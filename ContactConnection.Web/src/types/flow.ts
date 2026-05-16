@@ -28,6 +28,7 @@ export interface FlowNodeState {
   showCompany?: boolean
   requiredFields?: string[]
   fieldScripts?: Record<string, string>
+  prefilledAddress?: Record<string, string>
 }
 
 export interface StartSessionRequest {

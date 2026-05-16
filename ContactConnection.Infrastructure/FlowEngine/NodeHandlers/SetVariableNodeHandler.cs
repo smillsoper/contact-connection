@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using ContactConnection.Application.Interfaces.Services;
+using System.Collections.Generic;
 
 namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 
@@ -57,8 +58,15 @@ public class SetVariableNodeHandler(IVariableResolver resolver) : NodeHandlerBas
                         case "caller": ctx.Caller[key]   = resolvedValue; break;
                         case "agent":  ctx.Agent[key]    = resolvedValue; break;
                         case "tenant": ctx.Tenant[key]   = resolvedValue; break;
-                        case "flow":   ctx.FlowVars[key] = resolvedValue; break;
-                        default:       ctx.FlowVars[targetKey] = resolvedValue; break;
+                        case "flow":
+                            // Nested write: flow.objectKey.propPath → merge into existing JSON object
+                            var nestedDot = key.IndexOf('.');
+                            if (nestedDot > 0)
+                                SetNestedFlowVar(ctx.FlowVars, key[..nestedDot], key[(nestedDot + 1)..], resolvedValue);
+                            else
+                                ctx.FlowVars[key] = resolvedValue;
+                            break;
+                        default: ctx.FlowVars[targetKey] = resolvedValue; break;
                     }
                 }
                 else
@@ -68,10 +76,53 @@ public class SetVariableNodeHandler(IVariableResolver resolver) : NodeHandlerBas
             }
         }
 
-        var next = Transition(node, agentTransition) ?? Transition(node, "default");
+        var next  = Transition(node, agentTransition) ?? Transition(node, "default");
         AppendHistory(ctx, node, input: null, transition: next);
 
         var state = BuildState(ctx, node, resolvedContent: string.Empty);
         return Task.FromResult(new NodeResult(state, next));
+    }
+
+    /// <summary>
+    /// Merges a single property into a JSON object stored in FlowVars.
+    /// flow.billing_address.firstName = "John" reads FlowVars["billing_address"],
+    /// sets the firstName key, and writes the updated JSON back.
+    /// Supports arbitrary depth: flow.obj.a.b.c navigates/creates nested objects.
+    /// </summary>
+    private static void SetNestedFlowVar(
+        Dictionary<string, string> flowVars,
+        string objectKey,
+        string propPath,
+        string value)
+    {
+        JsonObject root;
+        if (flowVars.TryGetValue(objectKey, out var existing))
+        {
+            try   { root = JsonNode.Parse(existing)?.AsObject() ?? new JsonObject(); }
+            catch { root = new JsonObject(); }
+        }
+        else
+        {
+            root = new JsonObject();
+        }
+
+        // Navigate / create intermediate objects
+        var segments = propPath.Split('.');
+        var current  = root;
+        for (var i = 0; i < segments.Length - 1; i++)
+        {
+            var seg = segments[i];
+            if (current[seg] is not JsonObject child)
+            {
+                child = new JsonObject();
+                current[seg] = child;
+            }
+            current = child;
+        }
+
+        // Set the leaf as a JSON string value
+        current[segments[^1]] = JsonValue.Create(value);
+
+        flowVars[objectKey] = root.ToJsonString();
     }
 }

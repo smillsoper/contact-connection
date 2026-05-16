@@ -86,6 +86,35 @@ public partial class AddressNodeHandler(IVariableResolver resolver)
             if (!string.IsNullOrWhiteSpace(scriptContent))
                 s.NodeScriptContent = Resolver.Resolve(scriptContent, varCtx);
 
+            // Pre-populate form from an existing FlowVar (e.g. set by a preceding set_variable node)
+            if (!string.IsNullOrEmpty(outputVar) && ctx.FlowVars.TryGetValue(outputVar, out var existing))
+            {
+                try
+                {
+                    var sub = JsonSerializer.Deserialize<AddressSubmission>(existing, JsonOpts);
+                    if (sub is not null)
+                    {
+                        s.PrefilledAddress = new Dictionary<string, string>
+                        {
+                            ["firstName"]      = sub.FirstName      ?? string.Empty,
+                            ["middleInitial"]  = sub.MiddleInitial  ?? string.Empty,
+                            ["lastName"]       = sub.LastName       ?? string.Empty,
+                            ["company"]        = sub.Company        ?? string.Empty,
+                            ["address1Prefix"] = sub.Address1Prefix ?? string.Empty,
+                            ["address1"]       = sub.Address1       ?? string.Empty,
+                            ["address2Prefix"] = sub.Address2Prefix ?? string.Empty,
+                            ["address2"]       = sub.Address2       ?? string.Empty,
+                            ["zip"]            = sub.Zip            ?? string.Empty,
+                            ["zip4"]           = sub.Zip4           ?? string.Empty,
+                            ["city"]           = sub.City           ?? string.Empty,
+                            ["state"]          = sub.State          ?? string.Empty,
+                            ["country"]        = sub.Country        ?? "US",
+                        };
+                    }
+                }
+                catch { /* ignore malformed data — form starts empty */ }
+            }
+
             return s;
         }
 

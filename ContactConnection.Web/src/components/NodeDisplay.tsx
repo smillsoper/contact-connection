@@ -110,15 +110,30 @@ export default function NodeDisplay({ node, onAdvance, advancing }: Props) {
   const [addrForm, setAddrForm] = useState<AddrForm>(EMPTY_ADDR)
   const [focusedField, setFocusedField] = useState<string | null>(null)
 
-  // Reset address form when navigating to a new node
+  // Reset address form when navigating to a new node; pre-populate when available
   const prevAddrNodeId = useRef<string | null>(null)
   useEffect(() => {
-    if (node.nodeType === 'address' && node.nodeId !== prevAddrNodeId.current) {
-      prevAddrNodeId.current = node.nodeId
-      setAddrForm(EMPTY_ADDR)
-      setFocusedField(null)
-    }
-  }, [node.nodeId, node.nodeType])
+    if (node.nodeType !== 'address') return
+    if (node.nodeId === prevAddrNodeId.current) return
+    prevAddrNodeId.current = node.nodeId
+    const p = node.prefilledAddress
+    setAddrForm(p && Object.keys(p).length > 0 ? {
+      firstName:      p.firstName      ?? '',
+      middleInitial:  p.middleInitial  ?? '',
+      lastName:       p.lastName       ?? '',
+      company:        p.company        ?? '',
+      address1Prefix: p.address1Prefix ?? '',
+      address1:       p.address1       ?? '',
+      address2Prefix: p.address2Prefix ?? '',
+      address2:       p.address2       ?? '',
+      zip:            p.zip            ?? '',
+      zip4:           p.zip4           ?? '',
+      city:           p.city           ?? '',
+      state:          p.state          ?? '',
+      country:        p.country        ?? 'US',
+    } : EMPTY_ADDR)
+    setFocusedField(null)
+  }, [node.nodeId, node.nodeType, node.prefilledAddress])
 
   // Auto-focus the primary input whenever the displayed node changes
   const focusRef = useRef<HTMLElement | null>(null)

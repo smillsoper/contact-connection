@@ -125,6 +125,13 @@ public class FlowNodeState
 
     /// <summary>Per-field resolved script HTML, keyed by field name (e.g. "zip", "firstName"). Displayed when that field has focus.</summary>
     public Dictionary<string, string> FieldScripts { get; set; } = [];
+
+    /// <summary>
+    /// Pre-filled address form values loaded from an existing flow variable.
+    /// Present when the output variable already holds address data when the node first displays.
+    /// Keys match AddressSubmission property names (firstName, lastName, address1, etc.).
+    /// </summary>
+    public Dictionary<string, string>? PrefilledAddress { get; set; }
 }
 
 public class FlowOption
