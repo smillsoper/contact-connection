@@ -37,6 +37,7 @@
 | 25 | 2026-05-11 | 5:06 AM PDT | 5:24 AM PDT | 18 min | ~1023 min |
 | 26 | 2026-05-14 | 4:29 PM CDT | 6:03 PM CDT | 94 min | ~1117 min |
 | 27 | 2026-05-14 | 6:07 PM CDT | 7:03 PM CDT | 56 min | ~1173 min |
+| 28 | 2026-05-16 | 5:19 AM CDT | 7:06 AM CDT | 107 min | ~1280 min |
 
 ---
 
@@ -1482,3 +1483,47 @@ Continuation of Session 20 work — session was still in progress when the user 
 
 **EditableEdge waypoint visibility fix**
 - `EditableEdge.tsx` — waypoint handles now only render when `selected === true`, fixing the bug where handles were invisible after initial load until `setEdges` was called. Added `zIndex: 10` to handles. Added midpoint hint (semi-transparent indigo dot + "double-click to add curve point" text) when edge is selected but has no waypoints yet.
+
+---
+
+## Session 28 — Address Node + Multi-Select/Copy-Paste + Input Pre-Population
+
+**Date:** 2026-05-16
+**Start:** 5:19 AM CDT
+**End:** 7:06 AM CDT
+**Duration:** 107 minutes
+**Cumulative Total:** ~1280 min
+
+### Accomplished
+
+**Address node — full implementation**
+- `AddressNodeHandler.cs` (new) — handles `address` node type; parses `AddressSubmission` JSON from frontend; validates required fields; builds output object with 20+ derived properties (isPOBox, isCanada, isMilitary, isOutlyingUS, isAKHI, isForeign, isVerified, fullAddress, formattedAddress1/2, etc.); stored as JSON in `ctx.FlowVars[outputVar]`.
+- `IFlowEngine.cs` — added AllowInternational, ShowMiddleInitial, ShowCompany, RequiredFields, FieldScripts, PrefilledAddress to `FlowNodeState`.
+- `AddressNode.tsx` (new) — orange canvas node; shows script badge, optional field indicators, output variable tag.
+- `NodePalette.tsx` — added address to node type list.
+- `FlowDesignerPage.tsx` — registered AddressNode + minimap color.
+- `NodePropertiesPanel.tsx` — address case with tabbed field scripts (main + per-field tabs), required field checkboxes, showMiddleInitial/showCompany/allowInternational toggles.
+- `NodeDisplay.tsx` — full address form: name row (optional MI), optional company, address line 1 with prefix select, address line 2 with prefix select, ZIP/ZIP+4/city/state row, country select (US+CA only or full ISO list when allowInternational), per-field focus script switching, orange glow styling.
+- `flowGraph.ts` — address case with 24 output properties in the variable panel.
+- `index.css` — `.input-focus-glow-orange` class added.
+- `countries.ts` — 193 ISO 3166-1 alpha-2 entries (US/CA first, rest alphabetical); separate file to avoid content-filter policy on large inline arrays.
+- `designer.ts` + `flow.ts` — address node type and field definitions added.
+- `ServiceCollectionExtensions.cs` — AddressNodeHandler registered.
+
+**Flow designer enhancements**
+- Multi-select: `multiSelectionKeyCode` set to Shift/Meta/Control; shift+click and shift+drag box-select work natively.
+- Copy/paste: Ctrl/Cmd+C copies selected nodes + internal edges to clipboard ref; Ctrl/Cmd+V pastes at +40/+40 offset with fresh node/edge IDs.
+- Input select node redesign: replaced per-option exit handles with single exit handle + option-picker modal on connect; amber warning badge when options have no wired connection; `data.transition` stores option name, `sourceHandle: null` maps to default handle visually.
+
+**Set_variable dot-notation nested writes**
+- `SetVariableNodeHandler.cs` — `flow.obj.prop` assignments now merge into the existing JSON object rather than overwriting the whole variable; supports arbitrary depth (e.g. `flow.billing_address.firstName`).
+
+**Pre-population of input nodes from upstream flow variables**
+- `FlowNodeState` — added `DefaultValue` property for scalar pre-fill (input/email/phone).
+- `InputNodeHandler.cs` — sets `DefaultValue` from `FlowVars[outputVar]` on first display.
+- `EmailNodeHandler.cs` — extracts `.value` from stored email JSON object.
+- `PhoneNodeHandler.cs` — extracts `.display_value` from stored phone JSON object.
+- `AddressNodeHandler.cs` — `PrefilledAddress` dictionary populated from stored address JSON.
+- `NodeDisplay.tsx` — `prevInputNodeId` guard initializes `inputValue` from `defaultValue` on node navigation; address form similarly uses `prefilledAddress`; neither re-initializes on same-node validation re-display.
+
+**Build:** 0 warnings, 0 errors (dotnet + Vite) ✓
