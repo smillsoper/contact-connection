@@ -65,18 +65,14 @@ export function computeAncestorVars(
     flowVars.push({ key, label, isObject: true, properties })
   }
 
+  // Pass 1 — register object-typed node outputs first so set_variable flat entries
+  // don't claim the key before the object shape is known (seen set is first-writer-wins).
   for (const n of ancestors) {
     const type = n.type as string
     const data = n.data
     const nodeLabel = (data.label as string) || n.id
 
     switch (type) {
-      case 'input': {
-        inputs.push({ id: n.id, label: nodeLabel })
-        const outVar = (data.outputVariable as string | undefined)?.trim()
-        if (outVar) addFlat(outVar, `${nodeLabel} → output`)
-        break
-      }
       case 'email': {
         const outVar = (data.outputVariable as string | undefined)?.trim()
         if (outVar) {
@@ -136,13 +132,32 @@ export function computeAncestorVars(
         }
         break
       }
+    }
+  }
+
+  // Pass 2 — inputs, flat flow vars, set_variable, api_call
+  // Object keys already in `seen` from pass 1 will be skipped by addFlat.
+  for (const n of ancestors) {
+    const type = n.type as string
+    const data = n.data
+    const nodeLabel = (data.label as string) || n.id
+
+    switch (type) {
+      case 'input': {
+        inputs.push({ id: n.id, label: nodeLabel })
+        const outVar = (data.outputVariable as string | undefined)?.trim()
+        if (outVar) addFlat(outVar, `${nodeLabel} → output`)
+        break
+      }
       case 'set_variable': {
         const assignments = data.assignments as { variable: string; value: string }[] | undefined
         for (const a of assignments ?? []) {
           let key = a.variable.trim()
           if (key.startsWith('{{') && key.endsWith('}}')) key = key.slice(2, -2).trim()
-          if (key.startsWith('flow.')) addFlat(key.slice(5), `${nodeLabel} → set`)
-          else if (key && !key.includes('.')) addFlat(key, `${nodeLabel} → set`)
+          if (key.startsWith('flow.')) key = key.slice(5)
+          // Nested write (flow.obj.prop) — skip; the object is registered by its source node
+          if (!key || key.includes('.')) continue
+          addFlat(key, `${nodeLabel} → set`)
         }
         break
       }
