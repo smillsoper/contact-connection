@@ -112,7 +112,19 @@ public partial class PhoneNodeHandler(IVariableResolver resolver)
 
         // First display — return state with mask, wait for input
         if (agentInput is null)
-            return Task.FromResult(new NodeResult(WithScript(MakeState()), NextNodeId: null));
+        {
+            var firstState = WithScript(MakeState());
+            if (!string.IsNullOrEmpty(outputVar) && ctx.FlowVars.TryGetValue(outputVar, out var existing))
+            {
+                try
+                {
+                    var obj = System.Text.Json.Nodes.JsonNode.Parse(existing)?.AsObject();
+                    firstState.DefaultValue = obj?["display_value"]?.GetValue<string>();
+                }
+                catch { /* ignore malformed data */ }
+            }
+            return Task.FromResult(new NodeResult(firstState, NextNodeId: null));
+        }
 
         var displayValue = agentInput.Trim();
 

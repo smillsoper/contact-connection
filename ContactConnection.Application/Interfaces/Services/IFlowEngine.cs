@@ -127,6 +127,13 @@ public class FlowNodeState
     public Dictionary<string, string> FieldScripts { get; set; } = [];
 
     /// <summary>
+    /// Pre-filled value for input/email/phone nodes — present when the output variable already
+    /// holds a value from an earlier point in the flow (e.g. set by set_variable).
+    /// For email/phone this is the raw string (email address or display-formatted phone number).
+    /// </summary>
+    public string? DefaultValue { get; set; }
+
+    /// <summary>
     /// Pre-filled address form values loaded from an existing flow variable.
     /// Present when the output variable already holds address data when the node first displays.
     /// Keys match AddressSubmission property names (firstName, lastName, address1, etc.).

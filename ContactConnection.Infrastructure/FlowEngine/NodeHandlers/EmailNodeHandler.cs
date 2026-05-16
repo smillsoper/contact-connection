@@ -75,7 +75,19 @@ public class EmailNodeHandler(IVariableResolver resolver, IEmailValidationServic
 
         // First display (no input yet)
         if (agentInput is null)
-            return new NodeResult(WithScript(MakeState()), NextNodeId: null);
+        {
+            var firstState = WithScript(MakeState());
+            if (!string.IsNullOrEmpty(outputVar) && ctx.FlowVars.TryGetValue(outputVar, out var existing))
+            {
+                try
+                {
+                    var obj = System.Text.Json.Nodes.JsonNode.Parse(existing)?.AsObject();
+                    firstState.DefaultValue = obj?["value"]?.GetValue<string>();
+                }
+                catch { /* ignore malformed data */ }
+            }
+            return new NodeResult(firstState, NextNodeId: null);
+        }
 
         var email = agentInput.Trim();
 

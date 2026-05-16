@@ -135,6 +135,16 @@ export default function NodeDisplay({ node, onAdvance, advancing }: Props) {
     setFocusedField(null)
   }, [node.nodeId, node.nodeType, node.prefilledAddress])
 
+  // Pre-populate inputValue when navigating to a node whose output variable already has a value
+  const prevInputNodeId = useRef<string | null>(null)
+  useEffect(() => {
+    const capturesInput = node.nodeType === 'input' || node.nodeType === 'email' || node.nodeType === 'phone'
+    if (!capturesInput) return
+    if (node.nodeId === prevInputNodeId.current) return
+    prevInputNodeId.current = node.nodeId
+    setInputValue(node.defaultValue ?? '')
+  }, [node.nodeId, node.nodeType, node.defaultValue])
+
   // Auto-focus the primary input whenever the displayed node changes
   const focusRef = useRef<HTMLElement | null>(null)
   useEffect(() => {

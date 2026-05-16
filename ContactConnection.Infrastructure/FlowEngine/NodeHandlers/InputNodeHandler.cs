@@ -32,6 +32,7 @@ public class InputNodeHandler(IVariableResolver resolver) : NodeHandlerBase(reso
         var varCtx    = ctx.ToVariableContext();
         var inputType = Str(node, "input_type") ?? Str(node, "fieldType") ?? "text";
         var prompt    = Resolver.Resolve(Str(node, "prompt") ?? string.Empty, varCtx);
+        var outputVar = Str(node, "outputVariable")?.Trim();
 
         // If agent has submitted a value, store it and advance
         if (agentInput is not null)
@@ -45,7 +46,6 @@ public class InputNodeHandler(IVariableResolver resolver) : NodeHandlerBase(reso
             ctx.Inputs[ctx.CurrentNodeId] = agentInput;
 
             // Auto-store into flow variables if outputVariable is set
-            var outputVar = Str(node, "outputVariable")?.Trim();
             if (!string.IsNullOrEmpty(outputVar))
                 ctx.FlowVars[outputVar] = agentInput;
 
@@ -66,6 +66,11 @@ public class InputNodeHandler(IVariableResolver resolver) : NodeHandlerBase(reso
             inputType: inputType, options: ParseOptions(node));
         AttachInlineScript(node, ctx, displayState);
         AttachTextConstraints(node, inputType, displayState);
+
+        // Pre-populate from existing flow variable
+        if (!string.IsNullOrEmpty(outputVar) && ctx.FlowVars.TryGetValue(outputVar, out var existing))
+            displayState.DefaultValue = existing;
+
         return Task.FromResult(new NodeResult(displayState, NextNodeId: null));
     }
 
