@@ -18,8 +18,12 @@ export interface FlowAncestorVars {
   flowVars: FlowVarToken[]
 }
 
-/** Return all ancestor node IDs via reverse-BFS from nodeId. */
-function ancestorIds(nodeId: string, edges: Edge[]): Set<string> {
+/**
+ * Return ancestors keyed by their minimum distance from nodeId (1 = direct parent).
+ * Closest ancestors appear first when sorted ascending — that means the most recently
+ * set value of a variable wins when we use first-writer-wins registration.
+ */
+function ancestorDistances(nodeId: string, edges: Edge[]): Map<string, number> {
   const parents = new Map<string, string[]>()
   for (const e of edges) {
     const list = parents.get(e.target) ?? []
@@ -27,16 +31,16 @@ function ancestorIds(nodeId: string, edges: Edge[]): Set<string> {
     parents.set(e.target, list)
   }
 
-  const visited = new Set<string>()
-  const queue: string[] = [nodeId]
+  const dist = new Map<string, number>()
+  const queue: [string, number][] = [[nodeId, 0]]
   while (queue.length) {
-    const cur = queue.shift()!
-    if (visited.has(cur)) continue
-    visited.add(cur)
-    for (const p of parents.get(cur) ?? []) queue.push(p)
+    const [cur, d] = queue.shift()!
+    if (dist.has(cur)) continue
+    dist.set(cur, d)
+    for (const p of parents.get(cur) ?? []) queue.push([p, d + 1])
   }
-  visited.delete(nodeId)
-  return visited
+  dist.delete(nodeId)
+  return dist
 }
 
 /** Compute the variables that are reachable from ancestor nodes of nodeId. */
@@ -45,8 +49,11 @@ export function computeAncestorVars(
   nodes: Node<NodeData>[],
   edges: Edge[],
 ): FlowAncestorVars {
-  const ids = ancestorIds(nodeId, edges)
-  const ancestors = nodes.filter((n) => ids.has(n.id))
+  const distMap = ancestorDistances(nodeId, edges)
+  // Sort closest-first so first-writer-wins === most-recent-value-wins
+  const ancestors = nodes
+    .filter((n) => distMap.has(n.id))
+    .sort((a, b) => distMap.get(a.id)! - distMap.get(b.id)!)
 
   const inputs: FlowAncestorVars['inputs'] = []
   const apis: FlowAncestorVars['apis'] = []
