@@ -115,14 +115,7 @@ public partial class PhoneNodeHandler(IVariableResolver resolver)
         {
             var firstState = WithScript(MakeState());
             if (!string.IsNullOrEmpty(outputVar) && ctx.FlowVars.TryGetValue(outputVar, out var existing))
-            {
-                try
-                {
-                    var obj = System.Text.Json.Nodes.JsonNode.Parse(existing)?.AsObject();
-                    firstState.DefaultValue = obj?["display_value"]?.GetValue<string>();
-                }
-                catch { /* ignore malformed data */ }
-            }
+                firstState.DefaultValue = ExtractPhoneDefault(existing, allowInternational);
             return Task.FromResult(new NodeResult(firstState, NextNodeId: null));
         }
 
@@ -201,6 +194,49 @@ public partial class PhoneNodeHandler(IVariableResolver resolver)
         var advanceNext = Transition(node, agentTransition) ?? Transition(node, "default");
         AppendHistory(ctx, node, displayValue, advanceNext);
         return Task.FromResult(new NodeResult(WithScript(MakeState()), advanceNext));
+    }
+
+    /// <summary>
+    /// Extracts a mask-formatted phone string suitable for DefaultValue pre-population.
+    /// Priority: display_value (full object stored by a phone node) → value field formatted
+    /// as mask → raw plain string formatted as mask → null.
+    /// Handles partial objects written by set_variable (e.g. only "value" was copied).
+    /// </summary>
+    private static string? ExtractPhoneDefault(string stored, bool allowInternational)
+    {
+        // Try JSON object
+        try
+        {
+            if (System.Text.Json.Nodes.JsonNode.Parse(stored) is JsonObject obj)
+            {
+                var display = obj["display_value"]?.GetValue<string>();
+                if (!string.IsNullOrEmpty(display)) return display;
+
+                var digits = obj["value"]?.GetValue<string>() ?? string.Empty;
+                return FormatPhoneDigits(NonDigits().Replace(digits, string.Empty), allowInternational);
+            }
+        }
+        catch { /* not JSON — fall through */ }
+
+        // Plain digit string stored directly
+        return FormatPhoneDigits(NonDigits().Replace(stored, string.Empty), allowInternational);
+    }
+
+    /// <summary>Formats a raw digit string into the display mask pattern, or returns null if length doesn't match.</summary>
+    private static string? FormatPhoneDigits(string digits, bool allowInternational)
+    {
+        if (!allowInternational && digits.Length == 10)
+            return $"({digits[..3]}) {digits[3..6]}-{digits[6..]}";
+
+        // International: stored as stripped-cc (1–3 digits) + 10 local digits
+        if (allowInternational && digits.Length is >= 11 and <= 13)
+        {
+            var local    = digits[^10..];
+            var cc       = digits[..^10].PadLeft(3, '0');
+            return $"+{cc} ({local[..3]}) {local[3..6]}-{local[6..]}";
+        }
+
+        return null;
     }
 
     private static JsonObject BuildPhoneObject(string value, string displayValue, bool isTollFree) => new()

@@ -81,10 +81,16 @@ public class EmailNodeHandler(IVariableResolver resolver, IEmailValidationServic
             {
                 try
                 {
-                    var obj = System.Text.Json.Nodes.JsonNode.Parse(existing)?.AsObject();
-                    firstState.DefaultValue = obj?["value"]?.GetValue<string>();
+                    // Full email object stored by the email node
+                    if (System.Text.Json.Nodes.JsonNode.Parse(existing) is System.Text.Json.Nodes.JsonObject obj)
+                        firstState.DefaultValue = obj["value"]?.GetValue<string>();
+                    else
+                        firstState.DefaultValue = existing; // plain string set via set_variable
                 }
-                catch { /* ignore malformed data */ }
+                catch
+                {
+                    firstState.DefaultValue = existing; // not JSON — use as-is
+                }
             }
             return new NodeResult(firstState, NextNodeId: null);
         }
