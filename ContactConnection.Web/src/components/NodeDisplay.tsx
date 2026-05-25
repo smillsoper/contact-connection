@@ -24,6 +24,13 @@ const US_STATES: [string, string][] = [
   ['AA', 'AA'], ['AE', 'AE'], ['AP', 'AP'],
 ]
 
+const CA_PROVINCES: [string, string][] = [
+  ['', '— Province —'],
+  ['AB', 'AB'], ['BC', 'BC'], ['MB', 'MB'], ['NB', 'NB'], ['NL', 'NL'],
+  ['NS', 'NS'], ['NT', 'NT'], ['NU', 'NU'], ['ON', 'ON'], ['PE', 'PE'],
+  ['QC', 'QC'], ['SK', 'SK'], ['YT', 'YT'],
+]
+
 interface AddrForm {
   firstName: string; middleInitial: string; lastName: string
   company: string
@@ -96,13 +103,42 @@ function isMaskComplete(value: string, mask: string): boolean {
     && [...mask].every((mc, i) => !MASK_REQUIRED.has(mc) || (i < value.length && maskCharValid(value[i] ?? '', mc)))
 }
 
+// ── US-or-Canada ZIP/postal dual-mode mask ─────────────────────────────────
+// Sentinel stored in inputMask when this mode is selected in the designer.
+const ZIP_CA_SENTINEL = '__zip_ca__'
+
+// Determine mode from the first alphanumeric character typed.
+function zipCaMode(value: string): 'us' | 'ca' {
+  const first = [...value].find((c) => /[a-zA-Z0-9]/.test(c))
+  return first && /[a-zA-Z]/.test(first) ? 'ca' : 'us'
+}
+
+// Format the raw input as a US ZIP (DDDDD or DDDDD-DDDD) or Canadian postal
+// code (A1A 1A1) depending on the first character entered.
+function applyZipCaMask(raw: string): string {
+  if (zipCaMode(raw) === 'ca') {
+    return applyMask(raw, 'L0L 0L0')
+  }
+  const digits = raw.replace(/\D/g, '')
+  if (digits.length <= 5) return digits
+  return `${digits.slice(0, 5)}-${digits.slice(5, 9)}`
+}
+
+// Accept 5-digit ZIP, ZIP+4, or Canadian A1A 1A1
+function isZipCaComplete(value: string): boolean {
+  return /^\d{5}$/.test(value)
+    || /^\d{5}-\d{4}$/.test(value)
+    || /^[A-Za-z]\d[A-Za-z] \d[A-Za-z]\d$/.test(value)
+}
+
 interface Props {
   node: FlowNodeState
   onAdvance: (input?: string) => void
+  onJump?: (sectionNodeId: string) => void
   advancing: boolean
 }
 
-export default function NodeDisplay({ node, onAdvance, advancing }: Props) {
+export default function NodeDisplay({ node, onAdvance, onJump, advancing }: Props) {
   const [inputValue, setInputValue] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
 
@@ -117,23 +153,34 @@ export default function NodeDisplay({ node, onAdvance, advancing }: Props) {
     if (node.nodeId === prevAddrNodeId.current) return
     prevAddrNodeId.current = node.nodeId
     const p = node.prefilledAddress
-    setAddrForm(p && Object.keys(p).length > 0 ? {
-      firstName:      p.firstName      ?? '',
-      middleInitial:  p.middleInitial  ?? '',
-      lastName:       p.lastName       ?? '',
-      company:        p.company        ?? '',
-      address1Prefix: p.address1Prefix ?? '',
-      address1:       p.address1       ?? '',
-      address2Prefix: p.address2Prefix ?? '',
-      address2:       p.address2       ?? '',
-      zip:            p.zip            ?? '',
-      zip4:           p.zip4           ?? '',
-      city:           p.city           ?? '',
-      state:          p.state          ?? '',
-      country:        p.country        ?? 'US',
-    } : EMPTY_ADDR)
+    if (p && Object.keys(p).length > 0) {
+      // When not international, combine zip+zip4 into the single dual-mode masked field
+      const zipValue = !node.allowInternational && p.zip
+        ? applyZipCaMask(p.zip4 ? `${p.zip}-${p.zip4}` : p.zip)
+        : (p.zip ?? '')
+      const derivedCountry = !node.allowInternational
+        ? (zipCaMode(zipValue) === 'ca' ? 'CA' : 'US')
+        : (p.country ?? 'US')
+      setAddrForm({
+        firstName:      p.firstName      ?? '',
+        middleInitial:  p.middleInitial  ?? '',
+        lastName:       p.lastName       ?? '',
+        company:        p.company        ?? '',
+        address1Prefix: p.address1Prefix ?? '',
+        address1:       p.address1       ?? '',
+        address2Prefix: p.address2Prefix ?? '',
+        address2:       p.address2       ?? '',
+        zip:            zipValue,
+        zip4:           node.allowInternational ? (p.zip4 ?? '') : '',
+        city:           p.city           ?? '',
+        state:          p.state          ?? '',
+        country:        derivedCountry,
+      })
+    } else {
+      setAddrForm(EMPTY_ADDR)
+    }
     setFocusedField(null)
-  }, [node.nodeId, node.nodeType, node.prefilledAddress])
+  }, [node.nodeId, node.nodeType, node.prefilledAddress, node.allowInternational])
 
   // Pre-populate inputValue when navigating to a node whose output variable already has a value
   const prevInputNodeId = useRef<string | null>(null)
@@ -155,12 +202,34 @@ export default function NodeDisplay({ node, onAdvance, advancing }: Props) {
   function handleTextChange(raw: string) {
     const mask = node.inputMask
     setLocalError(null)
-    setInputValue(mask ? applyMask(raw, mask) : raw)
+    if (mask === ZIP_CA_SENTINEL) {
+      setInputValue(applyZipCaMask(raw))
+    } else {
+      setInputValue(mask ? applyMask(raw, mask) : raw)
+    }
   }
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
     const mask = node.inputMask
+    if (mask === ZIP_CA_SENTINEL) {
+      const isEmpty = inputValue.length === 0
+      if (!isEmpty && !isZipCaComplete(inputValue)) {
+        setLocalError(
+          node.required
+            ? 'Please enter a valid 5-digit ZIP, ZIP+4 (00000-0000), or Canadian postal code (A1A 1A1).'
+            : 'Please enter a valid ZIP or postal code, or clear the field.',
+        )
+        return
+      }
+      if (node.required && isEmpty) {
+        setLocalError('This field is required.')
+        return
+      }
+      onAdvance(inputValue)
+      setInputValue('')
+      return
+    }
     if (mask) {
       const isEmpty   = inputValue.length === 0
       const complete  = isMaskComplete(inputValue, mask)
@@ -202,13 +271,51 @@ export default function NodeDisplay({ node, onAdvance, advancing }: Props) {
 
   function handleAddressSubmit(e: FormEvent) {
     e.preventDefault()
-    onAdvance(JSON.stringify(addrForm))
+    const form = { ...addrForm }
+    // When using the US/CA dual-mode mask, ZIP+4 is stored combined (e.g. "90210-1234").
+    // Split it so the backend receives separate zip and zip4 fields as it expects.
+    if (!node.allowInternational) {
+      const zip4match = form.zip.match(/^(\d{5})-(\d{4})$/)
+      if (zip4match) {
+        form.zip  = zip4match[1]
+        form.zip4 = zip4match[2]
+      }
+    }
+    onAdvance(JSON.stringify(form))
   }
 
   const activeFieldScript =
     focusedField && node.fieldScripts?.[focusedField]?.trim()
       ? node.fieldScripts[focusedField]
       : null
+
+  const locked = node.sectionLocked === true
+
+  // Jump dropdown — shown on nodes that accept input when sections exist
+  const jumpDropdown = node.jumpTargets && node.jumpTargets.length > 0 && (
+    <div className="flex items-center gap-2 mt-1">
+      <label className="text-xs text-gray-500 shrink-0">Jump to:</label>
+      <select
+        className="flex-1 bg-gray-800 text-gray-300 rounded px-2 py-1 text-xs border border-gray-700 focus:outline-none focus:border-sky-500"
+        defaultValue=""
+        disabled={advancing}
+        onChange={(e) => {
+          if (e.target.value && onJump) {
+            onJump(e.target.value)
+            e.target.value = ''
+          }
+        }}
+      >
+        <option value="">— Jump to section —</option>
+        {node.jumpTargets.map((t) => (
+          <option key={t.sectionNodeId} value={t.sectionNodeId}>
+            {t.isCurrentSection ? `↺ ${t.name} (current)` : t.name}
+            {t.isLocked ? ' 🔒' : ''}
+          </option>
+        ))}
+      </select>
+    </div>
+  )
 
   if (node.nodeType === 'end') {
     return (
@@ -228,6 +335,18 @@ export default function NodeDisplay({ node, onAdvance, advancing }: Props) {
 
   return (
     <div className="flex flex-col gap-6 p-6 max-w-2xl mx-auto">
+      {/* Section bar — shown when inside a named section */}
+      {node.currentSectionName && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-800/60 border border-gray-700">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Section</span>
+          <span className="text-sm font-medium text-gray-200">{node.currentSectionName}</span>
+          {locked && (
+            <span className="ml-auto text-[10px] font-semibold text-amber-400 bg-amber-950/50 border border-amber-800 rounded px-1.5 py-0.5">
+              LOCKED
+            </span>
+          )}
+        </div>
+      )}
       {/* Script context from preceding script node — shown above the current input/end node */}
       {node.scriptContext && (
         <div
@@ -266,7 +385,21 @@ export default function NodeDisplay({ node, onAdvance, advancing }: Props) {
       </div>
 
       {/* Input area */}
-      {node.nodeType === 'input' && (
+      {node.nodeType === 'input' && locked ? (
+        <div className="flex flex-col gap-3">
+          <div className="bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300 min-h-[36px]">
+            {node.defaultValue || <span className="text-gray-600 italic">no value</span>}
+          </div>
+          <button
+            onClick={() => onAdvance(node.defaultValue ?? '')}
+            disabled={advancing}
+            className="self-start bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white rounded-lg px-5 py-2 text-sm font-medium transition-colors"
+          >
+            {advancing ? 'Advancing…' : 'Continue'}
+          </button>
+          {jumpDropdown}
+        </div>
+      ) : node.nodeType === 'input' && (
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           {node.inputType === 'select' && node.options ? (
             <select
@@ -298,7 +431,13 @@ export default function NodeDisplay({ node, onAdvance, advancing }: Props) {
                 type="text"
                 value={inputValue}
                 onChange={(e) => handleTextChange(e.target.value)}
-                placeholder={node.inputMask ? node.inputMask.replace(/0/g, '_').replace(/[LA]/g, '_') : 'Enter value…'}
+                placeholder={
+                  node.inputMask === ZIP_CA_SENTINEL
+                    ? '00000 or A1A 1A1'
+                    : node.inputMask
+                    ? node.inputMask.replace(/0/g, '_').replace(/[LA]/g, '_')
+                    : 'Enter value…'
+                }
                 className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow border border-gray-700 font-mono"
               />
               {(node.minChars || node.maxChars) && !node.inputMask && (
@@ -327,11 +466,26 @@ export default function NodeDisplay({ node, onAdvance, advancing }: Props) {
           >
             {advancing ? 'Advancing…' : 'Next'}
           </button>
+          {jumpDropdown}
         </form>
       )}
 
       {/* Phone node */}
-      {node.nodeType === 'phone' && (
+      {node.nodeType === 'phone' && locked ? (
+        <div className="flex flex-col gap-3">
+          <div className="bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300 font-mono min-h-[36px]">
+            {node.defaultValue || <span className="text-gray-600 italic">no value</span>}
+          </div>
+          <button
+            onClick={() => onAdvance(node.defaultValue ?? '')}
+            disabled={advancing}
+            className="self-start bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white rounded-lg px-5 py-2 text-sm font-medium transition-colors"
+          >
+            {advancing ? 'Advancing…' : 'Continue'}
+          </button>
+          {jumpDropdown}
+        </div>
+      ) : node.nodeType === 'phone' && (
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           {node.validationError && (
             <p className="text-sm text-red-400 bg-red-950/40 border border-red-800 rounded-lg px-3 py-2">
@@ -358,11 +512,26 @@ export default function NodeDisplay({ node, onAdvance, advancing }: Props) {
           >
             {advancing ? 'Validating…' : 'Next'}
           </button>
+          {jumpDropdown}
         </form>
       )}
 
       {/* Email node */}
-      {node.nodeType === 'email' && (
+      {node.nodeType === 'email' && locked ? (
+        <div className="flex flex-col gap-3">
+          <div className="bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300 min-h-[36px]">
+            {node.defaultValue || <span className="text-gray-600 italic">no value</span>}
+          </div>
+          <button
+            onClick={() => onAdvance(node.defaultValue ?? '')}
+            disabled={advancing}
+            className="self-start bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white rounded-lg px-5 py-2 text-sm font-medium transition-colors"
+          >
+            {advancing ? 'Advancing…' : 'Continue'}
+          </button>
+          {jumpDropdown}
+        </div>
+      ) : node.nodeType === 'email' && (
         <form onSubmit={handleEmailSubmit} className="flex flex-col gap-3">
           {node.validationError && (
             <p className="text-sm text-red-400 bg-red-950/40 border border-red-800 rounded-lg px-3 py-2">
@@ -385,11 +554,34 @@ export default function NodeDisplay({ node, onAdvance, advancing }: Props) {
           >
             {advancing ? 'Validating…' : 'Next'}
           </button>
+          {jumpDropdown}
         </form>
       )}
 
       {/* Address node */}
-      {node.nodeType === 'address' && (
+      {node.nodeType === 'address' && locked ? (
+        <div className="flex flex-col gap-3">
+          <div className="bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300 leading-relaxed">
+            {node.prefilledAddress && Object.keys(node.prefilledAddress).length > 0 ? (
+              <>
+                {[node.prefilledAddress.firstName, node.prefilledAddress.middleInitial, node.prefilledAddress.lastName].filter(Boolean).join(' ')}<br />
+                {node.prefilledAddress.company && <>{node.prefilledAddress.company}<br /></>}
+                {[node.prefilledAddress.address1Prefix, node.prefilledAddress.address1].filter(Boolean).join(' ')}<br />
+                {node.prefilledAddress.address2 && <>{[node.prefilledAddress.address2Prefix, node.prefilledAddress.address2].filter(Boolean).join(' ')}<br /></>}
+                {[node.prefilledAddress.city, node.prefilledAddress.state, node.prefilledAddress.zip].filter(Boolean).join(', ')}
+              </>
+            ) : <span className="text-gray-600 italic">no value</span>}
+          </div>
+          <button
+            onClick={() => onAdvance(JSON.stringify(node.prefilledAddress ?? {}))}
+            disabled={advancing}
+            className="self-start bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white rounded-lg px-5 py-2 text-sm font-medium transition-colors"
+          >
+            {advancing ? 'Advancing…' : 'Continue'}
+          </button>
+          {jumpDropdown}
+        </div>
+      ) : node.nodeType === 'address' && (
         <form onSubmit={handleAddressSubmit} className="flex flex-col gap-3">
           {/* Per-field or main script */}
           {node.nodeScriptLabel && !activeFieldScript && (
@@ -509,25 +701,51 @@ export default function NodeDisplay({ node, onAdvance, advancing }: Props) {
 
           {/* ZIP / City / State row */}
           <div className="flex gap-2">
-            <input
-              type="text"
-              value={addrForm.zip}
-              onChange={(e) => setAddrForm((f) => ({ ...f, zip: e.target.value }))}
-              onFocus={() => setFocusedField('zip')}
-              onBlur={() => setFocusedField(null)}
-              placeholder="ZIP"
-              className="w-20 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700 font-mono"
-            />
-            <input
-              type="text"
-              value={addrForm.zip4}
-              onChange={(e) => setAddrForm((f) => ({ ...f, zip4: e.target.value }))}
-              onFocus={() => setFocusedField('zip')}
-              onBlur={() => setFocusedField(null)}
-              placeholder="+4"
-              maxLength={4}
-              className="w-14 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700 font-mono"
-            />
+            {!node.allowInternational ? (
+              /* US or Canada dual-mode: single field, country derived from first character */
+              <input
+                type="text"
+                value={addrForm.zip}
+                onChange={(e) => {
+                  const formatted = applyZipCaMask(e.target.value)
+                  const newCountry = zipCaMode(formatted) === 'ca' ? 'CA' : 'US'
+                  setAddrForm((f) => ({
+                    ...f,
+                    zip: formatted,
+                    zip4: '',
+                    country: newCountry,
+                    state: newCountry !== f.country ? '' : f.state,
+                  }))
+                }}
+                onFocus={() => setFocusedField('zip')}
+                onBlur={() => setFocusedField(null)}
+                placeholder="00000 or A1A 1A1"
+                className="w-32 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700 font-mono"
+              />
+            ) : (
+              /* International: separate ZIP and +4 fields */
+              <>
+                <input
+                  type="text"
+                  value={addrForm.zip}
+                  onChange={(e) => setAddrForm((f) => ({ ...f, zip: e.target.value }))}
+                  onFocus={() => setFocusedField('zip')}
+                  onBlur={() => setFocusedField(null)}
+                  placeholder="ZIP"
+                  className="w-20 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700 font-mono"
+                />
+                <input
+                  type="text"
+                  value={addrForm.zip4}
+                  onChange={(e) => setAddrForm((f) => ({ ...f, zip4: e.target.value }))}
+                  onFocus={() => setFocusedField('zip')}
+                  onBlur={() => setFocusedField(null)}
+                  placeholder="+4"
+                  maxLength={4}
+                  className="w-14 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700 font-mono"
+                />
+              </>
+            )}
             <input
               type="text"
               value={addrForm.city}
@@ -542,21 +760,22 @@ export default function NodeDisplay({ node, onAdvance, advancing }: Props) {
               onChange={(e) => setAddrForm((f) => ({ ...f, state: e.target.value }))}
               onFocus={() => setFocusedField('state')}
               onBlur={() => setFocusedField(null)}
-              className="w-20 bg-gray-800 text-white rounded-lg px-2 py-2 text-sm input-focus-glow-orange border border-gray-700"
+              className="w-36 bg-gray-800 text-white rounded-lg px-2 py-2 text-sm input-focus-glow-orange border border-gray-700"
             >
-              {US_STATES.map(([v, l]) => (
+              {(addrForm.country === 'CA' ? CA_PROVINCES : US_STATES).map(([v, l]) => (
                 <option key={v} value={v}>{l}</option>
               ))}
             </select>
           </div>
 
-          {/* Country — US/CA only when domestic; full list when international */}
+          {/* Country — auto-derived from ZIP (disabled) when domestic; full list when international */}
           <select
             value={addrForm.country}
             onChange={(e) => setAddrForm((f) => ({ ...f, country: e.target.value }))}
             onFocus={() => setFocusedField('country')}
             onBlur={() => setFocusedField(null)}
-            className="w-full bg-gray-800 text-white rounded-lg px-2 py-2 text-sm input-focus-glow-orange border border-gray-700"
+            disabled={!node.allowInternational}
+            className={`w-full bg-gray-800 text-white rounded-lg px-2 py-2 text-sm border border-gray-700 ${node.allowInternational ? 'input-focus-glow-orange' : 'opacity-60 cursor-not-allowed'}`}
           >
             {node.allowInternational ? (
               <>
@@ -585,6 +804,7 @@ export default function NodeDisplay({ node, onAdvance, advancing }: Props) {
           >
             {advancing ? 'Validating…' : 'Next'}
           </button>
+          {jumpDropdown}
         </form>
       )}
 

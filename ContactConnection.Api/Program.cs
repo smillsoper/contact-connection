@@ -58,7 +58,15 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("PlatformAdmin", policy =>
+        policy.RequireClaim("role", "platform_admin"));
+    options.AddPolicy("TenantAdmin", policy =>
+        policy.RequireClaim("role", "admin", "supervisor"));
+    options.AddPolicy("MfaPending", policy =>
+        policy.RequireClaim("role", "mfa_pending"));
+});
 
 var app = builder.Build();
 
@@ -83,6 +91,17 @@ app.MapSubscriptionsEndpoints();
 app.MapFlowsEndpoints();
 app.MapFlowSessionsEndpoints();
 app.MapCustomFieldsEndpoints();
+
+// Tenant admin portal
+app.MapAdminAgentsEndpoints();
+
+// Portal (platform administration)
+app.MapPortalAuthEndpoints();
+app.MapPortalTenantsEndpoints();
+
+// Tenant onboarding and agent invite acceptance (public — no auth required)
+app.MapOnboardingEndpoints();
+app.MapTenantAdminInviteEndpoints();
 
 // SignalR hub
 app.MapHub<FlowHub>("/hubs/flow");

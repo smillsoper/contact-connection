@@ -48,6 +48,24 @@ public class AdvanceFlowRequest
     /// For most nodes this is "default".
     /// </summary>
     public string Transition { get; init; } = "default";
+
+    /// <summary>
+    /// When set, the engine jumps to this section node instead of advancing the current node.
+    /// The engine auto-advances through the section node and stops at the first input node.
+    /// </summary>
+    public string? JumpToSectionNodeId { get; init; }
+}
+
+/// <summary>
+/// A section node visible in the agent's jump dropdown.
+/// </summary>
+public class JumpTarget
+{
+    public required string SectionNodeId { get; init; }
+    public required string Name { get; init; }
+    public bool IsCurrentSection { get; init; }
+    public bool ClearPreviousValues { get; init; }
+    public bool IsLocked { get; init; }
 }
 
 /// <summary>
@@ -139,6 +157,17 @@ public class FlowNodeState
     /// Keys match AddressSubmission property names (firstName, lastName, address1, etc.).
     /// </summary>
     public Dictionary<string, string>? PrefilledAddress { get; set; }
+
+    // ── Section state ──────────────────────────────────────────────────────
+
+    /// <summary>Name of the section the agent is currently in (null if before first section).</summary>
+    public string? CurrentSectionName { get; set; }
+
+    /// <summary>True when the current section is locked — UI renders input nodes read-only.</summary>
+    public bool SectionLocked { get; set; }
+
+    /// <summary>Sections visible in the jump dropdown for this node.</summary>
+    public List<JumpTarget>? JumpTargets { get; set; }
 }
 
 public class FlowOption

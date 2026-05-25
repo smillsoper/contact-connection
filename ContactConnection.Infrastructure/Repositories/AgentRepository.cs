@@ -13,6 +13,9 @@ public class AgentRepository : IAgentRepository
 
     public AgentRepository(ScopedTenantDbContextFactory factory) => _factory = factory;
 
+    public Task<List<Agent>> GetAllAsync(CancellationToken ct = default) =>
+        Db.Agents.OrderBy(a => a.LastName).ThenBy(a => a.FirstName).ToListAsync(ct);
+
     public Task<Agent?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
         Db.Agents.FirstOrDefaultAsync(a => a.Id == id, ct);
 
@@ -25,6 +28,9 @@ public class AgentRepository : IAgentRepository
 
     public async Task AddAsync(Agent agent, CancellationToken ct = default) =>
         await Db.Agents.AddAsync(agent, ct);
+
+    public Task DeleteAllAsync(CancellationToken ct = default) =>
+        Db.Agents.ExecuteDeleteAsync(ct);
 
     public Task SaveChangesAsync(CancellationToken ct = default) =>
         Db.SaveChangesAsync(ct);

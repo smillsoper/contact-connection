@@ -25,6 +25,9 @@ import InputNode from '../components/designer/nodes/InputNode'
 import EmailNode from '../components/designer/nodes/EmailNode'
 import PhoneNode from '../components/designer/nodes/PhoneNode'
 import AddressNode from '../components/designer/nodes/AddressNode'
+import SectionNode from '../components/designer/nodes/SectionNode'
+import ExecuteFlowNode from '../components/designer/nodes/ExecuteFlowNode'
+import TransitionToFlowNode from '../components/designer/nodes/TransitionToFlowNode'
 import BranchNode from '../components/designer/nodes/BranchNode'
 import SetVariableNode from '../components/designer/nodes/SetVariableNode'
 import ApiCallNode from '../components/designer/nodes/ApiCallNode'
@@ -39,6 +42,9 @@ const nodeTypes = {
   email: EmailNode,
   phone: PhoneNode,
   address: AddressNode,
+  section: SectionNode,
+  execute_flow: ExecuteFlowNode,
+  transition_to_flow: TransitionToFlowNode,
   branch: BranchNode,
   set_variable: SetVariableNode,
   api_call: ApiCallNode,
@@ -97,6 +103,11 @@ function toContactConnectionDef(
     nodes: flowNodes,
     ...(Object.keys(waypointsMap).length > 0 ? { _waypoints: waypointsMap } : {}),
   }
+}
+
+// Treat null, undefined, and "default" as the same handle slot for de-dup purposes.
+function normHandle(h: string | null | undefined): string | null {
+  return !h || h === 'default' ? null : h
 }
 
 function fromContactConnectionDef(def: ContactConnectionFlowDefinition): {
@@ -288,13 +299,18 @@ function DesignerCanvas({
         return
       }
       setEdges((eds) =>
-        addEdge({
-          ...params,
-          id: `${params.source}-${params.sourceHandle ?? 'default'}-${params.target}`,
-          type: 'editable',
-          label: params.sourceHandle && params.sourceHandle !== 'default' ? params.sourceHandle : undefined,
-          data: { waypoints: [] },
-        } as Edge, eds),
+        addEdge(
+          {
+            ...params,
+            id: `${params.source}-${params.sourceHandle ?? 'default'}-${params.target}`,
+            type: 'editable',
+            label: params.sourceHandle && params.sourceHandle !== 'default' ? params.sourceHandle : undefined,
+            data: { waypoints: [] },
+          } as Edge,
+          eds.filter((e) =>
+            !(e.source === params.source && normHandle(e.sourceHandle) === normHandle(params.sourceHandle))
+          ),
+        )
       )
     },
     [nodes, setEdges],
@@ -492,6 +508,9 @@ function DesignerCanvas({
                 email: '#0891b2',
                 phone: '#0d9488',
                 address: '#f97316',
+                section: '#d1d5db',
+                execute_flow: '#0369a1',
+                transition_to_flow: '#7e22ce',
                 branch: '#f59e0b',
                 set_variable: '#8b5cf6',
                 api_call: '#6366f1',

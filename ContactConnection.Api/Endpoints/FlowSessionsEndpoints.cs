@@ -63,9 +63,10 @@ public static class FlowSessionsEndpoints
             {
                 var state = await engine.AdvanceAsync(new AdvanceFlowRequest
                 {
-                    SessionId   = id,
-                    InputValue  = req.InputValue,
-                    Transition  = req.Transition ?? "default"
+                    SessionId            = id,
+                    InputValue           = req.InputValue,
+                    Transition           = req.Transition ?? "default",
+                    JumpToSectionNodeId  = req.JumpToSectionNodeId,
                 }, ct);
 
                 return Results.Ok(state);
@@ -85,4 +86,5 @@ public record StartSessionRequest(
 
 public record AdvanceSessionRequest(
     string? InputValue,
-    string? Transition);
+    string? Transition,
+    string? JumpToSectionNodeId);

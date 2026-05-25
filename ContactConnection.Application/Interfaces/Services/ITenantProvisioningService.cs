@@ -6,11 +6,13 @@ public interface ITenantProvisioningService
 {
     /// <summary>
     /// Creates the tenant record and provisions its dedicated PostgreSQL schema.
+    /// Returns the tenant and, if an invite email was provided, the invite token.
     /// </summary>
-    Task<Tenant> ProvisionAsync(
+    Task<(Tenant Tenant, string? InviteToken)> ProvisionAsync(
         string name,
         string subdomain,
-        string planTier,
         string timezone,
+        TenantFeatureFlags? featureFlags = null,
+        string? inviteEmail = null,
         CancellationToken ct = default);
 }

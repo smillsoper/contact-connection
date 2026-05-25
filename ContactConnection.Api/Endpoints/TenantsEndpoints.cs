@@ -1,5 +1,6 @@
 using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
+using ContactConnection.Application.Services;
 using ContactConnection.Domain.Entities;
 
 namespace ContactConnection.Api.Endpoints;
@@ -10,10 +11,28 @@ public static class TenantsEndpoints
     {
         var group = app.MapGroup("/api/v1/tenants").RequireAuthorization();
 
+        group.MapGet("me", GetCurrentTenant);
         group.MapGet("{id:guid}", GetById);
         group.MapPost("", Provision);
 
         return app;
+    }
+
+    private static IResult GetCurrentTenant(TenantContext tenantContext)
+    {
+        if (tenantContext.Current is null) return Results.Unauthorized();
+        var t = tenantContext.Current;
+        return Results.Ok(new
+        {
+            t.Id,
+            t.Name,
+            t.DisplayName,
+            t.LogoUrl,
+            t.Subdomain,
+            t.Timezone,
+            t.Settings,
+            t.OnboardingComplete,
+        });
     }
 
     private static async Task<IResult> GetById(
@@ -32,12 +51,11 @@ public static class TenantsEndpoints
     {
         try
         {
-            var tenant = await provisioning.ProvisionAsync(
+            var (tenant, _) = await provisioning.ProvisionAsync(
                 request.Name,
                 request.Subdomain,
-                request.PlanTier,
                 request.Timezone,
-                ct);
+                ct: ct);
 
             return Results.Created($"/api/v1/tenants/{tenant.Id}", ToResponse(tenant));
         }
@@ -67,5 +85,4 @@ public static class TenantsEndpoints
 public record ProvisionTenantRequest(
     string Name,
     string Subdomain,
-    string PlanTier,
     string Timezone);

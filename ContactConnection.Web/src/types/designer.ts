@@ -4,6 +4,9 @@ export type ContactConnectionNodeType =
   | 'email'
   | 'phone'
   | 'address'
+  | 'section'
+  | 'execute_flow'
+  | 'transition_to_flow'
   | 'branch'
   | 'set_variable'
   | 'api_call'
@@ -38,6 +41,13 @@ export interface NodeData extends Record<string, unknown> {
   showCompany?: boolean
   requiredFields?: string[]
   fieldScripts?: Record<string, string>
+  // section
+  name?: string
+  allowJumpFromAnywhere?: boolean
+  clearPreviousValues?: boolean
+  // execute_flow / transition_to_flow
+  targetFlowId?: string
+  targetFlowName?: string
   // branch
   condition?: string
   // set_variable
@@ -77,6 +87,11 @@ export interface ContactConnectionNodeDef {
   showCompany?: boolean
   requiredFields?: string[]
   fieldScripts?: Record<string, string>
+  name?: string
+  allowJumpFromAnywhere?: boolean
+  clearPreviousValues?: boolean
+  targetFlowId?: string
+  targetFlowName?: string
   condition?: string
   assignments?: { variable: string; value: string }[]
   method?: string
@@ -131,6 +146,24 @@ export const NODE_META: Record<
     description: 'Capture and validate a mailing address',
     handles: 'single',
   },
+  section: {
+    label: 'Section',
+    color: '#ffffff',
+    description: 'Mark a named section of the flow',
+    handles: 'single',
+  },
+  execute_flow: {
+    label: 'Execute Flow',
+    color: '#0369a1',
+    description: 'Run a sub-flow and return',
+    handles: 'single',
+  },
+  transition_to_flow: {
+    label: 'Transition to Flow',
+    color: '#7e22ce',
+    description: 'Hand off to another flow (no return)',
+    handles: 'none',
+  },
   branch: {
     label: 'Branch',
     color: '#f59e0b',
@@ -169,6 +202,12 @@ export function defaultNodeData(type: ContactConnectionNodeType): NodeData {
       return { label: 'Phone Number', scriptLabel: '', scriptContent: '', outputVariable: '', required: false, allowInternational: false, dncCheck: false }
     case 'address':
       return { label: 'Address', scriptLabel: '', scriptContent: '', outputVariable: '', allowInternational: false, showMiddleInitial: false, showCompany: false, requiredFields: ['firstName', 'lastName', 'address1', 'zip', 'city', 'state'], fieldScripts: {} }
+    case 'section':
+      return { label: 'New Section', name: '', outputVariable: '', allowJumpFromAnywhere: false, clearPreviousValues: false }
+    case 'execute_flow':
+      return { label: 'Execute Flow', targetFlowId: '', targetFlowName: '' }
+    case 'transition_to_flow':
+      return { label: 'Transition to Flow', targetFlowId: '', targetFlowName: '' }
     case 'branch':
       return { label: 'New Branch', condition: '' }
     case 'set_variable':

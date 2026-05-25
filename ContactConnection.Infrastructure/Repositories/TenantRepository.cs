@@ -11,6 +11,9 @@ public class TenantRepository : ITenantRepository
 
     public TenantRepository(ContactConnectionDbContext db) => _db = db;
 
+    public Task<List<Tenant>> GetAllAsync(CancellationToken ct = default) =>
+        _db.Tenants.OrderBy(t => t.Name).ToListAsync(ct);
+
     public Task<Tenant?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
         _db.Tenants.FirstOrDefaultAsync(t => t.Id == id, ct);
 

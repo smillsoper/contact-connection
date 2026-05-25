@@ -1,9 +1,11 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Node, Edge } from '@xyflow/react'
 import type { NodeData, ContactConnectionNodeType } from '../../types/designer'
 import ScriptContentEditor from './ScriptContentEditor'
 import VariablePanel from './VariablePanel'
 import { computeAncestorVars } from '../../utils/flowGraph'
+import { flowsApi } from '../../api/flows'
+import type { FlowSummary } from '../../api/flows'
 
 const PRESET_MASKS = [
   { label: 'None', value: '' },
@@ -12,6 +14,7 @@ const PRESET_MASKS = [
   { label: 'SSN — 000-00-0000', value: '000-00-0000' },
   { label: 'ZIP Code — 5 digit', value: '00000' },
   { label: 'ZIP+4 — 00000-0000', value: '00000-0000' },
+  { label: 'ZIP — US or Canada', value: '__zip_ca__' },
   { label: 'EIN — 00-0000000', value: '00-0000000' },
   { label: 'Credit Card', value: '0000 0000 0000 0000' },
   { label: 'Time — HH:MM', value: '00:00' },
@@ -46,6 +49,13 @@ export default function NodePropertiesPanel({
 
   // Variable panel toggle for set_variable node
   const [varPanelOpen, setVarPanelOpen] = useState(false)
+
+  // Flow list for execute_flow / transition_to_flow nodes — fetched lazily
+  const [availableFlows, setAvailableFlows] = useState<FlowSummary[]>([])
+  useEffect(() => {
+    if (type !== 'execute_flow' && type !== 'transition_to_flow') return
+    flowsApi.listAll().then(setAvailableFlows).catch(console.error)
+  }, [type])
 
   // Address node — active script tab ('main' | field key)
   const [addrScriptTab, setAddrScriptTab] = useState('main')
@@ -391,6 +401,92 @@ export default function NodePropertiesPanel({
             <p className="text-[10px] text-gray-600 leading-snug -mt-1">
               Object properties: value · display_value · isMobile · isTollFree · isInternal · doNotCall
             </p>
+          </>
+        )
+
+      case 'execute_flow':
+      case 'transition_to_flow': {
+        const isExecute = type === 'execute_flow'
+        const selectedId = (data.targetFlowId as string) ?? ''
+        return (
+          <>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-400">Target flow</label>
+              <select
+                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-sky-500"
+                value={selectedId}
+                onChange={(e) => {
+                  const chosen = availableFlows.find((f) => f.id === e.target.value)
+                  onUpdate(node.id, {
+                    targetFlowId: chosen?.id ?? '',
+                    targetFlowName: chosen?.name ?? '',
+                  })
+                }}
+              >
+                <option value="">— Select a flow —</option>
+                {availableFlows.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}{f.is_active ? '' : ' (draft)'}
+                  </option>
+                ))}
+              </select>
+              {selectedId && !availableFlows.find((f) => f.id === selectedId && f.is_active) && selectedId && (
+                <p className="text-[10px] text-amber-400">
+                  Selected flow is a draft — publish it before running this flow.
+                </p>
+              )}
+            </div>
+            <p className="text-[10px] text-gray-500 leading-snug">
+              {isExecute
+                ? 'All flow variables are shared with the sub-flow. Execution returns here when the sub-flow ends.'
+                : 'All flow variables carry over. Execution never returns to this flow.'}
+            </p>
+          </>
+        )
+      }
+
+      case 'section':
+        return (
+          <>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-400">Section name</label>
+              <input
+                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-sky-500"
+                value={(data.name as string) ?? ''}
+                placeholder="Billing Information"
+                onChange={(e) => onUpdate(node.id, { name: e.target.value })}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-400">Output variable</label>
+              <input
+                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-sky-500"
+                value={(data.outputVariable as string) ?? ''}
+                placeholder="section_billing"
+                onChange={(e) => onUpdate(node.id, { outputVariable: e.target.value })}
+              />
+              <p className="text-[10px] text-gray-500 leading-snug">
+                Set <span className="font-mono text-sky-400">
+                  {'{{flow.' + ((data.outputVariable as string) || 'var') + '.locked}}'}
+                </span> = <span className="font-mono text-sky-400">"true"</span> via set_variable to lock this section.
+              </p>
+            </div>
+            <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={(data.allowJumpFromAnywhere as boolean) ?? false}
+                onChange={(e) => onUpdate(node.id, { allowJumpFromAnywhere: e.target.checked })}
+              />
+              Always visible in jump dropdown
+            </label>
+            <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={(data.clearPreviousValues as boolean) ?? false}
+                onChange={(e) => onUpdate(node.id, { clearPreviousValues: e.target.checked })}
+              />
+              Clear section values when jumping here
+            </label>
           </>
         )
 

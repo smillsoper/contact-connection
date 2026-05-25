@@ -34,5 +34,7 @@ public class AgentConfiguration : IEntityTypeConfiguration<Agent>
         builder.Property(a => a.IsActive).HasColumnName("is_active");
         builder.Property(a => a.CreatedAt).HasColumnName("created_at");
         builder.Property(a => a.LastLoginAt).HasColumnName("last_login_at");
+        builder.Property(a => a.MfaSecret).HasColumnName("mfa_secret").HasMaxLength(64);
+        builder.Property(a => a.MfaEnabled).HasColumnName("mfa_enabled");
     }
 }

@@ -38,6 +38,11 @@
 | 26 | 2026-05-14 | 4:29 PM CDT | 6:03 PM CDT | 94 min | ~1117 min |
 | 27 | 2026-05-14 | 6:07 PM CDT | 7:03 PM CDT | 56 min | ~1173 min |
 | 28 | 2026-05-16 | 5:19 AM CDT | 7:06 AM CDT | 107 min | ~1280 min |
+| 29 | 2026-05-19 | 4:52 PM CDT | 6:55 PM CDT | 123 min | ~1403 min |
+| 30 | 2026-05-21 | 4:00 PM CDT | 5:10 PM CDT | 70 min | ~1473 min |
+| 31 | 2026-05-21 | 5:15 PM CDT | 5:48 PM CDT | 33 min | ~1506 min |
+| 32 | 2026-05-23 | 6:30 AM CDT | 7:17 AM CDT | 47 min | ~1553 min |
+| 33 | 2026-05-25 | 7:11 AM CDT | 11:29 AM CDT | 258 min | ~1811 min |
 
 ---
 
@@ -1527,3 +1532,321 @@ Continuation of Session 20 work — session was still in progress when the user 
 - `NodeDisplay.tsx` — `prevInputNodeId` guard initializes `inputValue` from `defaultValue` on node navigation; address form similarly uses `prefilledAddress`; neither re-initializes on same-node validation re-display.
 
 **Build:** 0 warnings, 0 errors (dotnet + Vite) ✓
+
+---
+
+## Session 29 — Section Node + Execute Flow + Transition to Flow
+
+**Date:** 2026-05-19
+**Start:** 4:52 PM CDT
+**End:** 6:55 PM CDT
+**Duration:** 123 minutes
+**Cumulative Total:** ~1403 min
+
+### Accomplished
+
+**Bug fixes**
+- `PhoneNodeHandler.cs` — `ExtractPhoneDefault` helper reads `.display_value` from stored phone JSON object for pre-population; previously only `.value` (unformatted digits) was checked.
+- `EmailNodeHandler.cs` — plain-string fallback added so pre-population works whether the email variable is stored as a raw string or as a JSON object with a `.value` property.
+- `flowGraph.ts` — rewrote ancestor traversal to use `ancestorDistances()` returning `Map<string, number>`; ancestors sorted closest-first (most recent value wins); two-pass registration so email/phone/address object shapes are claimed before set_variable flat entries.
+
+**Section node — full implementation**
+- `SectionNode.tsx` (new) — white header with dark gray text "Section"; `bg-gray-800` body matching all other nodes; badges for `allowJumpFromAnywhere` and `clearPreviousValues`.
+- `SectionNodeHandler.cs` (new) — marks previous section complete on natural entry; reads locked state from `FlowVars[outputVar]`; updates `ctx.CurrentSectionNodeId/Name/Locked`; returns next node ID (transparent to agent).
+- `IFlowEngine.cs` — added `JumpTarget` class; added `JumpToSectionNodeId` to `AdvanceFlowRequest`; added `CurrentSectionName`, `SectionLocked`, `JumpTargets` to `FlowNodeState`.
+- `FlowExecutionContext.cs` — added `CallStack` (`List<FlowCallFrame>`), `CurrentSectionNodeId/Name/Locked`, `CompletedSectionNodeIds` (`HashSet<string>`); extended `VariableStore` private record + serialization to persist all section state in Redis.
+- `FlowEngine.cs` — jump interception in `AdvanceAsync`; clears `CurrentSectionNodeId/Name/Locked` before jump (prevents erroneously marking incomplete section as complete); marks current section complete when flow reaches terminal node; `AttachSectionInfo` populates `JumpTargets` (visited + `allowJumpFromAnywhere` sections); `ClearSectionVars` helper wipes node outputs when `clearPreviousValues = true`; `SectionNodeHandler` added to `AutoAdvanceTypes`.
+- `FlowSessionsEndpoints.cs` — `AdvanceSessionRequest` extended with `JumpToSectionNodeId`; passed through to `AdvanceFlowRequest`.
+- `NodePropertiesPanel.tsx` — section case: name field, outputVariable field, allowJumpFromAnywhere checkbox, clearPreviousValues checkbox.
+- `NodePalette.tsx` — section added to NODE_TYPES; palette uses dark text when `meta.color === '#ffffff'`.
+- `FlowDesignerPage.tsx` — SectionNode registered; minimap color `#d1d5db`.
+- `NodeDisplay.tsx` — section bar at top showing `currentSectionName` + LOCKED badge; jump dropdown from `jumpTargets`; locked read-only rendering for input/phone/email/address nodes with Continue button; `onJump` prop.
+- `FlowPanel.tsx` — `jump` callback via `flowsApi.advance(sessionId, { jumpToSectionNodeId })`; passes `onJump` to NodeDisplay.
+- `designer.ts` + `flow.ts` — section nodeType added; `JumpTarget` interface; section fields on `NodeData`/`FlowNodeState`.
+- `flowGraph.ts` — section/execute_flow/transition_to_flow cases: `break` (no output variables).
+- `ServiceCollectionExtensions.cs` — `SectionNodeHandler` registered.
+
+**Execute Flow node — full implementation**
+- `ExecuteFlowNode.tsx` (new) — sky-blue NodeShell; shows target flow name with `↳` prefix.
+- `ExecuteFlowNodeHandler.cs` (new) — loads sub-flow definition from `IFlowRepository`; validates `IsActive`; pushes `FlowCallFrame` (parent definition JSON + return node ID) onto `ctx.CallStack`; swaps `ctx.FlowDefinition` to sub-flow definition; returns sub-flow entry node.
+- `FlowEngine.cs` — `AdvanceInternalAsync` call stack unwind: when sub-flow terminates and `ctx.CallStack.Count > 0`, pops frame, restores parent definition + return node, clears `scriptContext`, continues the auto-advance while loop.
+- `FlowCallFrame` record added to `FlowExecutionContext.cs`: `(Guid FlowId, string DefinitionJson, string ReturnNodeId)`.
+- `FlowDefinition` changed from `{ get; init; }` to `{ get; set; }` to allow definition swaps at runtime.
+- `NodePropertiesPanel.tsx` — execute_flow case: flow dropdown populated from `flowsApi.listAll()`; draft warning shown if selected flow is not published.
+- `FlowDesignerPage.tsx` — ExecuteFlowNode registered; minimap color `#0369a1`.
+- `ServiceCollectionExtensions.cs` — `ExecuteFlowNodeHandler` registered.
+
+**Transition to Flow node — full implementation**
+- `TransitionToFlowNode.tsx` (new) — purple NodeShell; shows target flow name with `→` prefix.
+- `TransitionToFlowNodeHandler.cs` (new) — loads target flow; validates `IsActive`; swaps `ctx.FlowDefinition` to target definition; returns target flow entry node (no call stack push — one-way handoff).
+- `NodePropertiesPanel.tsx` — transition_to_flow case: same flow dropdown as execute_flow; description clarifies no-return behavior.
+- `FlowDesignerPage.tsx` — TransitionToFlowNode registered; minimap color `#7e22ce`.
+- `ServiceCollectionExtensions.cs` — `TransitionToFlowNodeHandler` registered.
+
+**Build:** 0 warnings, 0 errors (dotnet + Vite) ✓
+
+---
+
+## Session 30 — Flow Designer / Execution Polish + Platform Portal Planning
+
+**Date:** 2026-05-21
+**Start:** 4:00 PM CDT
+**End:** 5:10 PM CDT
+**Duration:** 70 minutes
+**Cumulative Total:** ~1473 min
+
+### Accomplished
+
+**Sub-flow section visibility fix**
+- `FlowEngine.cs` — `CollectSectionTargets` scans current flow definition AND all parent call stack frames (newest-to-oldest); sections from parent flows visible in jump dropdown while inside a sub-flow.
+- `FlowEngine.cs` — Jump handling in `AdvanceAsync` searches current definition first, then call stack frames; unwinds stack via `RemoveRange` to the owning frame before executing the jump.
+- `FlowEngine.cs` — `HasAnySections` updated to check current definition + all call stack frames.
+
+**Encountered sections always visible in jump dropdown**
+- `FlowExecutionContext.cs` — added `EncounteredSectionNodeIds` (`HashSet<string>`); serialized in `VariableStore` (persists in Redis).
+- `SectionNodeHandler.cs` — adds `ctx.CurrentNodeId` to `EncounteredSectionNodeIds` immediately when any section node is processed.
+- `FlowEngine.cs` — `CollectSectionTargets` visibility: `isCurrentSection || isCompleted || isEncountered || allowJumpFromAnywhere`; sections passed through but abandoned remain visible; unreached sections stay hidden.
+
+**ZIP — US or Canada dual-mode mask**
+- `NodePropertiesPanel.tsx` — added `'ZIP — US or Canada'` preset (`'__zip_ca__'` sentinel).
+- `NodeDisplay.tsx` — `zipCaMode()`, `applyZipCaMask()`, `isZipCaComplete()` helpers; auto-switches on first character (digit → US, letter → Canadian `L0L 0L0`); US auto-inserts `-` after 5th digit for ZIP+4; validates all three patterns on submit.
+
+**Address node — US/Canada ZIP + auto-country + provinces**
+- `NodeDisplay.tsx` — when `!allowInternational`, single dual-mode ZIP field replaces two-field layout; country auto-derives from `zipCaMode()`; country dropdown `disabled` + `opacity-60`; state resets on country switch.
+- `NodeDisplay.tsx` — `CA_PROVINCES` (13 entries); state `<select>` switches between `US_STATES` / `CA_PROVINCES` based on `addrForm.country`; dropdown width `w-36` to fit "— Province —" label.
+- Pre-population combines `zip`+`zip4` into single masked field; submit splits `DDDDD-DDDD` back for backend.
+
+**Flow designer — single exit per handle**
+- `FlowDesignerPage.tsx` — `normHandle()` helper normalizes `null`/`undefined`/`"default"` to same slot; `onConnect` removes existing edge for same `source + sourceHandle` before adding new one — works for both freshly drawn and saved-then-loaded edges.
+
+**Build:** 0 warnings, 0 errors (dotnet Infrastructure + Vite) ✓
+
+---
+
+## Session 31 — Platform Portal: Tenant Management
+
+**Date:** 2026-05-21
+**Start:** 5:15 PM CDT
+**End:** 5:48 PM CDT
+**Duration:** 33 minutes
+**Cumulative Total:** ~1506 min
+
+### Accomplished
+
+Full platform-level portal for tenant management — backend and frontend, end-to-end.
+
+**Domain**
+- `PlatformAdmin` entity — `public.platform_admins`; `FirstName`, `LastName`, `Email`, `PasswordHash`, `IsActive`, `CreatedAt`, `LastLoginAt`; `Create()`, `RecordLogin()`, `Activate()`, `Deactivate()`, `UpdatePasswordHash()`, `UpdateProfile()`; no tenant scope.
+
+**Application**
+- `IPlatformAdminRepository` — `GetByIdAsync`, `GetByEmailAsync`, `AddAsync`, `SaveChangesAsync`
+- `IPlatformTokenService` — `GenerateToken(PlatformAdmin)` — no tenant claims in issued JWT
+- `ITenantRepository` — extended with `GetAllAsync` for portal tenant list
+
+**Infrastructure**
+- `PlatformAdminConfiguration` — `platform_admins` table; unique index on `email`
+- `PlatformAdminRepository` — uses `ContactConnectionDbContext` (public schema)
+- `PlatformJwtTokenService` — HS256 JWT; claims: `sub`, `email`, `given_name`, `family_name`, `jti`, `role = "platform_admin"`; no tenant claims
+- `ContactConnectionDbContext` — added `PlatformAdmins DbSet` + `PlatformAdminConfiguration`
+- `ServiceCollectionExtensions` — registered `IPlatformAdminRepository` + `IPlatformTokenService`
+- `TenantRepository` — added `GetAllAsync` (ordered by name)
+- Old `HubionDbContextModelSnapshot.cs` removed (conflict with newly generated `ContactConnectionDbContextModelSnapshot.cs`)
+- Migration `AddPlatformAdmins` — creates `public.platform_admins` table + unique email index; applied ✓
+
+**API**
+- `POST /api/v1/portal/auth/login` — platform admin login; identical 401 for unknown email + wrong password; checks `IsActive`
+- `POST /api/v1/portal/auth/bootstrap` — creates first platform admin when none with that email exists; protected against duplicate creation
+- `GET /api/v1/portal/tenants` — list all tenants (requires `PlatformAdmin` policy)
+- `POST /api/v1/portal/tenants` — provision new tenant
+- `GET /api/v1/portal/tenants/{id}` — get tenant detail
+- `PATCH /api/v1/portal/tenants/{id}` — update billing contact + custom domain
+- `PATCH /api/v1/portal/tenants/{id}/feature-flags` — replace feature flags JSONB
+- `POST /api/v1/portal/tenants/{id}/activate` / `/deactivate`
+- `Program.cs` — `"PlatformAdmin"` authorization policy (`RequireClaim("role", "platform_admin")`); portal endpoints registered
+
+**Frontend**
+- `portalAuthStore.ts` — Zustand store with `cc-portal-auth` localStorage key; separate from agent `cc-auth`
+- `api/portal.ts` — typed API client; reads portal token automatically; `TenantFeatureFlags` interface matches actual C# property names (`telephonyNative`, `telephonyByod`, `webAutomation`, `omsBuiltIn`, `shopifyAdapter`, `advancedReporting`, `parallelQueuing`, `apiBuilder`)
+- `PortalLoginPage.tsx` — `/portal/login`; dark card; no subdomain field (platform-level auth)
+- `PortalShell.tsx` — own header (CC navbar logo + "PLATFORM PORTAL" label); nav tabs; sign-out; no softphone/chat panels
+- `TenantListPage.tsx` — `/portal/tenants`; table with name, subdomain, plan, active/inactive badge, created date, manage link
+- `ProvisionTenantPage.tsx` — `/portal/tenants/new`; auto-derives subdomain from name; plan tier + timezone selects
+- `TenantDetailPage.tsx` — `/portal/tenants/:id`; details editor (billing contact, custom domain); activate/deactivate toggle; feature flag toggles with slide-switch UI; flash status messages
+- `App.tsx` — `RequirePortalAuth` guard; `/portal/*` routes (login, tenant list, provision, detail); `/portal` redirects to `/portal/tenants`
+
+**Bug fixes**
+- `SectionNode.tsx`, `ExecuteFlowNode.tsx`, `TransitionToFlowNode.tsx` — changed `NodeProps<NodeData>` → `NodeProps & { data: NodeData }` to match the pattern used by all other node components (fixes pre-existing TS type errors)
+- `TenantFeatureFlags` interface — corrected property names to match actual C# domain object; previous invented names (`enableTelephony` etc.) caused feature flag saves to silently write all-false to the database
+
+**Build:** 0 warnings, 0 errors (dotnet API + Vite) ✓
+
+### Next Session
+- Additional portal features (active sessions view, platform admin management) OR
+- Continue down the build order: FreeSWITCH + Telephony
+
+---
+
+## Session 32 — Entra Redirect Loop Fix
+
+**Date:** 2026-05-23
+**Start:** 6:30 AM CDT
+**End:** 7:17 AM CDT
+**Duration:** 47 min
+**Cumulative Total:** ~1553 min
+
+### What Was Done
+
+**Azure Entra ID authentication — fixed portal sign-in redirect loop**
+
+Diagnosed and resolved a persistent bug where the portal's Microsoft sign-in redirect flow would always return to `/portal/login` instead of completing authentication and landing on `/portal/tenants`.
+
+**Root cause identified via HAR trace:**
+- `handleRedirectPromise()` in `@azure/msal-browser` v5 defaults to `navigateToLoginRequestUrl: true`
+- After processing the auth code on the callback page, MSAL internally calls `window.location.assign('/portal/login')` (the page where `loginRedirect()` was initiated) before resolving the promise
+- This browser navigation wins over React Router's `navigate()`, meaning auth state is never set and the user is always returned to the login page
+- The fix option is not a config setting — it is a **per-call argument** passed directly to `handleRedirectPromise()`
+
+**Fix:** Single option added to the `handleRedirectPromise` call in `PortalAuthCallbackPage.tsx`:
+```typescript
+const result = await msalInstance.handleRedirectPromise({ navigateToLoginRequestUrl: false })
+```
+
+**Cleanup during investigation:**
+- Reverted popup-based approach (`loginPopup`) that was attempted as a workaround — back to standard redirect flow
+- Removed `MsalProvider` wrapper from portal login route (not needed; singleton used directly)
+- Removed unused `MsalProvider` and `msalInstance` imports from `App.tsx`
+- `msal.ts` — kept `msalInitialized` export (ensures initialization before `loginRedirect()` stores redirect state)
+- `PortalLoginPage.tsx` — restored clean `loginRedirect()` with `await msalInitialized` guard
+- `PortalAuthCallbackPage.tsx` — restored redirect flow with the one-line fix
+
+**Azure portal settings confirmed correct:**
+- Platform type: Single-page application (SPA)
+- Redirect URI: `http://localhost:5173/portal/auth/callback`
+- No client secrets (PKCE replaces this for SPAs)
+- Access tokens + ID tokens checkboxes: unchecked (correct for PKCE flow)
+
+**Result:** Sign-in with Microsoft → Microsoft login page → callback spinner → `/portal/tenants` ✓
+
+### Next Session
+- Additional portal features (active sessions view, platform admin management) OR
+- Continue down the build order: FreeSWITCH + Telephony
+
+---
+
+## Session 33 — Portal Auth Simplification + Invite Flow Fixes + Agent Management + MFA Enforcement
+
+**Date:** 2026-05-25
+**Sub-session 1:** 7:11 AM CDT – 11:29 AM CDT (258 min)
+**Sub-session 2:** 2:53 PM CDT – 3:33 PM CDT (40 min)
+**Total Duration:** 298 minutes
+**Cumulative Total:** ~1851 min
+
+### What Was Done
+
+#### Sub-session 1 (7:11 AM – 11:29 AM CDT)
+
+**PlatformAdmin DB entity removed — Entra-only portal auth**
+
+The `PlatformAdmin` table, entity, repository, and configuration were deleted entirely. Any Entra-authenticated user can now access the portal — no DB allowlist needed. The Entra login endpoint issues a portal JWT directly from `EntraIdentity` claims without any DB lookup.
+
+- `IPlatformTokenService.GenerateToken` signature changed to accept `EntraIdentity` (not `PlatformAdmin`)
+- `EntraIdentity` record updated — added `Oid` field (stable per-user Entra object ID, used as JWT `sub`)
+- `EntraIdTokenValidator` — extracts `oid` claim from the Entra ID token
+- `PlatformJwtTokenService` — no DB dependency; generates token purely from Entra claims
+- `PortalAuthEndpoints` — only `entra-login` remains; bootstrap and add-admin endpoints removed
+- `ContactConnectionDbContext` — `PlatformAdmins` DbSet and configuration removed
+- Migration `DropPlatformAdmins` applied ✓
+- `PortalLoginResponse.AdminId` changed from `Guid` to `string` (Entra OID is a string)
+
+**Portal login splash screen**
+
+Added the same animated splash screen (CC logo, "Call Center Solutions, LLC", credits, fade-out) to `PortalLoginPage.tsx` that was already present on the agent login page.
+
+**Timezone abbreviations**
+
+Created `src/utils/timezones.ts` — shared `TIMEZONES` array with abbreviations in all labels (e.g. "Eastern Time (EST / EDT)"). `OnboardingPage.tsx` and `ProvisionTenantPage.tsx` both import from this shared utility.
+
+**Invite URL fix (App:BaseUrl config)**
+
+Onboarding and admin invite email URLs were hardcoded to `https://contactconnection.cc` (no DNS in local dev). Fixed with `App:BaseUrl` config key:
+- `appsettings.json`: `"App": { "BaseUrl": "https://contactconnection.cc" }`
+- `appsettings.Development.json`: `"App": { "BaseUrl": "http://localhost:5173" }`
+- All invite-sending endpoints use `configuration["App:BaseUrl"]`
+
+**Resend invite — portal tenant list and detail**
+
+- `PortalTenantsEndpoints` — added `POST {id}/resend-invite`: creates a fresh `TenantInvite`, saves, sends email
+- `TenantListPage.tsx` — "Resend" button for pending tenants with invite email
+- `TenantDetailPage.tsx` — "Resend invite" button in Onboarding section card
+
+**Tenant admin agents management page**
+
+- `AdminAgentsEndpoints.cs` — `/api/v1/admin/agents` (`TenantAdmin` policy): list, reset password, update (role/active toggle)
+- `IAgentRepository` / `AgentRepository` — added `GetAllAsync`
+- `Program.cs` — added `TenantAdmin` policy (`role = admin | supervisor`); registered endpoints
+- `AdminAgentsPage.tsx` — table with role badge, active status toggle, inline password reset row
+- `TenantAdminPage.tsx` — Agents card now live (renders as `<Link>`)
+
+**Portal tenant detail — admin users section**
+
+- `PortalTenantsEndpoints` — `GET {id}/agents` and `POST {id}/agents/{agentId}/reset-password`; sets `tenantContext.Current = tenant` manually before calling `IAgentRepository`
+- `TenantDetailPage.tsx` — "Admin users" section when `onboardingComplete`; role badge, name, email, status, inline password reset
+
+**Critical bug fix — agents never persisted after onboarding**
+
+`OnboardingEndpoints.Complete` called `agents.AddAsync` but never `agents.SaveChangesAsync`. The agent was tracked in `TenantDbContext` but never written to the DB. Onboarding issued a valid JWT from the in-memory object so the session worked, but after logout login always failed with "invalid credentials." Same bug in `TenantAdminInviteEndpoints.Accept`.
+
+- `OnboardingEndpoints.cs` — added `await agents.SaveChangesAsync(ct)` after `AddAsync`
+- `TenantAdminInviteEndpoints.cs` — same fix in `Accept`
+
+**Portal escape hatches for stuck/broken tenants**
+
+- `POST {id}/reset-onboarding` — sets `OnboardingComplete = false`; now also calls `agents.DeleteAllAsync()` and `adminInvites.DeleteByTenantAsync()` so re-onboarding with the same emails works
+- "Reset onboarding" button always visible regardless of `onboardingComplete` state (label changes to "Clear agents & invites" when already incomplete)
+- `POST {id}/invite-admin` with `{ email }` — creates fresh `TenantAdminInvite`, saves, sends email; "Invite an additional admin" input row in Admin users section
+- `Tenant.ResetOnboarding()` domain method added
+- `IAgentRepository.DeleteAllAsync()` — EF Core `ExecuteDeleteAsync` bulk delete
+- `ITenantAdminInviteRepository.DeleteByTenantAsync(tenantId)` — bulk delete by tenant
+
+#### Sub-session 2 (2:53 PM – 3:29 PM CDT)
+
+**Features step in onboarding wizard**
+
+- `OnboardingPage.tsx` — new "Features" step inserted at step index 5 (before "Additional Admins"); card-style toggle rows for all 4 tenant feature flags (`telephony`, `omsBuiltIn`, `shopifyAdapter`, `tenantChat`); flags state pre-populated from `data.featureFlags` returned by `ValidateToken`; submitted in `CompleteOnboardingRequest.featureFlags`
+- `OnboardingEndpoints.cs` — `ValidateToken` response includes `featureFlags = invite.Tenant.FeatureFlags`; `CompleteOnboardingRequest` gains `TenantFeatureFlags? FeatureFlags`; `Complete` handler calls `tenant.UpdateFeatureFlags(request.FeatureFlags)` when provided
+
+**TOTP MFA enforcement — full end-to-end**
+
+Domain / Infrastructure:
+- `Agent` entity — `MfaSecret: string?`, `MfaEnabled: bool` (private set); `StoreMfaSecret()`, `EnableMfa()`, `ClearMfa()` domain methods
+- `AgentConfiguration` — `mfa_secret` (max 64) + `mfa_enabled` columns mapped
+- Migration `AddAgentMfa` applied to `tenant_tms` ✓
+- `IMfaService` (Application) — `GenerateSecret()`, `GetOtpAuthUri()`, `Verify()`
+- `MfaService` (Infrastructure) — Otp.NET; `Base32Encoding`, `Totp`, `VerificationWindow(previous:1, future:0)`
+- `ITokenService.GeneratePreAuthToken` — 5-minute TTL, `role = "mfa_pending"`, same signing key
+
+Backend endpoints:
+- `Program.cs` — `MfaPending` authorization policy (`RequireClaim("role", "mfa_pending")`)
+- `appsettings.json` — `App:IssuerName = "ContactConnection"` (TOTP issuer shown in authenticator apps)
+- `POST /api/v1/auth/login` — branches on `tenant.Settings.MfaRequirement`:
+  - `"off"` → full JWT as before
+  - `"optional"` + `agent.MfaEnabled` → pre-auth token + `mfaSetupRequired: false`
+  - `"on"` + `!agent.MfaEnabled` → pre-auth token + `mfaSetupRequired: true` (force setup)
+  - `"on"` + `agent.MfaEnabled` → pre-auth token + `mfaSetupRequired: false`
+- `GET /api/v1/auth/mfa/setup` (`MfaPending`) — generates TOTP secret, saves to `agent.MfaSecret` (not yet enabled), returns `{ secret, otpAuthUri }`
+- `POST /api/v1/auth/mfa/setup/confirm` (`MfaPending`) — verifies TOTP, calls `agent.EnableMfa()`, issues full JWT
+- `POST /api/v1/auth/mfa/verify` (`MfaPending`) — verifies TOTP against existing secret, issues full JWT
+- `LoginResponse` — discriminated union: `mfaPending: bool`, `token?`, `preAuthToken?`, `mfaSetupRequired?`
+
+Frontend:
+- `auth.ts` — `LoginResponse` is now a TypeScript discriminated union; `mfaSetup()`, `mfaSetupConfirm()`, `mfaVerify()` API calls pass pre-auth token directly (bypass `api` client)
+- `LoginPage.tsx` — on `mfaPending: true` navigates to `/mfa/setup` or `/mfa/verify` with `{ preAuthToken, subdomain, email }` in router state
+- `MfaSetupPage.tsx` (new) — loads TOTP secret, renders QR code via `qrcode` npm library, shows manual key, submits 6-digit code; on success sets auth and navigates to `/admin` or `/agent`
+- `MfaVerifyPage.tsx` (new) — prompts 6-digit code for agents with MFA already enabled; same post-verify flow
+- `App.tsx` — `/mfa/setup` and `/mfa/verify` routes added (public, state-driven)
+
+**Build:** 0 warnings, 0 errors (dotnet + Vite) ✓
+
+### Next Session
+- End-to-end test of MFA flows (setup + verify)
+- Continue build order: FreeSWITCH + Telephony OR additional portal features

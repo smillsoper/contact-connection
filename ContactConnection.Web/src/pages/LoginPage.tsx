@@ -28,8 +28,17 @@ export default function LoginPage() {
     setLoading(true)
     try {
       const res = await authApi.login({ email, password, tenantSubdomain: subdomain })
-      setAuth(res.token, res.agentId, subdomain)
-      navigate('/agent', { replace: true })
+      if (res.mfaPending) {
+        const dest = res.mfaSetupRequired ? '/mfa/setup' : '/mfa/verify'
+        navigate(dest, {
+          replace: true,
+          state: { preAuthToken: res.preAuthToken, subdomain, email: res.email },
+        })
+        return
+      }
+      setAuth(res.token, res.agentId, subdomain, res.role, res.firstName, res.lastName)
+      const dest = res.role === 'admin' || res.role === 'supervisor' ? '/admin' : '/agent'
+      navigate(dest, { replace: true })
     } catch {
       setError('Invalid credentials. Please try again.')
     } finally {

@@ -34,7 +34,7 @@ public class FlowEngine : IFlowEngine
 
     // Transparent node types — engine auto-advances without waiting for agent input
     private static readonly HashSet<string> AutoAdvanceTypes =
-        ["branch", "set_variable"];
+        ["branch", "set_variable", "section", "execute_flow", "transition_to_flow"];
 
     private static readonly TimeSpan SessionTtl = TimeSpan.FromHours(12);
 
@@ -98,6 +98,7 @@ public class FlowEngine : IFlowEngine
         }
 
         var state = await AdvanceInternalAsync(ctx, entryNodeId, agentInput: null, transition: "default", isStart: true, ct);
+        AttachSectionInfo(ctx, state);
 
         // Save ctx AFTER advance so CurrentNodeId reflects where the engine stopped,
         // not the entry node — same pattern as AdvanceAsync.
@@ -113,8 +114,62 @@ public class FlowEngine : IFlowEngine
         var ctx = await LoadFromRedis(request.SessionId, ct)
             ?? throw new InvalidOperationException($"No active session {request.SessionId}.");
 
-        var state = await AdvanceInternalAsync(
-            ctx, ctx.CurrentNodeId, request.InputValue, request.Transition, isStart: false, ct);
+        FlowNodeState state;
+
+        if (request.JumpToSectionNodeId is not null)
+        {
+            // Find which definition contains the target section — current flow first,
+            // then parent frames (newest to oldest) so we can unwind the call stack.
+            var sectionNode = GetNode(ctx.FlowDefinition, request.JumpToSectionNodeId);
+            int? unwindToStackIndex = null;
+
+            if (sectionNode is null)
+            {
+                for (int i = ctx.CallStack.Count - 1; i >= 0; i--)
+                {
+                    var frameDef = JsonNode.Parse(ctx.CallStack[i].DefinitionJson)?.AsObject();
+                    if (frameDef is not null && GetNode(frameDef, request.JumpToSectionNodeId) is not null)
+                    {
+                        sectionNode        = GetNode(frameDef, request.JumpToSectionNodeId);
+                        ctx.FlowDefinition = frameDef;
+                        unwindToStackIndex = i;
+                        break;
+                    }
+                }
+            }
+
+            if (sectionNode is null)
+                throw new InvalidOperationException($"Section node '{request.JumpToSectionNodeId}' not found.");
+
+            // Unwind call stack: remove the target frame and all frames deeper than it
+            if (unwindToStackIndex.HasValue)
+                ctx.CallStack.RemoveRange(unwindToStackIndex.Value, ctx.CallStack.Count - unwindToStackIndex.Value);
+
+            if (sectionNode["clearPreviousValues"]?.GetValue<bool>() == true)
+                ClearSectionVars(ctx.FlowDefinition, request.JumpToSectionNodeId, ctx);
+
+            // Jumping away from a section before completing it must not mark it complete.
+            // Clearing section state here means SectionNodeHandler sees no previous section
+            // to add to CompletedSectionNodeIds — the abandoned section stays incomplete.
+            ctx.CurrentSectionNodeId = null;
+            ctx.CurrentSectionName   = null;
+            ctx.CurrentSectionLocked = false;
+
+            state = await AdvanceInternalAsync(
+                ctx, request.JumpToSectionNodeId, agentInput: null, transition: "default", isStart: true, ct);
+        }
+        else
+        {
+            state = await AdvanceInternalAsync(
+                ctx, ctx.CurrentNodeId, request.InputValue, request.Transition, isStart: false, ct);
+        }
+
+        // Mark the current section complete when the flow ends — covers the case where
+        // the last section leads directly to an end node with no subsequent section node.
+        if (state.IsTerminal && !string.IsNullOrEmpty(ctx.CurrentSectionNodeId))
+            ctx.CompletedSectionNodeIds.Add(ctx.CurrentSectionNodeId);
+
+        AttachSectionInfo(ctx, state);
 
         if (state.IsTerminal)
             await CompleteSession(ctx, ct);
@@ -167,6 +222,19 @@ public class FlowEngine : IFlowEngine
             // Terminal node or node waiting for input — return state, attaching any preceding script content
             if (result.NextNodeId is null || result.State.IsTerminal)
             {
+                // Sub-flow ended — pop call stack and resume parent flow transparently
+                if (result.State.IsTerminal && ctx.CallStack.Count > 0)
+                {
+                    var frame = ctx.CallStack[^1];
+                    ctx.CallStack.RemoveAt(ctx.CallStack.Count - 1);
+                    ctx.FlowDefinition = JsonNode.Parse(frame.DefinitionJson)?.AsObject() ?? [];
+                    nodeId        = frame.ReturnNodeId;
+                    agentInput    = null;
+                    transition    = "default";
+                    scriptContext = null; // don't bleed sub-flow scripts into parent
+                    continue;
+                }
+
                 result.State.ScriptContext = scriptContext;
                 return result.State;
             }
@@ -287,6 +355,152 @@ public class FlowEngine : IFlowEngine
         definition["nodes"]?[nodeId]?.AsObject();
 
     private static string RedisKey(Guid sessionId) => $"flow:session:{sessionId}";
+
+    // ── Section helpers ─────────────────────────────────────────────────────
+
+    private void AttachSectionInfo(FlowExecutionContext ctx, FlowNodeState state)
+    {
+        state.CurrentSectionName = ctx.CurrentSectionName;
+        state.SectionLocked      = ctx.CurrentSectionLocked;
+
+        if (HasAnySections(ctx))
+            state.JumpTargets = BuildJumpTargets(ctx);
+    }
+
+    private static bool HasAnySections(FlowExecutionContext ctx)
+    {
+        if (HasSectionsInDefinition(ctx.FlowDefinition)) return true;
+        return ctx.CallStack.Any(frame =>
+        {
+            var def = JsonNode.Parse(frame.DefinitionJson)?.AsObject();
+            return def is not null && HasSectionsInDefinition(def);
+        });
+    }
+
+    private static bool HasSectionsInDefinition(JsonObject definition)
+    {
+        var nodes = definition["nodes"]?.AsObject();
+        return nodes?.Any(kvp =>
+            kvp.Value?.AsObject()?["type"]?.GetValue<string>() == "section") == true;
+    }
+
+    private static List<JumpTarget> BuildJumpTargets(FlowExecutionContext ctx)
+    {
+        var targets = new List<JumpTarget>();
+
+        // Current (sub-)flow sections first, then parent frames newest-to-oldest
+        CollectSectionTargets(ctx.FlowDefinition, ctx, targets);
+        for (int i = ctx.CallStack.Count - 1; i >= 0; i--)
+        {
+            var parentDef = JsonNode.Parse(ctx.CallStack[i].DefinitionJson)?.AsObject();
+            if (parentDef is not null)
+                CollectSectionTargets(parentDef, ctx, targets);
+        }
+
+        return targets;
+    }
+
+    private static void CollectSectionTargets(
+        JsonObject definition, FlowExecutionContext ctx, List<JumpTarget> targets)
+    {
+        var nodes = definition["nodes"]?.AsObject();
+        if (nodes is null) return;
+
+        foreach (var kvp in nodes)
+        {
+            var node = kvp.Value?.AsObject();
+            if (node?["type"]?.GetValue<string>() != "section") continue;
+
+            var nodeId                = kvp.Key;
+            var name                  = node["name"]?.GetValue<string>()
+                                        ?? node["label"]?.GetValue<string>()
+                                        ?? nodeId;
+            var clearPrev             = node["clearPreviousValues"]?.GetValue<bool>() ?? false;
+            var allowJumpFromAnywhere = node["allowJumpFromAnywhere"]?.GetValue<bool>() ?? false;
+            var isCurrentSection      = nodeId == ctx.CurrentSectionNodeId;
+            var isCompleted           = ctx.CompletedSectionNodeIds.Contains(nodeId);
+            var isEncountered         = ctx.EncounteredSectionNodeIds.Contains(nodeId);
+
+            // Show if: current, completed, encountered (started but possibly abandoned),
+            // or explicitly surfaced everywhere — hides sections the flow hasn't reached yet.
+            if (!isCurrentSection && !isCompleted && !isEncountered && !allowJumpFromAnywhere)
+                continue;
+
+            var outputVar = node["outputVariable"]?.GetValue<string>()?.Trim();
+            var isLocked  = false;
+            if (!string.IsNullOrEmpty(outputVar) && ctx.FlowVars.TryGetValue(outputVar, out var varJson))
+            {
+                try
+                {
+                    var obj = JsonNode.Parse(varJson)?.AsObject();
+                    isLocked = obj?["locked"]?.GetValue<string>() == "true";
+                }
+                catch { }
+            }
+
+            targets.Add(new JumpTarget
+            {
+                SectionNodeId       = nodeId,
+                Name                = name,
+                IsCurrentSection    = isCurrentSection,
+                ClearPreviousValues = clearPrev,
+                IsLocked            = isLocked,
+            });
+        }
+    }
+
+    /// <summary>
+    /// BFS from the section node's transition targets, collecting all node IDs that belong
+    /// to this section — stops when it hits another section node or the end of the graph.
+    /// </summary>
+    private static IEnumerable<string> NodesInSection(JsonObject definition, string sectionNodeId)
+    {
+        var sectionNode = GetNode(definition, sectionNodeId);
+        if (sectionNode is null) yield break;
+
+        var transitions = sectionNode["transitions"]?.AsObject();
+        if (transitions is null) yield break;
+
+        var visited = new HashSet<string>();
+        var queue   = new Queue<string>();
+
+        foreach (var kvp in transitions)
+        {
+            var t = kvp.Value?.GetValue<string>();
+            if (t != null) queue.Enqueue(t);
+        }
+
+        while (queue.Count > 0)
+        {
+            var nodeId = queue.Dequeue();
+            if (!visited.Add(nodeId)) continue;
+
+            var node = GetNode(definition, nodeId);
+            if (node is null) continue;
+            if (node["type"]?.GetValue<string>() == "section") continue; // section boundary
+
+            yield return nodeId;
+
+            var nextTransitions = node["transitions"]?.AsObject();
+            if (nextTransitions is null) continue;
+            foreach (var kvp in nextTransitions)
+            {
+                var t = kvp.Value?.GetValue<string>();
+                if (t != null) queue.Enqueue(t);
+            }
+        }
+    }
+
+    private static void ClearSectionVars(JsonObject definition, string sectionNodeId, FlowExecutionContext ctx)
+    {
+        foreach (var nodeId in NodesInSection(definition, sectionNodeId))
+        {
+            var node      = GetNode(definition, nodeId);
+            var outputVar = node?["outputVariable"]?.GetValue<string>()?.Trim();
+            if (!string.IsNullOrEmpty(outputVar))
+                ctx.FlowVars.Remove(outputVar);
+        }
+    }
 
     // Compact Redis cache entry — avoids re-querying PostgreSQL on every advance
     private record RedisCacheEntry(

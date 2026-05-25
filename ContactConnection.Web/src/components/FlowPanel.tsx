@@ -80,6 +80,23 @@ export default function FlowPanel() {
     [state],
   )
 
+  const jump = useCallback(
+    async (sectionNodeId: string) => {
+      if (state.phase !== 'running') return
+      setAdvancing(true)
+      try {
+        const next = await flowsApi.advance(state.node.sessionId, { jumpToSectionNodeId: sectionNodeId })
+        setState({ phase: 'running', node: next })
+      } catch (e) {
+        setState({ phase: 'error', message: String(e) })
+      } finally {
+        setAdvancing(false)
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state],
+  )
+
   return (
     <div className="flex flex-col h-full">
       {/* Flow selector toolbar */}
@@ -137,6 +154,7 @@ export default function FlowPanel() {
           <NodeDisplay
             node={state.node}
             onAdvance={advance}
+            onJump={jump}
             advancing={advancing}
           />
         )}

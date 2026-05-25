@@ -19,13 +19,25 @@ public class FlowExecutionContext
     public Guid TenantId { get; init; }
     public string CurrentNodeId { get; set; } = string.Empty;
 
-    // The full flow definition JSON, parsed once at session start
-    public JsonObject FlowDefinition { get; init; } = [];
+    // The full flow definition JSON — mutable to support execute_flow / transition_to_flow
+    public JsonObject FlowDefinition { get; set; } = [];
 
     // Variable state — projected into VariableContext for resolver calls
     public Dictionary<string, string> FlowVars { get; init; } = [];
     public Dictionary<string, string> Inputs { get; init; } = [];
     public Dictionary<string, string> ApiResults { get; init; } = [];
+
+    // Sub-flow call stack — pushed by execute_flow, popped when sub-flow terminates
+    public List<FlowCallFrame> CallStack { get; init; } = [];
+
+    // Section state — updated by SectionNodeHandler as execution passes through section nodes
+    public string? CurrentSectionNodeId { get; set; }
+    public string? CurrentSectionName { get; set; }
+    public bool CurrentSectionLocked { get; set; }
+    public HashSet<string> CompletedSectionNodeIds { get; init; } = [];
+    // Every section node that was entered during this session — used to keep past
+    // (even unfinished) sections visible in the jump dropdown.
+    public HashSet<string> EncounteredSectionNodeIds { get; init; } = [];
 
     // Baseline data populated from call record and agent at session start
     public Dictionary<string, string> CallRecord { get; init; } = [];
@@ -53,7 +65,14 @@ public class FlowExecutionContext
     };
 
     public string SerializeVariableStore() =>
-        JsonSerializer.Serialize(new { FlowVars, Inputs, ApiResults });
+        JsonSerializer.Serialize(new
+        {
+            FlowVars, Inputs, ApiResults,
+            CurrentSectionNodeId, CurrentSectionName, CurrentSectionLocked,
+            CompletedSectionNodeIds,
+            EncounteredSectionNodeIds,
+            CallStack,
+        });
 
     public string SerializeExecutionHistory() =>
         JsonSerializer.Serialize(ExecutionHistory);
@@ -76,32 +95,44 @@ public class FlowExecutionContext
 
         return new FlowExecutionContext
         {
-            SessionId        = sessionId,
-            FlowId           = flowId,
-            FlowVersion      = flowVersion,
-            CallRecordId     = callRecordId,
-            InteractionId    = interactionId,
-            AgentId          = agentId,
-            TenantId         = tenantId,
-            CurrentNodeId    = currentNodeId,
-            FlowDefinition   = definition,
-            FlowVars         = varStore.FlowVars,
-            Inputs           = varStore.Inputs,
-            ApiResults       = varStore.ApiResults,
-            CallRecord       = callRecord,
-            Caller           = caller,
-            Agent            = agent,
-            Tenant           = tenant,
-            ExecutionHistory = history
+            SessionId               = sessionId,
+            FlowId                  = flowId,
+            FlowVersion             = flowVersion,
+            CallRecordId            = callRecordId,
+            InteractionId           = interactionId,
+            AgentId                 = agentId,
+            TenantId                = tenantId,
+            CurrentNodeId           = currentNodeId,
+            FlowDefinition          = definition,
+            FlowVars                = varStore.FlowVars,
+            Inputs                  = varStore.Inputs,
+            ApiResults              = varStore.ApiResults,
+            CurrentSectionNodeId    = varStore.CurrentSectionNodeId,
+            CurrentSectionName      = varStore.CurrentSectionName,
+            CurrentSectionLocked    = varStore.CurrentSectionLocked,
+            CompletedSectionNodeIds   = varStore.CompletedSectionNodeIds,
+            EncounteredSectionNodeIds = varStore.EncounteredSectionNodeIds,
+            CallStack                 = varStore.CallStack,
+            CallRecord              = callRecord,
+            Caller                  = caller,
+            Agent                   = agent,
+            Tenant                  = tenant,
+            ExecutionHistory        = history
         };
     }
 
     private record VariableStore(
         Dictionary<string, string> FlowVars,
         Dictionary<string, string> Inputs,
-        Dictionary<string, string> ApiResults)
+        Dictionary<string, string> ApiResults,
+        string? CurrentSectionNodeId,
+        string? CurrentSectionName,
+        bool CurrentSectionLocked,
+        HashSet<string> CompletedSectionNodeIds,
+        HashSet<string> EncounteredSectionNodeIds,
+        List<FlowCallFrame> CallStack)
     {
-        public VariableStore() : this([], [], []) { }
+        public VariableStore() : this([], [], [], null, null, false, [], [], []) { }
     }
 }
 
@@ -115,3 +146,12 @@ public record NodeExecutionRecord(
     DateTimeOffset EnteredAt,
     string? InputValue,
     string? TransitionTaken);
+
+/// <summary>
+/// Saved parent-flow state pushed onto the call stack when an execute_flow node runs.
+/// Popped and restored when the sub-flow reaches its end node.
+/// </summary>
+public record FlowCallFrame(
+    Guid FlowId,
+    string DefinitionJson,
+    string ReturnNodeId);

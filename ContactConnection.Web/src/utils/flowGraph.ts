@@ -172,6 +172,11 @@ export function computeAncestorVars(
         apis.push({ id: n.id, label: nodeLabel })
         break
       }
+      // these node types don't expose variables directly
+      case 'section':
+      case 'execute_flow':
+      case 'transition_to_flow':
+        break
     }
   }
 

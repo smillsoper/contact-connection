@@ -8,7 +8,7 @@ DevLog.md needs to be updated every session with the session start date and time
 
 ## Current Project Status
 
-**As of:** 2026-05-10 (Session 23 complete)
+**As of:** 2026-05-25 (Session 33 complete)
 
 ### Solution Structure
 
@@ -279,8 +279,8 @@ Building the **full ContactConnection platform** — not releasing ContactConnec
 3. **ContactConnection.Web — Script Node Editor** ✓ Complete (Session 18)
 4. **ContactConnection.Web — Flow Designer enhancements** ✓ Complete (Session 19): variable panel in script editor modal, input node per-option handles, output variable field, Flows management page (`/flows`)
 5. **ContactConnection.Web — UI polish + dark theme** ✓ Complete (Sessions 20-22): tagline branding, login page styling, dark theme throughout Flows/Designer, canvas node dark theme, navbar logo flush layout
-6. **ContactConnection.Web — Specialized flow nodes** ✓ Complete (Sessions 23–24): Email node with DNS validation + blocking; inline script (label + rich text) on input and email nodes
-7. **Chrome Extension** (web automation bridge) ← next after specialized nodes complete
+6. **ContactConnection.Web — Specialized flow nodes** ✓ Complete (Sessions 23–29): Email node with DNS validation + blocking; inline script on input/email nodes; phone node; address node; section node (named sections, lock/jump, read-only locked display); execute_flow node (sub-flow call stack, shared variables, unwind on return); transition_to_flow node (one-way handoff)
+7. **Platform Portal — Tenant Management** ✓ Complete (Sessions 31–33)
 4. **FreeSWITCH + Telephony** (ESL, parallel queue engine, screen pop)
 5. **ContactConnection.Integrations + API Builder** (no-code adapter framework)
 6. **Chat System** (tenant-scoped, enterprise features)
@@ -396,7 +396,7 @@ chat_mentions        — id, message_id, mentioned_agent_id, is_read, created_at
 docker compose up -d                              # start all services
 docker compose down                               # stop all services
 dotnet watch run --project ContactConnection.Api             # hot-reload API (localhost:5135)
-cd ContactConnection.Web && npm run dev                      # Vite dev server (localhost:3000), proxies /api + /hubs to :5135
+cd ContactConnection.Web && npm run dev                      # Vite dev server (localhost:5173), proxies /api + /hubs to :5135
 dotnet ef migrations add <Name> --context TenantDbContext --project ContactConnection.Infrastructure --startup-project ContactConnection.Api
 dotnet ef database update --context TenantDbContext --project ContactConnection.Infrastructure --startup-project ContactConnection.Api
 dotnet ef migrations add <Name> --context ContactConnectionDbContext --project ContactConnection.Infrastructure --startup-project ContactConnection.Api

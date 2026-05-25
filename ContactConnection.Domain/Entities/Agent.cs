@@ -16,6 +16,8 @@ public class Agent
     public bool IsActive { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? LastLoginAt { get; private set; }
+    public string? MfaSecret { get; private set; }
+    public bool MfaEnabled { get; private set; }
 
     // Required by EF Core
     private Agent() { }
@@ -54,6 +56,10 @@ public class Agent
     }
 
     public void UpdatePasswordHash(string passwordHash) => PasswordHash = passwordHash;
+
+    public void StoreMfaSecret(string secret) => MfaSecret = secret;
+    public void EnableMfa() => MfaEnabled = true;
+    public void ClearMfa() { MfaSecret = null; MfaEnabled = false; }
 
     public string FullName => $"{FirstName} {LastName}".Trim();
 }

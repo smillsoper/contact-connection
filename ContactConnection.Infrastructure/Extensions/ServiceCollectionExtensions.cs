@@ -5,6 +5,7 @@ using ContactConnection.Infrastructure.Auth;
 using ContactConnection.Infrastructure.Commerce;
 using ContactConnection.Infrastructure.CustomFields;
 using ContactConnection.Infrastructure.Data;
+using ContactConnection.Infrastructure.Email;
 using ContactConnection.Infrastructure.FlowEngine;
 using ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 using ContactConnection.Infrastructure.FlowEngine.Services;
@@ -54,6 +55,14 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICustomFieldValueRepository, CustomFieldValueRepository>();
         services.AddScoped<IDataTypeRepository, DataTypeRepository>();
 
+        services.AddScoped<ITenantInviteRepository, TenantInviteRepository>();
+        services.AddScoped<ITenantAdminInviteRepository, TenantAdminInviteRepository>();
+
+        // Platform auth
+        services.AddScoped<IPlatformTokenService, PlatformJwtTokenService>();
+        services.AddSingleton<IEntraIdTokenValidator, EntraIdTokenValidator>();
+        services.AddSingleton<IMfaService, MfaService>();
+
         // Services
         services.AddScoped<ITenantProvisioningService, TenantProvisioningService>();
         services.AddSingleton<IPasswordHasher, PasswordHasher>();
@@ -89,6 +98,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<INodeHandler, EmailNodeHandler>();
         services.AddScoped<INodeHandler, PhoneNodeHandler>();
         services.AddScoped<INodeHandler, AddressNodeHandler>();
+        services.AddScoped<INodeHandler, SectionNodeHandler>();
+        services.AddScoped<INodeHandler, ExecuteFlowNodeHandler>();
+        services.AddScoped<INodeHandler, TransitionToFlowNodeHandler>();
         services.AddScoped<INodeHandler, BranchNodeHandler>();
         services.AddScoped<INodeHandler, SetVariableNodeHandler>();
         services.AddScoped<INodeHandler, ApiCallNodeHandler>();
@@ -96,6 +108,10 @@ public static class ServiceCollectionExtensions
 
         // Flow engine (scoped — uses scoped repositories and tenant context)
         services.AddScoped<IFlowEngine, FlowEngine.FlowEngine>();
+
+        // Email
+        services.AddSingleton<IEmailService, ResendEmailService>();
+        services.AddHttpClient("Resend");
 
         // HTTP client for ApiCallNodeHandler
         services.AddHttpClient("FlowEngine");

@@ -14,6 +14,34 @@ public class JwtTokenService : ITokenService
 
     public JwtTokenService(IConfiguration configuration) => _configuration = configuration;
 
+    public string GeneratePreAuthToken(Agent agent, Tenant tenant)
+    {
+        var signingKey = _configuration["Jwt:SigningKey"]
+            ?? throw new InvalidOperationException("Jwt:SigningKey is not configured.");
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(signingKey));
+        var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+        var claims = new[]
+        {
+            new Claim(JwtRegisteredClaimNames.Sub, agent.Id.ToString()),
+            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+            new Claim("tenant_id", tenant.Id.ToString()),
+            new Claim("tenant_schema", tenant.SchemaName),
+            new Claim("tenant_subdomain", tenant.Subdomain),
+            new Claim("role", "mfa_pending")
+        };
+
+        var token = new JwtSecurityToken(
+            issuer: _configuration["Jwt:Issuer"] ?? "contactconnection",
+            audience: _configuration["Jwt:Audience"] ?? "contactconnection-api",
+            claims: claims,
+            notBefore: DateTime.UtcNow,
+            expires: DateTime.UtcNow.AddMinutes(5),
+            signingCredentials: credentials);
+
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
     public string GenerateToken(Agent agent, Tenant tenant)
     {
         var signingKey = _configuration["Jwt:SigningKey"]

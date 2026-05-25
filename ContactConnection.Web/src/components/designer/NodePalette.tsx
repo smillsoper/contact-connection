@@ -7,6 +7,9 @@ const NODE_TYPES: ContactConnectionNodeType[] = [
   'email',
   'phone',
   'address',
+  'section',
+  'execute_flow',
+  'transition_to_flow',
   'branch',
   'set_variable',
   'api_call',
@@ -36,9 +39,14 @@ export default function NodePalette() {
             >
               <div
                 style={{ backgroundColor: meta.color }}
-                className="px-2 py-1"
+                className="px-2 py-1 border-b border-gray-200"
               >
-                <span className="text-white text-xs font-semibold">{meta.label}</span>
+                <span
+                  className="text-xs font-semibold"
+                  style={{ color: meta.color === '#ffffff' ? '#374151' : '#ffffff' }}
+                >
+                  {meta.label}
+                </span>
               </div>
               <div className="px-2 py-1.5 bg-gray-800">
                 <p className="text-[11px] text-gray-400 leading-tight">{meta.description}</p>

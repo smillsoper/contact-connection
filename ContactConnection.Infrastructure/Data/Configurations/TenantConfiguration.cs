@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ContactConnection.Domain.Entities;
+using ContactConnection.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -20,6 +21,14 @@ public class TenantConfiguration : IEntityTypeConfiguration<Tenant>
             .HasColumnName("name")
             .IsRequired()
             .HasMaxLength(200);
+
+        builder.Property(t => t.DisplayName)
+            .HasColumnName("display_name")
+            .HasMaxLength(200);
+
+        builder.Property(t => t.LogoUrl)
+            .HasColumnName("logo_url")
+            .HasMaxLength(2048);
 
         builder.Property(t => t.Subdomain)
             .HasColumnName("subdomain")
@@ -56,6 +65,10 @@ public class TenantConfiguration : IEntityTypeConfiguration<Tenant>
             .HasColumnName("billing_contact")
             .HasMaxLength(200);
 
+        builder.Property(t => t.InviteEmail)
+            .HasColumnName("invite_email")
+            .HasMaxLength(254);
+
         builder.Property(t => t.FeatureFlags)
             .HasColumnName("feature_flags")
             .HasColumnType("jsonb")
@@ -64,6 +77,17 @@ public class TenantConfiguration : IEntityTypeConfiguration<Tenant>
                 v => JsonSerializer.Deserialize<TenantFeatureFlags>(v, JsonOptions)
                      ?? TenantFeatureFlags.Default()
             );
+
+        builder.Property(t => t.Settings)
+            .HasColumnName("settings")
+            .HasColumnType("jsonb")
+            .HasConversion(
+                v => JsonSerializer.Serialize(v, JsonOptions),
+                v => JsonSerializer.Deserialize<TenantSettings>(v, JsonOptions)
+                     ?? TenantSettings.Default()
+            );
+
+        builder.Property(t => t.OnboardingComplete).HasColumnName("onboarding_complete");
 
         builder.Property(t => t.CreatedAt).HasColumnName("created_at");
     }
