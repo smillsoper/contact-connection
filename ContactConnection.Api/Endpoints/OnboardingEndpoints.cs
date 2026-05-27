@@ -113,7 +113,7 @@ public static class OnboardingEndpoints
                 await email.SendAsync(
                     adminEmail,
                     TenantAdminInviteEmail.Subject(tenant.Name),
-                    TenantAdminInviteEmail.HtmlBody(tenant.Name, tenant.DisplayName, acceptUrl),
+                    TenantAdminInviteEmail.HtmlBody(tenant.Name, tenant.DisplayName, tenant.Subdomain, acceptUrl),
                     ct);
             }
             catch (Exception ex)

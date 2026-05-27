@@ -2,6 +2,7 @@ using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
 using ContactConnection.Domain.Entities;
+using ContactConnection.Infrastructure.Email;
 
 namespace ContactConnection.Api.Endpoints;
 
@@ -13,10 +14,50 @@ public static class AdminAgentsEndpoints
             .RequireAuthorization("TenantAdmin");
 
         group.MapGet("", List);
+        group.MapPost("invite", InviteAdmin);
         group.MapPost("{id:guid}/reset-password", ResetPassword);
         group.MapPatch("{id:guid}", Update);
 
         return app;
+    }
+
+    private static async Task<IResult> InviteAdmin(
+        InviteAdminAgentRequest request,
+        ITenantAdminInviteRepository invites,
+        IEmailService email,
+        IConfiguration configuration,
+        ILoggerFactory loggerFactory,
+        TenantContext tenantContext,
+        CancellationToken ct)
+    {
+        if (!tenantContext.HasTenant) return Results.Unauthorized();
+        var tenant = tenantContext.Current!;
+
+        if (string.IsNullOrWhiteSpace(request.Email))
+            return Results.BadRequest(new { error = "Email is required." });
+
+        var invite = TenantAdminInvite.Create(tenant.Id, request.Email.Trim().ToLowerInvariant(), AgentRole.Admin);
+        await invites.AddAsync(invite, ct);
+        await invites.SaveChangesAsync(ct);
+
+        try
+        {
+            var baseUrl = configuration["App:BaseUrl"] ?? "https://contactconnection.cc";
+            var acceptUrl = $"{baseUrl}/admin-invite/{invite.Token}";
+            await email.SendAsync(
+                invite.Email,
+                TenantAdminInviteEmail.Subject(tenant.Name),
+                TenantAdminInviteEmail.HtmlBody(tenant.Name, tenant.DisplayName, tenant.Subdomain, acceptUrl),
+                ct);
+        }
+        catch (Exception ex)
+        {
+            loggerFactory.CreateLogger("AdminAgents")
+                .LogError(ex, "Failed to send admin invite to {Email} for tenant {TenantId}", invite.Email, tenant.Id);
+            return Results.Problem("Invite created but email delivery failed. Check logs.");
+        }
+
+        return Results.Ok(new { message = "Invitation sent." });
     }
 
     private static async Task<IResult> List(
@@ -92,3 +133,4 @@ public static class AdminAgentsEndpoints
 
 public record ResetAgentPasswordRequest(string NewPassword);
 public record UpdateAgentRequest(string? Role, bool? IsActive);
+public record InviteAdminAgentRequest(string Email);

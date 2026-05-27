@@ -22,3 +22,7 @@ export function resetAgentPassword(id: string, newPassword: string): Promise<Age
 export function updateAgent(id: string, data: { role?: string; isActive?: boolean }): Promise<AgentRecord> {
   return api.patch<AgentRecord>(`/api/v1/admin/agents/${id}`, data)
 }
+
+export function inviteAdmin(email: string): Promise<{ message: string }> {
+  return api.post<{ message: string }>('/api/v1/admin/agents/invite', { email })
+}

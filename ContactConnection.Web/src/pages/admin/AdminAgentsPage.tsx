@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import AdminShell from '../../components/admin/AdminShell'
-import { listAdminAgents, resetAgentPassword, updateAgent, type AgentRecord } from '../../api/adminAgents'
+import { listAdminAgents, resetAgentPassword, updateAgent, inviteAdmin, type AgentRecord } from '../../api/adminAgents'
 
 const ROLE_STYLES: Record<string, string> = {
   admin:      'bg-indigo-900/50 text-indigo-300',
@@ -21,6 +21,12 @@ export default function AdminAgentsPage() {
 
   // Per-row update (role/status) state
   const [updatingId, setUpdatingId] = useState<string | null>(null)
+
+  // Invite admin state
+  const [showInvite, setShowInvite] = useState(false)
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [inviteStatus, setInviteStatus] = useState<{ ok: boolean; msg: string } | null>(null)
+  const [inviteSending, setInviteSending] = useState(false)
 
   useEffect(() => {
     listAdminAgents()
@@ -57,6 +63,22 @@ export default function AdminAgentsPage() {
     }
   }
 
+  async function handleInvite() {
+    if (!inviteEmail.trim()) return
+    setInviteSending(true)
+    setInviteStatus(null)
+    try {
+      await inviteAdmin(inviteEmail.trim())
+      setInviteStatus({ ok: true, msg: `Invitation sent to ${inviteEmail.trim()}.` })
+      setInviteEmail('')
+      setShowInvite(false)
+    } catch (e) {
+      setInviteStatus({ ok: false, msg: e instanceof Error ? e.message : 'Failed to send invitation.' })
+    } finally {
+      setInviteSending(false)
+    }
+  }
+
   async function handleToggleActive(agent: AgentRecord) {
     setUpdatingId(agent.id)
     try {
@@ -72,10 +94,59 @@ export default function AdminAgentsPage() {
   return (
     <AdminShell>
       <div className="p-6 max-w-5xl">
-        <div className="mb-6">
-          <h1 className="text-white text-xl font-semibold">Agents</h1>
-          <p className="text-gray-500 text-sm mt-0.5">All users in your workspace.</p>
+        <div className="flex items-start justify-between mb-6">
+          <div>
+            <h1 className="text-white text-xl font-semibold">Agents</h1>
+            <p className="text-gray-500 text-sm mt-0.5">All users in your workspace.</p>
+          </div>
+          <button
+            onClick={() => { setShowInvite((v) => !v); setInviteStatus(null); setInviteEmail('') }}
+            className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          >
+            Invite admin
+          </button>
         </div>
+
+        {/* Invite admin form */}
+        {showInvite && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-6">
+            <p className="text-gray-300 text-sm font-medium mb-3">Invite an administrator</p>
+            <div className="flex items-center gap-3">
+              <input
+                type="email"
+                autoFocus
+                value={inviteEmail}
+                onChange={(e) => { setInviteEmail(e.target.value); setInviteStatus(null) }}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleInvite() }}
+                placeholder="admin@example.com"
+                className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 w-72"
+              />
+              <button
+                onClick={handleInvite}
+                disabled={inviteSending || !inviteEmail.trim()}
+                className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+              >
+                {inviteSending ? 'Sending…' : 'Send invite'}
+              </button>
+              <button
+                onClick={() => { setShowInvite(false); setInviteStatus(null) }}
+                className="text-gray-500 hover:text-white text-sm transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+            {inviteStatus && (
+              <p className={`mt-2 text-xs ${inviteStatus.ok ? 'text-emerald-400' : 'text-red-400'}`}>
+                {inviteStatus.msg}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Success flash when invite panel is closed */}
+        {!showInvite && inviteStatus?.ok && (
+          <p className="text-emerald-400 text-sm mb-4">{inviteStatus.msg}</p>
+        )}
 
         {loading && <p className="text-gray-400 text-sm">Loading…</p>}
         {error && <p className="text-red-400 text-sm">{error}</p>}

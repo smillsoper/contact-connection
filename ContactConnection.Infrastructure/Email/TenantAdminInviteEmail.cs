@@ -5,7 +5,7 @@ public static class TenantAdminInviteEmail
     public static string Subject(string tenantName) =>
         $"You've been invited to {tenantName} — set up your account";
 
-    public static string HtmlBody(string tenantName, string? tenantDisplayName, string acceptUrl) => $"""
+    public static string HtmlBody(string tenantName, string? tenantDisplayName, string subdomain, string acceptUrl) => $"""
         <!DOCTYPE html>
         <html lang="en">
         <head>
@@ -52,6 +52,23 @@ public static class TenantAdminInviteEmail
                                 letter-spacing:0.01em;">
                         Set Up Your Account
                       </a>
+
+                      <!-- Subdomain callout -->
+                      <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin-top:32px;">
+                        <tr>
+                          <td style="background-color:#1f2937;border-radius:8px;padding:20px 24px;border-left:3px solid #4f46e5;">
+                            <p style="margin:0 0 4px;color:#6b7280;font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;">
+                              Your sign-in subdomain
+                            </p>
+                            <p style="margin:0 0 8px;color:#f9fafb;font-size:18px;font-weight:700;letter-spacing:0.02em;">
+                              {subdomain}
+                            </p>
+                            <p style="margin:0;color:#6b7280;font-size:12px;line-height:1.5;">
+                              Save this — you'll enter it in the <strong style="color:#9ca3af;">Tenant subdomain</strong> field each time you sign in.
+                            </p>
+                          </td>
+                        </tr>
+                      </table>
                     </td>
                   </tr>
 

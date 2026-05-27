@@ -1850,3 +1850,44 @@ Frontend:
 ### Next Session
 - End-to-end test of MFA flows (setup + verify)
 - Continue build order: FreeSWITCH + Telephony OR additional portal features
+
+---
+
+## Session 34 — Invite Email Subdomain + Tenant Admin Invite
+
+**Date:** 2026-05-27
+**Start:** 4:16 PM CDT
+**End:** 4:41 PM CDT
+**Duration:** 25 minutes
+**Cumulative Total:** ~1876 min
+
+### What Was Done
+
+**MFA confirmed working end-to-end**
+
+Full onboarding and login/MFA flow tested with both the initial tenant admin and an additional admin. First login after invite correctly prompts for MFA setup when `MfaRequirement = "on"`.
+
+**Tenant subdomain included in all invite emails**
+
+Neither invite email template included the tenant subdomain, leaving new users with no way to know what to enter in the login form's Tenant subdomain field.
+
+- `TenantInviteEmail.HtmlBody` — added `subdomain` parameter; renders a dark indigo-bordered callout card below the CTA button: "Your sign-in subdomain / {subdomain} / Save this — you'll enter it in the Tenant subdomain field each time you sign in."
+- `TenantAdminInviteEmail.HtmlBody` — same callout card added
+- All four call sites updated to pass `tenant.Subdomain`:
+  - `PortalTenantsEndpoints` — provision + resend invite (×2)
+  - `PortalTenantsEndpoints` — invite additional admin
+  - `OnboardingEndpoints` — additional admin invite during onboarding
+
+**Invite admin in tenant admin portal agents page**
+
+Tenant admins could view all agents/admins in their workspace but had no way to invite new admins from within the portal — only the platform admin could do it from the tenant management view.
+
+- `AdminAgentsEndpoints.cs` — `POST /api/v1/admin/agents/invite` (`TenantAdmin` policy); creates `TenantAdminInvite`, saves, sends standard admin invite email (with subdomain)
+- `adminAgents.ts` — `inviteAdmin(email)` API function added
+- `AdminAgentsPage.tsx` — "Invite admin" button in page header; toggles an inline form (email input + Send invite + Cancel); success message shown on send; status flash persists after form closes
+
+**Build:** 0 warnings, 0 errors (Vite) ✓ — dotnet build skipped (watch process holds PDB lock; changes are syntactically clean)
+
+### Next Session
+- Agent user creation (not yet built — tenant admins can only view/manage existing agents)
+- Continue build order: FreeSWITCH + Telephony

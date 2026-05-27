@@ -75,7 +75,7 @@ public static class PortalTenantsEndpoints
                     await email.SendAsync(
                         tenant.InviteEmail,
                         TenantInviteEmail.Subject(tenant.Name),
-                        TenantInviteEmail.HtmlBody(tenant.Name, onboardingUrl),
+                        TenantInviteEmail.HtmlBody(tenant.Name, tenant.Subdomain, onboardingUrl),
                         ct);
                 }
                 catch (Exception ex)
@@ -185,7 +185,7 @@ public static class PortalTenantsEndpoints
             await email.SendAsync(
                 tenant.InviteEmail,
                 TenantInviteEmail.Subject(tenant.Name),
-                TenantInviteEmail.HtmlBody(tenant.Name, onboardingUrl),
+                TenantInviteEmail.HtmlBody(tenant.Name, tenant.Subdomain, onboardingUrl),
                 ct);
         }
         catch (Exception ex)
@@ -249,7 +249,7 @@ public static class PortalTenantsEndpoints
             await email.SendAsync(
                 invite.Email,
                 TenantAdminInviteEmail.Subject(tenant.Name),
-                TenantAdminInviteEmail.HtmlBody(tenant.Name, tenant.DisplayName, acceptUrl),
+                TenantAdminInviteEmail.HtmlBody(tenant.Name, tenant.DisplayName, tenant.Subdomain, acceptUrl),
                 ct);
         }
         catch (Exception ex)
