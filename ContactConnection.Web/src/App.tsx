@@ -16,6 +16,8 @@ import OnboardingPage from './pages/OnboardingPage'
 import TenantAdminInviteAcceptPage from './pages/TenantAdminInviteAcceptPage'
 import TenantAdminPage from './pages/admin/TenantAdminPage'
 import AdminAgentsPage from './pages/admin/AdminAgentsPage'
+import AdminApiDefinitionsPage from './pages/admin/AdminApiDefinitionsPage'
+import PortalApiDefinitionsPage from './pages/portal/PortalApiDefinitionsPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -103,6 +105,14 @@ export default function App() {
             </RequirePortalAuth>
           }
         />
+        <Route
+          path="/portal/api-definitions"
+          element={
+            <RequirePortalAuth>
+              <PortalApiDefinitionsPage />
+            </RequirePortalAuth>
+          }
+        />
         <Route path="/portal" element={<Navigate to="/portal/tenants" replace />} />
 
         {/* ── Tenant onboarding and agent invite acceptance (public) ── */}
@@ -123,6 +133,14 @@ export default function App() {
           element={
             <RequireAdminAuth>
               <AdminAgentsPage />
+            </RequireAdminAuth>
+          }
+        />
+        <Route
+          path="/admin/api-definitions"
+          element={
+            <RequireAdminAuth>
+              <AdminApiDefinitionsPage />
             </RequireAdminAuth>
           }
         />

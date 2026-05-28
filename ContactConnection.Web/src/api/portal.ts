@@ -169,3 +169,83 @@ export async function resetTenantAgentPassword(tenantId: string, agentId: string
     body: JSON.stringify({ newPassword }),
   })
 }
+
+// ─── Portal API Definitions ─────────────────────────────────────────────────
+
+export interface ApiDefinitionRecord {
+  id: string
+  apiType: string
+  provider: string | null
+  name: string
+  description: string | null
+  httpMethod: string
+  baseUrl: string
+  timeoutSeconds: number
+  headers: string
+  queryParams: string
+  requestBodyTemplate: string | null
+  responseMapping: string
+  authConfig: string
+  isActive: boolean
+  createdAt: string
+  updatedAt: string | null
+}
+
+export interface CreateApiDefinitionData {
+  apiType: string
+  name: string
+  httpMethod: string
+  baseUrl: string
+  description?: string
+  provider?: string
+  timeoutSeconds?: number
+  authConfig?: string
+}
+
+export interface UpdateApiDefinitionData {
+  name: string
+  httpMethod: string
+  baseUrl: string
+  description?: string
+  provider?: string
+  timeoutSeconds?: number
+  headers?: string
+  queryParams?: string
+  requestBodyTemplate?: string
+  responseMapping?: string
+  authConfig?: string
+}
+
+export async function listPortalApiDefinitions(): Promise<ApiDefinitionRecord[]> {
+  return portalFetch<ApiDefinitionRecord[]>('/api/v1/portal/api-definitions')
+}
+
+export async function getPortalApiDefinition(id: string): Promise<ApiDefinitionRecord> {
+  return portalFetch<ApiDefinitionRecord>(`/api/v1/portal/api-definitions/${id}`)
+}
+
+export async function createPortalApiDefinition(data: CreateApiDefinitionData): Promise<ApiDefinitionRecord> {
+  return portalFetch<ApiDefinitionRecord>('/api/v1/portal/api-definitions', {
+    method: 'POST',
+    body: JSON.stringify({ ...data, authConfig: data.authConfig ?? JSON.stringify({ type: 'none' }) }),
+  })
+}
+
+export async function updatePortalApiDefinition(id: string, data: UpdateApiDefinitionData): Promise<ApiDefinitionRecord> {
+  return portalFetch<ApiDefinitionRecord>(`/api/v1/portal/api-definitions/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function activatePortalApiDefinition(id: string): Promise<ApiDefinitionRecord> {
+  return portalFetch<ApiDefinitionRecord>(`/api/v1/portal/api-definitions/${id}/activate`, { method: 'POST' })
+}
+
+export async function deactivatePortalApiDefinition(id: string): Promise<ApiDefinitionRecord> {
+  return portalFetch<ApiDefinitionRecord>(`/api/v1/portal/api-definitions/${id}/deactivate`, { method: 'POST' })
+}
+
+export async function deletePortalApiDefinition(id: string): Promise<void> {
+  return portalFetch<void>(`/api/v1/portal/api-definitions/${id}`, { method: 'DELETE' })
+}

@@ -43,6 +43,64 @@
 | 31 | 2026-05-21 | 5:15 PM CDT | 5:48 PM CDT | 33 min | ~1506 min |
 | 32 | 2026-05-23 | 6:30 AM CDT | 7:17 AM CDT | 47 min | ~1553 min |
 | 33 | 2026-05-25 | 7:11 AM CDT | 11:29 AM CDT | 258 min | ~1811 min |
+| 34 | 2026-05-27 | 4:43 PM CDT | 5:12 PM CDT | 29 min | ~1840 min |
+| 35 | 2026-05-27 | 5:26 PM CDT | 5:47 PM CDT | 21 min | ~1861 min |
+
+---
+
+## Session 35
+
+**Date:** 2026-05-27
+**Start:** 5:26 PM CDT
+**End:** 5:47 PM CDT
+**Duration:** 21 minutes
+
+### Accomplished
+
+**API Builder — Base URL rename + full Auth Config sub-form**
+
+- Renamed `EndpointUrl` → `BaseUrl` on both `PortalApiDefinition` and `TenantApiDefinition` domain entities; updated EF configs (`endpoint_url` → `base_url` column name); updated all API endpoint request records (`CreateApiDefinitionRequest`, `UpdateApiDefinitionRequest`) and `ToResponse()` shapes; updated all TypeScript API types in `portal.ts` and `adminApiDefinitions.ts`
+- Migration `RenameEndpointUrlToBaseUrl` applied to both contexts via PostgreSQL `RENAME COLUMN` — no data loss
+- Added `Auth` column to both list table views showing the active auth method as a colored badge
+- Built `src/components/apiDefinitions/AuthConfigForm.tsx` — shared reusable auth configuration component:
+  - **None** — no auth
+  - **API Key** — header or query param, param name, credential key reference
+  - **Basic Auth** — username + password credential key references
+  - **Bearer Token** — static token credential key reference
+  - **OAuth2** — token URL, method, grant type, scopes, client ID/secret credential key refs; credential placement toggle (Header Basic Auth / Body JSON or Form); token request body template with `{{credential_key}}` variable substitution (consistent with flow engine convention); content-type selector (JSON / form-encoded); auto-generates template from credential keys; re-generates on key changes until user manually edits; "Reset to default" button; token response field mapping (token field + expires-in field)
+  - **HMAC Signature** — algorithm, secret key ref, signature header name, timestamp toggle
+  - All credentials stored as key references (not plain values) — points to future Credentials store
+- Updated `PortalApiDefinitionsPage.tsx` and `AdminApiDefinitionsPage.tsx` to use `AuthConfigForm`; modal enlarged to `max-w-2xl` with scrollable body to accommodate OAuth2 sub-form
+- Build: **0 errors** ✓
+
+---
+
+## Session 34
+
+**Date:** 2026-05-27
+**Start:** 4:43 PM CDT
+**End:** 5:12 PM CDT
+**Duration:** 29 minutes
+
+### Accomplished
+
+**API Builder — scaffolding + `Provider` / `TimeoutSeconds` enhancement**
+
+- Reviewed architectural screenshots from prior claude.ai conversation — confirmed two-tier API hierarchy (portal fallback → tenant override) and identified two missing fields: `Provider` (string, nullable) and `TimeoutSeconds` (int, default 30)
+- Added `Provider` and `TimeoutSeconds` to both `PortalApiDefinition` and `TenantApiDefinition` domain entities; updated `Create()` and `Update()` signatures on both
+- Updated `PortalApiDefinitionConfiguration` and `TenantApiDefinitionConfiguration` EF configs — `provider varchar(100)` nullable, `timeout_seconds integer NOT NULL DEFAULT 30`
+- Updated `CreateApiDefinitionRequest` and `UpdateApiDefinitionRequest` shared records to include `Provider?` and `TimeoutSeconds?`
+- Updated `Create`/`Update` calls and `ToResponse()` in both `AdminApiDefinitionsEndpoints` and `PortalApiDefinitionsEndpoints`
+- Generated and applied migrations:
+  - `AddApiDefinitionProviderTimeout` → `ContactConnectionDbContext` (adds `provider`, `timeout_seconds` to `public.portal_api_definitions`) ✓
+  - `AddApiDefinitionProviderTimeout` → `TenantDbContext` (adds same columns to `tenant_api_definitions`) ✓
+- Built portal API definitions TypeScript API (`portal.ts` extended with `ApiDefinitionRecord`, `CreateApiDefinitionData`, `UpdateApiDefinitionData`, all 6 CRUD + activate/deactivate/delete functions)
+- Created `src/api/adminApiDefinitions.ts` — identical structure using `api` client with tenant auth
+- Built `PortalApiDefinitionsPage.tsx` — full CRUD UI with create/edit modal, activate/deactivate toggle, delete; type badge colors per API type
+- Built `AdminApiDefinitionsPage.tsx` — same UX but under tenant admin shell; empty state explains platform defaults are used when no override exists
+- Added "API Definitions" nav item to `PortalShell.tsx` and `AdminShell.tsx`
+- Wired `/portal/api-definitions` and `/admin/api-definitions` routes in `App.tsx`
+- Build: **0 errors** ✓ (both backend + frontend)
 
 ---
 

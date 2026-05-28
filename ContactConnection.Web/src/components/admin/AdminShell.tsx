@@ -19,6 +19,7 @@ interface Props {
 const NAV_ITEMS = [
   { label: 'Dashboard', path: '/admin' },
   { label: 'Agents', path: '/admin/agents' },
+  { label: 'API Definitions', path: '/admin/api-definitions' },
   { label: 'Flows', path: '/admin/flows' },
   { label: 'Settings', path: '/admin/settings' },
 ]

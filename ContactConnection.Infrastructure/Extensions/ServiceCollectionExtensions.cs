@@ -54,6 +54,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICustomFieldDefinitionRepository, CustomFieldDefinitionRepository>();
         services.AddScoped<ICustomFieldValueRepository, CustomFieldValueRepository>();
         services.AddScoped<IDataTypeRepository, DataTypeRepository>();
+        services.AddScoped<IPortalApiDefinitionRepository, PortalApiDefinitionRepository>();
+        services.AddScoped<ITenantApiDefinitionRepository, TenantApiDefinitionRepository>();
 
         services.AddScoped<ITenantInviteRepository, TenantInviteRepository>();
         services.AddScoped<ITenantAdminInviteRepository, TenantAdminInviteRepository>();

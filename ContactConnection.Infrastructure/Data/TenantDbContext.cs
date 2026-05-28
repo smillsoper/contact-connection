@@ -30,6 +30,7 @@ public class TenantDbContext : DbContext
     public DbSet<ProductAttributeValue> ProductAttributeValues => Set<ProductAttributeValue>();
     public DbSet<CustomFieldDefinition> CustomFieldDefinitions => Set<CustomFieldDefinition>();
     public DbSet<CustomFieldValue> CustomFieldValues => Set<CustomFieldValue>();
+    public DbSet<TenantApiDefinition> TenantApiDefinitions => Set<TenantApiDefinition>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -49,6 +50,7 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new ProductAttributeValueConfiguration());
         modelBuilder.ApplyConfiguration(new CustomFieldDefinitionConfiguration());
         modelBuilder.ApplyConfiguration(new CustomFieldValueConfiguration());
+        modelBuilder.ApplyConfiguration(new TenantApiDefinitionConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 
