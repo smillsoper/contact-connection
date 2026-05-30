@@ -1,4 +1,5 @@
 using ContactConnection.Application.Interfaces.Repositories;
+using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
 using ContactConnection.Domain.Entities;
 
@@ -13,6 +14,7 @@ public static class AdminApiEndpointsEndpoints
 
         group.MapGet("", GetAll);
         group.MapPost("", Create);
+        group.MapPost("test", TestEndpoint);
         group.MapGet("{endpointId:guid}", GetById);
         group.MapPut("{endpointId:guid}", Update);
         group.MapDelete("{endpointId:guid}", Delete);
@@ -99,6 +101,28 @@ public static class AdminApiEndpointsEndpoints
 
         await repo.SaveChangesAsync(ct);
         return Results.Ok(ToResponse(endpoint));
+    }
+
+    private static async Task<IResult> TestEndpoint(
+        Guid definitionId,
+        RunEndpointTestRequest request,
+        ITenantApiDefinitionRepository defRepo,
+        ITenantCredentialStore credStore,
+        IHttpClientFactory httpFactory,
+        TenantContext tenantContext,
+        CancellationToken ct)
+    {
+        if (!tenantContext.HasTenant) return Results.Unauthorized();
+        var def = await defRepo.GetByIdAsync(definitionId, ct);
+        if (def is null) return Results.NotFound();
+
+        return await ApiEndpointTestHelper.RunTest(
+            def.BaseUrl,
+            def.AuthConfig,
+            request,
+            (key, token) => credStore.GetAsync(key, token),
+            httpFactory,
+            ct);
     }
 
     private static async Task<IResult> Delete(

@@ -90,6 +90,25 @@ export interface ApiEndpointRecord {
   updatedAt: string | null
 }
 
+export interface EndpointTestPayload {
+  path: string
+  httpMethod?: string
+  queryParams?: string
+  headers?: string
+  requestBodyTemplate?: string
+  namespace: string
+  testData: Record<string, string>
+}
+
+export interface EndpointTestResult {
+  success: boolean
+  statusCode: number | null
+  body: string | null
+  responseHeaders: Record<string, string> | null
+  resolvedUrl: string | null
+  error: string | null
+}
+
 export interface DetailApi {
   getDefinition(id: string): Promise<ApiDefinitionRecord>
   updateDefinition(id: string, data: {
@@ -110,6 +129,7 @@ export interface DetailApi {
   listCredentials(): Promise<string[]>
   setCredential(keyName: string, value: string): Promise<void>
   testAuth(authConfig: string): Promise<AuthTestResult>
+  testEndpoint(definitionId: string, payload: EndpointTestPayload): Promise<EndpointTestResult>
   listPagePath: string
 }
 
@@ -134,7 +154,7 @@ interface DefFormState {
   auth: AuthFormState
 }
 
-interface KVRow { key: string; value: string }
+interface KVRow { key: string; value: string; skipIfEmpty?: boolean }
 
 interface EndpointForm {
   name: string
@@ -144,6 +164,7 @@ interface EndpointForm {
   params: KVRow[]
   headers: KVRow[]
   requestBodyTemplate: string
+  testData: Record<string, string>
 }
 
 const BLANK_KV: KVRow[] = [{ key: '', value: '' }]
@@ -156,18 +177,28 @@ const BLANK_ENDPOINT_FORM: EndpointForm = {
   params: BLANK_KV,
   headers: BLANK_KV,
   requestBodyTemplate: '',
+  testData: {},
 }
 
 function kvToJson(rows: KVRow[]): string {
-  const obj: Record<string, string> = {}
-  rows.filter((r) => r.key.trim()).forEach((r) => { obj[r.key.trim()] = r.value })
+  const filled = rows.filter((r) => r.key.trim())
+  const obj: Record<string, unknown> = {}
+  const skipIfEmpty: string[] = []
+  filled.forEach((r) => {
+    obj[r.key.trim()] = r.value
+    if (r.skipIfEmpty) skipIfEmpty.push(r.key.trim())
+  })
+  if (skipIfEmpty.length > 0) obj._skipIfEmpty = skipIfEmpty
   return JSON.stringify(obj)
 }
 
 function jsonToKv(json: string): KVRow[] {
   try {
-    const obj = JSON.parse(json) as Record<string, string>
-    const rows = Object.entries(obj).map(([key, value]) => ({ key, value }))
+    const obj = JSON.parse(json) as Record<string, unknown>
+    const skipSet = new Set<string>(Array.isArray(obj._skipIfEmpty) ? (obj._skipIfEmpty as string[]) : [])
+    const rows = Object.entries(obj)
+      .filter(([key]) => !key.startsWith('_'))
+      .map(([key, value]) => ({ key, value: String(value), skipIfEmpty: skipSet.has(key) }))
     return rows.length > 0 ? [...rows, { key: '', value: '' }] : [{ key: '', value: '' }]
   } catch {
     return [{ key: '', value: '' }]
@@ -183,20 +214,73 @@ const HEADER_SUGGESTIONS = [
   'X-Request-ID',
 ]
 
+// ── Source context: variable reference data keyed by API type ──────────────
+
+interface SourceField { key: string; label: string; example?: string }
+interface SourceGroup { label: string; fields: SourceField[] }
+interface SourceContext {
+  label: string
+  description: string
+  namespace: string
+  groups: SourceGroup[]
+}
+
+const ADDRESS_GROUPS: SourceGroup[] = [
+  {
+    label: 'Name',
+    fields: [
+      { key: 'firstName',     label: 'First Name',     example: 'John' },
+      { key: 'lastName',      label: 'Last Name',      example: 'Smith' },
+      { key: 'middleInitial', label: 'Middle Initial', example: 'A' },
+      { key: 'company',       label: 'Company',        example: 'Acme Corp' },
+    ],
+  },
+  {
+    label: 'Address',
+    fields: [
+      { key: 'address1', label: 'Address Line 1', example: '123 Main St' },
+      { key: 'address2', label: 'Address Line 2', example: 'Apt 4B' },
+      { key: 'city',     label: 'City',           example: 'Springfield' },
+      { key: 'state',    label: 'State',          example: 'IL' },
+      { key: 'zip',      label: 'ZIP',            example: '62701' },
+      { key: 'zip4',     label: 'ZIP+4',          example: '1234' },
+    ],
+  },
+]
+
+const API_TYPE_SOURCE_CONTEXT: Record<string, SourceContext> = {
+  address_validation: {
+    label: 'Address Node',
+    description: 'Fields captured by the Address entry form',
+    namespace: 'address',
+    groups: ADDRESS_GROUPS,
+  },
+  zip_code_lookup: {
+    label: 'Address Node',
+    description: 'Fields captured by the Address entry form',
+    namespace: 'address',
+    groups: ADDRESS_GROUPS,
+  },
+}
+
 interface KVEditorProps {
   rows: KVRow[]
   onChange: (rows: KVRow[]) => void
   keyPlaceholder?: string
   valuePlaceholder?: string
   datalistId?: string
+  showSkipToggle?: boolean
 }
 
-function KVEditor({ rows, onChange, keyPlaceholder = 'Key', valuePlaceholder = 'Value', datalistId }: KVEditorProps) {
+function KVEditor({ rows, onChange, keyPlaceholder = 'Key', valuePlaceholder = 'Value', datalistId, showSkipToggle }: KVEditorProps) {
   function updateRow(i: number, field: 'key' | 'value', val: string) {
     const next = rows.map((r, idx) => idx === i ? { ...r, [field]: val } : r)
-    // Auto-append a blank row when the last row gets any input
     if (i === rows.length - 1 && val.trim()) next.push({ key: '', value: '' })
     onChange(next)
+  }
+
+  function toggleSkip(i: number) {
+    onChange(rows.map((r, idx) => idx === i ? { ...r, skipIfEmpty: !r.skipIfEmpty } : r))
   }
 
   function removeRow(i: number) {
@@ -224,6 +308,20 @@ function KVEditor({ rows, onChange, keyPlaceholder = 'Key', valuePlaceholder = '
             placeholder={valuePlaceholder}
             className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-white text-xs font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
           />
+          {showSkipToggle && row.key.trim() && (
+            <button
+              onClick={() => toggleSkip(i)}
+              title={row.skipIfEmpty ? 'Excluded from request if empty (click to always include)' : 'Always included (click to exclude if empty)'}
+              className={`shrink-0 text-xs px-1.5 py-0.5 rounded border transition-colors ${
+                row.skipIfEmpty
+                  ? 'border-amber-600 text-amber-400 bg-amber-900/20'
+                  : 'border-gray-700 text-gray-600 hover:border-gray-500 hover:text-gray-400'
+              }`}
+            >
+              ∅
+            </button>
+          )}
+          {showSkipToggle && !row.key.trim() && <span className="shrink-0 w-[28px]" />}
           <button
             onClick={() => removeRow(i)}
             className="text-gray-600 hover:text-red-400 transition-colors px-1 text-sm shrink-0"
@@ -234,6 +332,27 @@ function KVEditor({ rows, onChange, keyPlaceholder = 'Key', valuePlaceholder = '
         </div>
       ))}
     </div>
+  )
+}
+
+// ── VarChip ────────────────────────────────────────────────────────────────
+
+interface VarChipProps { tag: string; label: string; example?: string; copied: boolean; onCopy: (tag: string) => void }
+
+function VarChip({ tag, label, example, copied, onCopy }: VarChipProps) {
+  return (
+    <button
+      type="button"
+      onClick={() => onCopy(tag)}
+      title={`${label}${example ? ` — e.g. "${example}"` : ''} — click to copy`}
+      className="group flex items-start gap-1.5 w-full px-2 py-1.5 rounded-lg hover:bg-orange-900/20 transition-colors text-left"
+    >
+      <span className="font-mono text-xs text-orange-300 flex-1 min-w-0 break-all leading-relaxed">{tag}</span>
+      {copied
+        ? <span className="text-emerald-400 text-xs shrink-0 mt-0.5">✓</span>
+        : <span className="text-gray-600 group-hover:text-gray-400 text-xs shrink-0 mt-0.5">⎘</span>
+      }
+    </button>
   )
 }
 
@@ -265,10 +384,45 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
   const [endpointModal, setEndpointModal] = useState<'create' | 'edit' | null>(null)
   const [editingEndpointId, setEditingEndpointId] = useState<string | null>(null)
   const [endpointForm, setEndpointForm] = useState<EndpointForm>(BLANK_ENDPOINT_FORM)
-  const [endpointTab, setEndpointTab] = useState<'params' | 'headers' | 'body'>('params')
+  const [endpointTab, setEndpointTab] = useState<'params' | 'headers' | 'body' | 'test'>('params')
   const [endpointSaving, setEndpointSaving] = useState(false)
   const [endpointFormError, setEndpointFormError] = useState<string | null>(null)
   const [deletingEndpointId, setDeletingEndpointId] = useState<string | null>(null)
+
+  // Variable chip clipboard
+  const [copiedVar, setCopiedVar] = useState<string | null>(null)
+  function handleCopyVar(tag: string) {
+    navigator.clipboard.writeText(tag).then(() => {
+      setCopiedVar(tag)
+      setTimeout(() => setCopiedVar(null), 1500)
+    })
+  }
+
+  // Endpoint test execution
+  const [testRunning, setTestRunning] = useState(false)
+  const [testResult, setTestResult] = useState<EndpointTestResult | null>(null)
+
+  async function runEndpointTest() {
+    if (!endpointSourceContext) return
+    setTestRunning(true)
+    setTestResult(null)
+    try {
+      const result = await api.testEndpoint(definitionId, {
+        path: endpointForm.path,
+        httpMethod: endpointForm.httpMethod || undefined,
+        queryParams: kvToJson(endpointForm.params),
+        headers: kvToJson(endpointForm.headers),
+        requestBodyTemplate: endpointForm.requestBodyTemplate || undefined,
+        namespace: endpointSourceContext.namespace,
+        testData: endpointForm.testData,
+      })
+      setTestResult(result)
+    } catch (e: unknown) {
+      setTestResult({ success: false, statusCode: null, body: null, responseHeaders: null, resolvedUrl: null, error: (e as Error).message })
+    } finally {
+      setTestRunning(false)
+    }
+  }
 
   useEffect(() => {
     loadDefinition()
@@ -373,6 +527,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
       params: jsonToKv(ep.queryParams),
       headers: jsonToKv(ep.headers),
       requestBodyTemplate: ep.requestBodyTemplate ?? '',
+      testData: {},
     })
     setEditingEndpointId(ep.id)
     setEndpointFormError(null)
@@ -438,6 +593,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
   }
 
   const authBadgeInfo = authBadge(def.authConfig)
+  const endpointSourceContext = API_TYPE_SOURCE_CONTEXT[def.apiType]
 
   return (
     <div className="p-6">
@@ -694,12 +850,13 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
           </datalist>
 
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-            <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh]">
+            <div className={`bg-gray-900 border border-gray-700 rounded-2xl w-full shadow-2xl flex flex-col max-h-[90vh] ${endpointSourceContext ? 'max-w-4xl' : 'max-w-2xl'}`}>
               <div className="px-6 pt-6 pb-4 border-b border-gray-800 shrink-0">
                 <h2 className="text-white text-lg font-semibold">
                   {endpointModal === 'edit' ? 'Edit Endpoint' : 'Add Endpoint'}
                 </h2>
               </div>
+              <div className="flex flex-1 min-h-0">
               <div className="overflow-y-auto flex-1 px-6 py-4 space-y-4">
 
                 {/* Name + Method */}
@@ -756,17 +913,25 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                 <div>
                   {/* Tab bar */}
                   <div className="flex border-b border-gray-700 mb-3">
-                    {(['params', 'headers', 'body'] as const).map((tab) => {
-                      const counts = { params: endpointForm.params.filter(r => r.key.trim()).length, headers: endpointForm.headers.filter(r => r.key.trim()).length, body: endpointForm.requestBodyTemplate.trim() ? 1 : 0 }
-                      const labels = { params: 'Query Params', headers: 'Headers', body: 'Body' }
+                    {(endpointSourceContext
+                      ? ['params', 'headers', 'body', 'test'] as const
+                      : ['params', 'headers', 'body'] as const
+                    ).map((tab) => {
+                      const counts: Record<string, number> = {
+                        params: endpointForm.params.filter(r => r.key.trim()).length,
+                        headers: endpointForm.headers.filter(r => r.key.trim()).length,
+                        body: endpointForm.requestBodyTemplate.trim() ? 1 : 0,
+                        test: 0,
+                      }
+                      const labels: Record<string, string> = { params: 'Query Params', headers: 'Headers', body: 'Body', test: 'Test' }
                       const count = counts[tab]
                       return (
                         <button
                           key={tab}
-                          onClick={() => setEndpointTab(tab)}
+                          onClick={() => { setEndpointTab(tab); setTestResult(null) }}
                           className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 -mb-px ${
                             endpointTab === tab
-                              ? 'border-indigo-500 text-white'
+                              ? tab === 'test' ? 'border-emerald-500 text-emerald-400' : 'border-indigo-500 text-white'
                               : 'border-transparent text-gray-500 hover:text-gray-300'
                           }`}
                         >
@@ -787,6 +952,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                       <div className="flex items-center gap-1.5 mb-1.5 px-0.5">
                         <span className="w-2/5 text-gray-500 text-xs font-medium">Key</span>
                         <span className="flex-1 text-gray-500 text-xs font-medium">Value</span>
+                        <span className="w-[28px]" />
                         <span className="w-5" />
                       </div>
                       <KVEditor
@@ -794,9 +960,11 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                         onChange={(rows) => setEndpointForm((f) => ({ ...f, params: rows }))}
                         keyPlaceholder="param"
                         valuePlaceholder="{{input.field}}"
+                        showSkipToggle
                       />
                       <p className="text-gray-600 text-xs mt-2">
                         Parameters appended to the URL as <span className="font-mono">?key=value</span>. Use {'{{namespace.field}}'} for dynamic values.
+                        Toggle <span className="font-mono text-amber-500">∅</span> on optional params to exclude them from the request when their value resolves to empty.
                       </p>
                     </div>
                   )}
@@ -829,7 +997,11 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                         rows={8}
                         value={endpointForm.requestBodyTemplate}
                         onChange={(e) => setEndpointForm((f) => ({ ...f, requestBodyTemplate: e.target.value }))}
-                        placeholder={'{\n  "Address": "{{input.address}}",\n  "City": "{{input.city}}",\n  "State": "{{input.state}}",\n  "ZIPCode": "{{input.zip}}"\n}'}
+                        placeholder={
+                          endpointSourceContext?.namespace === 'address'
+                            ? '{\n  "streetAddress": "{{address.address1}}",\n  "city": "{{address.city}}",\n  "state": "{{address.state}}",\n  "ZIPCode": "{{address.zip}}"\n}'
+                            : '{\n  "field": "{{input.field}}"\n}'
+                        }
                         className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-xs placeholder-gray-600 font-mono focus:outline-none focus:border-indigo-500 resize-y"
                       />
                       <p className="text-gray-600 text-xs mt-1.5">
@@ -837,9 +1009,144 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                       </p>
                     </div>
                   )}
+
+                  {/* Test tab */}
+                  {endpointTab === 'test' && endpointSourceContext?.namespace === 'address' && (
+                    <div className="space-y-3">
+                      {/* Name row */}
+                      <div className="grid grid-cols-[1fr_56px_1fr] gap-2">
+                        <div>
+                          <label className="block text-gray-400 text-xs font-medium mb-1">First Name</label>
+                          <input type="text" value={endpointForm.testData.firstName ?? ''} onChange={(e) => setEndpointForm((f) => ({ ...f, testData: { ...f.testData, firstName: e.target.value } }))} placeholder="John" className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500" />
+                        </div>
+                        <div>
+                          <label className="block text-gray-400 text-xs font-medium mb-1">MI</label>
+                          <input type="text" maxLength={2} value={endpointForm.testData.middleInitial ?? ''} onChange={(e) => setEndpointForm((f) => ({ ...f, testData: { ...f.testData, middleInitial: e.target.value } }))} placeholder="A" className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500" />
+                        </div>
+                        <div>
+                          <label className="block text-gray-400 text-xs font-medium mb-1">Last Name</label>
+                          <input type="text" value={endpointForm.testData.lastName ?? ''} onChange={(e) => setEndpointForm((f) => ({ ...f, testData: { ...f.testData, lastName: e.target.value } }))} placeholder="Smith" className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500" />
+                        </div>
+                      </div>
+
+                      {/* Company */}
+                      <div>
+                        <label className="block text-gray-400 text-xs font-medium mb-1">Company</label>
+                        <input type="text" value={endpointForm.testData.company ?? ''} onChange={(e) => setEndpointForm((f) => ({ ...f, testData: { ...f.testData, company: e.target.value } }))} placeholder="Acme Corp" className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500" />
+                      </div>
+
+                      {/* Address lines */}
+                      <div>
+                        <label className="block text-gray-400 text-xs font-medium mb-1">Address Line 1</label>
+                        <input type="text" value={endpointForm.testData.address1 ?? ''} onChange={(e) => setEndpointForm((f) => ({ ...f, testData: { ...f.testData, address1: e.target.value } }))} placeholder="123 Main St" className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500" />
+                      </div>
+                      <div>
+                        <label className="block text-gray-400 text-xs font-medium mb-1">Address Line 2</label>
+                        <input type="text" value={endpointForm.testData.address2 ?? ''} onChange={(e) => setEndpointForm((f) => ({ ...f, testData: { ...f.testData, address2: e.target.value } }))} placeholder="Apt 4B, Suite 200…" className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500" />
+                      </div>
+
+                      {/* City / State / ZIP / ZIP+4 */}
+                      <div className="grid grid-cols-[1fr_64px_96px_72px] gap-2">
+                        <div>
+                          <label className="block text-gray-400 text-xs font-medium mb-1">City</label>
+                          <input type="text" value={endpointForm.testData.city ?? ''} onChange={(e) => setEndpointForm((f) => ({ ...f, testData: { ...f.testData, city: e.target.value } }))} placeholder="Springfield" className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500" />
+                        </div>
+                        <div>
+                          <label className="block text-gray-400 text-xs font-medium mb-1">State</label>
+                          <input type="text" maxLength={2} value={endpointForm.testData.state ?? ''} onChange={(e) => setEndpointForm((f) => ({ ...f, testData: { ...f.testData, state: e.target.value.toUpperCase() } }))} placeholder="IL" className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500 uppercase" />
+                        </div>
+                        <div>
+                          <label className="block text-gray-400 text-xs font-medium mb-1">ZIP Code</label>
+                          <input type="text" maxLength={5} value={endpointForm.testData.zip ?? ''} onChange={(e) => setEndpointForm((f) => ({ ...f, testData: { ...f.testData, zip: e.target.value.replace(/\D/g, '') } }))} placeholder="62701" className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500" />
+                        </div>
+                        <div>
+                          <label className="block text-gray-400 text-xs font-medium mb-1">ZIP+4</label>
+                          <input type="text" maxLength={4} value={endpointForm.testData.zip4 ?? ''} onChange={(e) => setEndpointForm((f) => ({ ...f, testData: { ...f.testData, zip4: e.target.value.replace(/\D/g, '') } }))} placeholder="1234" className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500" />
+                        </div>
+                      </div>
+
+                      {/* Run Test */}
+                      <div className="pt-3 border-t border-gray-800 flex items-center gap-3">
+                        <button
+                          onClick={runEndpointTest}
+                          disabled={testRunning || !endpointForm.path.trim()}
+                          className="bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                        >
+                          {testRunning ? 'Running…' : 'Run Test'}
+                        </button>
+                        {!endpointForm.path.trim() && (
+                          <span className="text-gray-500 text-xs">Enter a path on the main form first.</span>
+                        )}
+                      </div>
+
+                      {/* Test result */}
+                      {testResult && (
+                        <div className="space-y-2">
+                          {testResult.resolvedUrl && (
+                            <p className="font-mono text-xs text-gray-500 truncate" title={testResult.resolvedUrl}>
+                              → {testResult.resolvedUrl}
+                            </p>
+                          )}
+                          <div className="flex items-center gap-2">
+                            {testResult.statusCode != null ? (
+                              <span className={`text-sm font-mono font-bold ${testResult.statusCode < 300 ? 'text-emerald-400' : testResult.statusCode < 500 ? 'text-amber-400' : 'text-red-400'}`}>
+                                {testResult.statusCode}
+                              </span>
+                            ) : null}
+                            <span className={`text-xs font-medium ${testResult.success ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {testResult.success ? 'Success' : 'Failed'}
+                            </span>
+                          </div>
+                          {testResult.error && (
+                            <p className="text-red-400 text-xs bg-red-900/20 rounded-lg px-3 py-2">{testResult.error}</p>
+                          )}
+                          {testResult.body && (
+                            <pre className="bg-gray-950 border border-gray-800 rounded-lg p-3 text-xs text-gray-300 font-mono overflow-x-auto max-h-52 whitespace-pre-wrap break-all">
+                              {testResult.body}
+                            </pre>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
               </div>
+
+              {/* ── Variables reference panel ── */}
+              {endpointSourceContext && (
+                <div className="w-56 shrink-0 border-l border-gray-800 px-4 py-4 overflow-y-auto">
+                  <p className="text-white text-xs font-semibold mb-0.5">Variables</p>
+                  <p className="text-gray-500 text-xs mb-3">{endpointSourceContext.description}</p>
+                  {endpointSourceContext.groups.map((group) => (
+                    <div key={group.label} className="mb-4">
+                      <p className="text-gray-500 text-[10px] font-semibold uppercase tracking-wider mb-1.5">
+                        {group.label}
+                      </p>
+                      <div className="space-y-0.5">
+                        {group.fields.map((field) => {
+                          const tag = `{{${endpointSourceContext.namespace}.${field.key}}}`
+                          return (
+                            <VarChip
+                              key={field.key}
+                              tag={tag}
+                              label={field.label}
+                              example={field.example}
+                              copied={copiedVar === tag}
+                              onCopy={handleCopyVar}
+                            />
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                  <p className="text-gray-600 text-xs mt-1 leading-relaxed">
+                    Click any variable to copy it to the clipboard.
+                  </p>
+                </div>
+              )}
+
+              </div>{/* end flex row */}
               <div className="px-6 py-4 border-t border-gray-800 shrink-0">
                 {endpointFormError && <p className="text-red-400 text-sm mb-3">{endpointFormError}</p>}
                 <div className="flex justify-end gap-3">

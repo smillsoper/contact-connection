@@ -13,6 +13,7 @@ import {
   listPortalCredentials,
   setPortalCredential,
   testPortalAuth,
+  testPortalEndpoint,
 } from '../../api/portal'
 
 const portalApi: DetailApi = {
@@ -27,6 +28,7 @@ const portalApi: DetailApi = {
   listCredentials: () => listPortalCredentials().then((list) => list.map((c) => c.keyName)),
   setCredential: setPortalCredential,
   testAuth: testPortalAuth,
+  testEndpoint: testPortalEndpoint,
   listPagePath: '/portal/api-definitions',
 }
 

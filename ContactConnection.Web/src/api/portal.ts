@@ -337,6 +337,32 @@ export async function deletePortalApiEndpoint(definitionId: string, endpointId: 
   return portalFetch<void>(`/api/v1/portal/api-definitions/${definitionId}/endpoints/${endpointId}`, { method: 'DELETE' })
 }
 
+export interface EndpointTestPayload {
+  path: string
+  httpMethod?: string
+  queryParams?: string
+  headers?: string
+  requestBodyTemplate?: string
+  namespace: string
+  testData: Record<string, string>
+}
+
+export interface EndpointTestResult {
+  success: boolean
+  statusCode: number | null
+  body: string | null
+  responseHeaders: Record<string, string> | null
+  resolvedUrl: string | null
+  error: string | null
+}
+
+export async function testPortalEndpoint(definitionId: string, payload: EndpointTestPayload): Promise<EndpointTestResult> {
+  return portalFetch<EndpointTestResult>(`/api/v1/portal/api-definitions/${definitionId}/endpoints/test`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 // ─── Auth Testing ────────────────────────────────────────────────────────────
 
 export interface AuthTestResult {

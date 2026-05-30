@@ -46,6 +46,38 @@
 | 34 | 2026-05-27 | 4:43 PM CDT | 5:12 PM CDT | 29 min | ~1840 min |
 | 35 | 2026-05-27 | 5:26 PM CDT | 5:47 PM CDT | 21 min | ~1861 min |
 | 36 | 2026-05-29 | 4:11 PM CDT | 5:56 PM CDT | 105 min | ~1966 min |
+| 37 | 2026-05-30 | 9:41 AM CDT | 10:43 AM CDT | 62 min | ~2028 min |
+
+---
+
+## Session 37
+
+**Date:** 2026-05-30
+**Start:** 9:41 AM CDT
+**End:** 10:43 AM CDT
+**Duration:** 62 minutes
+
+### Accomplished
+
+**API Endpoint Test Runner — source context, test data tab, OAuth2, variable resolution fixes**
+
+- Added `API_TYPE_SOURCE_CONTEXT` data map in `ApiDefinitionDetailContent.tsx`: maps API types (`address_validation`, `zip_code_lookup`) to a `SourceContext` object with namespace (`address`), label, description, and grouped fields (Name: firstName/lastName/middleInitial/company; Address: address1/address2/city/state/zip/zip4)
+- Added `VarChip` component — click to copy `{{address.field}}` to clipboard; amber on hover; ✓ flash for 1.5s
+- When an API type has a source context, the endpoint edit modal widens to `max-w-4xl` and renders a right-side **Variables** reference panel (w-56) showing all available `{{namespace.field}}` tags grouped by category
+- Added **Test** tab to endpoint modal (alongside Params/Headers/Body); only visible when definition has a source context
+- Test tab renders an address entry form (grid layout: first/last name, middle initial, company, address1, address2, city/state/zip/zip4) with labeled fields matching the Address flow node's entry fields
+- `runEndpointTest()` — collects test data from form fields, calls `api.testEndpoint(definitionId, payload)`, displays resolved URL, status code (color-coded), success/fail badge, error box, and pretty-printed response body
+- Created `ApiEndpointTestHelper.cs` — static helper for `RunTest` and `ApplyAuth`:
+  - `SubstituteVars` — regex replaces `{{namespace.field}}` tags; unmatched variables in the namespace resolve to `""` (not literal tag) to prevent literal template text being sent to external APIs
+  - `RunTest` — builds HTTP request (method, URL, substituted path, query params, headers, body), applies auth, sends via `IHttpClientFactory`, pretty-prints JSON response, returns `RunEndpointTestResponse`
+  - Query params: supports `_skipIfEmpty` metadata array — keys listed there are omitted from the request when their resolved value is empty; all other params always sent regardless of value
+  - `ApplyAuth` — handles api_key (header/query), bearer, basic, and **oauth2** (client credentials flow: header Basic or body placement, exchanges for access token, applies as `Authorization: Bearer {token}`)
+- Added `POST .../endpoints/test` route in `PortalApiEndpointsEndpoints.cs` and `AdminApiEndpointsEndpoints.cs`
+- Added `testAdminEndpoint` / `testPortalEndpoint` API functions in `adminApiDefinitions.ts` and `portal.ts`
+- Wired `testEndpoint` into `DetailApi` interface and both portal/admin page objects
+- `KVRow` extended with `skipIfEmpty?: boolean`; `kvToJson` outputs `_skipIfEmpty` metadata array; `jsonToKv` reads it back
+- `KVEditor` extended with `showSkipToggle?: boolean` — renders amber `∅` toggle button per row in the Params editor; legend text added below editor explaining the toggle behavior
+- Build: **0 errors** ✓ (backend + frontend)
 
 ---
 

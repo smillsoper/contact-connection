@@ -11,6 +11,7 @@ import {
   updateAdminApiEndpoint,
   deleteAdminApiEndpoint,
   testAdminAuth,
+  testAdminEndpoint,
 } from '../../api/adminApiDefinitions'
 import { listAdminCredentials, setAdminCredential } from '../../api/adminCredentials'
 
@@ -26,6 +27,7 @@ const adminApi: DetailApi = {
   listCredentials: () => listAdminCredentials().then((list) => list.map((c) => c.keyName)),
   setCredential: setAdminCredential,
   testAuth: testAdminAuth,
+  testEndpoint: testAdminEndpoint,
   listPagePath: '/admin/api-definitions',
 }
 

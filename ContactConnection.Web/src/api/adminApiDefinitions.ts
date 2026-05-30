@@ -134,6 +134,29 @@ export function deleteAdminApiEndpoint(definitionId: string, endpointId: string)
   return api.delete<void>(`/api/v1/admin/api-definitions/${definitionId}/endpoints/${endpointId}`)
 }
 
+export interface EndpointTestPayload {
+  path: string
+  httpMethod?: string
+  queryParams?: string
+  headers?: string
+  requestBodyTemplate?: string
+  namespace: string
+  testData: Record<string, string>
+}
+
+export interface EndpointTestResult {
+  success: boolean
+  statusCode: number | null
+  body: string | null
+  responseHeaders: Record<string, string> | null
+  resolvedUrl: string | null
+  error: string | null
+}
+
+export function testAdminEndpoint(definitionId: string, payload: EndpointTestPayload): Promise<EndpointTestResult> {
+  return api.post<EndpointTestResult>(`/api/v1/admin/api-definitions/${definitionId}/endpoints/test`, payload)
+}
+
 export interface AuthTestResult {
   type: string
   success: boolean
