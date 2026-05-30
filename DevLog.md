@@ -47,6 +47,37 @@
 | 35 | 2026-05-27 | 5:26 PM CDT | 5:47 PM CDT | 21 min | ~1861 min |
 | 36 | 2026-05-29 | 4:11 PM CDT | 5:56 PM CDT | 105 min | ~1966 min |
 | 37 | 2026-05-30 | 9:41 AM CDT | 10:43 AM CDT | 62 min | ~2028 min |
+| 38 | 2026-05-30 | 11:01 AM CDT | 11:54 AM CDT | 53 min | ~2081 min |
+
+---
+
+## Session 38
+
+**Date:** 2026-05-30
+**Start:** 11:01 AM CDT
+**End:** 11:54 AM CDT
+**Duration:** 53 minutes
+
+### Accomplished
+
+**Response Mapping tab — endpoint editor**
+
+- Added `ResponseMappingConfig`, `ResponseOutcome`, `OutcomeCondition`, `OutcomeFieldMapping`, `CapturedResponse` types to `ApiDefinitionDetailContent.tsx`
+- Added `parseResponseMapping(json)` helper — deserializes the existing `responseMapping` JSONB column; gracefully returns empty config on malformed JSON
+- Added `responseMapping: ResponseMappingConfig` to `EndpointForm` and `BLANK_ENDPOINT_FORM`; added `responseMapping?: string` to `EndpointFormData`
+- Added `JsonNode` recursive component — collapsible JSON tree with color-coded leaf values (amber=string, sky=number, emerald=boolean, gray=null); clicking any leaf copies the dot-notation path to clipboard (⎘/✓ pattern); depth-0 root renders children directly without a toggle header
+- Added `ConditionBuilder` component — path / operator (13 ops: eq, neq, gt, lt, gte, lte, contains, not_contains, exists, not_exists, length_gt, length_eq, length_lt) / value row; value field hidden for exists/not_exists ops; hint text for dot notation and array length usage
+- Added `FieldMappingEditor` component — from (response path, free-text) → to (flow variable, dropdown pre-populated from source context namespace); "+ Add mapping" button; × to remove
+- Added `ResponseMappingPanel` component — 3-column layout: outcomes sidebar (w-44, pill list, first-match-wins note, + Add outcome), outcome editor (flex-1, label + key + condition + field mappings + delete), captured response tree (w-64, Run & capture button, capture timestamp + status code, resolved URL, JSON tree)
+- Added `runAndCaptureForOutcome(outcomeId)` — runs the endpoint test using current test data, parses JSON body, pins `CapturedResponse` to the specified outcome; silently no-ops on failure
+- `handleEndpointSave` now serializes `endpointForm.responseMapping` → `responseMapping` column
+- `openEditEndpoint` now parses `ep.responseMapping` via `parseResponseMapping`
+- Added "Response Mapping" tab (violet color) to endpoint modal tab bar alongside Params/Headers/Body/Test; badge shows outcome count; only visible for API types with source context
+- Modal content area: when tab is "Response Mapping", replaces both the form column and variables panel with `ResponseMappingPanel`; otherwise renders existing tabs unchanged
+- Key field uses `<datalist>` for address namespace suggestions: `exact_match`, `multiple_matches`, `no_match`, `corrected`, `error`; free-form still allowed
+- Fixed flex height chain: added `min-h-0` to all three column containers so `overflow-y-auto` children scroll within modal bounds rather than overflowing
+- **Known issue:** captured response panel still has a vertical overflow edge case — deferred to next session
+- Build: **0 errors** ✓
 
 ---
 
