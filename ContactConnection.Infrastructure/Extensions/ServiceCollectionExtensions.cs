@@ -1,8 +1,11 @@
+using Azure.Identity;
+using Azure.Security.KeyVault.Secrets;
 using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
 using ContactConnection.Infrastructure.Auth;
 using ContactConnection.Infrastructure.Commerce;
+using ContactConnection.Infrastructure.Credentials;
 using ContactConnection.Infrastructure.CustomFields;
 using ContactConnection.Infrastructure.Data;
 using ContactConnection.Infrastructure.Email;
@@ -56,6 +59,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IDataTypeRepository, DataTypeRepository>();
         services.AddScoped<IPortalApiDefinitionRepository, PortalApiDefinitionRepository>();
         services.AddScoped<ITenantApiDefinitionRepository, TenantApiDefinitionRepository>();
+        services.AddScoped<IPortalApiEndpointRepository, PortalApiEndpointRepository>();
+        services.AddScoped<ITenantApiEndpointRepository, TenantApiEndpointRepository>();
 
         services.AddScoped<ITenantInviteRepository, TenantInviteRepository>();
         services.AddScoped<ITenantAdminInviteRepository, TenantAdminInviteRepository>();
@@ -123,6 +128,35 @@ public static class ServiceCollectionExtensions
             ?? "localhost:6379";
         services.AddSingleton<IConnectionMultiplexer>(
             ConnectionMultiplexer.Connect(redisConnection));
+
+        // Azure Key Vault — credential store for API authentication secrets.
+        // Uses ClientSecretCredential with the same app registration as portal auth.
+        // For production on Azure, swap ClientSecretCredential for ManagedIdentityCredential.
+        var vaultUri = configuration["KeyVault:VaultUri"];
+        if (!string.IsNullOrWhiteSpace(vaultUri))
+        {
+            var azureCredential = new ClientSecretCredential(
+                configuration["EntraId:TenantId"]
+                    ?? throw new InvalidOperationException("EntraId:TenantId is not configured."),
+                configuration["EntraId:ClientId"]
+                    ?? throw new InvalidOperationException("EntraId:ClientId is not configured."),
+                configuration["EntraId:ClientSecret"]
+                    ?? throw new InvalidOperationException("EntraId:ClientSecret is not configured."));
+
+            services.AddSingleton<SecretClient>(_ =>
+                new SecretClient(new Uri(vaultUri), azureCredential));
+
+            services.AddSingleton<IPortalCredentialStore, KeyVaultPortalCredentialStore>();
+            services.AddScoped<ITenantCredentialStore, KeyVaultTenantCredentialStore>();
+        }
+        else
+        {
+            // No Key Vault configured — register a no-op so credential endpoints start up.
+            // Write operations will return 500 until KeyVault:VaultUri is set in secrets.
+            var nullStore = new NullCredentialStore();
+            services.AddSingleton<IPortalCredentialStore>(nullStore);
+            services.AddSingleton<ITenantCredentialStore>(nullStore);
+        }
 
         return services;
     }

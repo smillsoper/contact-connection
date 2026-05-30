@@ -13,6 +13,7 @@ public class ContactConnectionDbContext : DbContext
     public DbSet<TenantAdminInvite> TenantAdminInvites => Set<TenantAdminInvite>();
     public DbSet<DataType> DataTypes => Set<DataType>();
     public DbSet<PortalApiDefinition> PortalApiDefinitions => Set<PortalApiDefinition>();
+    public DbSet<PortalApiEndpoint> PortalApiEndpoints => Set<PortalApiEndpoint>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -22,6 +23,7 @@ public class ContactConnectionDbContext : DbContext
         modelBuilder.ApplyConfiguration(new TenantAdminInviteConfiguration());
         modelBuilder.ApplyConfiguration(new DataTypeConfiguration());
         modelBuilder.ApplyConfiguration(new PortalApiDefinitionConfiguration());
+        modelBuilder.ApplyConfiguration(new PortalApiEndpointConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 }

@@ -3,6 +3,7 @@ using System;
 using ContactConnection.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace ContactConnection.Infrastructure.Migrations
 {
     [DbContext(typeof(ContactConnectionDbContext))]
-    partial class ContactConnectionDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260530002652_AddPortalApiEndpoints")]
+    partial class AddPortalApiEndpoints
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

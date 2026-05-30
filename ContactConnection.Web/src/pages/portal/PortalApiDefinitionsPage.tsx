@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router'
 import PortalShell from '../../components/portal/PortalShell'
 import AuthConfigForm, {
   type AuthFormState,
   BLANK_AUTH_STATE,
-  authStateFromConfig,
   serializeAuthConfig,
 } from '../../components/apiDefinitions/AuthConfigForm'
 import {
@@ -13,6 +13,9 @@ import {
   activatePortalApiDefinition,
   deactivatePortalApiDefinition,
   deletePortalApiDefinition,
+  listPortalCredentials,
+  setPortalCredential,
+  testPortalAuth,
   type ApiDefinitionRecord,
 } from '../../api/portal'
 
@@ -88,6 +91,7 @@ const BLANK_FORM: FormState = {
 }
 
 export default function PortalApiDefinitionsPage() {
+  const navigate = useNavigate()
   const [defs, setDefs] = useState<ApiDefinitionRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -100,8 +104,14 @@ export default function PortalApiDefinitionsPage() {
 
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
+  const [knownCreds, setKnownCreds] = useState<string[]>([])
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    listPortalCredentials()
+      .then((list) => setKnownCreds(list.map((c) => c.keyName)))
+      .catch(() => {})
+  }, [])
 
   async function load() {
     setLoading(true)
@@ -118,22 +128,6 @@ export default function PortalApiDefinitionsPage() {
   function openCreate() {
     setForm(BLANK_FORM)
     setEditingId(null)
-    setFormError(null)
-    setShowForm(true)
-  }
-
-  function openEdit(def: ApiDefinitionRecord) {
-    setForm({
-      apiType: def.apiType,
-      name: def.name,
-      httpMethod: def.httpMethod,
-      baseUrl: def.baseUrl,
-      description: def.description ?? '',
-      provider: def.provider ?? '',
-      timeoutSeconds: String(def.timeoutSeconds),
-      auth: authStateFromConfig(def.authConfig),
-    })
-    setEditingId(def.id)
     setFormError(null)
     setShowForm(true)
   }
@@ -285,7 +279,7 @@ export default function PortalApiDefinitionsPage() {
                           >
                             {togglingId === d.id ? '…' : d.isActive ? 'Deactivate' : 'Activate'}
                           </button>
-                          <button onClick={() => openEdit(d)} className="text-indigo-400 hover:text-indigo-300 text-xs font-medium transition-colors">Edit</button>
+                          <button onClick={() => navigate(`/portal/api-definitions/${d.id}`)} className="text-indigo-400 hover:text-indigo-300 text-xs font-medium transition-colors">Edit</button>
                           <button
                             onClick={() => handleDelete(d.id)}
                             disabled={deletingId === d.id}
@@ -405,7 +399,16 @@ export default function PortalApiDefinitionsPage() {
               {/* Auth Config */}
               <div>
                 <p className="text-gray-400 text-xs font-medium uppercase tracking-wide mb-2">Authentication</p>
-                <AuthConfigForm state={form.auth} onChange={patchAuth} />
+                <AuthConfigForm
+                  state={form.auth}
+                  onChange={patchAuth}
+                  knownCredentials={knownCreds}
+                  onAddCredential={async (keyName, value) => {
+                    await setPortalCredential(keyName, value)
+                    setKnownCreds((prev) => [...prev, keyName])
+                  }}
+                  onTestAuth={() => testPortalAuth(serializeAuthConfig(form.auth))}
+                />
               </div>
             </div>
 

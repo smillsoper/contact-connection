@@ -1,4 +1,5 @@
 using ContactConnection.Application.Interfaces.Repositories;
+using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Domain.Entities;
 
 namespace ContactConnection.Api.Endpoints;
@@ -12,6 +13,7 @@ public static class PortalApiDefinitionsEndpoints
 
         group.MapGet("", GetAll);
         group.MapPost("", Create);
+        group.MapPost("test-auth", TestAuth);
         group.MapGet("{id:guid}", GetById);
         group.MapPut("{id:guid}", Update);
         group.MapPost("{id:guid}/activate", Activate);
@@ -99,6 +101,13 @@ public static class PortalApiDefinitionsEndpoints
         await repo.SaveChangesAsync(ct);
         return Results.NoContent();
     }
+
+    private static async Task<IResult> TestAuth(
+        TestAuthRequest request,
+        IPortalCredentialStore credStore,
+        IHttpClientFactory httpFactory,
+        CancellationToken ct)
+        => await AuthTestHelper.RunAuthTest(request.AuthConfig, credStore.GetAsync, httpFactory, ct);
 
     private static object ToResponse(PortalApiDefinition d) => new
     {

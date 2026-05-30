@@ -45,6 +45,50 @@
 | 33 | 2026-05-25 | 7:11 AM CDT | 11:29 AM CDT | 258 min | ~1811 min |
 | 34 | 2026-05-27 | 4:43 PM CDT | 5:12 PM CDT | 29 min | ~1840 min |
 | 35 | 2026-05-27 | 5:26 PM CDT | 5:47 PM CDT | 21 min | ~1861 min |
+| 36 | 2026-05-29 | 4:11 PM CDT | 5:56 PM CDT | 105 min | ~1966 min |
+
+---
+
+## Session 36
+
+**Date:** 2026-05-29
+**Start:** 4:11 PM CDT
+**End:** 5:56 PM CDT
+**Duration:** 105 minutes
+
+### Accomplished
+
+**API Endpoint Detail Page — full backend + frontend**
+
+- Created `PortalApiEndpoint` and `TenantApiEndpoint` domain entities: Id, DefinitionId, Name, Description, Path, HttpMethod (nullable = inherit from definition), RequestBodyTemplate, QueryParams/Headers/ResponseMapping (jsonb), SortOrder, IsActive
+- Created `IPortalApiEndpointRepository` and `ITenantApiEndpointRepository` interfaces in Application
+- Created `PortalApiEndpointConfiguration` and `TenantApiEndpointConfiguration` EF configs; registered in `ContactConnectionDbContext` and `TenantDbContext`; added `PortalApiEndpoints` and `TenantApiEndpoints` DbSets
+- Created `PortalApiEndpointRepository` (uses `ContactConnectionDbContext` directly) and `TenantApiEndpointRepository` (lazy `ScopedTenantDbContextFactory` pattern); registered both in `ServiceCollectionExtensions`
+- Created `PortalApiEndpointsEndpoints.cs` — CRUD routes nested under `/api/v1/portal/api-definitions/{definitionId}/endpoints`; validates parent definition exists before create; scope-checks `endpoint.DefinitionId` on all get/update/delete
+- Created `AdminApiEndpointsEndpoints.cs` — identical structure under `/api/v1/admin/api-definitions/{definitionId}/endpoints` with `TenantContext.HasTenant` guards
+- Registered both route groups in `Program.cs`
+- Migrations: `AddPortalApiEndpoints` → `public.portal_api_endpoints`; `AddTenantApiEndpoints` → `tenant_api_endpoints` — both applied ✓
+- Frontend: added `ApiEndpointRecord`, `CreateApiEndpointData`, `UpdateApiEndpointData` types + list/create/update/delete functions to `portal.ts` and `adminApiDefinitions.ts`
+- Created shared `ApiDefinitionDetailContent.tsx` component: definition header card (name, provider, API type badge, active/inactive badge, method, base URL, auth badge, timeout) with Activate/Deactivate + Edit Definition buttons; Endpoints table (name, method badge, path, description) with Add/Edit/Delete; Edit Definition modal (full AuthConfigForm); Add/Edit Endpoint modal
+- Created `PortalApiDefinitionDetailPage.tsx` — thin wrapper in `PortalShell` wiring portal API functions into the shared component
+- Created `AdminApiDefinitionDetailPage.tsx` — same for `AdminShell` with admin API functions
+- Updated `PortalApiDefinitionsPage.tsx` and `AdminApiDefinitionsPage.tsx`: "Edit" button now navigates to `/portal/api-definitions/:id` or `/admin/api-definitions/:id` instead of opening the inline modal
+- Added `/portal/api-definitions/:id` and `/admin/api-definitions/:id` routes in `App.tsx`
+
+**Bug fix — Key Vault credential name mismatch showing false ⚠**
+
+- Root cause: `KeyVaultCredentialStoreBase.Sanitize()` converts underscores → hyphens (`usps_client_id` → `portal--usps-client-id`); `ListAsync` returns the vault-sanitized name (e.g. `usps-client-id`); `CredentialKeyField` checked exact match against `knownCredentials`, so `usps_client_id` ≠ `usps-client-id` → always showed ⚠ even when credential was in Key Vault
+- Fixed in `AuthConfigForm.tsx`: `CredentialKeyField` now also compares against the vault-sanitized form of the input key (lowercase, non-alphanumeric → hyphens, trim hyphens) so stored credentials resolve to ✓ correctly
+
+**Endpoint modal — Query Params, Headers, Body tabs**
+
+- Replaced the simple Request Body Template textarea with a tabbed UI: Query Params | Headers | Body
+- `KVEditor` sub-component: auto-appends a blank row when the last row gets input (Postman-style flow); `×` delete on each row; renders `key` and `value` inputs side-by-side
+- Query Params tab: key → param name, value → static or `{{namespace.field}}` variable; serializes to/from JSON object stored in `queryParams` column
+- Headers tab: key input backed by `<datalist id="header-key-suggestions">` with 23 common HTTP headers (Accept, Content-Type, Authorization, Cache-Control, X-API-Key, etc.) for browser-native autocomplete; serializes to/from `headers` column
+- Body tab: request body template textarea with variable syntax hint
+- Tab badges: blue count bubble on tab shows number of configured rows, visible at a glance
+- Build: **0 errors** ✓ (backend + frontend)
 
 ---
 

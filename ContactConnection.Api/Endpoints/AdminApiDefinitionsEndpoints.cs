@@ -1,4 +1,5 @@
 using ContactConnection.Application.Interfaces.Repositories;
+using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
 using ContactConnection.Domain.Entities;
 
@@ -13,6 +14,7 @@ public static class AdminApiDefinitionsEndpoints
 
         group.MapGet("", GetAll);
         group.MapPost("", Create);
+        group.MapPost("test-auth", TestAuth);
         group.MapGet("{id:guid}", GetById);
         group.MapPut("{id:guid}", Update);
         group.MapPost("{id:guid}/activate", Activate);
@@ -113,6 +115,13 @@ public static class AdminApiDefinitionsEndpoints
         await repo.SaveChangesAsync(ct);
         return Results.NoContent();
     }
+
+    private static async Task<IResult> TestAuth(
+        TestAuthRequest request,
+        ITenantCredentialStore credStore,
+        IHttpClientFactory httpFactory,
+        CancellationToken ct)
+        => await AuthTestHelper.RunAuthTest(request.AuthConfig, credStore.GetAsync, httpFactory, ct);
 
     private static object ToResponse(TenantApiDefinition d) => new
     {

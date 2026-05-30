@@ -17,7 +17,11 @@ import TenantAdminInviteAcceptPage from './pages/TenantAdminInviteAcceptPage'
 import TenantAdminPage from './pages/admin/TenantAdminPage'
 import AdminAgentsPage from './pages/admin/AdminAgentsPage'
 import AdminApiDefinitionsPage from './pages/admin/AdminApiDefinitionsPage'
+import AdminApiDefinitionDetailPage from './pages/admin/AdminApiDefinitionDetailPage'
+import AdminCredentialsPage from './pages/admin/AdminCredentialsPage'
 import PortalApiDefinitionsPage from './pages/portal/PortalApiDefinitionsPage'
+import PortalApiDefinitionDetailPage from './pages/portal/PortalApiDefinitionDetailPage'
+import PortalCredentialsPage from './pages/portal/PortalCredentialsPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -113,6 +117,22 @@ export default function App() {
             </RequirePortalAuth>
           }
         />
+        <Route
+          path="/portal/api-definitions/:id"
+          element={
+            <RequirePortalAuth>
+              <PortalApiDefinitionDetailPage />
+            </RequirePortalAuth>
+          }
+        />
+        <Route
+          path="/portal/credentials"
+          element={
+            <RequirePortalAuth>
+              <PortalCredentialsPage />
+            </RequirePortalAuth>
+          }
+        />
         <Route path="/portal" element={<Navigate to="/portal/tenants" replace />} />
 
         {/* ── Tenant onboarding and agent invite acceptance (public) ── */}
@@ -141,6 +161,22 @@ export default function App() {
           element={
             <RequireAdminAuth>
               <AdminApiDefinitionsPage />
+            </RequireAdminAuth>
+          }
+        />
+        <Route
+          path="/admin/api-definitions/:id"
+          element={
+            <RequireAdminAuth>
+              <AdminApiDefinitionDetailPage />
+            </RequireAdminAuth>
+          }
+        />
+        <Route
+          path="/admin/credentials"
+          element={
+            <RequireAdminAuth>
+              <AdminCredentialsPage />
             </RequireAdminAuth>
           }
         />

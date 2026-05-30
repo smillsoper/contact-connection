@@ -249,3 +249,114 @@ export async function deactivatePortalApiDefinition(id: string): Promise<ApiDefi
 export async function deletePortalApiDefinition(id: string): Promise<void> {
   return portalFetch<void>(`/api/v1/portal/api-definitions/${id}`, { method: 'DELETE' })
 }
+
+// ─── Portal Credentials ──────────────────────────────────────────────────────
+
+export interface CredentialSummary {
+  keyName: string
+  updatedOn: string | null
+}
+
+export async function listPortalCredentials(): Promise<CredentialSummary[]> {
+  return portalFetch<CredentialSummary[]>('/api/v1/portal/credentials')
+}
+
+export async function setPortalCredential(keyName: string, value: string): Promise<void> {
+  return portalFetch<void>(`/api/v1/portal/credentials/${keyName}`, {
+    method: 'PUT',
+    body: JSON.stringify({ value }),
+  })
+}
+
+export async function deletePortalCredential(keyName: string): Promise<void> {
+  return portalFetch<void>(`/api/v1/portal/credentials/${keyName}`, { method: 'DELETE' })
+}
+
+// ─── Portal API Endpoints ────────────────────────────────────────────────────
+
+export interface ApiEndpointRecord {
+  id: string
+  definitionId: string
+  name: string
+  description: string | null
+  path: string
+  httpMethod: string | null
+  requestBodyTemplate: string | null
+  queryParams: string
+  headers: string
+  responseMapping: string
+  sortOrder: number
+  isActive: boolean
+  createdAt: string
+  updatedAt: string | null
+}
+
+export interface CreateApiEndpointData {
+  name: string
+  path: string
+  httpMethod?: string
+  description?: string
+  sortOrder?: number
+  requestBodyTemplate?: string
+  queryParams?: string
+  headers?: string
+  responseMapping?: string
+}
+
+export interface UpdateApiEndpointData {
+  name: string
+  path: string
+  httpMethod?: string
+  description?: string
+  sortOrder?: number
+  requestBodyTemplate?: string
+  queryParams?: string
+  headers?: string
+  responseMapping?: string
+}
+
+export async function listPortalApiEndpoints(definitionId: string): Promise<ApiEndpointRecord[]> {
+  return portalFetch<ApiEndpointRecord[]>(`/api/v1/portal/api-definitions/${definitionId}/endpoints`)
+}
+
+export async function createPortalApiEndpoint(definitionId: string, data: CreateApiEndpointData): Promise<ApiEndpointRecord> {
+  return portalFetch<ApiEndpointRecord>(`/api/v1/portal/api-definitions/${definitionId}/endpoints`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function updatePortalApiEndpoint(definitionId: string, endpointId: string, data: UpdateApiEndpointData): Promise<ApiEndpointRecord> {
+  return portalFetch<ApiEndpointRecord>(`/api/v1/portal/api-definitions/${definitionId}/endpoints/${endpointId}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function deletePortalApiEndpoint(definitionId: string, endpointId: string): Promise<void> {
+  return portalFetch<void>(`/api/v1/portal/api-definitions/${definitionId}/endpoints/${endpointId}`, { method: 'DELETE' })
+}
+
+// ─── Auth Testing ────────────────────────────────────────────────────────────
+
+export interface AuthTestResult {
+  type: string
+  success: boolean
+  message?: string
+  error?: string
+  statusCode?: number
+  rawResponse?: string
+  credentials?: Array<{ key: string; found: boolean }>
+  fieldMapping?: {
+    token: { name: string; found: boolean; preview: string | null }
+    tokenType: { name: string; found: boolean; value: string | null }
+    expiresIn: { name: string; found: boolean; value: string | null }
+  }
+}
+
+export async function testPortalAuth(authConfig: string): Promise<AuthTestResult> {
+  return portalFetch<AuthTestResult>('/api/v1/portal/api-definitions/test-auth', {
+    method: 'POST',
+    body: JSON.stringify({ authConfig }),
+  })
+}

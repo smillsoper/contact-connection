@@ -74,3 +74,81 @@ export function deactivateAdminApiDefinition(id: string): Promise<ApiDefinitionR
 export function deleteAdminApiDefinition(id: string): Promise<void> {
   return api.delete<void>(`/api/v1/admin/api-definitions/${id}`)
 }
+
+// ─── Admin API Endpoints ─────────────────────────────────────────────────────
+
+export interface ApiEndpointRecord {
+  id: string
+  definitionId: string
+  name: string
+  description: string | null
+  path: string
+  httpMethod: string | null
+  requestBodyTemplate: string | null
+  queryParams: string
+  headers: string
+  responseMapping: string
+  sortOrder: number
+  isActive: boolean
+  createdAt: string
+  updatedAt: string | null
+}
+
+export interface CreateApiEndpointData {
+  name: string
+  path: string
+  httpMethod?: string
+  description?: string
+  sortOrder?: number
+  requestBodyTemplate?: string
+  queryParams?: string
+  headers?: string
+  responseMapping?: string
+}
+
+export interface UpdateApiEndpointData {
+  name: string
+  path: string
+  httpMethod?: string
+  description?: string
+  sortOrder?: number
+  requestBodyTemplate?: string
+  queryParams?: string
+  headers?: string
+  responseMapping?: string
+}
+
+export function listAdminApiEndpoints(definitionId: string): Promise<ApiEndpointRecord[]> {
+  return api.get<ApiEndpointRecord[]>(`/api/v1/admin/api-definitions/${definitionId}/endpoints`)
+}
+
+export function createAdminApiEndpoint(definitionId: string, data: CreateApiEndpointData): Promise<ApiEndpointRecord> {
+  return api.post<ApiEndpointRecord>(`/api/v1/admin/api-definitions/${definitionId}/endpoints`, data)
+}
+
+export function updateAdminApiEndpoint(definitionId: string, endpointId: string, data: UpdateApiEndpointData): Promise<ApiEndpointRecord> {
+  return api.put<ApiEndpointRecord>(`/api/v1/admin/api-definitions/${definitionId}/endpoints/${endpointId}`, data)
+}
+
+export function deleteAdminApiEndpoint(definitionId: string, endpointId: string): Promise<void> {
+  return api.delete<void>(`/api/v1/admin/api-definitions/${definitionId}/endpoints/${endpointId}`)
+}
+
+export interface AuthTestResult {
+  type: string
+  success: boolean
+  message?: string
+  error?: string
+  statusCode?: number
+  rawResponse?: string
+  credentials?: Array<{ key: string; found: boolean }>
+  fieldMapping?: {
+    token: { name: string; found: boolean; preview: string | null }
+    tokenType: { name: string; found: boolean; value: string | null }
+    expiresIn: { name: string; found: boolean; value: string | null }
+  }
+}
+
+export function testAdminAuth(authConfig: string): Promise<AuthTestResult> {
+  return api.post<AuthTestResult>('/api/v1/admin/api-definitions/test-auth', { authConfig })
+}

@@ -95,11 +95,15 @@ app.MapCustomFieldsEndpoints();
 // Tenant admin portal
 app.MapAdminAgentsEndpoints();
 app.MapAdminApiDefinitionsEndpoints();
+app.MapAdminApiEndpointsEndpoints();
+app.MapAdminCredentialsEndpoints();
 
 // Portal (platform administration)
 app.MapPortalAuthEndpoints();
 app.MapPortalTenantsEndpoints();
 app.MapPortalApiDefinitionsEndpoints();
+app.MapPortalApiEndpointsEndpoints();
+app.MapPortalCredentialsEndpoints();
 
 // Tenant onboarding and agent invite acceptance (public — no auth required)
 app.MapOnboardingEndpoints();

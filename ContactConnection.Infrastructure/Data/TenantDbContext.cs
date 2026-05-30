@@ -31,6 +31,7 @@ public class TenantDbContext : DbContext
     public DbSet<CustomFieldDefinition> CustomFieldDefinitions => Set<CustomFieldDefinition>();
     public DbSet<CustomFieldValue> CustomFieldValues => Set<CustomFieldValue>();
     public DbSet<TenantApiDefinition> TenantApiDefinitions => Set<TenantApiDefinition>();
+    public DbSet<TenantApiEndpoint> TenantApiEndpoints => Set<TenantApiEndpoint>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -51,6 +52,7 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new CustomFieldDefinitionConfiguration());
         modelBuilder.ApplyConfiguration(new CustomFieldValueConfiguration());
         modelBuilder.ApplyConfiguration(new TenantApiDefinitionConfiguration());
+        modelBuilder.ApplyConfiguration(new TenantApiEndpointConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 
