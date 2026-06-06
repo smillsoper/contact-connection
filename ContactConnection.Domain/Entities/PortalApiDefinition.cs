@@ -3,7 +3,7 @@ namespace ContactConnection.Domain.Entities;
 public class PortalApiDefinition
 {
     public Guid Id { get; private set; }
-    public string ApiType { get; private set; } = string.Empty;
+    public string ApiCategory { get; private set; } = string.Empty;
     public string? Provider { get; private set; }
     public string Name { get; private set; } = string.Empty;
     public string? Description { get; private set; }
@@ -22,7 +22,7 @@ public class PortalApiDefinition
     private PortalApiDefinition() { }
 
     public static PortalApiDefinition Create(
-        string apiType,
+        string apiCategory,
         string name,
         string httpMethod,
         string baseUrl,
@@ -30,13 +30,13 @@ public class PortalApiDefinition
         string? provider = null,
         int timeoutSeconds = 30)
     {
-        if (!ApiDefinitionType.IsValid(apiType))
-            throw new ArgumentException($"Unknown API type '{apiType}'.", nameof(apiType));
+        if (!Entities.ApiCategory.IsValid(apiCategory))
+            throw new ArgumentException($"Unknown API category '{apiCategory}'.", nameof(apiCategory));
 
         return new PortalApiDefinition
         {
             Id = Guid.NewGuid(),
-            ApiType = apiType,
+            ApiCategory = apiCategory,
             Provider = provider?.Trim(),
             Name = name.Trim(),
             Description = description?.Trim(),
@@ -56,6 +56,14 @@ public class PortalApiDefinition
         BaseUrl = baseUrl.Trim();
         if (provider is not null) Provider = provider.Trim() == string.Empty ? null : provider.Trim();
         if (timeoutSeconds.HasValue && timeoutSeconds.Value > 0) TimeoutSeconds = timeoutSeconds.Value;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void UpdateCategory(string apiCategory)
+    {
+        if (!Entities.ApiCategory.IsValid(apiCategory))
+            throw new ArgumentException($"Unknown API category '{apiCategory}'.", nameof(apiCategory));
+        ApiCategory = apiCategory;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 

@@ -9,15 +9,36 @@ import type { AuthTestResult } from '../../api/adminApiDefinitions'
 
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 
-const API_TYPES = [
-  { value: 'address_validation', label: 'Address Validation' },
-  { value: 'realtime_address_autocomplete', label: 'Realtime Address Autocomplete' },
-  { value: 'zip_code_lookup', label: 'ZIP Code Lookup' },
+const API_CATEGORIES = [
+  { value: 'address',     label: 'Address' },
+  { value: 'order',       label: 'Order' },
   { value: 'fulfillment', label: 'Fulfillment' },
+  { value: 'media',       label: 'Media' },
 ]
 
-const API_TYPE_LABELS: Record<string, string> = Object.fromEntries(
-  API_TYPES.map((t) => [t.value, t.label])
+const API_CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
+  API_CATEGORIES.map((c) => [c.value, c.label])
+)
+
+const API_SUB_TYPES = [
+  { value: 'address_validation',            label: 'Address Validation',             category: 'address' },
+  { value: 'zip_code_lookup',               label: 'ZIP Code Lookup',                category: 'address' },
+  { value: 'realtime_address_autocomplete', label: 'Realtime Address Autocomplete',  category: 'address' },
+  { value: 'order_submit',                  label: 'Submit Order',                   category: 'order' },
+  { value: 'order_lookup',                  label: 'Lookup',                         category: 'order' },
+  { value: 'order_cancel',                  label: 'Cancel',                         category: 'order' },
+  { value: 'fulfillment_tracking',          label: 'Tracking',                       category: 'fulfillment' },
+  { value: 'fulfillment_cancel',            label: 'Cancel',                         category: 'fulfillment' },
+  { value: 'fulfillment_return',            label: 'Return',                         category: 'fulfillment' },
+  { value: 'fulfillment_submit',            label: 'Submit',                         category: 'fulfillment' },
+  { value: 'tfn_assignment_add',            label: 'Add TFN Assignment',             category: 'media' },
+  { value: 'tfn_assignment_update',         label: 'Update TFN Assignment',          category: 'media' },
+  { value: 'tfn_assignment_delete',         label: 'Delete TFN Assignment',          category: 'media' },
+  { value: 'campaign_results',              label: 'Campaign Results',               category: 'media' },
+]
+
+const API_SUB_TYPE_LABELS: Record<string, string> = Object.fromEntries(
+  API_SUB_TYPES.map((s) => [s.value, s.label])
 )
 
 const AUTH_TYPE_LABELS: Record<string, string> = {
@@ -37,11 +58,28 @@ const AUTH_BADGE_COLORS: Record<string, string> = {
   hmac: 'bg-amber-900/40 text-amber-300',
 }
 
-const API_TYPE_BADGE_COLORS: Record<string, string> = {
-  address_validation: 'bg-sky-900/50 text-sky-300',
-  realtime_address_autocomplete: 'bg-violet-900/50 text-violet-300',
-  zip_code_lookup: 'bg-indigo-900/50 text-indigo-300',
+const API_CATEGORY_BADGE_COLORS: Record<string, string> = {
+  address:     'bg-sky-900/50 text-sky-300',
+  order:       'bg-emerald-900/50 text-emerald-300',
   fulfillment: 'bg-amber-900/50 text-amber-300',
+  media:       'bg-violet-900/50 text-violet-300',
+}
+
+const API_SUB_TYPE_BADGE_COLORS: Record<string, string> = {
+  address_validation:            'bg-sky-900/40 text-sky-300',
+  zip_code_lookup:               'bg-indigo-900/40 text-indigo-300',
+  realtime_address_autocomplete: 'bg-violet-900/40 text-violet-300',
+  order_submit:                  'bg-emerald-900/40 text-emerald-300',
+  order_lookup:                  'bg-teal-900/40 text-teal-300',
+  order_cancel:                  'bg-red-900/40 text-red-300',
+  fulfillment_tracking:          'bg-amber-900/40 text-amber-300',
+  fulfillment_cancel:            'bg-orange-900/40 text-orange-300',
+  fulfillment_return:            'bg-yellow-900/40 text-yellow-300',
+  fulfillment_submit:            'bg-lime-900/40 text-lime-300',
+  tfn_assignment_add:            'bg-pink-900/40 text-pink-300',
+  tfn_assignment_update:         'bg-fuchsia-900/40 text-fuchsia-300',
+  tfn_assignment_delete:         'bg-rose-900/40 text-rose-300',
+  campaign_results:              'bg-purple-900/40 text-purple-300',
 }
 
 function authBadge(authJson: string) {
@@ -56,7 +94,7 @@ function authBadge(authJson: string) {
 
 export interface ApiDefinitionRecord {
   id: string
-  apiType: string
+  apiCategory: string
   provider: string | null
   name: string
   description: string | null
@@ -76,6 +114,7 @@ export interface ApiDefinitionRecord {
 export interface ApiEndpointRecord {
   id: string
   definitionId: string
+  apiSubType: string
   name: string
   description: string | null
   path: string
@@ -85,6 +124,7 @@ export interface ApiEndpointRecord {
   headers: string
   responseMapping: string
   sortOrder: number
+  isPreferred: boolean
   isActive: boolean
   createdAt: string
   updatedAt: string | null
@@ -115,6 +155,7 @@ export interface DetailApi {
     name: string
     httpMethod: string
     baseUrl: string
+    apiCategory?: string
     description?: string
     provider?: string
     timeoutSeconds?: number
@@ -125,6 +166,7 @@ export interface DetailApi {
   listEndpoints(definitionId: string): Promise<ApiEndpointRecord[]>
   createEndpoint(definitionId: string, data: EndpointFormData): Promise<ApiEndpointRecord>
   updateEndpoint(definitionId: string, endpointId: string, data: EndpointFormData): Promise<ApiEndpointRecord>
+  setPreferred(definitionId: string, endpointId: string): Promise<ApiEndpointRecord>
   deleteEndpoint(definitionId: string, endpointId: string): Promise<void>
   listCredentials(): Promise<string[]>
   setCredential(keyName: string, value: string): Promise<void>
@@ -134,6 +176,7 @@ export interface DetailApi {
 }
 
 interface EndpointFormData {
+  apiSubType: string
   name: string
   path: string
   httpMethod?: string
@@ -146,6 +189,7 @@ interface EndpointFormData {
 }
 
 interface DefFormState {
+  apiCategory: string
   name: string
   httpMethod: string
   baseUrl: string
@@ -183,11 +227,19 @@ interface CapturedResponse {
   body: unknown
 }
 
+interface MultipleMatchesConfig {
+  arrayPath: string
+  itemMappings: OutcomeFieldMapping[]
+}
+
 interface ResponseOutcome {
   id: string
   name: string
   label: string
-  condition: OutcomeCondition
+  conditions: OutcomeCondition[]
+  conditionLogic?: 'and' | 'or'
+  messagePath?: string
+  multipleMatchesConfig?: MultipleMatchesConfig
   fieldMappings: OutcomeFieldMapping[]
   capturedResponse: CapturedResponse | null
 }
@@ -196,16 +248,75 @@ interface ResponseMappingConfig {
   outcomes: ResponseOutcome[]
 }
 
+type RawOutcome = Omit<ResponseOutcome, 'conditions'> & { condition?: OutcomeCondition; conditions?: OutcomeCondition[] }
+
+function walkPath(val: unknown, segments: string[]): unknown {
+  for (const segment of segments) {
+    if (val == null || typeof val !== 'object') return undefined
+    const arrMatch = segment.match(/^(\w*)\[(\d+)\]$/)
+    if (arrMatch) {
+      const [, key, idx] = arrMatch
+      if (key) val = (val as Record<string, unknown>)[key]
+      val = Array.isArray(val) ? val[parseInt(idx)] : undefined
+    } else {
+      val = (val as Record<string, unknown>)[segment]
+    }
+  }
+  return val
+}
+
+function resolveFromTemplate(body: unknown, template: string): string | null {
+  if (!template.includes('{{')) return null
+  const result = template.replace(/\{\{([^}]+)\}\}/g, (_, path: string) => {
+    const val = walkPath(body, path.trim().split('.'))
+    if (val == null || typeof val === 'object') return ''
+    return String(val)
+  }).trim().replace(/\s{2,}/g, ' ')
+  return result || null
+}
+
+function resolveMessagePreview(body: unknown, messagePath: string): string | null {
+  const wildcardIdx = messagePath.indexOf('[*]')
+  if (wildcardIdx >= 0) {
+    const arrayPath = messagePath.slice(0, wildcardIdx).replace(/\.$/, '')
+    const fieldPath = messagePath.slice(wildcardIdx + 3).replace(/^\./, '')
+    const arrayVal  = arrayPath ? walkPath(body, arrayPath.split('.')) : body
+    if (!Array.isArray(arrayVal)) return null
+    const parts = arrayVal
+      .map(item => fieldPath ? walkPath(item, fieldPath.split('.')) : item)
+      .filter(v => v != null && typeof v !== 'object')
+      .map(v => String(v))
+    return parts.length > 0 ? parts.join('\n') : null
+  }
+  const val = walkPath(body, messagePath.split('.'))
+  if (val == null || typeof val === 'object') return null
+  return String(val)
+}
+
 function parseResponseMapping(json: string): ResponseMappingConfig {
   try {
-    const obj = JSON.parse(json) as ResponseMappingConfig
-    return Array.isArray(obj?.outcomes) ? obj : { outcomes: [] }
+    const obj = JSON.parse(json) as { outcomes?: RawOutcome[] }
+    if (!Array.isArray(obj?.outcomes)) return { outcomes: [] }
+    const outcomes: ResponseOutcome[] = obj.outcomes.map(o => {
+      if (Array.isArray(o.conditions) && o.conditions.length > 0) {
+        const { condition: _legacy, ...rest } = o
+        return { ...rest, conditions: o.conditions }
+      }
+      if (o.condition) {
+        const { condition, ...rest } = o
+        return { ...rest, conditions: [condition], conditionLogic: 'and' as const }
+      }
+      const { condition: _c, ...rest } = o
+      return { ...rest, conditions: [{ path: '', op: 'eq' as ConditionOp, value: '' }] }
+    })
+    return { outcomes }
   } catch {
     return { outcomes: [] }
   }
 }
 
 interface EndpointForm {
+  apiSubType: string
   name: string
   path: string
   httpMethod: string
@@ -214,12 +325,14 @@ interface EndpointForm {
   headers: KVRow[]
   requestBodyTemplate: string
   testData: Record<string, string>
+  payloadBody: string
   responseMapping: ResponseMappingConfig
 }
 
 const BLANK_KV: KVRow[] = [{ key: '', value: '' }]
 
 const BLANK_ENDPOINT_FORM: EndpointForm = {
+  apiSubType: '',
   name: '',
   path: '',
   httpMethod: '',
@@ -228,6 +341,7 @@ const BLANK_ENDPOINT_FORM: EndpointForm = {
   headers: BLANK_KV,
   requestBodyTemplate: '',
   testData: {},
+  payloadBody: '',
   responseMapping: { outcomes: [] },
 }
 
@@ -430,7 +544,7 @@ function JsonNode({ name, value, path, depth, copiedPath, onCopy }: JsonNodeProp
 
     if (depth === 0) {
       return (
-        <div>
+        <div className="w-full overflow-hidden">
           {entries.map(([k, v, childPath]) => (
             <JsonNode key={k} name={k} value={v} path={childPath} depth={1} copiedPath={copiedPath} onCopy={onCopy} />
           ))}
@@ -439,15 +553,26 @@ function JsonNode({ name, value, path, depth, copiedPath, onCopy }: JsonNodeProp
     }
 
     return (
-      <div className="pl-3 border-l border-gray-800/50">
-        <button
-          onClick={() => setExpanded(e => !e)}
-          className="flex items-center gap-1 py-0.5 w-full text-left hover:bg-gray-800/30 rounded px-0.5"
-        >
-          <span className="text-gray-600 text-[10px] w-3 shrink-0">{expanded ? '▾' : '▸'}</span>
-          <span className="font-mono text-gray-300 text-xs">{name}</span>
-          <span className="text-gray-600 text-[10px] ml-0.5">{isArr ? `[${(value as unknown[]).length}]` : `{}`}</span>
-        </button>
+      <div className="pl-3 border-l border-gray-800/50 overflow-hidden">
+        <div className="flex items-center overflow-hidden group/arr">
+          <button
+            onClick={() => setExpanded(e => !e)}
+            className="flex items-center gap-1 py-0.5 flex-1 min-w-0 text-left hover:bg-gray-800/30 rounded-l px-0.5 overflow-hidden"
+          >
+            <span className="text-gray-600 text-[10px] w-3 shrink-0">{expanded ? '▾' : '▸'}</span>
+            <span className="font-mono text-gray-300 text-xs truncate">{name}</span>
+            <span className="text-gray-600 text-[10px] ml-0.5 shrink-0">{isArr ? `[${(value as unknown[]).length}]` : `{}`}</span>
+          </button>
+          {isArr && path && (
+            <button
+              onClick={() => onCopy(path)}
+              title={`Copy array path: ${path}`}
+              className={`shrink-0 px-1 py-0.5 text-[10px] transition-colors ${copiedPath === path ? 'text-emerald-400' : 'text-gray-700 group-hover/arr:text-gray-500 hover:text-gray-300'}`}
+            >
+              {copiedPath === path ? '✓' : '⎘'}
+            </button>
+          )}
+        </div>
         {expanded && entries.map(([k, v, childPath]) => (
           <JsonNode key={k} name={k} value={v} path={childPath} depth={depth + 1} copiedPath={copiedPath} onCopy={onCopy} />
         ))}
@@ -462,15 +587,15 @@ function JsonNode({ name, value, path, depth, copiedPath, onCopy }: JsonNodeProp
     : 'text-amber-300'
 
   return (
-    <div className="pl-3 border-l border-gray-800/50">
+    <div className="pl-3 border-l border-gray-800/50 overflow-hidden">
       <button
         onClick={() => onCopy(path)}
         title={`Copy path: ${path}`}
-        className="flex items-center gap-1 py-0.5 w-full text-left hover:bg-indigo-900/20 rounded px-0.5 group"
+        className="flex items-center gap-1 py-0.5 w-full text-left hover:bg-indigo-900/20 rounded px-0.5 group overflow-hidden"
       >
         <span className="text-gray-600 text-[10px] w-3 shrink-0" />
-        <span className="font-mono text-gray-400 text-xs shrink-0">{name}:</span>
-        <span className={`font-mono text-xs ml-1 flex-1 truncate ${valColor}`} title={displayVal}>
+        <span className="font-mono text-gray-400 text-xs shrink-0 max-w-[45%] truncate">{name}:</span>
+        <span className={`font-mono text-xs ml-1 flex-1 min-w-0 truncate ${valColor}`} title={displayVal}>
           {displayVal.length > 22 ? displayVal.slice(0, 22) + '…' : displayVal}
         </span>
         <span className={`text-[10px] shrink-0 ${copiedPath === path ? 'text-emerald-400' : 'text-gray-700 group-hover:text-gray-500'}`}>
@@ -499,57 +624,117 @@ const CONDITION_OPS: { value: ConditionOp; label: string }[] = [
   { value: 'length_lt',    label: 'length <' },
 ]
 
-function ConditionBuilder({ condition, onChange }: { condition: OutcomeCondition; onChange: (c: OutcomeCondition) => void }) {
+function ConditionRow({ condition, onChange, onRemove, showRemove }: {
+  condition: OutcomeCondition
+  onChange: (c: OutcomeCondition) => void
+  onRemove: () => void
+  showRemove: boolean
+}) {
   const noValue = condition.op === 'exists' || condition.op === 'not_exists'
   return (
-    <div className="space-y-2">
-      <div className="flex items-end gap-2">
+    <div className="flex items-end gap-2">
+      <div className="flex-1">
+        <label className="block text-gray-500 text-[10px] font-medium mb-1 uppercase tracking-wider">Response path</label>
+        <input
+          type="text"
+          value={condition.path}
+          onChange={(e) => onChange({ ...condition, path: e.target.value })}
+          placeholder="results.0.data.details.record_type.code"
+          className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-white text-xs font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+        />
+      </div>
+      <div className="shrink-0">
+        <label className="block text-gray-500 text-[10px] font-medium mb-1 uppercase tracking-wider">Operator</label>
+        <select
+          value={condition.op}
+          onChange={(e) => onChange({ ...condition, op: e.target.value as ConditionOp })}
+          className="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-white text-xs focus:outline-none focus:border-indigo-500"
+        >
+          {CONDITION_OPS.map(op => <option key={op.value} value={op.value}>{op.label}</option>)}
+        </select>
+      </div>
+      {!noValue && (
         <div className="flex-1">
-          <label className="block text-gray-500 text-[10px] font-medium mb-1 uppercase tracking-wider">Response path</label>
+          <label className="block text-gray-500 text-[10px] font-medium mb-1 uppercase tracking-wider">Value</label>
           <input
             type="text"
-            value={condition.path}
-            onChange={(e) => onChange({ ...condition, path: e.target.value })}
-            placeholder="returnCode"
+            value={condition.value ?? ''}
+            onChange={(e) => onChange({ ...condition, value: e.target.value })}
+            placeholder="0"
             className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-white text-xs font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
           />
         </div>
-        <div className="shrink-0">
-          <label className="block text-gray-500 text-[10px] font-medium mb-1 uppercase tracking-wider">Operator</label>
-          <select
-            value={condition.op}
-            onChange={(e) => onChange({ ...condition, op: e.target.value as ConditionOp })}
-            className="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-white text-xs focus:outline-none focus:border-indigo-500"
-          >
-            {CONDITION_OPS.map(op => <option key={op.value} value={op.value}>{op.label}</option>)}
-          </select>
+      )}
+      {showRemove && (
+        <button
+          onClick={onRemove}
+          className="shrink-0 mb-0.5 text-gray-600 hover:text-red-400 text-lg leading-none px-1"
+          title="Remove condition"
+        >×</button>
+      )}
+    </div>
+  )
+}
+
+function ConditionListBuilder({ conditions, conditionLogic, onChange }: {
+  conditions: OutcomeCondition[]
+  conditionLogic: 'and' | 'or'
+  onChange: (conditions: OutcomeCondition[], conditionLogic: 'and' | 'or') => void
+}) {
+  function updateCondition(i: number, c: OutcomeCondition) {
+    const next = conditions.map((existing, idx) => idx === i ? c : existing)
+    onChange(next, conditionLogic)
+  }
+  function removeCondition(i: number) {
+    onChange(conditions.filter((_, idx) => idx !== i), conditionLogic)
+  }
+  function addCondition() {
+    onChange([...conditions, { path: '', op: 'eq', value: '' }], conditionLogic)
+  }
+
+  return (
+    <div className="space-y-2">
+      {conditions.map((cond, i) => (
+        <div key={i}>
+          {i > 0 && (
+            <div className="flex items-center gap-2 my-1.5">
+              <div className="flex-1 border-t border-gray-700/50" />
+              <button
+                onClick={() => onChange(conditions, conditionLogic === 'and' ? 'or' : 'and')}
+                className="text-[10px] font-semibold px-2 py-0.5 rounded border border-gray-600 text-gray-400 hover:border-indigo-500 hover:text-indigo-400 uppercase tracking-wider"
+                title="Click to toggle AND / OR"
+              >{conditionLogic}</button>
+              <div className="flex-1 border-t border-gray-700/50" />
+            </div>
+          )}
+          <ConditionRow
+            condition={cond}
+            onChange={(c) => updateCondition(i, c)}
+            onRemove={() => removeCondition(i)}
+            showRemove={conditions.length > 1}
+          />
         </div>
-        {!noValue && (
-          <div className="flex-1">
-            <label className="block text-gray-500 text-[10px] font-medium mb-1 uppercase tracking-wider">Value</label>
-            <input
-              type="text"
-              value={condition.value ?? ''}
-              onChange={(e) => onChange({ ...condition, value: e.target.value })}
-              placeholder="0"
-              className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-white text-xs font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
-            />
-          </div>
-        )}
+      ))}
+      <div className="flex items-center justify-between pt-1">
+        <p className="text-gray-600 text-[10px]">
+          Dot notation + array index (e.g. <span className="font-mono">results.0.data.details.record_type.code</span>)
+        </p>
+        <button
+          onClick={addCondition}
+          className="text-[10px] text-indigo-400 hover:text-indigo-300 font-medium"
+        >+ Add condition</button>
       </div>
-      <p className="text-gray-600 text-[10px]">
-        Dot notation for nested fields (e.g. <span className="font-mono">standardizedAddress.city</span>). For array length checks, point to the array and use a <span className="font-mono">length</span> operator.
-      </p>
     </div>
   )
 }
 
 // ── FieldMappingEditor ──────────────────────────────────────────────────────
 
-function FieldMappingEditor({ mappings, onChange, sourceContext }: {
+function FieldMappingEditor({ mappings, onChange, sourceContext, capturedResponse }: {
   mappings: OutcomeFieldMapping[]
   onChange: (m: OutcomeFieldMapping[]) => void
   sourceContext: SourceContext | null
+  capturedResponse: CapturedResponse | null
 }) {
   const targetOptions = sourceContext
     ? sourceContext.groups.flatMap(g => g.fields.map(f => ({
@@ -566,48 +751,61 @@ function FieldMappingEditor({ mappings, onChange, sourceContext }: {
     <div className="space-y-2">
       {mappings.length > 0 && (
         <div className="flex items-center gap-2 px-0.5">
-          <span className="flex-1 text-gray-500 text-[10px] font-medium uppercase tracking-wider">From (response path)</span>
+          <span className="flex-1 text-gray-500 text-[10px] font-medium uppercase tracking-wider">From (path or template)</span>
           <span className="text-gray-600 text-[10px] shrink-0 w-4" />
           <span className="flex-1 text-gray-500 text-[10px] font-medium uppercase tracking-wider">To (flow variable)</span>
           <span className="w-5 shrink-0" />
         </div>
       )}
-      {mappings.map((mapping, i) => (
-        <div key={i} className="flex items-center gap-2">
-          <input
-            type="text"
-            value={mapping.from}
-            onChange={(e) => update(i, 'from', e.target.value)}
-            placeholder="standardizedAddress.city"
-            className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-white text-xs font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
-          />
-          <span className="text-gray-600 text-xs shrink-0">→</span>
-          {targetOptions.length > 0 ? (
-            <select
-              value={mapping.to}
-              onChange={(e) => update(i, 'to', e.target.value)}
-              className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-white text-xs focus:outline-none focus:border-indigo-500"
-            >
-              <option value="">Select target…</option>
-              {targetOptions.map(opt => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-          ) : (
-            <input
-              type="text"
-              value={mapping.to}
-              onChange={(e) => update(i, 'to', e.target.value)}
-              placeholder="address.city"
-              className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-white text-xs font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
-            />
-          )}
-          <button
-            onClick={() => onChange(mappings.filter((_, idx) => idx !== i))}
-            className="text-gray-600 hover:text-red-400 transition-colors px-0.5 text-sm shrink-0"
-          >×</button>
-        </div>
-      ))}
+      {mappings.map((mapping, i) => {
+        const isTemplate = mapping.from.includes('{{')
+        const preview = isTemplate && capturedResponse?.body != null
+          ? resolveFromTemplate(capturedResponse.body, mapping.from)
+          : null
+        return (
+          <div key={i} className="space-y-1">
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={mapping.from}
+                onChange={(e) => update(i, 'from', e.target.value)}
+                placeholder="results[0].data.city  or  {{path1}} {{path2}}"
+                className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-white text-xs font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+              />
+              <span className="text-gray-600 text-xs shrink-0">→</span>
+              {targetOptions.length > 0 ? (
+                <select
+                  value={mapping.to}
+                  onChange={(e) => update(i, 'to', e.target.value)}
+                  className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-white text-xs focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="">Select target…</option>
+                  {targetOptions.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={mapping.to}
+                  onChange={(e) => update(i, 'to', e.target.value)}
+                  placeholder="address.city"
+                  className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-white text-xs font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                />
+              )}
+              <button
+                onClick={() => onChange(mappings.filter((_, idx) => idx !== i))}
+                className="text-gray-600 hover:text-red-400 transition-colors px-0.5 text-sm shrink-0"
+              >×</button>
+            </div>
+            {preview != null && (
+              <p className="text-emerald-400 text-[10px] font-mono bg-gray-900/60 rounded px-2 py-1 truncate">
+                Preview: {preview}
+              </p>
+            )}
+          </div>
+        )
+      })}
       {mappings.length === 0 && (
         <p className="text-gray-600 text-xs italic">No mappings yet — add one to write response values into flow variables.</p>
       )}
@@ -629,11 +827,14 @@ interface ResponseMappingPanelProps {
   sourceContext: SourceContext | null
   testRunning: boolean
   onRunAndCapture: (outcomeId: string) => void
+  onRunAndCaptureFromPayload: (outcomeId: string) => void
   hasTestData: boolean
+  hasPayload: boolean
   onGoToTest: () => void
+  onGoToPayload: () => void
 }
 
-function ResponseMappingPanel({ config, onChange, sourceContext, testRunning, onRunAndCapture, hasTestData, onGoToTest }: ResponseMappingPanelProps) {
+function ResponseMappingPanel({ config, onChange, sourceContext, testRunning, onRunAndCapture, onRunAndCaptureFromPayload, hasTestData, hasPayload, onGoToTest, onGoToPayload }: ResponseMappingPanelProps) {
   const [activeId, setActiveId] = useState<string | null>(config.outcomes[0]?.id ?? null)
   const [copiedPath, setCopiedPath] = useState<string | null>(null)
 
@@ -645,7 +846,9 @@ function ResponseMappingPanel({ config, onChange, sourceContext, testRunning, on
       id,
       name: '',
       label: 'New Outcome',
-      condition: { path: '', op: 'eq', value: '' },
+      conditions: [{ path: '', op: 'eq', value: '' }],
+      conditionLogic: 'and',
+      messagePath: '',
       fieldMappings: [],
       capturedResponse: null,
     }
@@ -672,7 +875,7 @@ function ResponseMappingPanel({ config, onChange, sourceContext, testRunning, on
   }
 
   return (
-    <div className="flex flex-1 min-h-0">
+    <div className="flex w-full min-h-0 overflow-hidden">
       {/* Outcomes sidebar */}
       <div className="w-44 shrink-0 border-r border-gray-800 flex flex-col min-h-0">
         <div className="px-3 py-3 border-b border-gray-800 shrink-0">
@@ -759,10 +962,36 @@ function ResponseMappingPanel({ config, onChange, sourceContext, testRunning, on
           <div>
             <p className="text-gray-400 text-xs font-medium mb-2">Condition</p>
             <div className="bg-gray-800/40 border border-gray-700/50 rounded-lg px-3 py-3">
-              <ConditionBuilder
-                condition={activeOutcome.condition}
-                onChange={(condition) => updateOutcome({ condition })}
+              <ConditionListBuilder
+                conditions={activeOutcome.conditions}
+                conditionLogic={activeOutcome.conditionLogic ?? 'and'}
+                onChange={(conditions, conditionLogic) => updateOutcome({ conditions, conditionLogic })}
               />
+            </div>
+          </div>
+
+          <div>
+            <p className="text-gray-400 text-xs font-medium mb-1.5">Message to Display</p>
+            <div className="bg-gray-800/40 border border-gray-700/50 rounded-lg px-3 py-3 space-y-2">
+              <input
+                type="text"
+                value={activeOutcome.messagePath ?? ''}
+                onChange={(e) => updateOutcome({ messagePath: e.target.value })}
+                placeholder="e.g. error.message or results.0.notices[*].message"
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white text-sm font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+              />
+              <p className="text-gray-600 text-xs">
+                Response path whose value is shown when this outcome occurs. Use <span className="font-mono text-gray-500">[*]</span> to collect and join all values from an array — e.g. <span className="font-mono text-gray-500">results.0.notices[*].message</span> joins every notice message. Click a leaf in the captured response tree to copy its path.
+              </p>
+              {activeOutcome.messagePath && activeOutcome.capturedResponse?.body != null && (() => {
+                const preview = resolveMessagePreview(activeOutcome.capturedResponse.body, activeOutcome.messagePath)
+                if (preview == null) return null
+                return (
+                  <p className="text-emerald-400 text-xs font-mono bg-gray-900/60 rounded px-2 py-1 whitespace-pre-line">
+                    Preview: {preview}
+                  </p>
+                )
+              })()}
             </div>
           </div>
 
@@ -773,11 +1002,56 @@ function ResponseMappingPanel({ config, onChange, sourceContext, testRunning, on
                 mappings={activeOutcome.fieldMappings}
                 onChange={(fieldMappings) => updateOutcome({ fieldMappings })}
                 sourceContext={sourceContext}
+                capturedResponse={activeOutcome.capturedResponse}
               />
             </div>
             <p className="text-gray-600 text-[10px] mt-1.5">
-              Click any leaf in the captured response tree to copy its path, then paste into a "From" field.
+              Click any leaf in the captured response tree to copy its path, then paste into a "From" field. Use <span className="font-mono text-gray-500">{"{{path}}"}</span> template syntax to combine multiple values — e.g. <span className="font-mono text-gray-500">{"{{results[0].data.address_components.number}} {{results[0].data.address_components.street}}"}</span>.
             </p>
+          </div>
+
+          {/* Multiple Matches */}
+          <div>
+            <label className="flex items-center gap-2 cursor-pointer select-none mb-2">
+              <input
+                type="checkbox"
+                checked={!!activeOutcome.multipleMatchesConfig}
+                onChange={(e) => updateOutcome({
+                  multipleMatchesConfig: e.target.checked ? { arrayPath: '', itemMappings: [] } : undefined,
+                })}
+                className="w-3.5 h-3.5 rounded accent-indigo-500"
+              />
+              <span className="text-gray-400 text-xs font-medium">Multiple Matches — present a list for user selection</span>
+            </label>
+            {activeOutcome.multipleMatchesConfig && (
+              <div className="bg-gray-800/40 border border-gray-700/50 rounded-lg px-3 py-3 space-y-3">
+                <div>
+                  <label className="block text-gray-500 text-[10px] font-medium uppercase tracking-wider mb-1">Array Path</label>
+                  <input
+                    type="text"
+                    value={activeOutcome.multipleMatchesConfig.arrayPath}
+                    onChange={(e) => updateOutcome({ multipleMatchesConfig: { ...activeOutcome.multipleMatchesConfig!, arrayPath: e.target.value } })}
+                    placeholder="e.g. matches or candidates"
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white text-sm font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                  />
+                  <p className="text-gray-600 text-xs mt-1">
+                    Path to the array of address options. Click any array node <span className="font-mono">⎘</span> in the captured response tree to copy its path.
+                  </p>
+                </div>
+                <div>
+                  <p className="text-gray-500 text-[10px] font-medium uppercase tracking-wider mb-1">Per-Item Field Mappings</p>
+                  <p className="text-gray-600 text-xs mb-2">
+                    Paths are relative to each array item — e.g. use <span className="font-mono">streetAddress</span> not <span className="font-mono">matches[0].streetAddress</span>.
+                  </p>
+                  <FieldMappingEditor
+                    mappings={activeOutcome.multipleMatchesConfig.itemMappings}
+                    onChange={(itemMappings) => updateOutcome({ multipleMatchesConfig: { ...activeOutcome.multipleMatchesConfig!, itemMappings } })}
+                    sourceContext={sourceContext}
+                    capturedResponse={activeOutcome.capturedResponse}
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="pt-1 border-t border-gray-800">
@@ -822,19 +1096,35 @@ function ResponseMappingPanel({ config, onChange, sourceContext, testRunning, on
               )}
             </div>
             {activeOutcome && (
-              <button
-                onClick={() => onRunAndCapture(activeOutcome.id)}
-                disabled={testRunning}
-                className="text-[10px] bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white px-2 py-1 rounded transition-colors shrink-0"
-              >
-                {testRunning ? '…' : 'Run & capture'}
-              </button>
+              <div className="flex flex-col gap-1 shrink-0">
+                <button
+                  onClick={() => onRunAndCapture(activeOutcome.id)}
+                  disabled={testRunning || !hasTestData}
+                  title={hasTestData ? 'Capture using Source Test data' : 'Set source test data on the Source Test tab first'}
+                  className="text-[10px] bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-white px-2 py-1 rounded transition-colors whitespace-nowrap"
+                >
+                  {testRunning ? '…' : '⇡ Source'}
+                </button>
+                <button
+                  onClick={() => onRunAndCaptureFromPayload(activeOutcome.id)}
+                  disabled={testRunning || !hasPayload}
+                  title={hasPayload ? 'Capture using pasted payload' : 'Paste a payload on the Payload Test tab first'}
+                  className="text-[10px] bg-violet-700 hover:bg-violet-600 disabled:opacity-40 text-white px-2 py-1 rounded transition-colors whitespace-nowrap"
+                >
+                  {testRunning ? '…' : '⇡ Payload'}
+                </button>
+              </div>
             )}
           </div>
-          {!hasTestData && activeOutcome && (
-            <button onClick={onGoToTest} className="text-[10px] text-amber-400 hover:text-amber-300 transition-colors block">
-              ⚠ Set test data on the Test tab first →
-            </button>
+          {!hasTestData && !hasPayload && activeOutcome && (
+            <div className="flex gap-3">
+              <button onClick={onGoToTest} className="text-[10px] text-amber-400 hover:text-amber-300 transition-colors">
+                ⚠ Source Test →
+              </button>
+              <button onClick={onGoToPayload} className="text-[10px] text-amber-400 hover:text-amber-300 transition-colors">
+                ⚠ Payload Test →
+              </button>
+            </div>
           )}
           {activeOutcome?.capturedResponse?.resolvedUrl && (
             <p className="font-mono text-[10px] text-gray-600 truncate" title={activeOutcome.capturedResponse.resolvedUrl}>
@@ -842,7 +1132,7 @@ function ResponseMappingPanel({ config, onChange, sourceContext, testRunning, on
             </p>
           )}
         </div>
-        <div className="flex-1 overflow-y-auto px-2 py-2">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden px-2 py-2">
           {activeOutcome?.capturedResponse?.body != null ? (
             <JsonNode
               name="response"
@@ -896,7 +1186,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
   const [endpointModal, setEndpointModal] = useState<'create' | 'edit' | null>(null)
   const [editingEndpointId, setEditingEndpointId] = useState<string | null>(null)
   const [endpointForm, setEndpointForm] = useState<EndpointForm>(BLANK_ENDPOINT_FORM)
-  const [endpointTab, setEndpointTab] = useState<'params' | 'headers' | 'body' | 'test' | 'response'>('params')
+  const [endpointTab, setEndpointTab] = useState<'general' | 'params' | 'headers' | 'body' | 'test' | 'payload' | 'response'>('general')
   const [endpointSaving, setEndpointSaving] = useState(false)
   const [endpointFormError, setEndpointFormError] = useState<string | null>(null)
   const [deletingEndpointId, setDeletingEndpointId] = useState<string | null>(null)
@@ -970,6 +1260,62 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
     }
   }
 
+  async function runPayloadTest() {
+    if (!endpointSourceContext) return
+    setTestRunning(true)
+    setTestResult(null)
+    try {
+      const result = await api.testEndpoint(definitionId, {
+        path: endpointForm.path,
+        httpMethod: endpointForm.httpMethod || undefined,
+        queryParams: kvToJson(endpointForm.params),
+        headers: kvToJson(endpointForm.headers),
+        requestBodyTemplate: endpointForm.payloadBody || undefined,
+        namespace: endpointSourceContext.namespace,
+        testData: {},
+      })
+      setTestResult(result)
+    } catch (e: unknown) {
+      setTestResult({ success: false, statusCode: null, body: null, responseHeaders: null, resolvedUrl: null, error: (e as Error).message })
+    } finally {
+      setTestRunning(false)
+    }
+  }
+
+  async function runAndCaptureFromPayload(outcomeId: string) {
+    if (!endpointSourceContext) return
+    setTestRunning(true)
+    try {
+      const result = await api.testEndpoint(definitionId, {
+        path: endpointForm.path,
+        httpMethod: endpointForm.httpMethod || undefined,
+        queryParams: kvToJson(endpointForm.params),
+        headers: kvToJson(endpointForm.headers),
+        requestBodyTemplate: endpointForm.payloadBody || undefined,
+        namespace: endpointSourceContext.namespace,
+        testData: {},
+      })
+      let parsedBody: unknown = result.body
+      try { if (result.body) parsedBody = JSON.parse(result.body) } catch { /* keep raw */ }
+      const captured: CapturedResponse = {
+        capturedAt: new Date().toISOString(),
+        statusCode: result.statusCode ?? 0,
+        resolvedUrl: result.resolvedUrl,
+        body: parsedBody,
+      }
+      setEndpointForm(f => ({
+        ...f,
+        responseMapping: {
+          outcomes: f.responseMapping.outcomes.map(o =>
+            o.id === outcomeId ? { ...o, capturedResponse: captured } : o
+          ),
+        },
+      }))
+    } catch { /* ignore */ } finally {
+      setTestRunning(false)
+    }
+  }
+
   useEffect(() => {
     loadDefinition()
     loadEndpoints()
@@ -1003,7 +1349,9 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
 
   function openEditDef() {
     if (!def) return
+    const validCategories = API_CATEGORIES.map(c => c.value)
     setDefForm({
+      apiCategory: validCategories.includes(def.apiCategory) ? def.apiCategory : '',
       name: def.name,
       httpMethod: def.httpMethod,
       baseUrl: def.baseUrl,
@@ -1018,6 +1366,10 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
 
   async function handleDefSave() {
     if (!defForm) return
+    if (!defForm.apiCategory) {
+      setDefFormError('API Category is required.')
+      return
+    }
     if (!defForm.name.trim() || !defForm.baseUrl.trim()) {
       setDefFormError('Name and base URL are required.')
       return
@@ -1026,6 +1378,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
     setDefFormError(null)
     try {
       const updated = await api.updateDefinition(definitionId, {
+        apiCategory: defForm.apiCategory,
         name: defForm.name.trim(),
         httpMethod: defForm.httpMethod,
         baseUrl: defForm.baseUrl.trim(),
@@ -1057,15 +1410,16 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
   }
 
   function openCreateEndpoint() {
-    setEndpointForm({ ...BLANK_ENDPOINT_FORM, params: [{ key: '', value: '' }], headers: [{ key: '', value: '' }] })
+    setEndpointForm({ ...BLANK_ENDPOINT_FORM, params: [{ key: '', value: '' }], headers: [{ key: '', value: '' }], payloadBody: '' })
     setEditingEndpointId(null)
     setEndpointFormError(null)
-    setEndpointTab('params')
+    setEndpointTab('general')
     setEndpointModal('create')
   }
 
   function openEditEndpoint(ep: ApiEndpointRecord) {
     setEndpointForm({
+      apiSubType: ep.apiSubType,
       name: ep.name,
       path: ep.path,
       httpMethod: ep.httpMethod ?? '',
@@ -1074,23 +1428,25 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
       headers: jsonToKv(ep.headers),
       requestBodyTemplate: ep.requestBodyTemplate ?? '',
       testData: {},
+      payloadBody: '',
       responseMapping: parseResponseMapping(ep.responseMapping),
     })
     setEditingEndpointId(ep.id)
     setEndpointFormError(null)
-    setEndpointTab('params')
+    setEndpointTab('general')
     setEndpointModal('edit')
   }
 
   async function handleEndpointSave() {
-    if (!endpointForm.name.trim() || !endpointForm.path.trim()) {
-      setEndpointFormError('Name and path are required.')
+    if (!endpointForm.apiSubType.trim() || !endpointForm.name.trim() || !endpointForm.path.trim()) {
+      setEndpointFormError('Sub-type, name, and path are required.')
       return
     }
     setEndpointSaving(true)
     setEndpointFormError(null)
     try {
       const data: EndpointFormData = {
+        apiSubType: endpointForm.apiSubType,
         name: endpointForm.name.trim(),
         path: endpointForm.path.trim(),
         httpMethod: endpointForm.httpMethod.trim() || undefined,
@@ -1113,6 +1469,16 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
     } finally {
       setEndpointSaving(false)
     }
+  }
+
+  async function handleSetPreferred(id: string) {
+    try {
+      const updated = await api.setPreferred(definitionId, id)
+      // Clear preferred on all same-subtype endpoints, then mark the updated one
+      setEndpoints((prev) => prev.map((ep) =>
+        ep.apiSubType === updated.apiSubType ? { ...ep, isPreferred: ep.id === id } : ep
+      ))
+    } catch { /* ignore */ }
   }
 
   async function handleDeleteEndpoint(id: string) {
@@ -1141,7 +1507,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
   }
 
   const authBadgeInfo = authBadge(def.authConfig)
-  const endpointSourceContext = API_TYPE_SOURCE_CONTEXT[def.apiType]
+  const endpointSourceContext = API_TYPE_SOURCE_CONTEXT[endpointForm.apiSubType]
 
   return (
     <div className="p-6">
@@ -1162,8 +1528,8 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
               {def.provider && (
                 <span className="bg-gray-700 text-gray-300 text-xs px-2 py-0.5 rounded font-medium">{def.provider}</span>
               )}
-              <span className={`text-xs px-2 py-0.5 rounded font-medium ${API_TYPE_BADGE_COLORS[def.apiType] ?? 'bg-gray-800 text-gray-300'}`}>
-                {API_TYPE_LABELS[def.apiType] ?? def.apiType}
+              <span className={`text-xs px-2 py-0.5 rounded font-medium ${API_CATEGORY_BADGE_COLORS[def.apiCategory] ?? 'bg-gray-800 text-gray-300'}`}>
+                {API_CATEGORY_LABELS[def.apiCategory] ?? def.apiCategory}
               </span>
               <span className={`text-xs px-2 py-0.5 rounded font-medium ${def.isActive ? 'bg-emerald-900/50 text-emerald-400' : 'bg-gray-800 text-gray-500'}`}>
                 {def.isActive ? 'Active' : 'Inactive'}
@@ -1236,27 +1602,44 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
               <thead>
                 <tr className="border-b border-gray-800 text-gray-400 text-left">
                   <th className="px-4 py-3 font-medium">Name</th>
+                  <th className="px-4 py-3 font-medium">Sub-Type</th>
                   <th className="px-4 py-3 font-medium">Method</th>
                   <th className="px-4 py-3 font-medium">Path</th>
-                  <th className="px-4 py-3 font-medium">Description</th>
                   <th className="px-4 py-3 font-medium"></th>
                 </tr>
               </thead>
               <tbody>
                 {endpoints.map((ep) => (
                   <tr key={ep.id} className="border-b border-gray-800 last:border-0 hover:bg-gray-800/30 transition-colors">
-                    <td className="px-4 py-3 text-white font-medium">{ep.name}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-white font-medium">{ep.name}</span>
+                        {ep.isPreferred && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-900/50 text-emerald-400 font-medium">Preferred</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`text-xs px-2 py-0.5 rounded font-medium ${API_SUB_TYPE_BADGE_COLORS[ep.apiSubType] ?? 'bg-gray-800 text-gray-400'}`}>
+                        {API_SUB_TYPE_LABELS[ep.apiSubType] ?? ep.apiSubType}
+                      </span>
+                    </td>
                     <td className="px-4 py-3">
                       <span className="bg-gray-800 text-gray-300 text-xs px-2 py-0.5 rounded font-mono">
                         {ep.httpMethod ?? 'inherit'}
                       </span>
                     </td>
                     <td className="px-4 py-3 font-mono text-gray-300 text-xs">{ep.path}</td>
-                    <td className="px-4 py-3 text-gray-400 text-xs max-w-xs truncate">
-                      {ep.description ?? <span className="text-gray-600">—</span>}
-                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-3">
+                        {!ep.isPreferred && (
+                          <button
+                            onClick={() => handleSetPreferred(ep.id)}
+                            className="text-emerald-500 hover:text-emerald-400 text-xs font-medium transition-colors"
+                          >
+                            Set Preferred
+                          </button>
+                        )}
                         <button
                           onClick={() => openEditEndpoint(ep)}
                           className="text-indigo-400 hover:text-indigo-300 text-xs font-medium transition-colors"
@@ -1288,6 +1671,17 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
               <h2 className="text-white text-lg font-semibold">Edit API Definition</h2>
             </div>
             <div className="overflow-y-auto flex-1 px-6 py-4 space-y-4">
+              <div>
+                <label className="block text-gray-400 text-xs font-medium mb-1.5">API Category</label>
+                <select
+                  value={defForm.apiCategory}
+                  onChange={(e) => setDefForm((f) => f ? { ...f, apiCategory: e.target.value } : f)}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="">— Select a category —</option>
+                  {API_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                </select>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-gray-400 text-xs font-medium mb-1.5">Name *</label>
@@ -1398,13 +1792,51 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
           </datalist>
 
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-            <div className={`bg-gray-900 border border-gray-700 rounded-2xl w-full shadow-2xl flex flex-col max-h-[90vh] ${endpointSourceContext ? 'max-w-4xl' : 'max-w-2xl'}`}>
+            <div className={`bg-gray-900 border border-gray-700 rounded-2xl w-full shadow-2xl flex flex-col max-h-[90vh] ${endpointSourceContext ? (endpointTab === 'response' ? 'max-w-5xl' : 'max-w-4xl') : 'max-w-2xl'}`}>
               <div className="px-6 pt-6 pb-4 border-b border-gray-800 shrink-0">
                 <h2 className="text-white text-lg font-semibold">
                   {endpointModal === 'edit' ? 'Edit Endpoint' : 'Add Endpoint'}
                 </h2>
               </div>
-              <div className="flex flex-1 min-h-0">
+              {/* Tab bar — always visible so the user can navigate back from any tab */}
+              <div className="px-6 border-b border-gray-700 shrink-0 flex">
+                {(endpointSourceContext
+                  ? ['general', 'params', 'headers', 'body', 'test', 'payload', 'response'] as const
+                  : ['general', 'params', 'headers', 'body'] as const
+                ).map((tab) => {
+                  const counts: Record<string, number> = {
+                    general: 0,
+                    params: endpointForm.params.filter(r => r.key.trim()).length,
+                    headers: endpointForm.headers.filter(r => r.key.trim()).length,
+                    body: endpointForm.requestBodyTemplate.trim() ? 1 : 0,
+                    test: 0,
+                    payload: endpointForm.payloadBody.trim() ? 1 : 0,
+                    response: endpointForm.responseMapping.outcomes.length,
+                  }
+                  const labels: Record<string, string> = { general: 'General', params: 'Query Params', headers: 'Headers', body: 'Body', test: 'Source Test', payload: 'Payload Test', response: 'Response Mapping' }
+                  const count = counts[tab]
+                  const activeColor = tab === 'test' ? 'border-emerald-500 text-emerald-400'
+                    : tab === 'response' ? 'border-violet-500 text-violet-400'
+                    : 'border-indigo-500 text-white'
+                  return (
+                    <button
+                      key={tab}
+                      onClick={() => { setEndpointTab(tab); setTestResult(null) }}
+                      className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 -mb-px ${
+                        endpointTab === tab ? activeColor : 'border-transparent text-gray-500 hover:text-gray-300'
+                      }`}
+                    >
+                      {labels[tab]}
+                      {count > 0 && (
+                        <span className={`text-white text-xs rounded-full w-4 h-4 flex items-center justify-center leading-none ${tab === 'response' ? 'bg-violet-600' : 'bg-indigo-600'}`}>
+                          {count}
+                        </span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+              <div className="flex flex-1 min-h-0 overflow-hidden">
               {endpointTab === 'response' ? (
                 <ResponseMappingPanel
                   config={endpointForm.responseMapping}
@@ -1412,102 +1844,84 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                   sourceContext={endpointSourceContext ?? null}
                   testRunning={testRunning}
                   onRunAndCapture={runAndCaptureForOutcome}
+                  onRunAndCaptureFromPayload={runAndCaptureFromPayload}
                   hasTestData={Object.values(endpointForm.testData).some(v => v.trim())}
+                  hasPayload={endpointForm.payloadBody.trim().length > 0}
                   onGoToTest={() => setEndpointTab('test')}
+                  onGoToPayload={() => setEndpointTab('payload')}
                 />
               ) : (<>
               <div className="overflow-y-auto flex-1 px-6 py-4 space-y-4">
 
-                {/* Name + Method */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-gray-400 text-xs font-medium mb-1.5">Name *</label>
-                    <input
-                      type="text"
-                      value={endpointForm.name}
-                      onChange={(e) => setEndpointForm((f) => ({ ...f, name: e.target.value }))}
-                      placeholder="Address Validate"
-                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-gray-400 text-xs font-medium mb-1.5">HTTP Method</label>
-                    <select
-                      value={endpointForm.httpMethod}
-                      onChange={(e) => setEndpointForm((f) => ({ ...f, httpMethod: e.target.value }))}
-                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
-                    >
-                      <option value="">Inherit from definition</option>
-                      {HTTP_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
-                    </select>
-                  </div>
-                </div>
-
-                {/* Path */}
-                <div>
-                  <label className="block text-gray-400 text-xs font-medium mb-1.5">Path *</label>
-                  <input
-                    type="text"
-                    value={endpointForm.path}
-                    onChange={(e) => setEndpointForm((f) => ({ ...f, path: e.target.value }))}
-                    placeholder="/v3/address"
-                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 font-mono focus:outline-none focus:border-indigo-500"
-                  />
-                  <p className="text-gray-600 text-xs mt-1">Relative path appended to the base URL. Start with /</p>
-                </div>
-
-                {/* Description */}
-                <div>
-                  <label className="block text-gray-400 text-xs font-medium mb-1.5">Description</label>
-                  <input
-                    type="text"
-                    value={endpointForm.description}
-                    onChange={(e) => setEndpointForm((f) => ({ ...f, description: e.target.value }))}
-                    placeholder="Optional description"
-                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-
-                {/* Tabs: Params | Headers | Body */}
-                <div>
-                  {/* Tab bar */}
-                  <div className="flex border-b border-gray-700 mb-3">
-                    {(endpointSourceContext
-                      ? ['params', 'headers', 'body', 'test', 'response'] as const
-                      : ['params', 'headers', 'body'] as const
-                    ).map((tab) => {
-                      const counts: Record<string, number> = {
-                        params: endpointForm.params.filter(r => r.key.trim()).length,
-                        headers: endpointForm.headers.filter(r => r.key.trim()).length,
-                        body: endpointForm.requestBodyTemplate.trim() ? 1 : 0,
-                        test: 0,
-                        response: endpointForm.responseMapping.outcomes.length,
-                      }
-                      const labels: Record<string, string> = { params: 'Query Params', headers: 'Headers', body: 'Body', test: 'Test', response: 'Response Mapping' }
-                      const count = counts[tab]
-                      const activeColor = tab === 'test' ? 'border-emerald-500 text-emerald-400'
-                        : tab === 'response' ? 'border-violet-500 text-violet-400'
-                        : 'border-indigo-500 text-white'
-                      return (
-                        <button
-                          key={tab}
-                          onClick={() => { setEndpointTab(tab); setTestResult(null) }}
-                          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 -mb-px ${
-                            endpointTab === tab ? activeColor : 'border-transparent text-gray-500 hover:text-gray-300'
-                          }`}
+                {/* General tab */}
+                {endpointTab === 'general' && (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-gray-400 text-xs font-medium mb-1.5">API Sub-Type *</label>
+                      <select
+                        value={endpointForm.apiSubType}
+                        onChange={(e) => setEndpointForm((f) => ({ ...f, apiSubType: e.target.value }))}
+                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value="">Select a sub-type…</option>
+                        {API_SUB_TYPES.filter(s => s.category === def.apiCategory).map((s) => (
+                          <option key={s.value} value={s.value}>{s.label}</option>
+                        ))}
+                      </select>
+                      {!API_CATEGORIES.some(c => c.value === def.apiCategory) && (
+                        <p className="text-amber-400 text-xs mt-1">
+                          The definition has an invalid API Category — edit the definition and set a valid category first.
+                        </p>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-gray-400 text-xs font-medium mb-1.5">Name *</label>
+                        <input
+                          type="text"
+                          value={endpointForm.name}
+                          onChange={(e) => setEndpointForm((f) => ({ ...f, name: e.target.value }))}
+                          placeholder="Address Validate"
+                          className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-gray-400 text-xs font-medium mb-1.5">HTTP Method</label>
+                        <select
+                          value={endpointForm.httpMethod}
+                          onChange={(e) => setEndpointForm((f) => ({ ...f, httpMethod: e.target.value }))}
+                          className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
                         >
-                          {labels[tab]}
-                          {count > 0 && (
-                            <span className={`text-white text-xs rounded-full w-4 h-4 flex items-center justify-center leading-none ${tab === 'response' ? 'bg-violet-600' : 'bg-indigo-600'}`}>
-                              {count}
-                            </span>
-                          )}
-                        </button>
-                      )
-                    })}
+                          <option value="">Inherit from definition</option>
+                          {HTTP_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-gray-400 text-xs font-medium mb-1.5">Path *</label>
+                      <input
+                        type="text"
+                        value={endpointForm.path}
+                        onChange={(e) => setEndpointForm((f) => ({ ...f, path: e.target.value }))}
+                        placeholder="/v3/address"
+                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 font-mono focus:outline-none focus:border-indigo-500"
+                      />
+                      <p className="text-gray-600 text-xs mt-1">Relative path appended to the base URL. Start with /</p>
+                    </div>
+                    <div>
+                      <label className="block text-gray-400 text-xs font-medium mb-1.5">Description</label>
+                      <input
+                        type="text"
+                        value={endpointForm.description}
+                        onChange={(e) => setEndpointForm((f) => ({ ...f, description: e.target.value }))}
+                        placeholder="Optional description"
+                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
                   </div>
+                )}
 
-                  {/* Query Params tab */}
+                {/* Query Params tab */}
                   {endpointTab === 'params' && (
                     <div>
                       <div className="flex items-center gap-1.5 mb-1.5 px-0.5">
@@ -1571,7 +1985,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                     </div>
                   )}
 
-                  {/* Test tab */}
+                  {/* Source Test tab */}
                   {endpointTab === 'test' && endpointSourceContext?.namespace === 'address' && (
                     <div className="space-y-3">
                       {/* Name row */}
@@ -1670,7 +2084,62 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                       )}
                     </div>
                   )}
-                </div>
+
+                  {/* Payload Test tab */}
+                  {endpointTab === 'payload' && (
+                    <div className="space-y-3">
+                      <p className="text-gray-500 text-xs leading-relaxed">
+                        Paste a raw request body (e.g. a vendor-supplied test payload) to send directly to the endpoint.
+                        Auth, path, query params, and headers are still applied from the endpoint config.
+                      </p>
+                      <textarea
+                        value={endpointForm.payloadBody}
+                        onChange={(e) => setEndpointForm((f) => ({ ...f, payloadBody: e.target.value }))}
+                        placeholder={'{\n  "streetAddress": "6406 Ivy Lane",\n  "city": "Greenbelt",\n  "state": "MD",\n  "ZIPCode": "20770"\n}'}
+                        rows={10}
+                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500 resize-y"
+                      />
+                      <div className="pt-1 border-t border-gray-800 flex items-center gap-3">
+                        <button
+                          onClick={runPayloadTest}
+                          disabled={testRunning || !endpointForm.path.trim() || !endpointForm.payloadBody.trim()}
+                          className="bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                        >
+                          {testRunning ? 'Running…' : 'Run Test'}
+                        </button>
+                        {!endpointForm.payloadBody.trim() && (
+                          <span className="text-gray-500 text-xs">Paste a payload above to run.</span>
+                        )}
+                      </div>
+                      {testResult && (
+                        <div className="space-y-2">
+                          {testResult.resolvedUrl && (
+                            <p className="font-mono text-xs text-gray-500 truncate" title={testResult.resolvedUrl}>
+                              → {testResult.resolvedUrl}
+                            </p>
+                          )}
+                          <div className="flex items-center gap-2">
+                            {testResult.statusCode != null ? (
+                              <span className={`text-sm font-mono font-bold ${testResult.statusCode < 300 ? 'text-emerald-400' : testResult.statusCode < 500 ? 'text-amber-400' : 'text-red-400'}`}>
+                                {testResult.statusCode}
+                              </span>
+                            ) : null}
+                            <span className={`text-xs font-medium ${testResult.success ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {testResult.success ? 'Success' : 'Failed'}
+                            </span>
+                          </div>
+                          {testResult.error && (
+                            <p className="text-red-400 text-xs bg-red-900/20 rounded-lg px-3 py-2">{testResult.error}</p>
+                          )}
+                          {testResult.body && (
+                            <pre className="bg-gray-950 border border-gray-800 rounded-lg p-3 text-xs text-gray-300 font-mono overflow-x-auto max-h-52 whitespace-pre-wrap break-all">
+                              {testResult.body}
+                            </pre>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
               </div>
 

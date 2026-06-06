@@ -174,7 +174,7 @@ export async function resetTenantAgentPassword(tenantId: string, agentId: string
 
 export interface ApiDefinitionRecord {
   id: string
-  apiType: string
+  apiCategory: string
   provider: string | null
   name: string
   description: string | null
@@ -192,7 +192,7 @@ export interface ApiDefinitionRecord {
 }
 
 export interface CreateApiDefinitionData {
-  apiType: string
+  apiCategory: string
   name: string
   httpMethod: string
   baseUrl: string
@@ -206,6 +206,7 @@ export interface UpdateApiDefinitionData {
   name: string
   httpMethod: string
   baseUrl: string
+  apiCategory?: string
   description?: string
   provider?: string
   timeoutSeconds?: number
@@ -277,6 +278,7 @@ export async function deletePortalCredential(keyName: string): Promise<void> {
 export interface ApiEndpointRecord {
   id: string
   definitionId: string
+  apiSubType: string
   name: string
   description: string | null
   path: string
@@ -286,12 +288,14 @@ export interface ApiEndpointRecord {
   headers: string
   responseMapping: string
   sortOrder: number
+  isPreferred: boolean
   isActive: boolean
   createdAt: string
   updatedAt: string | null
 }
 
 export interface CreateApiEndpointData {
+  apiSubType: string
   name: string
   path: string
   httpMethod?: string
@@ -304,6 +308,7 @@ export interface CreateApiEndpointData {
 }
 
 export interface UpdateApiEndpointData {
+  apiSubType?: string
   name: string
   path: string
   httpMethod?: string
@@ -331,6 +336,10 @@ export async function updatePortalApiEndpoint(definitionId: string, endpointId: 
     method: 'PUT',
     body: JSON.stringify(data),
   })
+}
+
+export async function setPreferredPortalApiEndpoint(definitionId: string, endpointId: string): Promise<ApiEndpointRecord> {
+  return portalFetch<ApiEndpointRecord>(`/api/v1/portal/api-definitions/${definitionId}/endpoints/${endpointId}/set-preferred`, { method: 'POST' })
 }
 
 export async function deletePortalApiEndpoint(definitionId: string, endpointId: string): Promise<void> {

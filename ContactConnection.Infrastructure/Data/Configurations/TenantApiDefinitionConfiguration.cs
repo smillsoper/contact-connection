@@ -12,7 +12,7 @@ public class TenantApiDefinitionConfiguration : IEntityTypeConfiguration<TenantA
 
         builder.HasKey(d => d.Id);
         builder.Property(d => d.Id).HasColumnName("id");
-        builder.Property(d => d.ApiType).HasColumnName("api_type").HasMaxLength(64).IsRequired();
+        builder.Property(d => d.ApiCategory).HasColumnName("api_category").HasMaxLength(64).IsRequired();
         builder.Property(d => d.Provider).HasColumnName("provider").HasMaxLength(100);
         builder.Property(d => d.Name).HasColumnName("name").HasMaxLength(200).IsRequired();
         builder.Property(d => d.Description).HasColumnName("description").HasMaxLength(500);
@@ -28,7 +28,7 @@ public class TenantApiDefinitionConfiguration : IEntityTypeConfiguration<TenantA
         builder.Property(d => d.CreatedAt).HasColumnName("created_at").IsRequired();
         builder.Property(d => d.UpdatedAt).HasColumnName("updated_at");
 
-        builder.HasIndex(d => d.ApiType).HasDatabaseName("ix_tenant_api_definitions_api_type");
-        builder.HasIndex(d => new { d.ApiType, d.IsActive }).HasDatabaseName("ix_tenant_api_definitions_api_type_active");
+        builder.HasIndex(d => d.ApiCategory).HasDatabaseName("ix_tenant_api_definitions_api_category");
+        builder.HasIndex(d => new { d.ApiCategory, d.IsActive }).HasDatabaseName("ix_tenant_api_definitions_api_category_active");
     }
 }

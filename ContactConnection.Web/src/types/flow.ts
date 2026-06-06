@@ -31,6 +31,7 @@ export interface FlowNodeState {
   lockedFields: string[]
   scriptContext?: string
   // address node
+  useValidation?: boolean
   allowInternational?: boolean
   showMiddleInitial?: boolean
   showCompany?: boolean

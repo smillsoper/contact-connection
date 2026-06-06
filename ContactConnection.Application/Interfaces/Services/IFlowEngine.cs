@@ -129,6 +129,9 @@ public class FlowNodeState
 
     // ── Address node ───────────────────────────────────────────────────────
 
+    /// <summary>When true the frontend should call the validate-address endpoint before advancing.</summary>
+    public bool UseValidation { get; set; } = true;
+
     /// <summary>When true the Country field is shown and international postal formats are accepted.</summary>
     public bool AllowInternational { get; set; }
 

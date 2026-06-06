@@ -66,12 +66,14 @@ public partial class AddressNodeHandler(IVariableResolver resolver)
         var allowInternational = node["allowInternational"]?.GetValue<bool>() ?? false;
         var showMiddleInitial  = node["showMiddleInitial"]?.GetValue<bool>()  ?? false;
         var showCompany        = node["showCompany"]?.GetValue<bool>()        ?? false;
+        var useValidation      = node["useValidation"]?.GetValue<bool>()      ?? true;
         var requiredFields     = ParseStringList(node, "requiredFields");
         var varCtx             = ctx.ToVariableContext();
 
         FlowNodeState MakeState()
         {
             var s = BuildState(ctx, node, resolvedContent: string.Empty);
+            s.UseValidation      = useValidation;
             s.AllowInternational = allowInternational;
             s.ShowMiddleInitial  = showMiddleInitial;
             s.ShowCompany        = showCompany;
@@ -86,29 +88,36 @@ public partial class AddressNodeHandler(IVariableResolver resolver)
             if (!string.IsNullOrWhiteSpace(scriptContent))
                 s.NodeScriptContent = Resolver.Resolve(scriptContent, varCtx);
 
-            // Pre-populate form from an existing FlowVar (e.g. set by a preceding set_variable node)
-            if (!string.IsNullOrEmpty(outputVar) && ctx.FlowVars.TryGetValue(outputVar, out var existing))
+            // Pre-populate form: prefer FlowVars (normalized, has computed fields stripped)
+            // then fall back to the raw last submission stored in execution history.
+            string? existingJson = null;
+            if (!string.IsNullOrEmpty(outputVar) && ctx.FlowVars.TryGetValue(outputVar, out var fv))
+                existingJson = fv;
+            if (string.IsNullOrEmpty(existingJson))
+                existingJson = ctx.ExecutionHistory.LastOrDefault(h => h.NodeId == ctx.CurrentNodeId)?.InputValue;
+
+            if (!string.IsNullOrEmpty(existingJson))
             {
                 try
                 {
-                    var sub = JsonSerializer.Deserialize<AddressSubmission>(existing, JsonOpts);
-                    if (sub is not null)
+                    var pre = JsonSerializer.Deserialize<AddressSubmission>(existingJson, JsonOpts);
+                    if (pre is not null)
                     {
                         s.PrefilledAddress = new Dictionary<string, string>
                         {
-                            ["firstName"]      = sub.FirstName      ?? string.Empty,
-                            ["middleInitial"]  = sub.MiddleInitial  ?? string.Empty,
-                            ["lastName"]       = sub.LastName       ?? string.Empty,
-                            ["company"]        = sub.Company        ?? string.Empty,
-                            ["address1Prefix"] = sub.Address1Prefix ?? string.Empty,
-                            ["address1"]       = sub.Address1       ?? string.Empty,
-                            ["address2Prefix"] = sub.Address2Prefix ?? string.Empty,
-                            ["address2"]       = sub.Address2       ?? string.Empty,
-                            ["zip"]            = sub.Zip            ?? string.Empty,
-                            ["zip4"]           = sub.Zip4           ?? string.Empty,
-                            ["city"]           = sub.City           ?? string.Empty,
-                            ["state"]          = sub.State          ?? string.Empty,
-                            ["country"]        = sub.Country        ?? "US",
+                            ["firstName"]      = pre.FirstName      ?? string.Empty,
+                            ["middleInitial"]  = pre.MiddleInitial  ?? string.Empty,
+                            ["lastName"]       = pre.LastName       ?? string.Empty,
+                            ["company"]        = pre.Company        ?? string.Empty,
+                            ["address1Prefix"] = pre.Address1Prefix ?? string.Empty,
+                            ["address1"]       = pre.Address1       ?? string.Empty,
+                            ["address2Prefix"] = pre.Address2Prefix ?? string.Empty,
+                            ["address2"]       = pre.Address2       ?? string.Empty,
+                            ["zip"]            = pre.Zip            ?? string.Empty,
+                            ["zip4"]           = pre.Zip4           ?? string.Empty,
+                            ["city"]           = pre.City           ?? string.Empty,
+                            ["state"]          = pre.State          ?? string.Empty,
+                            ["country"]        = pre.Country        ?? "US",
                         };
                     }
                 }

@@ -53,10 +53,10 @@ public static class AdminApiDefinitionsEndpoints
     {
         if (!tenantContext.HasTenant) return Results.Unauthorized();
 
-        if (!ApiDefinitionType.IsValid(request.ApiType))
-            return Results.BadRequest(new { error = $"Unknown api_type '{request.ApiType}'. Valid types: {string.Join(", ", ApiDefinitionType.All)}" });
+        if (!ApiCategory.IsValid(request.ApiCategory))
+            return Results.BadRequest(new { error = $"Unknown api_category '{request.ApiCategory}'. Valid categories: {string.Join(", ", ApiCategory.All)}" });
 
-        var def = TenantApiDefinition.Create(request.ApiType, request.Name, request.HttpMethod, request.BaseUrl, request.Description, request.Provider, request.TimeoutSeconds ?? 30);
+        var def = TenantApiDefinition.Create(request.ApiCategory, request.Name, request.HttpMethod, request.BaseUrl, request.Description, request.Provider, request.TimeoutSeconds ?? 30);
         await repo.AddAsync(def, ct);
         await repo.SaveChangesAsync(ct);
 
@@ -75,6 +75,12 @@ public static class AdminApiDefinitionsEndpoints
         var def = await repo.GetByIdAsync(id, ct);
         if (def is null) return Results.NotFound();
 
+        if (request.ApiCategory is not null)
+        {
+            if (!ApiCategory.IsValid(request.ApiCategory))
+                return Results.BadRequest(new { error = $"Unknown api_category '{request.ApiCategory}'." });
+            def.UpdateCategory(request.ApiCategory);
+        }
         def.Update(request.Name, request.HttpMethod, request.BaseUrl, request.Description, request.Provider, request.TimeoutSeconds);
         if (request.Headers is not null) def.SetHeaders(request.Headers);
         if (request.QueryParams is not null) def.SetQueryParams(request.QueryParams);
@@ -126,7 +132,7 @@ public static class AdminApiDefinitionsEndpoints
     private static object ToResponse(TenantApiDefinition d) => new
     {
         d.Id,
-        d.ApiType,
+        d.ApiCategory,
         d.Provider,
         d.Name,
         d.Description,
@@ -146,7 +152,7 @@ public static class AdminApiDefinitionsEndpoints
 
 // Shared request records for both portal and tenant endpoints
 public record CreateApiDefinitionRequest(
-    string ApiType,
+    string ApiCategory,
     string Name,
     string HttpMethod,
     string BaseUrl,
@@ -158,6 +164,7 @@ public record UpdateApiDefinitionRequest(
     string Name,
     string HttpMethod,
     string BaseUrl,
+    string? ApiCategory,
     string? Description,
     string? Provider,
     int? TimeoutSeconds,

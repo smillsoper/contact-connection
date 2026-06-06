@@ -18,8 +18,26 @@ public class PortalApiEndpointRepository : IPortalApiEndpointRepository
             .ThenBy(e => e.Name)
             .ToListAsync(ct);
 
+    public Task<List<PortalApiEndpoint>> GetBySubTypeAsync(string apiSubType, CancellationToken ct = default) =>
+        _db.PortalApiEndpoints
+            .Where(e => e.ApiSubType == apiSubType && e.IsActive)
+            .OrderByDescending(e => e.IsPreferred)
+            .ThenBy(e => e.SortOrder)
+            .ToListAsync(ct);
+
+    public Task<PortalApiEndpoint?> GetPreferredBySubTypeAsync(string apiSubType, CancellationToken ct = default) =>
+        _db.PortalApiEndpoints
+            .FirstOrDefaultAsync(e => e.ApiSubType == apiSubType && e.IsPreferred && e.IsActive, ct);
+
     public Task<PortalApiEndpoint?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
         _db.PortalApiEndpoints.FirstOrDefaultAsync(e => e.Id == id, ct);
+
+    public async Task ClearPreferredForSubTypeAsync(string apiSubType, CancellationToken ct = default)
+    {
+        var current = await _db.PortalApiEndpoints
+            .FirstOrDefaultAsync(e => e.ApiSubType == apiSubType && e.IsPreferred, ct);
+        current?.ClearPreferred();
+    }
 
     public async Task AddAsync(PortalApiEndpoint endpoint, CancellationToken ct = default) =>
         await _db.PortalApiEndpoints.AddAsync(endpoint, ct);

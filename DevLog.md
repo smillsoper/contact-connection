@@ -48,6 +48,201 @@
 | 36 | 2026-05-29 | 4:11 PM CDT | 5:56 PM CDT | 105 min | ~1966 min |
 | 37 | 2026-05-30 | 9:41 AM CDT | 10:43 AM CDT | 62 min | ~2028 min |
 | 38 | 2026-05-30 | 11:01 AM CDT | 11:54 AM CDT | 53 min | ~2081 min |
+| 39 | 2026-05-30 | 4:13 PM CDT | 5:01 PM CDT | 48 min | ~2129 min |
+| 40 | 2026-05-31 | 8:28 AM CDT | 11:13 AM CDT | 165 min | ~2294 min |
+| 41 | 2026-06-01 | 4:45 AM CDT | 5:11 AM CDT | 26 min | ~2320 min |
+| 42 | 2026-06-04 | 5:00 PM CDT | 7:00 PM CDT | 120 min | ~2440 min |
+| 43 | 2026-06-06 | 11:03 AM CDT | 2:27 PM CDT | 204 min | ~2644 min |
+| 44 | 2026-06-06 | 2:27 PM CDT | 3:44 PM CDT | 77 min | ~2721 min |
+
+---
+
+## Session 44
+
+**Date:** 2026-06-06
+**Start:** 2:27 PM CDT
+**End:** 3:44 PM CDT
+**Duration:** 77 minutes
+
+### Accomplished
+
+**Response mapping field template syntax**
+
+- Added `{{path}}` template support to the FROM field in field mappings, allowing multiple response paths to be combined into a single target variable.
+- Example: `{{results[0].data.address_components.number}} {{results[0].data.address_components.pre_directional}} {{results[0].data.address_components.street}} {{results[0].data.address_components.suffix}}` → "111 SE RIFLE RANGE ST"
+- Backend: `ResolveTemplate` method — regex-replaces each `{{path}}` placeholder using `ResolvePath` + `Normalize`; collapses multiple spaces left by empty/missing segments.
+- Frontend: `resolveFromTemplate` helper — resolves `{{path}}` placeholders using `walkPath` for live preview; same space collapsing.
+- `FieldMappingEditor` updated: accepts `capturedResponse` prop; shows live emerald preview line beneath any mapping row using template syntax; header updated to "From (path or template)"; placeholder and hint text updated to document `{{path}}` syntax.
+
+**PO Box address handling for template-constructed address1**
+
+- `ParseAddress1` previously only detected prefix types (PO Box, RR, etc.) when they appeared at the start of the string. The template `{{number}} {{street}}` produces "100 PO BOX" (number first) which was not recognized, leaving the prefix dropdown blank.
+- Enhanced `ParseAddress1` with a second pass: after the start-match fails, scans for each prefix token mid-string using `" " + token.TrimEnd()` (space-prefixed bare token). A whole-word boundary check (`upper[afterIdx] != ' '`) prevents false positives such as "BOXER ST" matching the "BOX" token.
+- Result: "100 PO BOX" → prefix="PO Box", address="100" ✓; "111 SE RIFLE RANGE ST" → prefix="", address unchanged ✓.
+- Applied to both `fieldMappings` and `multipleMatchesConfig.itemMappings` paths.
+
+---
+
+## Session 43
+
+**Date:** 2026-06-06
+**Start:** 11:03 AM CDT
+**End:** 2:27 PM CDT
+**Duration:** 204 minutes
+
+### Accomplished
+
+**Two-tier API type hierarchy refactor**
+
+- Replaced flat `ApiType` enum on API definitions with a two-tier system: `ApiCategory` at the definition level (address, order, fulfillment, media) and `ApiSubType` at the endpoint level (address_validation, zip_code_lookup, realtime_address_autocomplete, fulfillment_tracking, fulfillment_submit, order_lookup, image_upload, image_resize).
+- Added `ApiCategory` and `ApiSubType` static classes to Domain; deleted `ApiDefinitionType`.
+- Updated `PortalApiDefinition` and `TenantApiDefinition`: `ApiType` → `ApiCategory`, validated against `ApiCategory.IsValid()`.
+- Updated `PortalApiEndpoint` and `TenantApiEndpoint`: added `ApiSubType` (validated), `IsPreferred`, `SetPreferred()`, `ClearPreferred()`.
+- Added `TenantApiPreference` entity (tenant schema) — cross-schema reference to portal endpoint ID, no DB FK.
+
+**Application / Infrastructure**
+
+- Updated all repository interfaces: `GetByTypeAsync` → `GetByCategoryAsync`; added `GetBySubTypeAsync`, `GetPreferredBySubTypeAsync`, `ClearPreferredForSubTypeAsync` on endpoint repos.
+- Added `ITenantApiPreferenceRepository` + `TenantApiPreferenceRepository`; registered in DI.
+- Updated EF configurations: `api_type` → `api_category`, added `api_sub_type` + `is_preferred` columns, `TenantApiPreferenceConfiguration` for `tenant_api_preferences` table.
+- Ran both migrations (`RefactorApiTypes` on ContactConnectionDbContext and TenantDbContext); both applied successfully.
+
+**API endpoints**
+
+- Updated portal + admin definition endpoints: `apiType` → `apiCategory` in requests/responses.
+- Updated portal + admin endpoint endpoints: added `apiSubType` field, `POST .../set-preferred` route.
+- Added `AdminApiPreferencesEndpoints`: `GET/PUT/DELETE /api/v1/admin/api-preferences/{subType}` and `GET /api/v1/admin/available-endpoints/{subType}`.
+- Rewrote flow session `ValidateAddress` to use the new resolution order: tenant preferred endpoint → any tenant endpoint → TenantApiPreference (portal override) → portal preferred → any portal endpoint.
+
+**Frontend**
+
+- Updated `portal.ts` and `adminApiDefinitions.ts`: `apiType` → `apiCategory` on definitions; added `apiSubType` + `isPreferred` to endpoint records; added `setPreferredPortalApiEndpoint` / `setPreferredAdminApiEndpoint`; added `TenantApiPreferenceRecord`, `AvailableEndpointsResult`, `AvailableEndpointItem` types and preference API functions.
+- Rewrote `ApiDefinitionDetailContent.tsx`: replaced `API_TYPES` with `API_CATEGORIES` + `API_SUB_TYPES`; added Sub-Type column with colored badges, Preferred badge, Set Preferred button in endpoint table; endpoint form now has `apiSubType` dropdown filtered by definition category.
+- Updated `PortalApiDefinitionsPage.tsx` and `AdminApiDefinitionsPage.tsx`: `API_TYPES` → `API_CATEGORIES`, badge color functions, form field `apiType` → `apiCategory`.
+- Wired `setPreferred` into `DetailApi` objects in `PortalApiDefinitionDetailPage.tsx` and `AdminApiDefinitionDetailPage.tsx`.
+- TypeScript build: 0 errors. .NET build: 0 warnings, 0 errors.
+
+**Sub-type taxonomy update (bugs found during testing)**
+
+- Expanded `ApiSubType` to 14 sub-types across 4 categories: Address (address_validation, zip_code_lookup, realtime_address_autocomplete), Order (order_submit, order_lookup, order_cancel), Fulfillment (fulfillment_tracking, fulfillment_cancel, fulfillment_return, fulfillment_submit), Media (tfn_assignment_add, tfn_assignment_update, tfn_assignment_delete, campaign_results — DR/Print media agency APIs).
+- Updated `_categoryMap` to cover all 14 sub-types.
+
+**API Category edit modal fix**
+
+- `ApiCategory` field was missing from the Edit Definition modal. Added `apiCategory: string` to `DefFormState`, blank placeholder option in the dropdown, client-side validation before save, and `apiCategory` passed in the update call.
+- Added `UpdateCategory()` method to `PortalApiDefinition` and `TenantApiDefinition` domain entities; wired into portal and admin definition update handlers with server-side `ApiCategory.IsValid()` validation.
+- Fixed stale `address_validation` badge: React controlled `<select>` was holding an invalid value in state when no matching option existed. `openEditDef` now resets any category not in the valid list to `''`, triggering the blank placeholder, so the user must explicitly choose a valid category before saving.
+
+**Endpoint sub-type persistence fix**
+
+- Endpoint `api_sub_type` was never updated on edit — `UpdateApiEndpointRequest` had no `ApiSubType` field, so the backend ignored the value sent by the frontend. Added `string? ApiSubType` to both portal and admin `UpdateApiEndpointRequest` records; added `UpdateSubType()` method to `PortalApiEndpoint` and `TenantApiEndpoint`; update handlers now validate and call `endpoint.UpdateSubType()`.
+
+**Boolean condition matching fix in flow execution**
+
+- `AddressResponseMappingEvaluator.EvaluateCondition` was calling `resolved?.ToString()` on `JsonElement` values, which returns `"True"`/`"False"` (via `bool.TrueString`) for JSON booleans — not `"true"`/`"false"` as stored in outcome conditions. Any `success = true` condition always failed, causing the AND chain to collapse and returning "UNRECOGNIZED RESPONSE".
+- Added `Normalize()` helper: explicitly maps `JsonValueKind.True` → `"true"`, `JsonValueKind.False` → `"false"`, `JsonValueKind.String` → `je.GetString()`, `JsonValueKind.Number` → `je.GetRawText()`. All condition comparisons now use `Normalize(resolved)` instead of `resolved?.ToString()`.
+
+---
+
+## Session 42
+
+**Date:** 2026-06-04
+**Start:** 5:00 PM CDT
+**End:** 7:00 PM CDT
+**Duration:** 120 minutes
+
+### Accomplished
+
+**API Key auth property name mismatch fix**
+
+- `ApiEndpointTestHelper.ApplyAuth` was reading `addTo` and `headerName` from the auth config JSON, but the portal serializes `api_key` auth as `placement` and `paramName`. Source tests using API key auth always failed with 401 AUTH_MISSING_KEY because both properties resolved to empty strings. Fixed `ApplyAuth` to fall back: reads `addTo` with fallback to `placement`, and `headerName` with fallback to `paramName`. Backward-compatible — covers both old and new saved definitions.
+
+**Multi-condition response mapping**
+
+- Changed `ResponseOutcome.condition` (single object) to `conditions: OutcomeCondition[]` + `conditionLogic: 'and' | 'or'` in both the TypeScript interface and the JSON schema.
+- `parseResponseMapping` migrates any saved outcome with the old singular `condition` field to `conditions: [condition]` automatically.
+- New `ConditionRow` component — single condition row (path / operator / value) with an × remove button shown when more than one condition exists.
+- New `ConditionListBuilder` component — renders the list of conditions; an AND/OR badge between each row that toggles the logic for the whole outcome on click; "+ Add condition" button appends a blank row.
+- Backend `AddressResponseMappingEvaluator.Evaluate()` updated to check `conditions` array first (AND = all must pass, OR = any must pass via `conditionLogic`), with backward compat fallback to legacy singular `condition` property.
+
+**`[*]` wildcard for array message collection**
+
+- Added `ResolveMessage` backend method to `AddressResponseMappingEvaluator` — supports `[*]` wildcard in `messagePath` to collect all matching values from an array and join them (e.g. `results.0.notices[*].message` joins every notice message). Falls back to single-value `ResolvePath` for plain paths.
+- Added matching `resolveMessagePreview` + `walkPath` helpers in the portal frontend — preview below the Message to Display input now shows the concatenated result when `[*]` is used.
+- Join separator is `\n` (newline) so separate notice messages are visually distinct.
+- Applied `whitespace-pre-line` to the message preview in the portal and to the message `<p>` in `AddressValidationModal` so newlines render correctly in both contexts.
+- Updated portal hint text to document `[*]` syntax with example.
+
+**zip-codes.com API investigation**
+
+- Investigated whether zip-codes.com returns a flag for "unit number required" (analogous to USPS DPV). Determined that `results[0].data.details.record_type.code = "H"` (Highrise) is the signal — no explicit `MISSING_SECONDARY` notice when no unit is provided. Advised configuring a `needs_unit` outcome with conditions on `record_type.code = H` AND `address_components.secondary_number` field absent.
+- Determined that `secondary_number` in zip-codes.com responses strips the unit type prefix (returns `"1"`, not `"Unit 1"`). Since `AddressValidationModal` merges `correctedFields` over `originalAddress` (`{ ...originalAddress, ...correctedFields }`), leaving `address2` unmapped preserves the user's original unit entry (including prefix) automatically — no code change required.
+
+---
+
+## Session 41
+
+**Date:** 2026-06-01
+**Start:** 4:45 AM CDT
+**End:** 5:11 AM CDT
+**Duration:** 26 minutes
+
+### Accomplished
+
+**Address validation — root cause and final fixes**
+
+- Identified root cause of corrected address not populating: `OutcomeFieldMapping` uses `"from"`/`"to"` properties (not `"source"`/`"target"`), so `correctedFields` was always empty. Fixed evaluator to read `Str(fm, "from")` and `Str(fm, "to")`.
+- Fixed `{{address.address1}}` in API templates resolving to just the text field value (e.g. `"100"` instead of `"PO Box 100"`): overrode `addrData["address1"]` and `addrData["address2"]` with `formattedAddress1`/`formattedAddress2` after computing combined values, matching source test tab behavior.
+- Fixed double-prefix display (`"PO Box PO BOX 100"`): added `ParseAddress1` / `ParseAddress2` methods to `AddressResponseMappingEvaluator` (ported from CRMPro `AddressInfo` class), splitting the API-returned formatted line back into prefix dropdown value + remainder text. Applied to both `fieldMappings` and `multipleMatchesConfig.itemMappings`.
+- Added field labels to address node form in `NodeDisplay.tsx` (`text-gray-500 text-[10px] font-medium uppercase tracking-wider`) matching portal endpoint modal style: FIRST NAME / MI / LAST NAME, ADDRESS LINE 1, ADDRESS LINE 2, ZIP / CITY / STATE, COUNTRY.
+- Address validation is fully functional end-to-end: corrected address modal displays correctly, prefix dropdown populated on jump-back, city/state/zip all pre-filled from corrected API response.
+
+---
+
+## Session 40
+
+**Date:** 2026-05-31
+**Start:** 8:28 AM CDT
+**End:** 11:13 AM CDT
+**Duration:** 165 minutes
+
+### Accomplished
+
+**Address Validation API — response mapping evaluator fixes**
+
+- Fixed `AddressResponseMappingEvaluator` returning "Unrecognized Response" for all conditions:
+  - `Str()` helper was calling `v.GetString()` on `JsonValueKind.Number` elements, which throws `InvalidOperationException`; the outer `try/catch` silently returned `Unrecognized()`. Fixed `Str()` to use `GetRawText()` for numbers, `"true"`/`"false"` for booleans.
+  - Condition `"operator"` property renamed to `"op"` in evaluator to match the portal's TypeScript `OutcomeCondition` type (field is `condition.op`, not `condition.operator`). This was why all operator comparisons returned false.
+- Added and removed diagnostic logging during debugging (confirmed condition now evaluates correctly — `corrected` outcome matched for USPS address standardization response).
+
+**Address validation — corrected field mapping fix**
+
+- Field mapping targets in the portal are stored with namespace prefix (e.g. `"address.address1"`). Added prefix stripping so `correctedFields` returned to the frontend has plain keys (`"address1"`, `"city"`, etc.) that match the form field names and `AddressSubmission` properties.
+
+**Jump-back pre-population — partial fix (still in progress)**
+
+- Backend: `AddressNodeHandler.MakeState()` now falls back to last `InputValue` in `ExecutionHistory` when `outputVar` is empty, so `prefilledAddress` is populated even without an `outputVariable` configured.
+- Frontend: `NodeDisplay` address form initialization guard changed from `prevAddrNodeId.current === node.nodeId` to a stable key `nodeId + JSON.stringify(prefilledAddress)` so jumping back to the same node with new prefilled data triggers a form reset, while validation-error re-renders (same nodeId + same prefilledAddress) do not.
+- **Still broken**: address form still shows original entered value after jump-back. Root cause not yet confirmed — continuing next session.
+
+---
+
+## Session 39
+
+**Date:** 2026-05-30
+**Start:** 4:13 PM CDT
+**End:** 5:01 PM CDT
+**Duration:** 48 minutes
+
+### Accomplished
+
+**Response Mapping modal — horizontal overflow fix**
+
+- Fixed captured response panel overflowing the modal's right edge:
+  - Modal width now conditionally `max-w-5xl` when on the Response Mapping tab (was `max-w-4xl`), giving the three-column layout (w-44 + flex-1 + w-64) proper room
+  - Added `overflow-hidden` to the modal content row div to prevent any column from bleeding outside the modal boundary
+  - Changed `ResponseMappingPanel` root from `flex flex-1 min-h-0` to `flex w-full min-h-0 overflow-hidden` to anchor its width to the container rather than relying on flex growth
+- All three columns now render within modal bounds; captured response JSON tree scrolls correctly without horizontal bleed
 
 ---
 

@@ -15,10 +15,10 @@ public class TenantApiDefinitionRepository : ITenantApiDefinitionRepository
     public TenantApiDefinitionRepository(ScopedTenantDbContextFactory factory) => _factory = factory;
 
     public Task<List<TenantApiDefinition>> GetAllAsync(CancellationToken ct = default) =>
-        Db.TenantApiDefinitions.OrderBy(d => d.ApiType).ThenBy(d => d.Name).ToListAsync(ct);
+        Db.TenantApiDefinitions.OrderBy(d => d.ApiCategory).ThenBy(d => d.Name).ToListAsync(ct);
 
-    public Task<List<TenantApiDefinition>> GetByTypeAsync(string apiType, CancellationToken ct = default) =>
-        Db.TenantApiDefinitions.Where(d => d.ApiType == apiType).OrderBy(d => d.Name).ToListAsync(ct);
+    public Task<List<TenantApiDefinition>> GetByCategoryAsync(string apiCategory, CancellationToken ct = default) =>
+        Db.TenantApiDefinitions.Where(d => d.ApiCategory == apiCategory).OrderBy(d => d.Name).ToListAsync(ct);
 
     public Task<TenantApiDefinition?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
         Db.TenantApiDefinitions.FirstOrDefaultAsync(d => d.Id == id, ct);

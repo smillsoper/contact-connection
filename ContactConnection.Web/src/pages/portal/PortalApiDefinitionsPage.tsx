@@ -19,17 +19,17 @@ import {
   type ApiDefinitionRecord,
 } from '../../api/portal'
 
-const API_TYPES = [
-  { value: 'address_validation', label: 'Address Validation' },
-  { value: 'realtime_address_autocomplete', label: 'Realtime Address Autocomplete' },
-  { value: 'zip_code_lookup', label: 'ZIP Code Lookup' },
+const API_CATEGORIES = [
+  { value: 'address',     label: 'Address' },
+  { value: 'order',       label: 'Order' },
   { value: 'fulfillment', label: 'Fulfillment' },
+  { value: 'media',       label: 'Media' },
 ]
 
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 
-const API_TYPE_LABELS: Record<string, string> = Object.fromEntries(
-  API_TYPES.map((t) => [t.value, t.label])
+const API_CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
+  API_CATEGORIES.map((c) => [c.value, c.label])
 )
 
 const AUTH_TYPE_LABELS: Record<string, string> = {
@@ -58,18 +58,18 @@ function authTypeBadge(authJson: string) {
   }
 }
 
-function apiTypeBadgeColor(type: string) {
+function apiCategoryBadgeColor(category: string) {
   const colors: Record<string, string> = {
-    address_validation: 'bg-sky-900/50 text-sky-300',
-    realtime_address_autocomplete: 'bg-violet-900/50 text-violet-300',
-    zip_code_lookup: 'bg-indigo-900/50 text-indigo-300',
+    address:     'bg-sky-900/50 text-sky-300',
+    order:       'bg-emerald-900/50 text-emerald-300',
     fulfillment: 'bg-amber-900/50 text-amber-300',
+    media:       'bg-violet-900/50 text-violet-300',
   }
-  return colors[type] ?? 'bg-gray-800 text-gray-300'
+  return colors[category] ?? 'bg-gray-800 text-gray-300'
 }
 
 interface FormState {
-  apiType: string
+  apiCategory: string
   name: string
   httpMethod: string
   baseUrl: string
@@ -80,7 +80,7 @@ interface FormState {
 }
 
 const BLANK_FORM: FormState = {
-  apiType: 'address_validation',
+  apiCategory: 'address',
   name: '',
   httpMethod: 'POST',
   baseUrl: '',
@@ -164,7 +164,7 @@ export default function PortalApiDefinitionsPage() {
         setDefs((prev) => prev.map((d) => (d.id === editingId ? updated : d)))
       } else {
         const created = await createPortalApiDefinition({
-          apiType: form.apiType,
+          apiCategory: form.apiCategory,
           name: form.name.trim(),
           httpMethod: form.httpMethod,
           baseUrl: form.baseUrl.trim(),
@@ -251,8 +251,8 @@ export default function PortalApiDefinitionsPage() {
                   return (
                     <tr key={d.id} className="border-b border-gray-800 last:border-0 hover:bg-gray-800/30 transition-colors">
                       <td className="px-4 py-3">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${apiTypeBadgeColor(d.apiType)}`}>
-                          {API_TYPE_LABELS[d.apiType] ?? d.apiType}
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${apiCategoryBadgeColor(d.apiCategory)}`}>
+                          {API_CATEGORY_LABELS[d.apiCategory] ?? d.apiCategory}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-white font-medium">{d.name}</td>
@@ -314,13 +314,13 @@ export default function PortalApiDefinitionsPage() {
               {/* API Type (create only) */}
               {!editingId && (
                 <div>
-                  <label className="block text-gray-400 text-xs font-medium mb-1.5">API Type</label>
+                  <label className="block text-gray-400 text-xs font-medium mb-1.5">API Category</label>
                   <select
-                    value={form.apiType}
-                    onChange={(e) => setForm((f) => ({ ...f, apiType: e.target.value }))}
+                    value={form.apiCategory}
+                    onChange={(e) => setForm((f) => ({ ...f, apiCategory: e.target.value }))}
                     className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
                   >
-                    {API_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                    {API_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
                   </select>
                 </div>
               )}

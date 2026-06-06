@@ -37,6 +37,7 @@ export interface NodeData extends Record<string, unknown> {
   allowInternational?: boolean
   dncCheck?: boolean
   // address
+  useValidation?: boolean
   showMiddleInitial?: boolean
   showCompany?: boolean
   requiredFields?: string[]
@@ -83,6 +84,7 @@ export interface ContactConnectionNodeDef {
   checkDisposable?: boolean
   allowInternational?: boolean
   dncCheck?: boolean
+  useValidation?: boolean
   showMiddleInitial?: boolean
   showCompany?: boolean
   requiredFields?: string[]
@@ -201,7 +203,7 @@ export function defaultNodeData(type: ContactConnectionNodeType): NodeData {
     case 'phone':
       return { label: 'Phone Number', scriptLabel: '', scriptContent: '', outputVariable: '', required: false, allowInternational: false, dncCheck: false }
     case 'address':
-      return { label: 'Address', scriptLabel: '', scriptContent: '', outputVariable: '', allowInternational: false, showMiddleInitial: false, showCompany: false, requiredFields: ['firstName', 'lastName', 'address1', 'zip', 'city', 'state'], fieldScripts: {} }
+      return { label: 'Address', scriptLabel: '', scriptContent: '', outputVariable: '', useValidation: true, allowInternational: false, showMiddleInitial: false, showCompany: false, requiredFields: ['firstName', 'lastName', 'address1', 'zip', 'city', 'state'], fieldScripts: {} }
     case 'section':
       return { label: 'New Section', name: '', outputVariable: '', allowJumpFromAnywhere: false, clearPreviousValues: false }
     case 'execute_flow':

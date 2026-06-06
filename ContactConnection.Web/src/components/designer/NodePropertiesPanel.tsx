@@ -638,6 +638,22 @@ export default function NodePropertiesPanel({
               </label>
             </div>
 
+            {/* Address Validation */}
+            <div className="flex flex-col gap-1.5">
+              <p className="text-xs font-medium text-gray-400">Validation</p>
+              <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={(data.useValidation as boolean) ?? true}
+                  onChange={(e) => onUpdate(node.id, { useValidation: e.target.checked })}
+                />
+                Validate Address via API
+              </label>
+              <p className="text-[10px] text-gray-500 leading-snug">
+                Calls the configured Address Validation API when the agent submits. Requires an active API definition of type "Address Validation".
+              </p>
+            </div>
+
             {/* Required fields */}
             <div className="flex flex-col gap-1.5">
               <p className="text-xs font-medium text-gray-400">Required fields</p>

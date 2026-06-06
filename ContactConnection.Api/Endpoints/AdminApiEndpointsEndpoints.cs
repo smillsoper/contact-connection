@@ -17,6 +17,7 @@ public static class AdminApiEndpointsEndpoints
         group.MapPost("test", TestEndpoint);
         group.MapGet("{endpointId:guid}", GetById);
         group.MapPut("{endpointId:guid}", Update);
+        group.MapPost("{endpointId:guid}/set-preferred", SetPreferred);
         group.MapDelete("{endpointId:guid}", Delete);
 
         return app;
@@ -62,8 +63,12 @@ public static class AdminApiEndpointsEndpoints
         var def = await defRepo.GetByIdAsync(definitionId, ct);
         if (def is null) return Results.NotFound();
 
+        if (!ApiSubType.IsValid(request.ApiSubType))
+            return Results.BadRequest(new { error = $"Unknown api_sub_type '{request.ApiSubType}'. Valid sub-types: {string.Join(", ", ApiSubType.All)}" });
+
         var endpoint = TenantApiEndpoint.Create(
             definitionId,
+            request.ApiSubType,
             request.Name,
             request.Path,
             request.HttpMethod,
@@ -93,12 +98,35 @@ public static class AdminApiEndpointsEndpoints
         var endpoint = await repo.GetByIdAsync(endpointId, ct);
         if (endpoint is null || endpoint.DefinitionId != definitionId) return Results.NotFound();
 
+        if (request.ApiSubType is not null)
+        {
+            if (!ApiSubType.IsValid(request.ApiSubType))
+                return Results.BadRequest(new { error = $"Unknown api_sub_type '{request.ApiSubType}'." });
+            endpoint.UpdateSubType(request.ApiSubType);
+        }
         endpoint.Update(request.Name, request.Path, request.HttpMethod, request.Description, request.SortOrder);
         if (request.RequestBodyTemplate is not null) endpoint.SetRequestBodyTemplate(request.RequestBodyTemplate);
         if (request.QueryParams is not null) endpoint.SetQueryParams(request.QueryParams);
         if (request.Headers is not null) endpoint.SetHeaders(request.Headers);
         if (request.ResponseMapping is not null) endpoint.SetResponseMapping(request.ResponseMapping);
 
+        await repo.SaveChangesAsync(ct);
+        return Results.Ok(ToResponse(endpoint));
+    }
+
+    private static async Task<IResult> SetPreferred(
+        Guid definitionId,
+        Guid endpointId,
+        ITenantApiEndpointRepository repo,
+        TenantContext tenantContext,
+        CancellationToken ct)
+    {
+        if (!tenantContext.HasTenant) return Results.Unauthorized();
+        var endpoint = await repo.GetByIdAsync(endpointId, ct);
+        if (endpoint is null || endpoint.DefinitionId != definitionId) return Results.NotFound();
+
+        await repo.ClearPreferredForSubTypeAsync(endpoint.ApiSubType, ct);
+        endpoint.SetPreferred();
         await repo.SaveChangesAsync(ct);
         return Results.Ok(ToResponse(endpoint));
     }
@@ -144,6 +172,7 @@ public static class AdminApiEndpointsEndpoints
     {
         e.Id,
         e.DefinitionId,
+        e.ApiSubType,
         e.Name,
         e.Description,
         e.Path,
@@ -153,6 +182,7 @@ public static class AdminApiEndpointsEndpoints
         e.Headers,
         e.ResponseMapping,
         e.SortOrder,
+        e.IsPreferred,
         e.IsActive,
         e.CreatedAt,
         e.UpdatedAt,

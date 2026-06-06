@@ -21,8 +21,26 @@ public class TenantApiEndpointRepository : ITenantApiEndpointRepository
             .ThenBy(e => e.Name)
             .ToListAsync(ct);
 
+    public Task<List<TenantApiEndpoint>> GetBySubTypeAsync(string apiSubType, CancellationToken ct = default) =>
+        Db.TenantApiEndpoints
+            .Where(e => e.ApiSubType == apiSubType && e.IsActive)
+            .OrderByDescending(e => e.IsPreferred)
+            .ThenBy(e => e.SortOrder)
+            .ToListAsync(ct);
+
+    public Task<TenantApiEndpoint?> GetPreferredBySubTypeAsync(string apiSubType, CancellationToken ct = default) =>
+        Db.TenantApiEndpoints
+            .FirstOrDefaultAsync(e => e.ApiSubType == apiSubType && e.IsPreferred && e.IsActive, ct);
+
     public Task<TenantApiEndpoint?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
         Db.TenantApiEndpoints.FirstOrDefaultAsync(e => e.Id == id, ct);
+
+    public async Task ClearPreferredForSubTypeAsync(string apiSubType, CancellationToken ct = default)
+    {
+        var current = await Db.TenantApiEndpoints
+            .FirstOrDefaultAsync(e => e.ApiSubType == apiSubType && e.IsPreferred, ct);
+        current?.ClearPreferred();
+    }
 
     public async Task AddAsync(TenantApiEndpoint endpoint, CancellationToken ct = default) =>
         await Db.TenantApiEndpoints.AddAsync(endpoint, ct);

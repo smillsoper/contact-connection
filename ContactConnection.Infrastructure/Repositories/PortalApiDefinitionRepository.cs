@@ -12,10 +12,10 @@ public class PortalApiDefinitionRepository : IPortalApiDefinitionRepository
     public PortalApiDefinitionRepository(ContactConnectionDbContext db) => _db = db;
 
     public Task<List<PortalApiDefinition>> GetAllAsync(CancellationToken ct = default) =>
-        _db.PortalApiDefinitions.OrderBy(d => d.ApiType).ThenBy(d => d.Name).ToListAsync(ct);
+        _db.PortalApiDefinitions.OrderBy(d => d.ApiCategory).ThenBy(d => d.Name).ToListAsync(ct);
 
-    public Task<List<PortalApiDefinition>> GetByTypeAsync(string apiType, CancellationToken ct = default) =>
-        _db.PortalApiDefinitions.Where(d => d.ApiType == apiType).OrderBy(d => d.Name).ToListAsync(ct);
+    public Task<List<PortalApiDefinition>> GetByCategoryAsync(string apiCategory, CancellationToken ct = default) =>
+        _db.PortalApiDefinitions.Where(d => d.ApiCategory == apiCategory).OrderBy(d => d.Name).ToListAsync(ct);
 
     public Task<PortalApiDefinition?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
         _db.PortalApiDefinitions.FirstOrDefaultAsync(d => d.Id == id, ct);

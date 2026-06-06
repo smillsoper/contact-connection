@@ -36,7 +36,8 @@ internal static class ApiEndpointTestHelper
             m => data.TryGetValue(m.Groups[1].Value, out var val) ? val : "");
     }
 
-    public static async Task<IResult> RunTest(
+    /// <summary>Runs the test and returns the raw response (not wrapped in IResult).</summary>
+    public static async Task<RunEndpointTestResponse> RunTestAsync(
         string baseUrl,
         string authConfigJson,
         RunEndpointTestRequest req,
@@ -58,13 +59,9 @@ internal static class ApiEndpointTestHelper
                 _        => HttpMethod.Get,
             };
 
-            // Build URL — substitute vars in path
             var resolvedPath = SubstituteVars(req.Path, ns, data);
             var uriBuilder   = new UriBuilder(baseUrl.TrimEnd('/') + "/" + resolvedPath.TrimStart('/'));
 
-            // Append query params.
-            // _skipIfEmpty is an optional metadata array listing keys that should be omitted
-            // when their value resolves to an empty string; all other params are always sent.
             if (!string.IsNullOrEmpty(req.QueryParams))
             {
                 try
@@ -79,7 +76,7 @@ internal static class ApiEndpointTestHelper
                     var qs = HttpUtility.ParseQueryString(uriBuilder.Query);
                     foreach (var prop in qpRoot.EnumerateObject())
                     {
-                        if (prop.Name.StartsWith('_')) continue; // skip metadata keys
+                        if (prop.Name.StartsWith('_')) continue;
                         var resolvedKey   = SubstituteVars(prop.Name, ns, data);
                         var resolvedValue = SubstituteVars(prop.Value.GetString() ?? "", ns, data);
 
@@ -90,12 +87,11 @@ internal static class ApiEndpointTestHelper
                     }
                     uriBuilder.Query = qs.ToString();
                 }
-                catch { /* ignore malformed JSON */ }
+                catch { }
             }
 
             var request = new HttpRequestMessage(method, uriBuilder.Uri);
 
-            // Endpoint-level headers
             if (!string.IsNullOrEmpty(req.Headers))
             {
                 try
@@ -105,15 +101,12 @@ internal static class ApiEndpointTestHelper
                         foreach (var (k, v) in hdrDict)
                             request.Headers.TryAddWithoutValidation(k, SubstituteVars(v, ns, data));
                 }
-                catch { /* ignore */ }
+                catch { }
             }
 
-            // Apply auth (may modify uriBuilder for api_key query placement)
             await ApplyAuth(request, uriBuilder, authConfigJson, getCredential, httpFactory, ct);
-            // Re-apply URI in case auth added query params
             request.RequestUri = uriBuilder.Uri;
 
-            // Body
             if (!string.IsNullOrEmpty(req.RequestBodyTemplate))
             {
                 var body = SubstituteVars(req.RequestBodyTemplate, ns, data);
@@ -133,30 +126,42 @@ internal static class ApiEndpointTestHelper
                 var el = JsonDocument.Parse(responseBody).RootElement;
                 prettyBody = JsonSerializer.Serialize(el, new JsonSerializerOptions { WriteIndented = true });
             }
-            catch { /* non-JSON — surface as-is */ }
+            catch { }
 
             var responseHeaders = response.Headers
                 .Concat(response.Content.Headers)
                 .ToDictionary(h => h.Key, h => string.Join(", ", h.Value));
 
-            return Results.Ok(new RunEndpointTestResponse(
+            return new RunEndpointTestResponse(
                 Success: response.IsSuccessStatusCode,
                 StatusCode: (int)response.StatusCode,
                 Body: prettyBody,
                 ResponseHeaders: responseHeaders,
                 ResolvedUrl: uriBuilder.ToString(),
-                Error: null));
+                Error: null);
         }
         catch (Exception ex)
         {
-            return Results.Ok(new RunEndpointTestResponse(
+            return new RunEndpointTestResponse(
                 Success: false,
                 StatusCode: null,
                 Body: null,
                 ResponseHeaders: null,
                 ResolvedUrl: null,
-                Error: ex.Message));
+                Error: ex.Message);
         }
+    }
+
+    public static async Task<IResult> RunTest(
+        string baseUrl,
+        string authConfigJson,
+        RunEndpointTestRequest req,
+        Func<string, CancellationToken, Task<string?>> getCredential,
+        IHttpClientFactory httpFactory,
+        CancellationToken ct)
+    {
+        var result = await RunTestAsync(baseUrl, authConfigJson, req, getCredential, httpFactory, ct);
+        return Results.Ok(result);
     }
 
     private static async Task ApplyAuth(
@@ -178,8 +183,8 @@ internal static class ApiEndpointTestHelper
             case "api_key":
             {
                 var credKey = Str(root, "credentialKey");
-                var addTo   = Str(root, "addTo");
-                var name    = Str(root, "headerName");
+                var addTo   = Str(root, "addTo").Length > 0 ? Str(root, "addTo") : Str(root, "placement");
+                var name    = Str(root, "headerName").Length > 0 ? Str(root, "headerName") : Str(root, "paramName");
                 var val     = await getCredential(credKey, ct);
                 if (val is null) break;
                 if (addTo == "query")

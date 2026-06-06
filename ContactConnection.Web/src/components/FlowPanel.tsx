@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import * as signalR from '@microsoft/signalr'
 import { useAuthStore } from '../stores/authStore'
-import { flowsApi } from '../api/flows'
+import { flowsApi, type AddressValidationResult } from '../api/flows'
 import type { FlowNodeState } from '../types/flow'
 import NodeDisplay from './NodeDisplay'
+import AddressValidationModal from './AddressValidationModal'
 
 type PanelState =
   | { phase: 'idle' }
@@ -15,6 +16,11 @@ export default function FlowPanel() {
   const { token, tenantSubdomain } = useAuthStore()
   const [state, setState] = useState<PanelState>({ phase: 'idle' })
   const [advancing, setAdvancing] = useState(false)
+  const [validating, setValidating] = useState(false)
+  const [validationModal, setValidationModal] = useState<{
+    result: AddressValidationResult
+    address: Record<string, string>
+  } | null>(null)
   const [flows, setFlows] = useState<{ id: string; name: string }[]>([])
   const [selectedFlowId, setSelectedFlowId] = useState('')
   const [hub, setHub] = useState<signalR.HubConnection | null>(null)
@@ -97,8 +103,57 @@ export default function FlowPanel() {
     [state],
   )
 
+  const validateAddress = useCallback(
+    async (address: Record<string, string>) => {
+      if (state.phase !== 'running') return
+      setValidating(true)
+      try {
+        const result = await flowsApi.validateAddress(state.node.sessionId, address)
+        if (result.outcomeKey === 'exact_match') {
+          // Auto-advance: merge corrected fields into original address
+          const finalAddress = { ...address, ...(result.correctedFields ?? {}) }
+          await advance(JSON.stringify(finalAddress))
+        } else {
+          setValidationModal({ result, address })
+        }
+      } catch (err) {
+        setValidationModal({
+          result: {
+            outcomeKey: 'error',
+            outcomeLabel: 'Validation Error',
+            message: err instanceof Error ? err.message : 'An unexpected error occurred calling the address validation API.',
+            correctedFields: null,
+            matches: null,
+          },
+          address,
+        })
+      } finally {
+        setValidating(false)
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state, advance],
+  )
+
+  function handleValidationSelect(selectedAddress: Record<string, string>) {
+    setValidationModal(null)
+    advance(JSON.stringify(selectedAddress))
+  }
+
+  function handleValidationChange() {
+    setValidationModal(null)
+  }
+
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full relative">
+      {validationModal && (
+        <AddressValidationModal
+          result={validationModal.result}
+          originalAddress={validationModal.address}
+          onSelectAddress={handleValidationSelect}
+          onChangeAddress={handleValidationChange}
+        />
+      )}
       {/* Flow selector toolbar */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-800 shrink-0">
         <select
@@ -156,6 +211,8 @@ export default function FlowPanel() {
             onAdvance={advance}
             onJump={jump}
             advancing={advancing}
+            validating={validating}
+            onValidateAddress={validateAddress}
           />
         )}
       </div>

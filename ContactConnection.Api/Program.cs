@@ -96,6 +96,7 @@ app.MapCustomFieldsEndpoints();
 app.MapAdminAgentsEndpoints();
 app.MapAdminApiDefinitionsEndpoints();
 app.MapAdminApiEndpointsEndpoints();
+app.MapAdminApiPreferencesEndpoints();
 app.MapAdminCredentialsEndpoints();
 
 // Portal (platform administration)

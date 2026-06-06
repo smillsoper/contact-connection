@@ -136,9 +136,11 @@ interface Props {
   onAdvance: (input?: string) => void
   onJump?: (sectionNodeId: string) => void
   advancing: boolean
+  validating?: boolean
+  onValidateAddress?: (address: Record<string, string>) => void
 }
 
-export default function NodeDisplay({ node, onAdvance, onJump, advancing }: Props) {
+export default function NodeDisplay({ node, onAdvance, onJump, advancing, validating, onValidateAddress }: Props) {
   const [inputValue, setInputValue] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
 
@@ -146,12 +148,15 @@ export default function NodeDisplay({ node, onAdvance, onJump, advancing }: Prop
   const [addrForm, setAddrForm] = useState<AddrForm>(EMPTY_ADDR)
   const [focusedField, setFocusedField] = useState<string | null>(null)
 
-  // Reset address form when navigating to a new node; pre-populate when available
-  const prevAddrNodeId = useRef<string | null>(null)
+  // Reset address form when navigating to a new node or when prefilledAddress changes
+  // (e.g. jumping back after submitting a corrected address). Validation-error re-renders
+  // return the same nodeId + same prefilledAddress so the key is stable and the form is left alone.
+  const prevAddrKeyRef = useRef<string>('')
   useEffect(() => {
     if (node.nodeType !== 'address') return
-    if (node.nodeId === prevAddrNodeId.current) return
-    prevAddrNodeId.current = node.nodeId
+    const key = `${node.nodeId}:${JSON.stringify(node.prefilledAddress ?? null)}`
+    if (key === prevAddrKeyRef.current) return
+    prevAddrKeyRef.current = key
     const p = node.prefilledAddress
     if (p && Object.keys(p).length > 0) {
       // When not international, combine zip+zip4 into the single dual-mode masked field
@@ -281,7 +286,12 @@ export default function NodeDisplay({ node, onAdvance, onJump, advancing }: Prop
         form.zip4 = zip4match[2]
       }
     }
-    onAdvance(JSON.stringify(form))
+    // If validation is enabled and a validator is wired up, hand off to it instead of advancing directly
+    if (node.useValidation && onValidateAddress) {
+      onValidateAddress(form as Record<string, string>)
+    } else {
+      onAdvance(JSON.stringify(form))
+    }
   }
 
   const activeFieldScript =
@@ -582,7 +592,16 @@ export default function NodeDisplay({ node, onAdvance, onJump, advancing }: Prop
           {jumpDropdown}
         </div>
       ) : node.nodeType === 'address' && (
-        <form onSubmit={handleAddressSubmit} className="flex flex-col gap-3">
+        <form onSubmit={handleAddressSubmit} className="relative flex flex-col gap-3">
+          {/* Validating overlay */}
+          {validating && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-gray-900/80 rounded-xl">
+              <div className="flex flex-col items-center gap-3">
+                <div className="w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+                <p className="text-sm text-orange-300 font-medium">Validating…</p>
+              </div>
+            </div>
+          )}
           {/* Per-field or main script */}
           {node.nodeScriptLabel && !activeFieldScript && (
             <p className="text-xs font-semibold text-gray-300 uppercase tracking-wider">
@@ -605,171 +624,204 @@ export default function NodeDisplay({ node, onAdvance, onJump, advancing }: Prop
 
           {/* Name row */}
           <div className="flex gap-2">
-            <input
-              ref={(el) => { focusRef.current = el }}
-              type="text"
-              value={addrForm.firstName}
-              onChange={(e) => setAddrForm((f) => ({ ...f, firstName: e.target.value }))}
-              onFocus={() => setFocusedField('firstName')}
-              onBlur={() => setFocusedField(null)}
-              placeholder="First name"
-              className="flex-1 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700"
-            />
+            <div className="flex flex-col flex-1 gap-0.5">
+              <label className="text-gray-500 text-[10px] font-medium uppercase tracking-wider">First Name</label>
+              <input
+                ref={(el) => { focusRef.current = el }}
+                type="text"
+                value={addrForm.firstName}
+                onChange={(e) => setAddrForm((f) => ({ ...f, firstName: e.target.value }))}
+                onFocus={() => setFocusedField('firstName')}
+                onBlur={() => setFocusedField(null)}
+                placeholder="First name"
+                className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700"
+              />
+            </div>
             {node.showMiddleInitial && (
+              <div className="flex flex-col w-12 gap-0.5">
+                <label className="text-gray-500 text-[10px] font-medium uppercase tracking-wider">MI</label>
+                <input
+                  type="text"
+                  value={addrForm.middleInitial}
+                  onChange={(e) => setAddrForm((f) => ({ ...f, middleInitial: e.target.value }))}
+                  onFocus={() => setFocusedField('middleInitial')}
+                  onBlur={() => setFocusedField(null)}
+                  placeholder="MI"
+                  maxLength={1}
+                  className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700 text-center"
+                />
+              </div>
+            )}
+            <div className="flex flex-col flex-1 gap-0.5">
+              <label className="text-gray-500 text-[10px] font-medium uppercase tracking-wider">Last Name</label>
               <input
                 type="text"
-                value={addrForm.middleInitial}
-                onChange={(e) => setAddrForm((f) => ({ ...f, middleInitial: e.target.value }))}
-                onFocus={() => setFocusedField('middleInitial')}
+                value={addrForm.lastName}
+                onChange={(e) => setAddrForm((f) => ({ ...f, lastName: e.target.value }))}
+                onFocus={() => setFocusedField('lastName')}
                 onBlur={() => setFocusedField(null)}
-                placeholder="MI"
-                maxLength={1}
-                className="w-12 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700 text-center"
+                placeholder="Last name"
+                className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700"
               />
-            )}
-            <input
-              type="text"
-              value={addrForm.lastName}
-              onChange={(e) => setAddrForm((f) => ({ ...f, lastName: e.target.value }))}
-              onFocus={() => setFocusedField('lastName')}
-              onBlur={() => setFocusedField(null)}
-              placeholder="Last name"
-              className="flex-1 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700"
-            />
+            </div>
           </div>
 
           {/* Company */}
           {node.showCompany && (
-            <input
-              type="text"
-              value={addrForm.company}
-              onChange={(e) => setAddrForm((f) => ({ ...f, company: e.target.value }))}
-              onFocus={() => setFocusedField('company')}
-              onBlur={() => setFocusedField(null)}
-              placeholder="Company"
-              className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700"
-            />
+            <div className="flex flex-col gap-0.5">
+              <label className="text-gray-500 text-[10px] font-medium uppercase tracking-wider">Company</label>
+              <input
+                type="text"
+                value={addrForm.company}
+                onChange={(e) => setAddrForm((f) => ({ ...f, company: e.target.value }))}
+                onFocus={() => setFocusedField('company')}
+                onBlur={() => setFocusedField(null)}
+                placeholder="Company"
+                className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700"
+              />
+            </div>
           )}
 
           {/* Address line 1 */}
-          <div className="flex gap-2">
-            <select
-              value={addrForm.address1Prefix}
-              onChange={(e) => setAddrForm((f) => ({ ...f, address1Prefix: e.target.value }))}
-              onFocus={() => setFocusedField('address1')}
-              onBlur={() => setFocusedField(null)}
-              className="bg-gray-800 text-white rounded-lg px-2 py-2 text-sm input-focus-glow-orange border border-gray-700"
-            >
-              {ADDR1_PREFIXES.map((p) => (
-                <option key={p} value={p}>{p || '(none)'}</option>
-              ))}
-            </select>
-            <input
-              type="text"
-              value={addrForm.address1}
-              onChange={(e) => setAddrForm((f) => ({ ...f, address1: e.target.value }))}
-              onFocus={() => setFocusedField('address1')}
-              onBlur={() => setFocusedField(null)}
-              placeholder="Address line 1"
-              className="flex-1 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700"
-            />
+          <div className="flex flex-col gap-0.5">
+            <label className="text-gray-500 text-[10px] font-medium uppercase tracking-wider">Address Line 1</label>
+            <div className="flex gap-2">
+              <select
+                value={addrForm.address1Prefix}
+                onChange={(e) => setAddrForm((f) => ({ ...f, address1Prefix: e.target.value }))}
+                onFocus={() => setFocusedField('address1')}
+                onBlur={() => setFocusedField(null)}
+                className="bg-gray-800 text-white rounded-lg px-2 py-2 text-sm input-focus-glow-orange border border-gray-700"
+              >
+                {ADDR1_PREFIXES.map((p) => (
+                  <option key={p} value={p}>{p || '(none)'}</option>
+                ))}
+              </select>
+              <input
+                type="text"
+                value={addrForm.address1}
+                onChange={(e) => setAddrForm((f) => ({ ...f, address1: e.target.value }))}
+                onFocus={() => setFocusedField('address1')}
+                onBlur={() => setFocusedField(null)}
+                placeholder="Address line 1"
+                className="flex-1 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700"
+              />
+            </div>
           </div>
 
           {/* Address line 2 */}
-          <div className="flex gap-2">
-            <select
-              value={addrForm.address2Prefix}
-              onChange={(e) => setAddrForm((f) => ({ ...f, address2Prefix: e.target.value }))}
-              onFocus={() => setFocusedField('address2')}
-              onBlur={() => setFocusedField(null)}
-              className="bg-gray-800 text-white rounded-lg px-2 py-2 text-sm input-focus-glow-orange border border-gray-700"
-            >
-              {ADDR2_PREFIXES.map((p) => (
-                <option key={p} value={p}>{p || '(none)'}</option>
-              ))}
-            </select>
-            <input
-              type="text"
-              value={addrForm.address2}
-              onChange={(e) => setAddrForm((f) => ({ ...f, address2: e.target.value }))}
-              onFocus={() => setFocusedField('address2')}
-              onBlur={() => setFocusedField(null)}
-              placeholder="Address line 2 (optional)"
-              className="flex-1 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700"
-            />
+          <div className="flex flex-col gap-0.5">
+            <label className="text-gray-500 text-[10px] font-medium uppercase tracking-wider">Address Line 2</label>
+            <div className="flex gap-2">
+              <select
+                value={addrForm.address2Prefix}
+                onChange={(e) => setAddrForm((f) => ({ ...f, address2Prefix: e.target.value }))}
+                onFocus={() => setFocusedField('address2')}
+                onBlur={() => setFocusedField(null)}
+                className="bg-gray-800 text-white rounded-lg px-2 py-2 text-sm input-focus-glow-orange border border-gray-700"
+              >
+                {ADDR2_PREFIXES.map((p) => (
+                  <option key={p} value={p}>{p || '(none)'}</option>
+                ))}
+              </select>
+              <input
+                type="text"
+                value={addrForm.address2}
+                onChange={(e) => setAddrForm((f) => ({ ...f, address2: e.target.value }))}
+                onFocus={() => setFocusedField('address2')}
+                onBlur={() => setFocusedField(null)}
+                placeholder="Address line 2 (optional)"
+                className="flex-1 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700"
+              />
+            </div>
           </div>
 
           {/* ZIP / City / State row */}
           <div className="flex gap-2">
             {!node.allowInternational ? (
-              /* US or Canada dual-mode: single field, country derived from first character */
-              <input
-                type="text"
-                value={addrForm.zip}
-                onChange={(e) => {
-                  const formatted = applyZipCaMask(e.target.value)
-                  const newCountry = zipCaMode(formatted) === 'ca' ? 'CA' : 'US'
-                  setAddrForm((f) => ({
-                    ...f,
-                    zip: formatted,
-                    zip4: '',
-                    country: newCountry,
-                    state: newCountry !== f.country ? '' : f.state,
-                  }))
-                }}
-                onFocus={() => setFocusedField('zip')}
-                onBlur={() => setFocusedField(null)}
-                placeholder="00000 or A1A 1A1"
-                className="w-32 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700 font-mono"
-              />
-            ) : (
-              /* International: separate ZIP and +4 fields */
-              <>
+              <div className="flex flex-col w-32 gap-0.5">
+                <label className="text-gray-500 text-[10px] font-medium uppercase tracking-wider">ZIP</label>
                 <input
                   type="text"
                   value={addrForm.zip}
-                  onChange={(e) => setAddrForm((f) => ({ ...f, zip: e.target.value }))}
+                  onChange={(e) => {
+                    const formatted = applyZipCaMask(e.target.value)
+                    const newCountry = zipCaMode(formatted) === 'ca' ? 'CA' : 'US'
+                    setAddrForm((f) => ({
+                      ...f,
+                      zip: formatted,
+                      zip4: '',
+                      country: newCountry,
+                      state: newCountry !== f.country ? '' : f.state,
+                    }))
+                  }}
                   onFocus={() => setFocusedField('zip')}
                   onBlur={() => setFocusedField(null)}
-                  placeholder="ZIP"
-                  className="w-20 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700 font-mono"
+                  placeholder="00000 or A1A 1A1"
+                  className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700 font-mono"
                 />
-                <input
-                  type="text"
-                  value={addrForm.zip4}
-                  onChange={(e) => setAddrForm((f) => ({ ...f, zip4: e.target.value }))}
-                  onFocus={() => setFocusedField('zip')}
-                  onBlur={() => setFocusedField(null)}
-                  placeholder="+4"
-                  maxLength={4}
-                  className="w-14 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700 font-mono"
-                />
+              </div>
+            ) : (
+              <>
+                <div className="flex flex-col w-20 gap-0.5">
+                  <label className="text-gray-500 text-[10px] font-medium uppercase tracking-wider">ZIP</label>
+                  <input
+                    type="text"
+                    value={addrForm.zip}
+                    onChange={(e) => setAddrForm((f) => ({ ...f, zip: e.target.value }))}
+                    onFocus={() => setFocusedField('zip')}
+                    onBlur={() => setFocusedField(null)}
+                    placeholder="ZIP"
+                    className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700 font-mono"
+                  />
+                </div>
+                <div className="flex flex-col w-14 gap-0.5">
+                  <label className="text-gray-500 text-[10px] font-medium uppercase tracking-wider">+4</label>
+                  <input
+                    type="text"
+                    value={addrForm.zip4}
+                    onChange={(e) => setAddrForm((f) => ({ ...f, zip4: e.target.value }))}
+                    onFocus={() => setFocusedField('zip')}
+                    onBlur={() => setFocusedField(null)}
+                    placeholder="+4"
+                    maxLength={4}
+                    className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700 font-mono"
+                  />
+                </div>
               </>
             )}
-            <input
-              type="text"
-              value={addrForm.city}
-              onChange={(e) => setAddrForm((f) => ({ ...f, city: e.target.value }))}
-              onFocus={() => setFocusedField('city')}
-              onBlur={() => setFocusedField(null)}
-              placeholder="City"
-              className="flex-1 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700"
-            />
-            <select
-              value={addrForm.state}
-              onChange={(e) => setAddrForm((f) => ({ ...f, state: e.target.value }))}
-              onFocus={() => setFocusedField('state')}
-              onBlur={() => setFocusedField(null)}
-              className="w-36 bg-gray-800 text-white rounded-lg px-2 py-2 text-sm input-focus-glow-orange border border-gray-700"
-            >
-              {(addrForm.country === 'CA' ? CA_PROVINCES : US_STATES).map(([v, l]) => (
-                <option key={v} value={v}>{l}</option>
-              ))}
-            </select>
+            <div className="flex flex-col flex-1 gap-0.5">
+              <label className="text-gray-500 text-[10px] font-medium uppercase tracking-wider">City</label>
+              <input
+                type="text"
+                value={addrForm.city}
+                onChange={(e) => setAddrForm((f) => ({ ...f, city: e.target.value }))}
+                onFocus={() => setFocusedField('city')}
+                onBlur={() => setFocusedField(null)}
+                placeholder="City"
+                className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700"
+              />
+            </div>
+            <div className="flex flex-col w-36 gap-0.5">
+              <label className="text-gray-500 text-[10px] font-medium uppercase tracking-wider">State</label>
+              <select
+                value={addrForm.state}
+                onChange={(e) => setAddrForm((f) => ({ ...f, state: e.target.value }))}
+                onFocus={() => setFocusedField('state')}
+                onBlur={() => setFocusedField(null)}
+                className="bg-gray-800 text-white rounded-lg px-2 py-2 text-sm input-focus-glow-orange border border-gray-700"
+              >
+                {(addrForm.country === 'CA' ? CA_PROVINCES : US_STATES).map(([v, l]) => (
+                  <option key={v} value={v}>{l}</option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* Country — auto-derived from ZIP (disabled) when domestic; full list when international */}
-          <select
+          <div className="flex flex-col gap-0.5">
+            <label className="text-gray-500 text-[10px] font-medium uppercase tracking-wider">Country</label>
+            <select
             value={addrForm.country}
             onChange={(e) => setAddrForm((f) => ({ ...f, country: e.target.value }))}
             onFocus={() => setFocusedField('country')}
@@ -796,13 +848,14 @@ export default function NodeDisplay({ node, onAdvance, onJump, advancing }: Prop
               </>
             )}
           </select>
+          </div>
 
           <button
             type="submit"
-            disabled={advancing}
+            disabled={advancing || validating}
             className="self-start bg-orange-700 hover:bg-orange-600 disabled:opacity-50 text-white rounded-lg px-5 py-2 text-sm font-medium transition-colors"
           >
-            {advancing ? 'Validating…' : 'Next'}
+            {validating ? 'Validating…' : advancing ? 'Advancing…' : 'Continue'}
           </button>
           {jumpDropdown}
         </form>

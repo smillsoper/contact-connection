@@ -16,6 +16,14 @@ export interface FlowDetail extends FlowSummary {
   definition: string
 }
 
+export interface AddressValidationResult {
+  outcomeKey: string
+  outcomeLabel: string
+  message: string | null
+  correctedFields: Record<string, string> | null
+  matches: Record<string, string>[] | null
+}
+
 export const flowsApi = {
   // Agent panel — published flows only
   list: () => api.get<FlowSummary[]>('/api/v1/flows'),
@@ -31,6 +39,9 @@ export const flowsApi = {
 
   advance: (sessionId: string, req: AdvanceSessionRequest) =>
     api.post<FlowNodeState>(`/api/v1/flow-sessions/${sessionId}/advance`, req),
+
+  validateAddress: (sessionId: string, address: Record<string, string>) =>
+    api.post<AddressValidationResult>(`/api/v1/flow-sessions/${sessionId}/validate-address`, { address }),
 
   // Flow designer
   create: (name: string, flowType: string, definition: ContactConnectionFlowDefinition) =>
