@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import * as signalR from '@microsoft/signalr'
 import { useAuthStore } from '../stores/authStore'
-import { flowsApi, type AddressValidationResult, type ZipLookupResult } from '../api/flows'
+import { flowsApi, type AddressValidationResult, type ZipLookupResult, type AutocompleteSuggestion, type AutocompleteSelectionResult } from '../api/flows'
 import type { FlowNodeState } from '../types/flow'
 import NodeDisplay from './NodeDisplay'
 import AddressValidationModal from './AddressValidationModal'
@@ -19,6 +19,9 @@ export default function FlowPanel() {
   const [validating, setValidating] = useState(false)
   const [zipLookupResult, setZipLookupResult] = useState<ZipLookupResult | null>(null)
   const [zipLookupPending, setZipLookupPending] = useState(false)
+  const [autocompleteSuggestions, setAutocompleteSuggestions] = useState<AutocompleteSuggestion[]>([])
+  const [autocompletePending, setAutocompletePending] = useState(false)
+  const [autocompleteSelection, setAutocompleteSelection] = useState<AutocompleteSelectionResult | null>(null)
   const [validationModal, setValidationModal] = useState<{
     result: AddressValidationResult
     address: Record<string, string>
@@ -154,6 +157,42 @@ export default function FlowPanel() {
     [state],
   )
 
+  const searchAutocomplete = useCallback(
+    async (text: string, sessionToken: string) => {
+      if (state.phase !== 'running') return
+      setAutocompletePending(true)
+      try {
+        const result = await flowsApi.autocompleteAddress(state.node.sessionId, text, sessionToken)
+        setAutocompleteSuggestions(result.suggestions)
+      } catch {
+        // best-effort
+      } finally {
+        setAutocompletePending(false)
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state],
+  )
+
+  const selectAutocomplete = useCallback(
+    async (placeId: string, sessionToken: string) => {
+      if (state.phase !== 'running') return
+      setAutocompletePending(true)
+      setAutocompleteSuggestions([])
+      try {
+        const result = await flowsApi.selectAutocompleteAddress(state.node.sessionId, placeId, sessionToken)
+        console.log('[autocomplete] select result:', JSON.stringify(result, null, 2))
+        setAutocompleteSelection(result)
+      } catch {
+        // best-effort
+      } finally {
+        setAutocompletePending(false)
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state],
+  )
+
   function handleValidationSelect(selectedAddress: Record<string, string>) {
     setValidationModal(null)
     advance(JSON.stringify(selectedAddress))
@@ -236,6 +275,12 @@ export default function FlowPanel() {
             zipLookupPending={zipLookupPending}
             onLookupZip={lookupZip}
             onClearZipLookup={() => setZipLookupResult(null)}
+            autocompleteSuggestions={autocompleteSuggestions}
+            autocompletePending={autocompletePending}
+            autocompleteSelection={autocompleteSelection}
+            onAutocompleteSearch={searchAutocomplete}
+            onAutocompleteSelect={selectAutocomplete}
+            onClearAutocomplete={() => { setAutocompleteSuggestions([]); setAutocompleteSelection(null) }}
           />
         )}
       </div>

@@ -24,6 +24,20 @@ export interface AddressValidationResult {
   matches: Record<string, string>[] | null
 }
 
+export interface AutocompleteSuggestion {
+  placeId: string
+  displayText: string
+}
+
+export interface AutocompleteAddressResult {
+  suggestions: AutocompleteSuggestion[]
+}
+
+export interface AutocompleteSelectionResult {
+  fields: Record<string, string> | null
+  error: string | null
+}
+
 export interface ZipLookupResult {
   city: string | null
   cities: string[]
@@ -56,6 +70,12 @@ export const flowsApi = {
 
   lookupZip: (sessionId: string, zip: string) =>
     api.post<ZipLookupResult>(`/api/v1/flow-sessions/${sessionId}/lookup-zip`, { zip }),
+
+  autocompleteAddress: (sessionId: string, text: string, sessionToken: string) =>
+    api.post<AutocompleteAddressResult>(`/api/v1/flow-sessions/${sessionId}/autocomplete-address`, { text, sessionToken }),
+
+  selectAutocompleteAddress: (sessionId: string, placeId: string, sessionToken: string) =>
+    api.post<AutocompleteSelectionResult>(`/api/v1/flow-sessions/${sessionId}/select-autocomplete-address`, { placeId, sessionToken }),
 
   // Flow designer
   create: (name: string, flowType: string, definition: ContactConnectionFlowDefinition) =>

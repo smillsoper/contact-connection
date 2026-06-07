@@ -61,6 +61,12 @@ public static class FlowSessionsEndpoints
         // Look up city/state/coordinates for a ZIP code
         group.MapPost("/{id:guid}/lookup-zip", LookupZip);
 
+        // Realtime address autocomplete — suggestions as the agent types
+        group.MapPost("/{id:guid}/autocomplete-address", AutocompleteAddress);
+
+        // Realtime address autocomplete — fetch full address fields for selected suggestion
+        group.MapPost("/{id:guid}/select-autocomplete-address", SelectAutocompleteAddress);
+
         // Advance the session — submit agent input and get next node state
         group.MapPost("/{id:guid}/advance", async (
             Guid id,
@@ -320,6 +326,183 @@ public static class FlowSessionsEndpoints
         var result = ZipLookupResponseEvaluator.Evaluate(responseMapping!, body);
         return Results.Ok(result);
     }
+
+    private static async Task<IResult> AutocompleteAddress(
+        Guid id,
+        AutocompleteAddressRequest req,
+        ITenantApiDefinitionRepository tenantDefRepo,
+        ITenantApiEndpointRepository tenantEndpointRepo,
+        ITenantApiPreferenceRepository tenantPrefRepo,
+        ITenantCredentialStore tenantCredStore,
+        IPortalApiDefinitionRepository portalDefRepo,
+        IPortalApiEndpointRepository portalEndpointRepo,
+        IPortalCredentialStore portalCredStore,
+        IHttpClientFactory httpFactory,
+        TenantContext tenantContext,
+        CancellationToken ct)
+    {
+        if (tenantContext.Current is null) return Results.Unauthorized();
+
+        var empty = new AutocompleteAddressResult([]);
+
+        var (baseUrl, authConfig, endpointPath, httpMethod, queryParams, headers, requestBodyTemplate, responseMapping, getCredential) =
+            await ResolveApiEndpoint(ApiSubType.RealtimeAddressAutocomplete,
+                tenantDefRepo, tenantEndpointRepo, tenantPrefRepo, tenantCredStore,
+                portalDefRepo, portalEndpointRepo, portalCredStore, ct);
+
+        if (getCredential is null) return Results.Ok(empty);
+
+        var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["text"]         = req.Text         ?? string.Empty,
+            ["sessionToken"] = req.SessionToken  ?? string.Empty,
+        };
+
+        var testReq = new RunEndpointTestRequest(
+            Path: endpointPath!,
+            HttpMethod: httpMethod,
+            QueryParams: queryParams,
+            Headers: headers,
+            RequestBodyTemplate: requestBodyTemplate,
+            Namespace: "address",
+            TestData: data);
+
+        var response = await ApiEndpointTestHelper.RunTestAsync(
+            baseUrl!, authConfig!, testReq, getCredential, httpFactory, ct);
+
+        if (response.Error is not null) return Results.Ok(empty);
+
+        JsonElement body;
+        try { body = JsonDocument.Parse(response.Body ?? "{}").RootElement; }
+        catch { return Results.Ok(empty); }
+
+        var suggestions = AutocompleteResponseEvaluator.EvaluateSuggestions(responseMapping!, body);
+        return Results.Ok(new AutocompleteAddressResult(suggestions));
+    }
+
+    private static async Task<IResult> SelectAutocompleteAddress(
+        Guid id,
+        SelectAutocompleteRequest req,
+        ITenantApiDefinitionRepository tenantDefRepo,
+        ITenantApiEndpointRepository tenantEndpointRepo,
+        ITenantApiPreferenceRepository tenantPrefRepo,
+        ITenantCredentialStore tenantCredStore,
+        IPortalApiDefinitionRepository portalDefRepo,
+        IPortalApiEndpointRepository portalEndpointRepo,
+        IPortalCredentialStore portalCredStore,
+        IHttpClientFactory httpFactory,
+        TenantContext tenantContext,
+        CancellationToken ct)
+    {
+        if (tenantContext.Current is null) return Results.Unauthorized();
+
+        var (baseUrl, authConfig, _, _, _, _, _, responseMapping, getCredential) =
+            await ResolveApiEndpoint(ApiSubType.RealtimeAddressAutocomplete,
+                tenantDefRepo, tenantEndpointRepo, tenantPrefRepo, tenantCredStore,
+                portalDefRepo, portalEndpointRepo, portalCredStore, ct);
+
+        if (getCredential is null)
+            return Results.Ok(new AutocompleteSelectionResult(null, "No address autocomplete API is configured."));
+
+        var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["placeId"]      = req.PlaceId      ?? string.Empty,
+            ["sessionToken"] = req.SessionToken ?? string.Empty,
+        };
+
+        // Details call config comes from the autocompleteConfig.details section of the response mapping
+        var detailsConfig = AutocompleteResponseEvaluator.ParseDetailsConfig(responseMapping!);
+        if (detailsConfig is null)
+            return Results.Ok(new AutocompleteSelectionResult(null, "No details configuration found in response mapping."));
+
+        var detailsPath    = ApiEndpointTestHelper.SubstituteVars(detailsConfig.Path, "address", data);
+        var detailsHeaders = detailsConfig.Headers is not null
+            ? System.Text.Json.JsonSerializer.Serialize(
+                detailsConfig.Headers.ToDictionary(kv => kv.Key, kv => ApiEndpointTestHelper.SubstituteVars(kv.Value, "address", data)))
+            : null;
+
+        var testReq = new RunEndpointTestRequest(
+            Path: detailsPath,
+            HttpMethod: detailsConfig.Method ?? "GET",
+            QueryParams: null,
+            Headers: detailsHeaders,
+            RequestBodyTemplate: null,
+            Namespace: "address",
+            TestData: data);
+
+        var response = await ApiEndpointTestHelper.RunTestAsync(
+            baseUrl!, authConfig!, testReq, getCredential, httpFactory, ct);
+
+        if (response.Error is not null)
+            return Results.Ok(new AutocompleteSelectionResult(null, response.Error));
+
+        JsonElement body;
+        try { body = JsonDocument.Parse(response.Body ?? "{}").RootElement; }
+        catch { return Results.Ok(new AutocompleteSelectionResult(null, "Details API returned a non-JSON response.")); }
+
+        var fields = AutocompleteResponseEvaluator.EvaluateDetails(detailsConfig, body);
+        return Results.Ok(new AutocompleteSelectionResult(fields));
+    }
+
+    // Shared helper — resolves tenant→portal API endpoint for a given sub-type
+    private static async Task<(string? BaseUrl, string? AuthConfig, string? Path, string? HttpMethod,
+        string? QueryParams, string? Headers, string? RequestBodyTemplate, string? ResponseMapping,
+        Func<string, CancellationToken, Task<string?>>? GetCredential)>
+        ResolveApiEndpoint(
+            string subType,
+            ITenantApiDefinitionRepository tenantDefRepo,
+            ITenantApiEndpointRepository tenantEndpointRepo,
+            ITenantApiPreferenceRepository tenantPrefRepo,
+            ITenantCredentialStore tenantCredStore,
+            IPortalApiDefinitionRepository portalDefRepo,
+            IPortalApiEndpointRepository portalEndpointRepo,
+            IPortalCredentialStore portalCredStore,
+            CancellationToken ct)
+    {
+        string? baseUrl = null, authConfig = null, path = null, httpMethod = null;
+        string? queryParams = null, headers = null, body = null, responseMapping = null;
+        Func<string, CancellationToken, Task<string?>>? getCredential = null;
+
+        var tenantEp = await tenantEndpointRepo.GetPreferredBySubTypeAsync(subType, ct)
+                       ?? (await tenantEndpointRepo.GetBySubTypeAsync(subType, ct)).FirstOrDefault();
+        if (tenantEp is not null)
+        {
+            var def = await tenantDefRepo.GetByIdAsync(tenantEp.DefinitionId, ct);
+            if (def is not null && def.IsActive)
+            {
+                baseUrl = def.BaseUrl; authConfig = def.AuthConfig;
+                path = tenantEp.Path; httpMethod = tenantEp.HttpMethod ?? def.HttpMethod;
+                queryParams = tenantEp.QueryParams; headers = tenantEp.Headers;
+                body = tenantEp.RequestBodyTemplate; responseMapping = tenantEp.ResponseMapping;
+                getCredential = (key, token) => tenantCredStore.GetAsync(key, token);
+            }
+        }
+
+        if (getCredential is null)
+        {
+            PortalApiEndpoint? portalEp = null;
+            var pref = await tenantPrefRepo.GetBySubTypeAsync(subType, ct);
+            if (pref is not null)
+                portalEp = await portalEndpointRepo.GetByIdAsync(pref.PortalApiEndpointId, ct);
+            portalEp ??= await portalEndpointRepo.GetPreferredBySubTypeAsync(subType, ct)
+                         ?? (await portalEndpointRepo.GetBySubTypeAsync(subType, ct)).FirstOrDefault();
+
+            if (portalEp is not null)
+            {
+                var def = await portalDefRepo.GetByIdAsync(portalEp.DefinitionId, ct);
+                if (def is not null && def.IsActive)
+                {
+                    baseUrl = def.BaseUrl; authConfig = def.AuthConfig;
+                    path = portalEp.Path; httpMethod = portalEp.HttpMethod ?? def.HttpMethod;
+                    queryParams = portalEp.QueryParams; headers = portalEp.Headers;
+                    body = portalEp.RequestBodyTemplate; responseMapping = portalEp.ResponseMapping;
+                    getCredential = (key, token) => portalCredStore.GetAsync(key, token);
+                }
+            }
+        }
+
+        return (baseUrl, authConfig, path, httpMethod, queryParams, headers, body, responseMapping, getCredential);
+    }
 }
 
 public record StartSessionRequest(
@@ -343,6 +526,13 @@ public record AddressValidationResult(
     List<Dictionary<string, string>>? Matches);
 
 public record ZipLookupRequest(string? Zip);
+
+public record AutocompleteAddressRequest(string? Text, string? SessionToken);
+public record AutocompleteSuggestion(string PlaceId, string DisplayText);
+public record AutocompleteAddressResult(List<AutocompleteSuggestion> Suggestions);
+
+public record SelectAutocompleteRequest(string? PlaceId, string? SessionToken);
+public record AutocompleteSelectionResult(Dictionary<string, string>? Fields, string? Error = null);
 
 public record ZipLookupResult(
     string? City,
@@ -925,5 +1115,203 @@ internal static class ZipLookupResponseEvaluator
             JsonValueKind.False  => "false",
             _                    => ""
         };
+    }
+}
+
+internal sealed class AutocompleteDetailsConfig
+{
+    public string Path { get; init; } = string.Empty;
+    public string? Method { get; init; }
+    public Dictionary<string, string>? Headers { get; init; }
+    public List<(string From, string To)> FieldMappings { get; init; } = [];
+}
+
+internal static class AutocompleteResponseEvaluator
+{
+    // Parse the "details" section from the stored response mapping JSON
+    public static AutocompleteDetailsConfig? ParseDetailsConfig(string responseMappingJson)
+    {
+        try
+        {
+            var root = JsonDocument.Parse(responseMappingJson).RootElement;
+            if (!root.TryGetProperty("autocompleteConfig", out var acEl) ||
+                !acEl.TryGetProperty("details", out var detEl))
+                return null;
+
+            var path   = Str(detEl, "path");
+            var method = Str(detEl, "method");
+            if (string.IsNullOrEmpty(path)) return null;
+
+            Dictionary<string, string>? headers = null;
+            if (detEl.TryGetProperty("headers", out var hdrEl) && hdrEl.ValueKind == JsonValueKind.Object)
+            {
+                headers = new();
+                foreach (var prop in hdrEl.EnumerateObject())
+                    if (prop.Value.ValueKind == JsonValueKind.String)
+                        headers[prop.Name] = prop.Value.GetString() ?? "";
+            }
+
+            var fieldMappings = new List<(string From, string To)>();
+            if (detEl.TryGetProperty("fieldMappings", out var fmEl) && fmEl.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var fm in fmEl.EnumerateArray())
+                {
+                    var from = Str(fm, "from");
+                    var to   = Str(fm, "to");
+                    if (!string.IsNullOrEmpty(from) && !string.IsNullOrEmpty(to))
+                        fieldMappings.Add((from, to));
+                }
+            }
+
+            return new AutocompleteDetailsConfig
+            {
+                Path          = path,
+                Method        = string.IsNullOrEmpty(method) ? "GET" : method.ToUpperInvariant(),
+                Headers       = headers,
+                FieldMappings = fieldMappings,
+            };
+        }
+        catch { return null; }
+    }
+
+    // Extract suggestions list from autocomplete API response
+    public static List<AutocompleteSuggestion> EvaluateSuggestions(string responseMappingJson, JsonElement body)
+    {
+        try
+        {
+            var root = JsonDocument.Parse(responseMappingJson).RootElement;
+            if (!root.TryGetProperty("autocompleteConfig", out var acEl) ||
+                !acEl.TryGetProperty("suggestions", out var sugEl))
+                return [];
+
+            var arrayPath   = Str(sugEl, "arrayPath");
+            var placeIdPath = Str(sugEl, "placeIdPath");
+            var displayPath = Str(sugEl, "displayTextPath");
+
+            if (string.IsNullOrEmpty(arrayPath)) return [];
+
+            var arrayEl = ResolvePath(body, arrayPath);
+            if (arrayEl is not JsonElement ae || ae.ValueKind != JsonValueKind.Array) return [];
+
+            var results = new List<AutocompleteSuggestion>();
+            foreach (var item in ae.EnumerateArray())
+            {
+                var placeId = string.IsNullOrEmpty(placeIdPath) ? null
+                    : Normalize(ResolvePath(item, placeIdPath));
+                var display = string.IsNullOrEmpty(displayPath) ? null
+                    : Normalize(ResolvePath(item, displayPath));
+                if (!string.IsNullOrWhiteSpace(placeId) && !string.IsNullOrWhiteSpace(display))
+                    results.Add(new AutocompleteSuggestion(placeId!, display!));
+            }
+            return results;
+        }
+        catch { return []; }
+    }
+
+    // Map address details response fields using configured fieldMappings
+    public static Dictionary<string, string> EvaluateDetails(AutocompleteDetailsConfig config, JsonElement body)
+    {
+        var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (from, to) in config.FieldMappings)
+        {
+            var dot = to.IndexOf('.');
+            var key = dot >= 0 ? to[(dot + 1)..] : to;
+
+            string? value;
+            if (from.Contains("{{"))
+                value = ResolveTemplate(body, from);
+            else if (from.Contains("[type="))
+                value = ResolveByType(body, from);
+            else
+                value = Normalize(ResolvePath(body, from));
+
+            if (!string.IsNullOrEmpty(value))
+                fields[key] = value;
+        }
+        return fields;
+    }
+
+    // Handles path like "addressComponents[type=locality].longText"
+    // Filters array items where item.types array contains the specified type string
+    private static string? ResolveByType(JsonElement root, string path)
+    {
+        var typeMatch = System.Text.RegularExpressions.Regex.Match(path, @"^(.+)\[type=(\w+)\](?:\.(.+))?$");
+        if (!typeMatch.Success) return null;
+
+        var arrayPath = typeMatch.Groups[1].Value;
+        var typeValue = typeMatch.Groups[2].Value;
+        var fieldPath = typeMatch.Groups[3].Value;
+
+        var arrayEl = ResolvePath(root, arrayPath);
+        if (arrayEl is not JsonElement ae || ae.ValueKind != JsonValueKind.Array) return null;
+
+        foreach (var item in ae.EnumerateArray())
+        {
+            if (!item.TryGetProperty("types", out var typesEl) || typesEl.ValueKind != JsonValueKind.Array)
+                continue;
+            var hasType = typesEl.EnumerateArray()
+                .Any(t => t.ValueKind == JsonValueKind.String &&
+                          string.Equals(t.GetString(), typeValue, StringComparison.OrdinalIgnoreCase));
+            if (!hasType) continue;
+
+            if (string.IsNullOrEmpty(fieldPath)) return Normalize(item);
+            return Normalize(ResolvePath(item, fieldPath));
+        }
+        return null;
+    }
+
+    private static string ResolveTemplate(JsonElement body, string template)
+    {
+        var result = System.Text.RegularExpressions.Regex.Replace(
+            template, @"\{\{([^}]+)\}\}", m =>
+            {
+                var path = m.Groups[1].Value.Trim();
+                return path.Contains("[type=")
+                    ? ResolveByType(body, path) ?? string.Empty
+                    : Normalize(ResolvePath(body, path)) ?? string.Empty;
+            });
+        return System.Text.RegularExpressions.Regex.Replace(result.Trim(), @"\s{2,}", " ");
+    }
+
+    private static object? ResolvePath(JsonElement element, string path)
+    {
+        JsonElement current = element;
+        foreach (var segment in path.Split('.'))
+        {
+            var arrMatch = System.Text.RegularExpressions.Regex.Match(segment, @"^(\w*)\[(\d+)\]$");
+            if (arrMatch.Success)
+            {
+                var key = arrMatch.Groups[1].Value;
+                var idx = int.Parse(arrMatch.Groups[2].Value);
+                if (!string.IsNullOrEmpty(key))
+                    if (!current.TryGetProperty(key, out current)) return null;
+                if (current.ValueKind != JsonValueKind.Array || idx >= current.GetArrayLength()) return null;
+                current = current[idx];
+            }
+            else
+            {
+                if (!current.TryGetProperty(segment, out current)) return null;
+            }
+        }
+        return current;
+    }
+
+    private static string? Normalize(object? val)
+    {
+        if (val is not JsonElement je) return val?.ToString();
+        return je.ValueKind switch
+        {
+            JsonValueKind.String => je.GetString(),
+            JsonValueKind.Number => je.GetRawText(),
+            JsonValueKind.True   => "true",
+            JsonValueKind.False  => "false",
+            _                    => null,
+        };
+    }
+
+    private static string Str(JsonElement el, string prop)
+    {
+        if (!el.TryGetProperty(prop, out var v)) return "";
+        return v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
     }
 }

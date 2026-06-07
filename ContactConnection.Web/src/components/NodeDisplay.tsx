@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type FormEvent } from 'react'
 import type { FlowNodeState } from '../types/flow'
-import type { ZipLookupResult } from '../api/flows'
+import type { ZipLookupResult, AutocompleteSuggestion, AutocompleteSelectionResult } from '../api/flows'
 import { COUNTRIES } from '../data/countries'
 
 // ── Address form constants ────────────────────────────────────────────────────
@@ -145,9 +145,15 @@ interface Props {
   zipLookupPending?: boolean
   onLookupZip?: (zip: string) => void
   onClearZipLookup?: () => void
+  autocompleteSuggestions?: AutocompleteSuggestion[]
+  autocompletePending?: boolean
+  autocompleteSelection?: AutocompleteSelectionResult | null
+  onAutocompleteSearch?: (text: string, sessionToken: string) => void
+  onAutocompleteSelect?: (placeId: string, sessionToken: string) => void
+  onClearAutocomplete?: () => void
 }
 
-export default function NodeDisplay({ node, onAdvance, onJump, advancing, validating, onValidateAddress, zipLookupResult, zipLookupPending, onLookupZip, onClearZipLookup }: Props) {
+export default function NodeDisplay({ node, onAdvance, onJump, advancing, validating, onValidateAddress, zipLookupResult, zipLookupPending, onLookupZip, onClearZipLookup, autocompleteSuggestions, autocompletePending, autocompleteSelection, onAutocompleteSearch, onAutocompleteSelect, onClearAutocomplete }: Props) {
   const [inputValue, setInputValue] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
 
@@ -158,6 +164,10 @@ export default function NodeDisplay({ node, onAdvance, onJump, advancing, valida
   const [zipCityMismatch, setZipCityMismatch] = useState(false)
   const [zipMismatchedCity, setZipMismatchedCity] = useState<string | null>(null)
   const [zipError, setZipError] = useState<string | null>(null)
+  // Autocomplete
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const autocompleteSessionToken = useRef<string>(crypto.randomUUID())
+  const autocompleteDebounce = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Ref so the zip lookup effect can read the current city without being a dependency on addrForm
   const addrFormRef = useRef<AddrForm>(EMPTY_ADDR)
   useEffect(() => { addrFormRef.current = addrForm }, [addrForm])
@@ -270,6 +280,34 @@ export default function NodeDisplay({ node, onAdvance, onJump, advancing, valida
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zipLookupResult])
+
+  // Apply autocomplete selection: fill address fields from the mapped response
+  useEffect(() => {
+    if (!autocompleteSelection?.fields || node.nodeType !== 'address') return
+    setShowSuggestions(false)
+    // Generate a fresh session token — the selection closed this billing session
+    autocompleteSessionToken.current = crypto.randomUUID()
+    onClearAutocomplete?.()
+    setAddrForm((f) => {
+      const next = { ...f }
+      const fields = autocompleteSelection.fields!
+      // Map returned fields into the form; keys match AddressData field names (case-insensitive)
+      const get = (key: string) => fields[key] ?? fields[key.toLowerCase()] ?? null
+      if (get('address1')) next.address1 = get('address1')!
+      if (get('address2')) next.address2 = get('address2')!
+      if (get('city'))     next.city     = get('city')!
+      if (get('state'))    next.state    = get('state')!
+      if (get('zip'))      next.zip      = get('zip')!
+      if (get('zip4'))     next.zip4     = get('zip4')!
+      if (get('country'))  next.country  = get('country')!
+      const lat = get('latitude')
+      const lon = get('longitude')
+      if (lat != null) next.latitude  = parseFloat(lat)
+      if (lon != null) next.longitude = parseFloat(lon)
+      return next
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autocompleteSelection])
 
   // Pre-populate inputValue when navigating to a node whose output variable already has a value
   const prevInputNodeId = useRef<string | null>(null)
@@ -784,7 +822,7 @@ export default function NodeDisplay({ node, onAdvance, onJump, advancing, valida
             </div>
           )}
 
-          {/* Address line 1 */}
+          {/* Address line 1 — with typeahead when autocomplete API is configured */}
           <div className="flex flex-col gap-0.5">
             <label className="text-gray-500 text-[10px] font-medium uppercase tracking-wider">Address Line 1</label>
             <div className="flex gap-2">
@@ -799,15 +837,68 @@ export default function NodeDisplay({ node, onAdvance, onJump, advancing, valida
                   <option key={p} value={p}>{p || '(none)'}</option>
                 ))}
               </select>
-              <input
-                type="text"
-                value={addrForm.address1}
-                onChange={(e) => setAddrForm((f) => ({ ...f, address1: e.target.value }))}
-                onFocus={() => setFocusedField('address1')}
-                onBlur={() => setFocusedField(null)}
-                placeholder="Address line 1"
-                className="flex-1 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700"
-              />
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  value={addrForm.address1}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    setAddrForm((f) => ({ ...f, address1: val }))
+                    if (onAutocompleteSearch) {
+                      if (autocompleteDebounce.current) clearTimeout(autocompleteDebounce.current)
+                      if (val.trim().length >= 3) {
+                        setShowSuggestions(true)
+                        autocompleteDebounce.current = setTimeout(() => {
+                          onAutocompleteSearch(val.trim(), autocompleteSessionToken.current)
+                        }, 300)
+                      } else {
+                        setShowSuggestions(false)
+                        onClearAutocomplete?.()
+                      }
+                    }
+                  }}
+                  onFocus={() => {
+                    setFocusedField('address1')
+                    if ((autocompleteSuggestions?.length ?? 0) > 0) setShowSuggestions(true)
+                  }}
+                  onBlur={() => {
+                    setFocusedField(null)
+                    // Delay hide so a click on a suggestion registers first
+                    setTimeout(() => setShowSuggestions(false), 150)
+                  }}
+                  placeholder={onAutocompleteSearch ? 'Start typing to search…' : 'Address line 1'}
+                  className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700"
+                />
+                {/* Suggestions dropdown */}
+                {showSuggestions && onAutocompleteSearch && (
+                  <div className="absolute z-20 left-0 right-0 top-full mt-0.5 bg-gray-900 border border-gray-700 rounded-lg shadow-xl overflow-hidden">
+                    {autocompletePending && (
+                      <div className="flex items-center gap-2 px-3 py-2 text-gray-500 text-xs">
+                        <span className="inline-block w-3 h-3 border border-gray-500 border-t-transparent rounded-full animate-spin" />
+                        Searching…
+                      </div>
+                    )}
+                    {!autocompletePending && (autocompleteSuggestions?.length ?? 0) === 0 && addrForm.address1.trim().length >= 3 && (
+                      <div className="px-3 py-2 text-gray-600 text-xs">No suggestions</div>
+                    )}
+                    {(autocompleteSuggestions ?? []).map((s) => (
+                      <button
+                        key={s.placeId}
+                        type="button"
+                        onMouseDown={(e) => {
+                          // mouseDown fires before blur — prevent blur from hiding dropdown first
+                          e.preventDefault()
+                          setShowSuggestions(false)
+                          onAutocompleteSelect?.(s.placeId, autocompleteSessionToken.current)
+                        }}
+                        className="w-full text-left px-3 py-2 text-sm text-white hover:bg-gray-700 transition-colors border-b border-gray-800 last:border-0"
+                      >
+                        {s.displayText}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 

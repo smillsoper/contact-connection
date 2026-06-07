@@ -55,6 +55,41 @@
 | 43 | 2026-06-06 | 11:03 AM CDT | 2:27 PM CDT | 204 min | ~2644 min |
 | 44 | 2026-06-06 | 2:27 PM CDT | 3:44 PM CDT | 77 min | ~2721 min |
 | 45 | 2026-06-07 | 8:29 AM CDT | 10:09 AM CDT | 100 min | ~2821 min |
+| 46 | 2026-06-07 | 10:09 AM CDT | 12:00 PM CDT | 111 min | ~2932 min |
+
+---
+
+## Session 46
+
+**Date:** 2026-06-07
+**Start:** 10:09 AM CDT
+**End:** 12:00 PM CDT
+**Duration:** 111 minutes
+
+### Accomplished
+
+**Realtime Address Autocomplete — API Builder fixes**
+
+- `realtime_address_autocomplete` added to `API_TYPE_SOURCE_CONTEXT` — Response Mapping, Source Test, and Payload Test tabs were hidden because the sub-type was missing from the lookup map.
+- Source Test tab now shows an autocomplete-specific form (Search Text → `{{address.text}}`, Session Token → `{{address.sessionToken}}`) instead of the standard address name/address form, since those are the actual variables resolved by the autocomplete endpoint.
+- Response Mapping tab badge count uses `autocompleteConfig` presence (not `outcomes.length`) for the `realtime_address_autocomplete` sub-type so the badge appears correctly.
+
+**Realtime Address Autocomplete — crash and data-loss bug fixes**
+
+- `<JsonTree>` undefined component reference in the autocomplete captured response panel caused a React white-page crash when a capture completed. Fixed by replacing with `<JsonNode name="" value={capturedBody} path="" depth={0} ... />` (the correct existing component).
+- Both `runAndCaptureForOutcome` and `runAndCaptureFromPayload` were overwriting `responseMapping` as `{ outcomes: [...] }`, silently dropping `autocompleteConfig`. Fixed by spreading `...f.responseMapping` to preserve all fields.
+- Run & Capture button race condition: UUID was generated inside `onChange()` but `config.outcomes[0]?.id` was still `undefined` when read, falling back to the string `'capture'` which never matched any outcome. Fixed by generating the UUID before calling `onChange` and passing it to both.
+
+**Realtime Address Autocomplete — backend template fix**
+
+- `ResolveTemplate` updated to route through `ResolveByType` when a `{{...}}` placeholder path contains `[type=]` syntax — enables `{{addressComponents[type=street_number].longText}} {{addressComponents[type=route].longText}}` as the `address1` field mapping.
+
+**Google Places API configuration — troubleshooting**
+
+- Diagnosed 403 `API_KEY_HTTP_REFERRER_BLOCKED`: server-to-server calls don't send a Referer header; workaround is to add `Referer: http://localhost:5173/` to the definition's headers tab (or switch the key restriction to IP addresses).
+- Diagnosed 400 invalid JSON: body template was missing closing `"` between `{{address.text}}` and `,`; also corrected variable from `{{address.address1}}` to `{{address.text}}`.
+- Diagnosed suggestions not appearing: Place ID and Display Text fields contained full root paths (`suggestions[0].placePrediction.placeId`) instead of relative item paths (`placePrediction.placeId`); Details Path field also had wrong value.
+- Added `console.log` in `FlowPanel.selectAutocomplete` to log the details call result for next-session debugging of field auto-fill.
 
 ---
 

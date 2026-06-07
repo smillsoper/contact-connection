@@ -250,8 +250,34 @@ interface ResponseOutcome {
   longitudePath?: string
 }
 
+interface AutocompleteSuggestionsConfig {
+  arrayPath: string
+  placeIdPath: string
+  displayTextPath: string
+}
+
+interface AutocompleteDetailsConfig {
+  path: string
+  method: string
+  headers: Record<string, string>
+  fieldMappings: OutcomeFieldMapping[]
+}
+
+interface AutocompleteConfig {
+  suggestions: AutocompleteSuggestionsConfig
+  details: AutocompleteDetailsConfig
+}
+
+function defaultAutocompleteConfig(): AutocompleteConfig {
+  return {
+    suggestions: { arrayPath: '', placeIdPath: '', displayTextPath: '' },
+    details: { path: '', method: 'GET', headers: {}, fieldMappings: [] },
+  }
+}
+
 interface ResponseMappingConfig {
   outcomes: ResponseOutcome[]
+  autocompleteConfig?: AutocompleteConfig
 }
 
 type RawOutcome = Omit<ResponseOutcome, 'conditions'> & { condition?: OutcomeCondition; conditions?: OutcomeCondition[] }
@@ -301,8 +327,9 @@ function resolveMessagePreview(body: unknown, messagePath: string): string | nul
 
 function parseResponseMapping(json: string): ResponseMappingConfig {
   try {
-    const obj = JSON.parse(json) as { outcomes?: RawOutcome[] }
-    if (!Array.isArray(obj?.outcomes)) return { outcomes: [] }
+    const obj = JSON.parse(json) as { outcomes?: RawOutcome[]; autocompleteConfig?: AutocompleteConfig }
+    const autocompleteConfig = obj.autocompleteConfig
+    if (!Array.isArray(obj?.outcomes)) return { outcomes: [], autocompleteConfig }
     const outcomes: ResponseOutcome[] = obj.outcomes.map(o => {
       if (Array.isArray(o.conditions) && o.conditions.length > 0) {
         const { condition: _legacy, ...rest } = o
@@ -315,7 +342,7 @@ function parseResponseMapping(json: string): ResponseMappingConfig {
       const { condition: _c, ...rest } = o
       return { ...rest, conditions: [{ path: '', op: 'eq' as ConditionOp, value: '' }] }
     })
-    return { outcomes }
+    return { outcomes, autocompleteConfig }
   } catch {
     return { outcomes: [] }
   }
@@ -429,6 +456,12 @@ const API_TYPE_SOURCE_CONTEXT: Record<string, SourceContext> = {
     groups: ADDRESS_GROUPS,
   },
   zip_code_lookup: {
+    label: 'Address Node',
+    description: 'Fields captured by the Address entry form',
+    namespace: 'address',
+    groups: ADDRESS_GROUPS,
+  },
+  realtime_address_autocomplete: {
     label: 'Address Node',
     description: 'Fields captured by the Address entry form',
     namespace: 'address',
@@ -861,18 +894,18 @@ function ResponseMappingPanel({ config, onChange, sourceContext, subType, testRu
       fieldMappings: [],
       capturedResponse: null,
     }
-    onChange({ outcomes: [...config.outcomes, next] })
+    onChange({ ...config, outcomes: [...config.outcomes, next] })
     setActiveId(id)
   }
 
   function updateOutcome(patch: Partial<ResponseOutcome>) {
     if (!activeId) return
-    onChange({ outcomes: config.outcomes.map(o => o.id === activeId ? { ...o, ...patch } : o) })
+    onChange({ ...config, outcomes: config.outcomes.map(o => o.id === activeId ? { ...o, ...patch } : o) })
   }
 
   function removeOutcome(id: string) {
     const next = config.outcomes.filter(o => o.id !== id)
-    onChange({ outcomes: next })
+    onChange({ ...config, outcomes: next })
     if (activeId === id) setActiveId(next[0]?.id ?? null)
   }
 
@@ -881,6 +914,214 @@ function ResponseMappingPanel({ config, onChange, sourceContext, subType, testRu
       setCopiedPath(path)
       setTimeout(() => setCopiedPath(null), 1500)
     })
+  }
+
+  function updateAutocomplete(patch: Partial<AutocompleteConfig>) {
+    const current = config.autocompleteConfig ?? defaultAutocompleteConfig()
+    onChange({ ...config, autocompleteConfig: { ...current, ...patch } })
+  }
+
+  function updateAutocompleteSuggestions(patch: Partial<AutocompleteSuggestionsConfig>) {
+    const current = config.autocompleteConfig ?? defaultAutocompleteConfig()
+    updateAutocomplete({ suggestions: { ...current.suggestions, ...patch } })
+  }
+
+  function updateAutocompleteDetails(patch: Partial<AutocompleteDetailsConfig>) {
+    const current = config.autocompleteConfig ?? defaultAutocompleteConfig()
+    updateAutocomplete({ details: { ...current.details, ...patch } })
+  }
+
+  // ── Realtime Address Autocomplete — dedicated two-section config panel ──────
+  if (subType === 'realtime_address_autocomplete') {
+    const ac = config.autocompleteConfig ?? defaultAutocompleteConfig()
+    const capturedBody = config.outcomes[0]?.capturedResponse?.body ?? null
+    return (
+      <div className="flex w-full min-h-0 overflow-hidden">
+        {/* Config panels */}
+        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-5 min-w-0">
+
+          {/* ── Suggestions ─────────────────────────────── */}
+          <div>
+            <p className="text-white text-xs font-semibold mb-3">Suggestions</p>
+            <p className="text-gray-500 text-xs mb-3">
+              Configure how to extract the suggestions list from the autocomplete API response (the call made while the agent types).
+            </p>
+            <div className="bg-gray-800/40 border border-gray-700/50 rounded-lg px-3 py-3 space-y-3">
+              <div>
+                <label className="block text-gray-500 text-[10px] font-medium uppercase tracking-wider mb-1">Suggestions Array Path</label>
+                <input type="text" value={ac.suggestions.arrayPath}
+                  onChange={(e) => updateAutocompleteSuggestions({ arrayPath: e.target.value })}
+                  placeholder="e.g. suggestions"
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white text-sm font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                />
+                <p className="text-gray-600 text-xs mt-1">Path to the array of suggestion items in the response.</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-gray-500 text-[10px] font-medium uppercase tracking-wider mb-1">Place ID Field</label>
+                  <input type="text" value={ac.suggestions.placeIdPath}
+                    onChange={(e) => updateAutocompleteSuggestions({ placeIdPath: e.target.value })}
+                    placeholder="e.g. placePrediction.placeId"
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white text-sm font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                  />
+                  <p className="text-gray-600 text-xs mt-1">Path within each item to the unique place identifier.</p>
+                </div>
+                <div>
+                  <label className="block text-gray-500 text-[10px] font-medium uppercase tracking-wider mb-1">Display Text Field</label>
+                  <input type="text" value={ac.suggestions.displayTextPath}
+                    onChange={(e) => updateAutocompleteSuggestions({ displayTextPath: e.target.value })}
+                    placeholder="e.g. placePrediction.text.text"
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white text-sm font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                  />
+                  <p className="text-gray-600 text-xs mt-1">Path within each item to the display text shown in the dropdown.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ── Details ─────────────────────────────────── */}
+          <div>
+            <p className="text-white text-xs font-semibold mb-3">Details</p>
+            <p className="text-gray-500 text-xs mb-3">
+              Configure the second API call made when the agent selects a suggestion. Use <span className="font-mono text-gray-400">{"{{address.placeId}}"}</span> and <span className="font-mono text-gray-400">{"{{address.sessionToken}}"}</span> in the path and headers.
+            </p>
+            <div className="bg-gray-800/40 border border-gray-700/50 rounded-lg px-3 py-3 space-y-3">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2">
+                  <label className="block text-gray-500 text-[10px] font-medium uppercase tracking-wider mb-1">Details Path</label>
+                  <input type="text" value={ac.details.path}
+                    onChange={(e) => updateAutocompleteDetails({ path: e.target.value })}
+                    placeholder="e.g. /v1/places/{{address.placeId}}"
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white text-sm font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-gray-500 text-[10px] font-medium uppercase tracking-wider mb-1">Method</label>
+                  <select value={ac.details.method}
+                    onChange={(e) => updateAutocompleteDetails({ method: e.target.value })}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white text-sm focus:outline-none focus:border-indigo-500"
+                  >
+                    {['GET', 'POST', 'PUT', 'PATCH'].map(m => <option key={m}>{m}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              {/* Details headers */}
+              <div>
+                <p className="text-gray-500 text-[10px] font-medium uppercase tracking-wider mb-1">Additional Headers</p>
+                <p className="text-gray-600 text-xs mb-2">
+                  Headers specific to the details call — e.g. <span className="font-mono text-gray-500">X-Goog-SessionToken: {"{{address.sessionToken}}"}</span>.
+                  Auth credentials are applied automatically from the definition's auth config.
+                </p>
+                <div className="space-y-1.5">
+                  {Object.entries(ac.details.headers).map(([k, v], i) => (
+                    <div key={i} className="flex gap-2 items-center">
+                      <input type="text" value={k}
+                        onChange={(e) => {
+                          const entries = Object.entries(ac.details.headers)
+                          entries[i] = [e.target.value, v]
+                          updateAutocompleteDetails({ headers: Object.fromEntries(entries) })
+                        }}
+                        placeholder="Header name"
+                        className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-white text-xs font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                      />
+                      <input type="text" value={v}
+                        onChange={(e) => {
+                          const entries = Object.entries(ac.details.headers)
+                          entries[i] = [k, e.target.value]
+                          updateAutocompleteDetails({ headers: Object.fromEntries(entries) })
+                        }}
+                        placeholder="Value or {{address.sessionToken}}"
+                        className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-white text-xs font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                      />
+                      <button onClick={() => {
+                        const entries = Object.entries(ac.details.headers).filter((_, j) => j !== i)
+                        updateAutocompleteDetails({ headers: Object.fromEntries(entries) })
+                      }} className="text-gray-600 hover:text-red-400 text-sm px-1">×</button>
+                    </div>
+                  ))}
+                  <button onClick={() => updateAutocompleteDetails({ headers: { ...ac.details.headers, '': '' } })}
+                    className="text-indigo-400 hover:text-indigo-300 text-xs mt-1">
+                    + Add header
+                  </button>
+                </div>
+              </div>
+
+              {/* Field mappings */}
+              <div>
+                <p className="text-gray-500 text-[10px] font-medium uppercase tracking-wider mb-1">Field Mappings</p>
+                <FieldMappingEditor
+                  mappings={ac.details.fieldMappings}
+                  onChange={(fieldMappings) => updateAutocompleteDetails({ fieldMappings })}
+                  sourceContext={sourceContext}
+                  capturedResponse={config.outcomes[0]?.capturedResponse ?? null}
+                />
+                <p className="text-gray-600 text-[10px] mt-1.5">
+                  Map details response fields to address form fields. For Google Places use <span className="font-mono text-gray-500">addressComponents[type=locality].longText</span> to extract by component type,
+                  or <span className="font-mono text-gray-500">formattedAddress</span> for the full address string.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Test capture — reuses first outcome slot to store captured response */}
+          <div>
+            <p className="text-white text-xs font-semibold mb-2">Captured Response</p>
+            <p className="text-gray-500 text-xs mb-3">
+              Run a test against the suggestions endpoint to capture a sample response for path reference.
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => {
+                let outcomeId = config.outcomes[0]?.id
+                if (!outcomeId) {
+                  outcomeId = crypto.randomUUID()
+                  onChange({ ...config, outcomes: [{ id: outcomeId, name: 'capture', label: 'Capture', conditions: [], fieldMappings: [], capturedResponse: null }] })
+                }
+                onRunAndCapture(outcomeId)
+              }}
+                disabled={testRunning || !hasTestData}
+                className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded-lg px-3 py-1.5 text-xs font-medium transition-colors flex items-center gap-1.5"
+              >
+                {testRunning ? <span className="inline-block w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" /> : '▶'}
+                {hasTestData ? 'Run & Capture' : 'Add test data first'}
+              </button>
+              <button onClick={() => {
+                let outcomeId = config.outcomes[0]?.id
+                if (!outcomeId) {
+                  outcomeId = crypto.randomUUID()
+                  onChange({ ...config, outcomes: [{ id: outcomeId, name: 'capture', label: 'Capture', conditions: [], fieldMappings: [], capturedResponse: null }] })
+                }
+                onRunAndCaptureFromPayload(outcomeId)
+              }}
+                disabled={testRunning || !hasPayload}
+                className="bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
+              >
+                {hasPayload ? '↑ Payload' : 'No payload'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Captured response tree */}
+        {capturedBody != null && (
+          <div className="w-72 shrink-0 border-l border-gray-800 flex flex-col min-h-0">
+            <div className="px-3 py-2.5 border-b border-gray-800 shrink-0 flex items-center justify-between">
+              <div>
+                <p className="text-white text-xs font-semibold">Captured Response</p>
+                {config.outcomes[0]?.capturedResponse && (
+                  <p className="text-gray-500 text-[10px] mt-0.5">
+                    {new Date(config.outcomes[0].capturedResponse.capturedAt).toLocaleDateString()} · {config.outcomes[0].capturedResponse.statusCode}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto px-2 py-2">
+              <JsonNode name="" value={capturedBody} path="" depth={0} copiedPath={copiedPath} onCopy={handleCopyPath} />
+            </div>
+          </div>
+        )}
+      </div>
+    )
   }
 
   return (
@@ -1331,6 +1572,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
       setEndpointForm(f => ({
         ...f,
         responseMapping: {
+          ...f.responseMapping,
           outcomes: f.responseMapping.outcomes.map(o =>
             o.id === outcomeId ? { ...o, capturedResponse: captured } : o
           ),
@@ -1387,6 +1629,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
       setEndpointForm(f => ({
         ...f,
         responseMapping: {
+          ...f.responseMapping,
           outcomes: f.responseMapping.outcomes.map(o =>
             o.id === outcomeId ? { ...o, capturedResponse: captured } : o
           ),
@@ -1892,7 +2135,9 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                     body: endpointForm.requestBodyTemplate.trim() ? 1 : 0,
                     test: 0,
                     payload: endpointForm.payloadBody.trim() ? 1 : 0,
-                    response: endpointForm.responseMapping.outcomes.length,
+                    response: endpointForm.apiSubType === 'realtime_address_autocomplete'
+                      ? (endpointForm.responseMapping.autocompleteConfig ? 1 : 0)
+                      : endpointForm.responseMapping.outcomes.length,
                   }
                   const labels: Record<string, string> = { general: 'General', params: 'Query Params', headers: 'Headers', body: 'Body', test: 'Source Test', payload: 'Payload Test', response: 'Response Mapping' }
                   const count = counts[tab]
@@ -2067,8 +2312,46 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                     </div>
                   )}
 
-                  {/* Source Test tab */}
-                  {endpointTab === 'test' && endpointSourceContext?.namespace === 'address' && (
+                  {/* Source Test tab — autocomplete variant */}
+                  {endpointTab === 'test' && endpointForm.apiSubType === 'realtime_address_autocomplete' && (
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-gray-400 text-xs font-medium mb-1">Search Text <span className="text-gray-600 font-normal">(address.text)</span></label>
+                        <input type="text" value={endpointForm.testData.text ?? ''} onChange={(e) => setEndpointForm((f) => ({ ...f, testData: { ...f.testData, text: e.target.value } }))} placeholder="435 Castillo St" className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500" />
+                        <p className="text-gray-600 text-xs mt-1">Partial address the agent is typing. Used as {"{{address.text}}"} in the body template.</p>
+                      </div>
+                      <div>
+                        <label className="block text-gray-400 text-xs font-medium mb-1">Session Token <span className="text-gray-600 font-normal">(address.sessionToken)</span></label>
+                        <input type="text" value={endpointForm.testData.sessionToken ?? ''} onChange={(e) => setEndpointForm((f) => ({ ...f, testData: { ...f.testData, sessionToken: e.target.value } }))} placeholder="test-session-123" className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500" />
+                        <p className="text-gray-600 text-xs mt-1">Any string for testing — the live flow generates a UUID per session.</p>
+                      </div>
+                      {/* Run Test */}
+                      <div className="pt-3 border-t border-gray-800 flex items-center gap-3">
+                        <button
+                          onClick={runEndpointTest}
+                          disabled={testRunning || !endpointForm.path.trim()}
+                          className="bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                        >
+                          {testRunning ? 'Running…' : 'Run Test'}
+                        </button>
+                      </div>
+                      {testResult && (
+                        <div className="space-y-2">
+                          {testResult.resolvedUrl && <p className="text-gray-500 text-xs font-mono">→ {testResult.resolvedUrl}</p>}
+                          <p className={`text-xs font-medium ${testResult.success ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {testResult.statusCode} {testResult.success ? 'OK' : 'Failed'}
+                          </p>
+                          {testResult.body && (
+                            <pre className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-300 font-mono overflow-x-auto whitespace-pre-wrap max-h-64">{testResult.body}</pre>
+                          )}
+                          {testResult.error && <p className="text-red-400 text-xs">{testResult.error}</p>}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Source Test tab — standard address */}
+                  {endpointTab === 'test' && endpointSourceContext?.namespace === 'address' && endpointForm.apiSubType !== 'realtime_address_autocomplete' && (
                     <div className="space-y-3">
                       {/* Name row */}
                       <div className="grid grid-cols-[1fr_56px_1fr] gap-2">
