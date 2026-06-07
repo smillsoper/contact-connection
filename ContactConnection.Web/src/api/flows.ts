@@ -24,6 +24,17 @@ export interface AddressValidationResult {
   matches: Record<string, string>[] | null
 }
 
+export interface ZipLookupResult {
+  city: string | null
+  cities: string[]
+  state: string | null
+  zip4: string | null
+  latitude: number | null
+  longitude: number | null
+  outcomeKey: string | null
+  message: string | null
+}
+
 export const flowsApi = {
   // Agent panel — published flows only
   list: () => api.get<FlowSummary[]>('/api/v1/flows'),
@@ -42,6 +53,9 @@ export const flowsApi = {
 
   validateAddress: (sessionId: string, address: Record<string, string>) =>
     api.post<AddressValidationResult>(`/api/v1/flow-sessions/${sessionId}/validate-address`, { address }),
+
+  lookupZip: (sessionId: string, zip: string) =>
+    api.post<ZipLookupResult>(`/api/v1/flow-sessions/${sessionId}/lookup-zip`, { zip }),
 
   // Flow designer
   create: (name: string, flowType: string, definition: ContactConnectionFlowDefinition) =>

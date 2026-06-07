@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, type FormEvent } from 'react'
 import type { FlowNodeState } from '../types/flow'
+import type { ZipLookupResult } from '../api/flows'
 import { COUNTRIES } from '../data/countries'
 
 // ── Address form constants ────────────────────────────────────────────────────
@@ -38,6 +39,7 @@ interface AddrForm {
   address2Prefix: string; address2: string
   zip: string; zip4: string; city: string; state: string
   country: string
+  latitude: number | null; longitude: number | null
 }
 
 const EMPTY_ADDR: AddrForm = {
@@ -47,6 +49,7 @@ const EMPTY_ADDR: AddrForm = {
   address2Prefix: '', address2: '',
   zip: '', zip4: '', city: '', state: '',
   country: 'US',
+  latitude: null, longitude: null,
 }
 
 // ── WinForms-style input mask engine ──────────────────────────────────────
@@ -138,15 +141,26 @@ interface Props {
   advancing: boolean
   validating?: boolean
   onValidateAddress?: (address: Record<string, string>) => void
+  zipLookupResult?: ZipLookupResult | null
+  zipLookupPending?: boolean
+  onLookupZip?: (zip: string) => void
+  onClearZipLookup?: () => void
 }
 
-export default function NodeDisplay({ node, onAdvance, onJump, advancing, validating, onValidateAddress }: Props) {
+export default function NodeDisplay({ node, onAdvance, onJump, advancing, validating, onValidateAddress, zipLookupResult, zipLookupPending, onLookupZip, onClearZipLookup }: Props) {
   const [inputValue, setInputValue] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
 
   // Address form state
   const [addrForm, setAddrForm] = useState<AddrForm>(EMPTY_ADDR)
   const [focusedField, setFocusedField] = useState<string | null>(null)
+  const [zipCities, setZipCities] = useState<string[]>([])
+  const [zipCityMismatch, setZipCityMismatch] = useState(false)
+  const [zipMismatchedCity, setZipMismatchedCity] = useState<string | null>(null)
+  const [zipError, setZipError] = useState<string | null>(null)
+  // Ref so the zip lookup effect can read the current city without being a dependency on addrForm
+  const addrFormRef = useRef<AddrForm>(EMPTY_ADDR)
+  useEffect(() => { addrFormRef.current = addrForm }, [addrForm])
 
   // Reset address form when navigating to a new node or when prefilledAddress changes
   // (e.g. jumping back after submitting a corrected address). Validation-error re-renders
@@ -180,12 +194,82 @@ export default function NodeDisplay({ node, onAdvance, onJump, advancing, valida
         city:           p.city           ?? '',
         state:          p.state          ?? '',
         country:        derivedCountry,
+        latitude:       p.latitude  ? parseFloat(p.latitude)  : null,
+        longitude:      p.longitude ? parseFloat(p.longitude) : null,
       })
     } else {
       setAddrForm(EMPTY_ADDR)
     }
     setFocusedField(null)
   }, [node.nodeId, node.nodeType, node.prefilledAddress, node.allowInternational])
+
+  // Clear ZIP lookup state when navigating to a new address node
+  const prevZipNodeId = useRef<string | null>(null)
+  useEffect(() => {
+    if (node.nodeType !== 'address') return
+    if (node.nodeId !== prevZipNodeId.current) {
+      prevZipNodeId.current = node.nodeId
+      setZipCities([])
+      setZipCityMismatch(false)
+      setZipMismatchedCity(null)
+      setZipError(null)
+      onClearZipLookup?.()
+    }
+  }, [node.nodeId, node.nodeType, onClearZipLookup])
+
+  // Apply ZIP lookup result: build city list (preserving entered city), auto-fill empty fields
+  useEffect(() => {
+    if (!zipLookupResult || node.nodeType !== 'address') return
+    const { city: lookupCity, cities, state: lookupState, zip4, latitude, longitude, outcomeKey, message } = zipLookupResult
+
+    // Error outcome — show message near ZIP field, clear any prior city dropdown
+    if (outcomeKey === 'error' || (outcomeKey && cities.length === 0 && !lookupCity)) {
+      setZipError(message ?? 'ZIP code not found.')
+      setZipCities([])
+      setZipCityMismatch(false)
+      return
+    }
+
+    // Clear any prior error when a successful lookup arrives
+    setZipError(null)
+
+    // Read current city via ref so we don't depend on addrForm and re-run on every keystroke
+    const currentCity = addrFormRef.current.city.trim()
+
+    // Build final city list:
+    // - If entered city is not in the returned list, prepend it so the agent's entry persists
+    // - Mismatch warning is only shown when the lookup returned at least one city but it didn't match
+    let finalCities = [...cities]
+    let mismatch = false
+    let mismatchedCity: string | null = null
+    if (currentCity && cities.length > 0) {
+      const cityInList = cities.some((c) => c.toLowerCase() === currentCity.toLowerCase())
+      if (!cityInList) {
+        finalCities = [currentCity, ...cities]
+        mismatch = true
+        mismatchedCity = currentCity
+      }
+    }
+
+    setZipCities(finalCities)
+    setZipCityMismatch(mismatch)
+    setZipMismatchedCity(mismatchedCity)
+
+    setAddrForm((f) => {
+      const nextForm = { ...f }
+      // Only auto-fill city if field was empty at the time of lookup
+      if (!f.city.trim() && lookupCity) nextForm.city = lookupCity
+      // State is always set from lookup — ZIP definitively determines state
+      if (lookupState) nextForm.state = lookupState
+      // Zip4 from lookup only if not already entered
+      if (zip4 && !f.zip4) nextForm.zip4 = zip4
+      // Coordinates always come from the API
+      if (latitude != null) nextForm.latitude = latitude
+      if (longitude != null) nextForm.longitude = longitude
+      return nextForm
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zipLookupResult])
 
   // Pre-populate inputValue when navigating to a node whose output variable already has a value
   const prevInputNodeId = useRef<string | null>(null)
@@ -286,11 +370,29 @@ export default function NodeDisplay({ node, onAdvance, onJump, advancing, valida
         form.zip4 = zip4match[2]
       }
     }
+    // Build a string-only submission for address validation and the advance payload.
+    // lat/lng are numbers — stringify them so the backend Dictionary<string,string> can deserialize.
+    const submission: Record<string, string> = {
+      firstName: form.firstName,
+      mi:        form.mi,
+      lastName:  form.lastName,
+      address1:  form.address1,
+      prefix1:   form.prefix1,
+      address2:  form.address2,
+      prefix2:   form.prefix2,
+      zip:       form.zip,
+      zip4:      form.zip4,
+      city:      form.city,
+      state:     form.state,
+      country:   form.country,
+    }
+    if (form.latitude  != null) submission.latitude  = String(form.latitude)
+    if (form.longitude != null) submission.longitude = String(form.longitude)
     // If validation is enabled and a validator is wired up, hand off to it instead of advancing directly
     if (node.useValidation && onValidateAddress) {
-      onValidateAddress(form as Record<string, string>)
+      onValidateAddress(submission)
     } else {
-      onAdvance(JSON.stringify(form))
+      onAdvance(JSON.stringify(submission))
     }
   }
 
@@ -754,12 +856,40 @@ export default function NodeDisplay({ node, onAdvance, onJump, advancing, valida
                       country: newCountry,
                       state: newCountry !== f.country ? '' : f.state,
                     }))
+                    // Clear stale ZIP lookup when user edits the ZIP field
+                    if (zipCities.length > 0 || zipCityMismatch || zipError) {
+                      setZipCities([])
+                      setZipCityMismatch(false)
+                      setZipError(null)
+                      onClearZipLookup?.()
+                    }
                   }}
                   onFocus={() => setFocusedField('zip')}
-                  onBlur={() => setFocusedField(null)}
+                  onBlur={(e) => {
+                    setFocusedField(null)
+                    if (!onLookupZip) return
+                    const val = e.target.value
+                    // Fire for any complete ZIP: 5-digit US, US ZIP+4, or Canadian postal code
+                    const isUSFiveDigit = /^\d{5}$/.test(val)
+                    const isUSZipPlus4  = /^\d{5}-\d{4}$/.test(val)
+                    const isCanadian    = /^[A-Za-z]\d[A-Za-z] \d[A-Za-z]\d$/.test(val)
+                    if (isUSFiveDigit || isUSZipPlus4 || isCanadian) {
+                      // For ZIP+4 send just the 5-digit base — most ZIP APIs key on the 5-digit ZIP
+                      onLookupZip(isUSZipPlus4 ? val.slice(0, 5) : val)
+                    }
+                  }}
                   placeholder="00000 or A1A 1A1"
                   className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700 font-mono"
                 />
+                {zipLookupPending && (
+                  <p className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1">
+                    <span className="inline-block w-2.5 h-2.5 border border-gray-400 border-t-transparent rounded-full animate-spin" />
+                    Looking up…
+                  </p>
+                )}
+                {!zipLookupPending && zipError && (
+                  <p className="text-[10px] text-red-400 mt-0.5 leading-snug">{zipError}</p>
+                )}
               </div>
             ) : (
               <>
@@ -768,12 +898,30 @@ export default function NodeDisplay({ node, onAdvance, onJump, advancing, valida
                   <input
                     type="text"
                     value={addrForm.zip}
-                    onChange={(e) => setAddrForm((f) => ({ ...f, zip: e.target.value }))}
+                    onChange={(e) => {
+                      setAddrForm((f) => ({ ...f, zip: e.target.value }))
+                      if (zipError) setZipError(null)
+                    }}
                     onFocus={() => setFocusedField('zip')}
-                    onBlur={() => setFocusedField(null)}
+                    onBlur={(e) => {
+                      setFocusedField(null)
+                      if (!onLookupZip) return
+                      const val = e.target.value
+                      if (/^\d{5}$/.test(val) || /^\d{5}-\d{4}$/.test(val) || /^[A-Za-z]\d[A-Za-z] \d[A-Za-z]\d$/.test(val))
+                        onLookupZip(/^\d{5}-\d{4}$/.test(val) ? val.slice(0, 5) : val)
+                    }}
                     placeholder="ZIP"
                     className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700 font-mono"
                   />
+                  {zipLookupPending && (
+                    <p className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1">
+                      <span className="inline-block w-2.5 h-2.5 border border-gray-400 border-t-transparent rounded-full animate-spin" />
+                      Looking up…
+                    </p>
+                  )}
+                  {!zipLookupPending && zipError && (
+                    <p className="text-[10px] text-red-400 mt-0.5 leading-snug">{zipError}</p>
+                  )}
                 </div>
                 <div className="flex flex-col w-14 gap-0.5">
                   <label className="text-gray-500 text-[10px] font-medium uppercase tracking-wider">+4</label>
@@ -792,15 +940,39 @@ export default function NodeDisplay({ node, onAdvance, onJump, advancing, valida
             )}
             <div className="flex flex-col flex-1 gap-0.5">
               <label className="text-gray-500 text-[10px] font-medium uppercase tracking-wider">City</label>
-              <input
-                type="text"
-                value={addrForm.city}
-                onChange={(e) => setAddrForm((f) => ({ ...f, city: e.target.value }))}
-                onFocus={() => setFocusedField('city')}
-                onBlur={() => setFocusedField(null)}
-                placeholder="City"
-                className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700"
-              />
+              {zipCities.length > 1 ? (
+                <select
+                  value={addrForm.city}
+                  onChange={(e) => {
+                    setAddrForm((f) => ({ ...f, city: e.target.value }))
+                    const isMismatched = zipMismatchedCity != null &&
+                      e.target.value.toLowerCase() === zipMismatchedCity.toLowerCase()
+                    setZipCityMismatch(isMismatched)
+                  }}
+                  onFocus={() => setFocusedField('city')}
+                  onBlur={() => setFocusedField(null)}
+                  className="bg-gray-800 text-white rounded-lg px-2 py-2 text-sm input-focus-glow-orange border border-gray-700"
+                >
+                  {zipCities.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={addrForm.city}
+                  onChange={(e) => setAddrForm((f) => ({ ...f, city: e.target.value }))}
+                  onFocus={() => setFocusedField('city')}
+                  onBlur={() => setFocusedField(null)}
+                  placeholder="City"
+                  className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm input-focus-glow-orange border border-gray-700"
+                />
+              )}
+              {zipCityMismatch && (
+                <p className="text-[10px] text-amber-400 mt-0.5 leading-snug">
+                  ⚠ The entered city was not found for this ZIP. Select the correct city or keep your entry.
+                </p>
+              )}
             </div>
             <div className="flex flex-col w-36 gap-0.5">
               <label className="text-gray-500 text-[10px] font-medium uppercase tracking-wider">State</label>

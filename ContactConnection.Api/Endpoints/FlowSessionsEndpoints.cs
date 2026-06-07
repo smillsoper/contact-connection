@@ -58,6 +58,9 @@ public static class FlowSessionsEndpoints
         // Validate an address via the tenant's address_validation API definition
         group.MapPost("/{id:guid}/validate-address", ValidateAddress);
 
+        // Look up city/state/coordinates for a ZIP code
+        group.MapPost("/{id:guid}/lookup-zip", LookupZip);
+
         // Advance the session — submit agent input and get next node state
         group.MapPost("/{id:guid}/advance", async (
             Guid id,
@@ -214,6 +217,109 @@ public static class FlowSessionsEndpoints
         var result = AddressResponseMappingEvaluator.Evaluate(responseMapping!, body);
         return Results.Ok(result);
     }
+
+    private static async Task<IResult> LookupZip(
+        Guid id,
+        ZipLookupRequest req,
+        ITenantApiDefinitionRepository tenantDefRepo,
+        ITenantApiEndpointRepository tenantEndpointRepo,
+        ITenantApiPreferenceRepository tenantPrefRepo,
+        ITenantCredentialStore tenantCredStore,
+        IPortalApiDefinitionRepository portalDefRepo,
+        IPortalApiEndpointRepository portalEndpointRepo,
+        IPortalCredentialStore portalCredStore,
+        IHttpClientFactory httpFactory,
+        TenantContext tenantContext,
+        CancellationToken ct)
+    {
+        if (tenantContext.Current is null) return Results.Unauthorized();
+
+        var empty = new ZipLookupResult(null, [], null, null, null, null);
+
+        string? baseUrl = null;
+        string? authConfig = null;
+        string? endpointPath = null;
+        string? httpMethod = null;
+        string? queryParams = null;
+        string? headers = null;
+        string? requestBodyTemplate = null;
+        string? responseMapping = null;
+        Func<string, CancellationToken, Task<string?>>? getCredential = null;
+
+        var tenantEp = await tenantEndpointRepo.GetPreferredBySubTypeAsync(ApiSubType.ZipCodeLookup, ct)
+                       ?? (await tenantEndpointRepo.GetBySubTypeAsync(ApiSubType.ZipCodeLookup, ct)).FirstOrDefault();
+        if (tenantEp is not null)
+        {
+            var tenantDef = await tenantDefRepo.GetByIdAsync(tenantEp.DefinitionId, ct);
+            if (tenantDef is not null && tenantDef.IsActive)
+            {
+                baseUrl             = tenantDef.BaseUrl;
+                authConfig          = tenantDef.AuthConfig;
+                endpointPath        = tenantEp.Path;
+                httpMethod          = tenantEp.HttpMethod ?? tenantDef.HttpMethod;
+                queryParams         = tenantEp.QueryParams;
+                headers             = tenantEp.Headers;
+                requestBodyTemplate = tenantEp.RequestBodyTemplate;
+                responseMapping     = tenantEp.ResponseMapping;
+                getCredential       = (key, token) => tenantCredStore.GetAsync(key, token);
+            }
+        }
+
+        if (getCredential is null)
+        {
+            PortalApiEndpoint? portalEp = null;
+            var tenantPref = await tenantPrefRepo.GetBySubTypeAsync(ApiSubType.ZipCodeLookup, ct);
+            if (tenantPref is not null)
+                portalEp = await portalEndpointRepo.GetByIdAsync(tenantPref.PortalApiEndpointId, ct);
+            portalEp ??= await portalEndpointRepo.GetPreferredBySubTypeAsync(ApiSubType.ZipCodeLookup, ct)
+                         ?? (await portalEndpointRepo.GetBySubTypeAsync(ApiSubType.ZipCodeLookup, ct)).FirstOrDefault();
+
+            if (portalEp is not null)
+            {
+                var portalDef = await portalDefRepo.GetByIdAsync(portalEp.DefinitionId, ct);
+                if (portalDef is not null && portalDef.IsActive)
+                {
+                    baseUrl             = portalDef.BaseUrl;
+                    authConfig          = portalDef.AuthConfig;
+                    endpointPath        = portalEp.Path;
+                    httpMethod          = portalEp.HttpMethod ?? portalDef.HttpMethod;
+                    queryParams         = portalEp.QueryParams;
+                    headers             = portalEp.Headers;
+                    requestBodyTemplate = portalEp.RequestBodyTemplate;
+                    responseMapping     = portalEp.ResponseMapping;
+                    getCredential       = (key, token) => portalCredStore.GetAsync(key, token);
+                }
+            }
+        }
+
+        if (getCredential is null) return Results.Ok(empty);
+
+        var zipData = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["zip"] = req.Zip ?? string.Empty,
+        };
+
+        var testReq = new RunEndpointTestRequest(
+            Path: endpointPath!,
+            HttpMethod: httpMethod,
+            QueryParams: queryParams,
+            Headers: headers,
+            RequestBodyTemplate: requestBodyTemplate,
+            Namespace: "address",
+            TestData: zipData);
+
+        var response = await ApiEndpointTestHelper.RunTestAsync(
+            baseUrl!, authConfig!, testReq, getCredential, httpFactory, ct);
+
+        if (response.Error is not null) return Results.Ok(empty);
+
+        JsonElement body;
+        try { body = JsonDocument.Parse(response.Body ?? "{}").RootElement; }
+        catch { return Results.Ok(empty); }
+
+        var result = ZipLookupResponseEvaluator.Evaluate(responseMapping!, body);
+        return Results.Ok(result);
+    }
 }
 
 public record StartSessionRequest(
@@ -235,6 +341,18 @@ public record AddressValidationResult(
     string? Message,
     Dictionary<string, string>? CorrectedFields,
     List<Dictionary<string, string>>? Matches);
+
+public record ZipLookupRequest(string? Zip);
+
+public record ZipLookupResult(
+    string? City,
+    List<string> Cities,
+    string? State,
+    string? Zip4,
+    double? Latitude,
+    double? Longitude,
+    string? OutcomeKey = null,
+    string? Message = null);
 
 /// <summary>
 /// Evaluates a response mapping JSON config against an actual API response body
@@ -593,5 +711,219 @@ internal static class AddressResponseMappingEvaluator
         foreach (var (token, prefix) in Addr2Prefixes)
             if (upper.StartsWith(token)) return (prefix, address[token.Length..].Trim());
         return ("", address);
+    }
+}
+
+/// <summary>
+/// Evaluates a ZIP code lookup response mapping against an API response and extracts
+/// city, state, ZIP+4, latitude, longitude, and the full list of acceptable city names.
+///
+/// The response mapping schema is identical to address_validation outcomes, with one
+/// extra optional field on each outcome:
+///   "citiesConfig": { "arrayPath": "acceptable_city_names", "cityField": "city" }
+/// When cityField is empty the array items are treated as raw city name strings.
+/// </summary>
+internal static class ZipLookupResponseEvaluator
+{
+    public static ZipLookupResult Evaluate(string responseMappingJson, JsonElement body)
+    {
+        var empty = new ZipLookupResult(null, [], null, null, null, null);
+        try
+        {
+            var config = JsonDocument.Parse(responseMappingJson).RootElement;
+            if (!config.TryGetProperty("outcomes", out var outcomesEl) || outcomesEl.ValueKind != JsonValueKind.Array)
+                return empty;
+
+            foreach (var outcome in outcomesEl.EnumerateArray())
+            {
+                bool matched;
+                if (outcome.TryGetProperty("conditions", out var conditionsEl) && conditionsEl.ValueKind == JsonValueKind.Array)
+                {
+                    var logic = Str(outcome, "conditionLogic");
+                    var isOr  = string.Equals(logic, "or", StringComparison.OrdinalIgnoreCase);
+                    var conds = conditionsEl.EnumerateArray().ToList();
+                    matched = conds.Count > 0 && (isOr
+                        ? conds.Any(c => EvaluateCondition(c, body))
+                        : conds.All(c => EvaluateCondition(c, body)));
+                }
+                else
+                {
+                    matched = false;
+                }
+
+                if (!matched) continue;
+
+                // Resolve outcome key and message
+                var outcomeKey  = Str(outcome, "name");   // "name" = key field (used in flow branching)
+                var messagePath = Str(outcome, "messagePath");
+                string? message = null;
+                if (!string.IsNullOrEmpty(messagePath))
+                {
+                    var resolved = ResolvePath(body, messagePath);
+                    message = Normalize(resolved);
+                }
+
+                // Resolve dedicated path fields
+                var mainCityPath    = Str(outcome, "mainCityPath");
+                var cityAliasesPath = Str(outcome, "cityAliasesPath");
+                var statePath       = Str(outcome, "statePath");
+                var latitudePath    = Str(outcome, "latitudePath");
+                var longitudePath   = Str(outcome, "longitudePath");
+
+                var city  = string.IsNullOrEmpty(mainCityPath)  ? null : Normalize(ResolvePath(body, mainCityPath));
+                var state = string.IsNullOrEmpty(statePath)     ? null : Normalize(ResolvePath(body, statePath));
+
+                double? latitude  = null;
+                double? longitude = null;
+                if (!string.IsNullOrEmpty(latitudePath))
+                {
+                    var raw = Normalize(ResolvePath(body, latitudePath));
+                    if (double.TryParse(raw, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var lat))
+                        latitude = lat;
+                }
+                if (!string.IsNullOrEmpty(longitudePath))
+                {
+                    var raw = Normalize(ResolvePath(body, longitudePath));
+                    if (double.TryParse(raw, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var lon))
+                        longitude = lon;
+                }
+
+                // Build cities list: aliases + prepend main city if not already present
+                var aliases = string.IsNullOrEmpty(cityAliasesPath)
+                    ? new List<string>()
+                    : ResolveStringArray(body, cityAliasesPath);
+
+                var cities = new List<string>(aliases);
+                if (city is not null && !cities.Any(c => c.Equals(city, StringComparison.OrdinalIgnoreCase)))
+                    cities.Insert(0, city);
+
+                return new ZipLookupResult(city ?? cities.FirstOrDefault(), cities, state, null, latitude, longitude, outcomeKey, message);
+            }
+        }
+        catch { /* fall through to empty result */ }
+
+        return empty;
+    }
+
+    private static List<string> ResolveStringArray(JsonElement body, string path)
+    {
+        // Split on [*] — e.g. "results[0].city_aliases[*].city"
+        // prefix: "results[0].city_aliases", suffix: "city"
+        var starIdx = path.IndexOf("[*]", StringComparison.Ordinal);
+        if (starIdx < 0)
+        {
+            // No wildcard — resolve single value as one-item list
+            var single = Normalize(ResolvePath(body, path));
+            return single is not null ? [single] : [];
+        }
+
+        var arrayPath = path[..starIdx];
+        var itemPath  = path[(starIdx + 3)..].TrimStart('.');
+
+        var arrayEl = ResolvePath(body, arrayPath);
+        if (arrayEl is not JsonElement ae || ae.ValueKind != JsonValueKind.Array)
+            return [];
+
+        var results = new List<string>();
+        foreach (var item in ae.EnumerateArray())
+        {
+            string? name;
+            if (string.IsNullOrEmpty(itemPath))
+            {
+                name = item.ValueKind == JsonValueKind.String ? item.GetString() : Normalize(item);
+            }
+            else
+            {
+                var val = ResolvePath(item, itemPath);
+                name = Normalize(val);
+            }
+            if (!string.IsNullOrWhiteSpace(name)) results.Add(name!);
+        }
+        return results;
+    }
+
+    private static bool EvaluateCondition(JsonElement condition, JsonElement body)
+    {
+        var op    = Str(condition, "op");
+        var path  = Str(condition, "path");
+        var value = Str(condition, "value");
+        var resolved    = string.IsNullOrEmpty(path) ? null : ResolvePath(body, path);
+        var resolvedStr = Normalize(resolved);
+        return op switch
+        {
+            "exists"       => resolved is not null,
+            "not_exists"   => resolved is null,
+            "eq"           => resolvedStr == value,
+            "neq"          => resolvedStr != value,
+            "contains"     => resolvedStr?.Contains(value, StringComparison.OrdinalIgnoreCase) == true,
+            "not_contains" => resolvedStr?.Contains(value, StringComparison.OrdinalIgnoreCase) != true,
+            "gt"           => double.TryParse(resolvedStr, out var a)  && double.TryParse(value, out var b)  && a > b,
+            "lt"           => double.TryParse(resolvedStr, out var a2) && double.TryParse(value, out var b2) && a2 < b2,
+            _              => false,
+        };
+    }
+
+    private static string? Normalize(object? resolved)
+    {
+        if (resolved is not JsonElement je) return resolved?.ToString();
+        return je.ValueKind switch
+        {
+            JsonValueKind.True   => "true",
+            JsonValueKind.False  => "false",
+            JsonValueKind.String => je.GetString(),
+            JsonValueKind.Number => je.GetRawText(),
+            _                    => null,
+        };
+    }
+
+    private static string ResolveTemplate(JsonElement body, string template)
+    {
+        var result = System.Text.RegularExpressions.Regex.Replace(
+            template, @"\{\{([^}]+)\}\}",
+            m =>
+            {
+                var path     = m.Groups[1].Value.Trim();
+                var resolved = ResolvePath(body, path);
+                return Normalize(resolved) ?? string.Empty;
+            });
+        return System.Text.RegularExpressions.Regex.Replace(result.Trim(), @"\s{2,}", " ");
+    }
+
+    private static object? ResolvePath(JsonElement element, string path)
+    {
+        JsonElement current = element;
+        foreach (var segment in path.Split('.'))
+        {
+            var arrMatch = System.Text.RegularExpressions.Regex.Match(segment, @"^(\w*)\[(\d+)\]$");
+            if (arrMatch.Success)
+            {
+                var key = arrMatch.Groups[1].Value;
+                var idx = int.Parse(arrMatch.Groups[2].Value);
+                if (!string.IsNullOrEmpty(key))
+                {
+                    if (!current.TryGetProperty(key, out current)) return null;
+                }
+                if (current.ValueKind != JsonValueKind.Array || idx >= current.GetArrayLength()) return null;
+                current = current[idx];
+            }
+            else
+            {
+                if (!current.TryGetProperty(segment, out current)) return null;
+            }
+        }
+        return current;
+    }
+
+    private static string Str(JsonElement el, string prop)
+    {
+        if (!el.TryGetProperty(prop, out var v)) return "";
+        return v.ValueKind switch
+        {
+            JsonValueKind.String => v.GetString() ?? "",
+            JsonValueKind.Number => v.GetRawText(),
+            JsonValueKind.True   => "true",
+            JsonValueKind.False  => "false",
+            _                    => ""
+        };
     }
 }

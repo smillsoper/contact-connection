@@ -54,6 +54,38 @@
 | 42 | 2026-06-04 | 5:00 PM CDT | 7:00 PM CDT | 120 min | ~2440 min |
 | 43 | 2026-06-06 | 11:03 AM CDT | 2:27 PM CDT | 204 min | ~2644 min |
 | 44 | 2026-06-06 | 2:27 PM CDT | 3:44 PM CDT | 77 min | ~2721 min |
+| 45 | 2026-06-07 | 8:29 AM CDT | 10:09 AM CDT | 100 min | ~2821 min |
+
+---
+
+## Session 45
+
+**Date:** 2026-06-07
+**Start:** 8:29 AM CDT
+**End:** 10:09 AM CDT
+**Duration:** 100 minutes
+
+### Accomplished
+
+**ZIP Code Lookup API sub-type — full implementation**
+
+- `AddressData` value object extended with `Latitude` and `Longitude` (`double?`) for future media agency geo-assignment.
+- `AddressNodeHandler` updated: `AddressSubmission` and `BuildAddressObject` include lat/lng when present; `PrefilledAddress` preserves lat/lng on jump-back.
+- `POST /api/v1/flow-sessions/{id}/lookup-zip` endpoint added — resolves tenant → portal API chain using `ApiSubType.ZipCodeLookup`; builds `zipData` with `address` namespace; calls `ApiEndpointTestHelper.RunTestAsync`; returns `ZipLookupResult`.
+- `ZipLookupResult` record: `City`, `Cities`, `State`, `Zip4`, `Latitude`, `Longitude`, `OutcomeKey`, `Message`.
+- `ZipLookupResponseEvaluator` written: reads named path fields (`mainCityPath`, `cityAliasesPath`, `statePath`, `latitudePath`, `longitudePath`) from matched outcome; resolves `messagePath` for error text; `ResolveStringArray` helper handles `[*]` wildcard to extract alias city lists; merges Main City into aliases list (deduped, prepended if absent).
+
+**API Builder — ZIP Code Lookup response mapping UI**
+
+- `ResponseMappingPanel`: for `zip_code_lookup` sub-type, generic Field Mappings and Multiple Matches sections replaced with a dedicated 5-field "Field Paths" panel (Main City, City Aliases, State, Latitude, Longitude); City Aliases input documents `[*]` wildcard syntax inline.
+- `ResponseOutcome` interface extended with `mainCityPath`, `cityAliasesPath`, `statePath`, `latitudePath`, `longitudePath`; `citiesConfig` / `CitiesConfig` removed entirely.
+
+**Flow execution — address node ZIP lookup UX**
+
+- `FlowPanel`: `zipLookupPending` state tracks in-flight request; `lookupZip` sets/clears it with `finally`; passed to `NodeDisplay`.
+- `NodeDisplay`: ZIP `onBlur` fires for 5-digit US, ZIP+4, and Canadian postal codes; Canadian/international ZIP field also wired; `zipLookupResult` effect handles error outcomes (sets `zipError` in red below ZIP field) vs success (builds city dropdown, auto-fills state always, auto-fills city only if empty); spinning "Looking up…" indicator shown while pending.
+- City mismatch logic: if entered city not in returned list it is prepended; `zipMismatchedCity` state tracks it so warning re-appears when agent re-selects that city; warning clears when a valid returned city is selected.
+- Address submit fixed: lat/lng converted to strings in submission object so `Dictionary<string,string>` on `ValidateAddressRequest` deserializes correctly.
 
 ---
 

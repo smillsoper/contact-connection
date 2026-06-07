@@ -28,6 +28,10 @@ public class AddressData
     public bool IsOutlyingUS { get; set; }    // Guam, PR, USVI, etc.
     public bool IsAKHI { get; set; }          // Alaska or Hawaii
 
+    // Geo coordinates — populated by ZIP code lookup
+    public double? Latitude { get; set; }
+    public double? Longitude { get; set; }
+
     // Verification state
     public bool IsVerified { get; set; }
     public string? VerificationSource { get; set; }   // usps, smartystreets, manual

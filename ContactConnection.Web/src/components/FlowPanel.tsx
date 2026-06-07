@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import * as signalR from '@microsoft/signalr'
 import { useAuthStore } from '../stores/authStore'
-import { flowsApi, type AddressValidationResult } from '../api/flows'
+import { flowsApi, type AddressValidationResult, type ZipLookupResult } from '../api/flows'
 import type { FlowNodeState } from '../types/flow'
 import NodeDisplay from './NodeDisplay'
 import AddressValidationModal from './AddressValidationModal'
@@ -17,6 +17,8 @@ export default function FlowPanel() {
   const [state, setState] = useState<PanelState>({ phase: 'idle' })
   const [advancing, setAdvancing] = useState(false)
   const [validating, setValidating] = useState(false)
+  const [zipLookupResult, setZipLookupResult] = useState<ZipLookupResult | null>(null)
+  const [zipLookupPending, setZipLookupPending] = useState(false)
   const [validationModal, setValidationModal] = useState<{
     result: AddressValidationResult
     address: Record<string, string>
@@ -135,6 +137,23 @@ export default function FlowPanel() {
     [state, advance],
   )
 
+  const lookupZip = useCallback(
+    async (zip: string) => {
+      if (state.phase !== 'running') return
+      setZipLookupPending(true)
+      try {
+        const result = await flowsApi.lookupZip(state.node.sessionId, zip)
+        setZipLookupResult(result)
+      } catch {
+        // Silently ignore — ZIP lookup is best-effort
+      } finally {
+        setZipLookupPending(false)
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state],
+  )
+
   function handleValidationSelect(selectedAddress: Record<string, string>) {
     setValidationModal(null)
     advance(JSON.stringify(selectedAddress))
@@ -213,6 +232,10 @@ export default function FlowPanel() {
             advancing={advancing}
             validating={validating}
             onValidateAddress={validateAddress}
+            zipLookupResult={zipLookupResult}
+            zipLookupPending={zipLookupPending}
+            onLookupZip={lookupZip}
+            onClearZipLookup={() => setZipLookupResult(null)}
           />
         )}
       </div>

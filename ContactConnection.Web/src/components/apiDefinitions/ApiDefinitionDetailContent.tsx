@@ -242,6 +242,12 @@ interface ResponseOutcome {
   multipleMatchesConfig?: MultipleMatchesConfig
   fieldMappings: OutcomeFieldMapping[]
   capturedResponse: CapturedResponse | null
+  // ZIP code lookup dedicated path fields (zip_code_lookup sub-type only)
+  mainCityPath?: string
+  cityAliasesPath?: string
+  statePath?: string
+  latitudePath?: string
+  longitudePath?: string
 }
 
 interface ResponseMappingConfig {
@@ -403,12 +409,14 @@ const ADDRESS_GROUPS: SourceGroup[] = [
   {
     label: 'Address',
     fields: [
-      { key: 'address1', label: 'Address Line 1', example: '123 Main St' },
-      { key: 'address2', label: 'Address Line 2', example: 'Apt 4B' },
-      { key: 'city',     label: 'City',           example: 'Springfield' },
-      { key: 'state',    label: 'State',          example: 'IL' },
-      { key: 'zip',      label: 'ZIP',            example: '62701' },
-      { key: 'zip4',     label: 'ZIP+4',          example: '1234' },
+      { key: 'address1',  label: 'Address Line 1', example: '123 Main St' },
+      { key: 'address2',  label: 'Address Line 2', example: 'Apt 4B' },
+      { key: 'city',      label: 'City',           example: 'Springfield' },
+      { key: 'state',     label: 'State',          example: 'IL' },
+      { key: 'zip',       label: 'ZIP',            example: '62701' },
+      { key: 'zip4',      label: 'ZIP+4',          example: '1234' },
+      { key: 'latitude',  label: 'Latitude',       example: '39.7817' },
+      { key: 'longitude', label: 'Longitude',      example: '-89.6501' },
     ],
   },
 ]
@@ -825,6 +833,7 @@ interface ResponseMappingPanelProps {
   config: ResponseMappingConfig
   onChange: (c: ResponseMappingConfig) => void
   sourceContext: SourceContext | null
+  subType?: string
   testRunning: boolean
   onRunAndCapture: (outcomeId: string) => void
   onRunAndCaptureFromPayload: (outcomeId: string) => void
@@ -834,7 +843,7 @@ interface ResponseMappingPanelProps {
   onGoToPayload: () => void
 }
 
-function ResponseMappingPanel({ config, onChange, sourceContext, testRunning, onRunAndCapture, onRunAndCaptureFromPayload, hasTestData, hasPayload, onGoToTest, onGoToPayload }: ResponseMappingPanelProps) {
+function ResponseMappingPanel({ config, onChange, sourceContext, subType, testRunning, onRunAndCapture, onRunAndCaptureFromPayload, hasTestData, hasPayload, onGoToTest, onGoToPayload }: ResponseMappingPanelProps) {
   const [activeId, setActiveId] = useState<string | null>(config.outcomes[0]?.id ?? null)
   const [copiedPath, setCopiedPath] = useState<string | null>(null)
 
@@ -995,64 +1004,136 @@ function ResponseMappingPanel({ config, onChange, sourceContext, testRunning, on
             </div>
           </div>
 
-          <div>
-            <p className="text-gray-400 text-xs font-medium mb-2">Field Mappings</p>
-            <div className="bg-gray-800/40 border border-gray-700/50 rounded-lg px-3 py-3">
-              <FieldMappingEditor
-                mappings={activeOutcome.fieldMappings}
-                onChange={(fieldMappings) => updateOutcome({ fieldMappings })}
-                sourceContext={sourceContext}
-                capturedResponse={activeOutcome.capturedResponse}
-              />
-            </div>
-            <p className="text-gray-600 text-[10px] mt-1.5">
-              Click any leaf in the captured response tree to copy its path, then paste into a "From" field. Use <span className="font-mono text-gray-500">{"{{path}}"}</span> template syntax to combine multiple values — e.g. <span className="font-mono text-gray-500">{"{{results[0].data.address_components.number}} {{results[0].data.address_components.street}}"}</span>.
-            </p>
-          </div>
-
-          {/* Multiple Matches */}
-          <div>
-            <label className="flex items-center gap-2 cursor-pointer select-none mb-2">
-              <input
-                type="checkbox"
-                checked={!!activeOutcome.multipleMatchesConfig}
-                onChange={(e) => updateOutcome({
-                  multipleMatchesConfig: e.target.checked ? { arrayPath: '', itemMappings: [] } : undefined,
-                })}
-                className="w-3.5 h-3.5 rounded accent-indigo-500"
-              />
-              <span className="text-gray-400 text-xs font-medium">Multiple Matches — present a list for user selection</span>
-            </label>
-            {activeOutcome.multipleMatchesConfig && (
+          {/* ZIP Code Lookup — dedicated field path inputs */}
+          {subType === 'zip_code_lookup' ? (
+            <div>
+              <p className="text-gray-400 text-xs font-medium mb-2">Field Paths</p>
               <div className="bg-gray-800/40 border border-gray-700/50 rounded-lg px-3 py-3 space-y-3">
+                <p className="text-gray-500 text-xs">
+                  Click any leaf in the captured response tree to copy its path, then paste it here.
+                </p>
                 <div>
-                  <label className="block text-gray-500 text-[10px] font-medium uppercase tracking-wider mb-1">Array Path</label>
+                  <label className="block text-gray-500 text-[10px] font-medium uppercase tracking-wider mb-1">Main City</label>
                   <input
                     type="text"
-                    value={activeOutcome.multipleMatchesConfig.arrayPath}
-                    onChange={(e) => updateOutcome({ multipleMatchesConfig: { ...activeOutcome.multipleMatchesConfig!, arrayPath: e.target.value } })}
-                    placeholder="e.g. matches or candidates"
+                    value={activeOutcome.mainCityPath ?? ''}
+                    onChange={(e) => updateOutcome({ mainCityPath: e.target.value })}
+                    placeholder="e.g. results[0].city"
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white text-sm font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                  />
+                  <p className="text-gray-600 text-xs mt-1">The primary/default city name returned by the API for this ZIP code.</p>
+                </div>
+                <div>
+                  <label className="block text-gray-500 text-[10px] font-medium uppercase tracking-wider mb-1">City Aliases</label>
+                  <input
+                    type="text"
+                    value={activeOutcome.cityAliasesPath ?? ''}
+                    onChange={(e) => updateOutcome({ cityAliasesPath: e.target.value })}
+                    placeholder="e.g. results[0].city_aliases[*].city"
                     className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white text-sm font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
                   />
                   <p className="text-gray-600 text-xs mt-1">
-                    Path to the array of address options. Click any array node <span className="font-mono">⎘</span> in the captured response tree to copy its path.
+                    Path to the array of alternate city names. Use <span className="font-mono text-gray-500">[*]</span> to collect all values — e.g. <span className="font-mono text-gray-500">results[0].city_aliases[*].city</span>.
+                    Main City is automatically included if not already in this list.
                   </p>
                 </div>
                 <div>
-                  <p className="text-gray-500 text-[10px] font-medium uppercase tracking-wider mb-1">Per-Item Field Mappings</p>
-                  <p className="text-gray-600 text-xs mb-2">
-                    Paths are relative to each array item — e.g. use <span className="font-mono">streetAddress</span> not <span className="font-mono">matches[0].streetAddress</span>.
-                  </p>
+                  <label className="block text-gray-500 text-[10px] font-medium uppercase tracking-wider mb-1">State</label>
+                  <input
+                    type="text"
+                    value={activeOutcome.statePath ?? ''}
+                    onChange={(e) => updateOutcome({ statePath: e.target.value })}
+                    placeholder="e.g. results[0].state"
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white text-sm font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-gray-500 text-[10px] font-medium uppercase tracking-wider mb-1">Latitude</label>
+                    <input
+                      type="text"
+                      value={activeOutcome.latitudePath ?? ''}
+                      onChange={(e) => updateOutcome({ latitudePath: e.target.value })}
+                      placeholder="e.g. results[0].location.lat"
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white text-sm font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-gray-500 text-[10px] font-medium uppercase tracking-wider mb-1">Longitude</label>
+                    <input
+                      type="text"
+                      value={activeOutcome.longitudePath ?? ''}
+                      onChange={(e) => updateOutcome({ longitudePath: e.target.value })}
+                      placeholder="e.g. results[0].location.lon"
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white text-sm font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Generic Field Mappings — non-ZIP sub-types */}
+              <div>
+                <p className="text-gray-400 text-xs font-medium mb-2">Field Mappings</p>
+                <div className="bg-gray-800/40 border border-gray-700/50 rounded-lg px-3 py-3">
                   <FieldMappingEditor
-                    mappings={activeOutcome.multipleMatchesConfig.itemMappings}
-                    onChange={(itemMappings) => updateOutcome({ multipleMatchesConfig: { ...activeOutcome.multipleMatchesConfig!, itemMappings } })}
+                    mappings={activeOutcome.fieldMappings}
+                    onChange={(fieldMappings) => updateOutcome({ fieldMappings })}
                     sourceContext={sourceContext}
                     capturedResponse={activeOutcome.capturedResponse}
                   />
                 </div>
+                <p className="text-gray-600 text-[10px] mt-1.5">
+                  Click any leaf in the captured response tree to copy its path, then paste into a "From" field. Use <span className="font-mono text-gray-500">{"{{path}}"}</span> template syntax to combine multiple values — e.g. <span className="font-mono text-gray-500">{"{{results[0].data.address_components.number}} {{results[0].data.address_components.street}}"}</span>.
+                </p>
               </div>
-            )}
-          </div>
+
+              {/* Multiple Matches */}
+              <div>
+                <label className="flex items-center gap-2 cursor-pointer select-none mb-2">
+                  <input
+                    type="checkbox"
+                    checked={!!activeOutcome.multipleMatchesConfig}
+                    onChange={(e) => updateOutcome({
+                      multipleMatchesConfig: e.target.checked ? { arrayPath: '', itemMappings: [] } : undefined,
+                    })}
+                    className="w-3.5 h-3.5 rounded accent-indigo-500"
+                  />
+                  <span className="text-gray-400 text-xs font-medium">Multiple Matches — present a list for user selection</span>
+                </label>
+                {activeOutcome.multipleMatchesConfig && (
+                  <div className="bg-gray-800/40 border border-gray-700/50 rounded-lg px-3 py-3 space-y-3">
+                    <div>
+                      <label className="block text-gray-500 text-[10px] font-medium uppercase tracking-wider mb-1">Array Path</label>
+                      <input
+                        type="text"
+                        value={activeOutcome.multipleMatchesConfig.arrayPath}
+                        onChange={(e) => updateOutcome({ multipleMatchesConfig: { ...activeOutcome.multipleMatchesConfig!, arrayPath: e.target.value } })}
+                        placeholder="e.g. matches or candidates"
+                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white text-sm font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                      />
+                      <p className="text-gray-600 text-xs mt-1">
+                        Path to the array of address options. Click any array node <span className="font-mono">⎘</span> in the captured response tree to copy its path.
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500 text-[10px] font-medium uppercase tracking-wider mb-1">Per-Item Field Mappings</p>
+                      <p className="text-gray-600 text-xs mb-2">
+                        Paths are relative to each array item — e.g. use <span className="font-mono">streetAddress</span> not <span className="font-mono">matches[0].streetAddress</span>.
+                      </p>
+                      <FieldMappingEditor
+                        mappings={activeOutcome.multipleMatchesConfig.itemMappings}
+                        onChange={(itemMappings) => updateOutcome({ multipleMatchesConfig: { ...activeOutcome.multipleMatchesConfig!, itemMappings } })}
+                        sourceContext={sourceContext}
+                        capturedResponse={activeOutcome.capturedResponse}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
 
           <div className="pt-1 border-t border-gray-800">
             <button
@@ -1842,6 +1923,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                   config={endpointForm.responseMapping}
                   onChange={(config) => setEndpointForm(f => ({ ...f, responseMapping: config }))}
                   sourceContext={endpointSourceContext ?? null}
+                  subType={endpointForm.apiSubType}
                   testRunning={testRunning}
                   onRunAndCapture={runAndCaptureForOutcome}
                   onRunAndCaptureFromPayload={runAndCaptureFromPayload}

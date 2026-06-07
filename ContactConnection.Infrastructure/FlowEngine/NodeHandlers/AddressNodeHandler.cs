@@ -119,6 +119,10 @@ public partial class AddressNodeHandler(IVariableResolver resolver)
                             ["state"]          = pre.State          ?? string.Empty,
                             ["country"]        = pre.Country        ?? "US",
                         };
+                        if (pre.Latitude.HasValue)
+                            s.PrefilledAddress["latitude"]  = pre.Latitude.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                        if (pre.Longitude.HasValue)
+                            s.PrefilledAddress["longitude"] = pre.Longitude.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
                     }
                 }
                 catch { /* ignore malformed data — form starts empty */ }
@@ -234,7 +238,7 @@ public partial class AddressNodeHandler(IVariableResolver resolver)
         var isAKHI     = AkHiStates.Contains(state);
         var isForeign  = country.Length > 0 && country != "US" && !isCanada;
 
-        return new JsonObject
+        var obj = new JsonObject
         {
             ["firstName"]         = firstName,
             ["middleInitial"]     = mi,
@@ -258,8 +262,11 @@ public partial class AddressNodeHandler(IVariableResolver resolver)
             ["isOutlyingUS"]      = isOutlying,
             ["isForeign"]         = isForeign,
             ["isAKHI"]            = isAKHI,
-            ["isVerified"]        = false,  // address validation API pending
+            ["isVerified"]        = false,
         };
+        if (s.Latitude.HasValue)  obj["latitude"]  = s.Latitude.Value;
+        if (s.Longitude.HasValue) obj["longitude"] = s.Longitude.Value;
+        return obj;
     }
 
     private static string BuildCityStateZip(string city, string state, string zip, string zip4)
@@ -301,4 +308,6 @@ public class AddressSubmission
     public string? Zip            { get; set; }
     public string? Zip4           { get; set; }
     public string? Country        { get; set; }
+    public double? Latitude       { get; set; }
+    public double? Longitude      { get; set; }
 }
