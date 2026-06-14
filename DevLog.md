@@ -79,6 +79,7 @@
 - FreeSWITCH directory to be backed by `mod_xml_curl` calling `GET /api/v1/freeswitch/directory?user={ext}&domain={sub}.contactconnection.cc` — fully dynamic, no per-tenant XML files
 - SIP password returned plaintext once on agent creation, never stored; a1hash allows FreeSWITCH DIGEST auth without plaintext
 - WebRTC softphone panel (current placeholder) will use JsSIP or SIP.js, register to `wss://{domain}:7443`
+- Plan includes backfill strategy for existing agents: columns added nullable; on first login after migration, SIP credentials are auto-provisioned and returned once in the login response alongside the JWT; `POST /agents/{id}/sip-credentials/reset` admin endpoint for recovery
 - Plan saved to memory (`project_sip_registration_plan.md`) for next session pickup
 
 ---
