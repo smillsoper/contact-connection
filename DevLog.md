@@ -58,6 +58,28 @@
 | 46 | 2026-06-07 | 10:09 AM CDT | 12:00 PM CDT | 111 min | ~2932 min |
 | 47 | 2026-06-07 | 6:25 PM CDT | 7:08 PM CDT | 43 min | ~2975 min |
 | 48 | 2026-06-14 | 7:30 AM CDT | 10:05 AM CDT | 155 min | ~3130 min |
+| 49 | 2026-06-14 | 10:14 AM CDT | 10:22 AM CDT | 8 min | ~3138 min |
+
+---
+
+## Session 49
+
+**Date:** 2026-06-14
+**Start:** 10:14 AM CDT
+**End:** 10:22 AM CDT
+**Duration:** 8 minutes
+
+### Accomplished
+
+**SIP Registration Architecture — Planning**
+
+- Defined implementation plan for agent SIP identity and FreeSWITCH WebRTC registration
+- Decided: agents need `SipExtension` (short auto-assigned, e.g. "1001") and `SipPasswordHash` (MD5 a1hash = `MD5("{ext}:{domain}:{password}")`) separate from web login credentials
+- Carrier: Telnyx primary target; `sip_gateways` retained as BYOC fallback (decided Session 48)
+- FreeSWITCH directory to be backed by `mod_xml_curl` calling `GET /api/v1/freeswitch/directory?user={ext}&domain={sub}.contactconnection.cc` — fully dynamic, no per-tenant XML files
+- SIP password returned plaintext once on agent creation, never stored; a1hash allows FreeSWITCH DIGEST auth without plaintext
+- WebRTC softphone panel (current placeholder) will use JsSIP or SIP.js, register to `wss://{domain}:7443`
+- Plan saved to memory (`project_sip_registration_plan.md`) for next session pickup
 
 ---
 
