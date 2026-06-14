@@ -1,0 +1,10 @@
+<configuration name="event_socket.conf" description="Event Socket Library">
+  <settings>
+    <!-- Bind to all interfaces so the .NET Worker can connect from the Docker network -->
+    <param name="listen-ip"   value="0.0.0.0"/>
+    <param name="listen-port" value="8021"/>
+    <!-- Standard default ESL password — override in production via secret -->
+    <param name="password"    value="ClueCon"/>
+    <param name="nat-map"     value="false"/>
+  </settings>
+</configuration>

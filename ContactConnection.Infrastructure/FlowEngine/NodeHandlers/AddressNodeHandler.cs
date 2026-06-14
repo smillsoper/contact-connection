@@ -308,6 +308,8 @@ public class AddressSubmission
     public string? Zip            { get; set; }
     public string? Zip4           { get; set; }
     public string? Country        { get; set; }
+    [System.Text.Json.Serialization.JsonNumberHandling(System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString)]
     public double? Latitude       { get; set; }
+    [System.Text.Json.Serialization.JsonNumberHandling(System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString)]
     public double? Longitude      { get; set; }
 }

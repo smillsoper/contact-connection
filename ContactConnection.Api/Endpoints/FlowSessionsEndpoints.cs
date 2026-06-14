@@ -436,6 +436,10 @@ public static class FlowSessionsEndpoints
         if (response.Error is not null)
             return Results.Ok(new AutocompleteSelectionResult(null, response.Error));
 
+        if (!response.Success)
+            return Results.Ok(new AutocompleteSelectionResult(null,
+                $"Details API returned HTTP {response.StatusCode}: {response.Body}"));
+
         JsonElement body;
         try { body = JsonDocument.Parse(response.Body ?? "{}").RootElement; }
         catch { return Results.Ok(new AutocompleteSelectionResult(null, "Details API returned a non-JSON response.")); }

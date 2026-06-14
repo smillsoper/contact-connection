@@ -1,0 +1,26 @@
+<include>
+  <!-- ── Network ──────────────────────────────────────────────────────── -->
+  <!-- FreeSWITCH auto-detects the container's local IP at startup.       -->
+  <!-- ext-sip-ip / ext-rtp-ip use auto-nat to handle Docker NAT.        -->
+  <X-PRE-PROCESS cmd="set" data="domain=127.0.0.1"/>
+  <X-PRE-PROCESS cmd="set" data="domain_name=$${domain}"/>
+
+  <!-- ── SIP ports ────────────────────────────────────────────────────── -->
+  <!-- Internal (5060): agent softphones register here                    -->
+  <!-- External (5080): SIP trunk providers connect here                  -->
+  <X-PRE-PROCESS cmd="set" data="internal_sip_port=5060"/>
+  <X-PRE-PROCESS cmd="set" data="external_sip_port=5080"/>
+
+  <!-- ── Codec preference order ──────────────────────────────────────── -->
+  <X-PRE-PROCESS cmd="set" data="global_codec_prefs=OPUS,G722,G711U,G711A"/>
+  <X-PRE-PROCESS cmd="set" data="outbound_codec_prefs=OPUS,G722,G711U,G711A"/>
+
+  <!-- ── Audio ────────────────────────────────────────────────────────── -->
+  <X-PRE-PROCESS cmd="set" data="hold_music=local_stream://moh"/>
+  <X-PRE-PROCESS cmd="set" data="recordings_dir=/var/lib/freeswitch/recordings"/>
+
+  <!-- ── Dev defaults — override via environment or per-tenant config ── -->
+  <!-- Default agent SIP password; agents in directory override per-user  -->
+  <X-PRE-PROCESS cmd="set" data="default_password=cc_dev_1234"/>
+  <X-PRE-PROCESS cmd="set" data="outbound_caller_id=ContactConnection"/>
+</include>

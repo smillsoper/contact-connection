@@ -1,5 +1,6 @@
 using ContactConnection.Domain.Entities;
 using ContactConnection.Infrastructure.Data.Configurations;
+using ContactConnection.Infrastructure.Persistence.Configurations;
 using Microsoft.EntityFrameworkCore;
 
 namespace ContactConnection.Infrastructure.Data;
@@ -33,6 +34,13 @@ public class TenantDbContext : DbContext
     public DbSet<TenantApiDefinition> TenantApiDefinitions => Set<TenantApiDefinition>();
     public DbSet<TenantApiEndpoint> TenantApiEndpoints => Set<TenantApiEndpoint>();
     public DbSet<TenantApiPreference> TenantApiPreferences => Set<TenantApiPreference>();
+    public DbSet<Client> Clients => Set<Client>();
+    public DbSet<Campaign> Campaigns => Set<Campaign>();
+    public DbSet<PhoneNumber> PhoneNumbers => Set<PhoneNumber>();
+    public DbSet<AgentCampaignAssignment> AgentCampaignAssignments => Set<AgentCampaignAssignment>();
+    public DbSet<AgentGroup> AgentGroups => Set<AgentGroup>();
+    public DbSet<AgentGroupMember> AgentGroupMembers => Set<AgentGroupMember>();
+    public DbSet<GroupCampaignAssignment> GroupCampaignAssignments => Set<GroupCampaignAssignment>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -55,6 +63,13 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new TenantApiDefinitionConfiguration());
         modelBuilder.ApplyConfiguration(new TenantApiEndpointConfiguration());
         modelBuilder.ApplyConfiguration(new TenantApiPreferenceConfiguration());
+        modelBuilder.ApplyConfiguration(new ClientConfiguration());
+        modelBuilder.ApplyConfiguration(new CampaignConfiguration());
+        modelBuilder.ApplyConfiguration(new PhoneNumberConfiguration());
+        modelBuilder.ApplyConfiguration(new AgentCampaignAssignmentConfiguration());
+        modelBuilder.ApplyConfiguration(new AgentGroupConfiguration());
+        modelBuilder.ApplyConfiguration(new AgentGroupMemberConfiguration());
+        modelBuilder.ApplyConfiguration(new GroupCampaignAssignmentConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 

@@ -181,7 +181,6 @@ export default function FlowPanel() {
       setAutocompleteSuggestions([])
       try {
         const result = await flowsApi.selectAutocompleteAddress(state.node.sessionId, placeId, sessionToken)
-        console.log('[autocomplete] select result:', JSON.stringify(result, null, 2))
         setAutocompleteSelection(result)
       } catch {
         // best-effort

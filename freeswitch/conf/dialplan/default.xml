@@ -1,0 +1,35 @@
+<include>
+  <!--
+    Default dialplan context — applies to calls from registered agent softphones.
+    The ContactConnection ESL service issues bridge/originate commands to connect
+    agents to queued callers; this dialplan handles direct agent-to-agent calls
+    and test extensions only.
+  -->
+  <context name="default">
+
+    <!-- Agent-to-agent direct call: dial 1xxx to reach another agent extension -->
+    <extension name="agent-extension">
+      <condition field="destination_number" expression="^(1\d{3})$">
+        <action application="set"    data="call_timeout=30"/>
+        <action application="bridge" data="user/$1@$${domain}"/>
+      </condition>
+    </extension>
+
+    <!-- Hold music test: dial 9732 to hear the MOH stream -->
+    <extension name="moh-test">
+      <condition field="destination_number" expression="^9732$">
+        <action application="answer"/>
+        <action application="playback" data="local_stream://moh"/>
+      </condition>
+    </extension>
+
+    <!-- Echo test: dial 9196 to hear your own voice (latency/audio quality check) -->
+    <extension name="echo-test">
+      <condition field="destination_number" expression="^9196$">
+        <action application="answer"/>
+        <action application="echo"/>
+      </condition>
+    </extension>
+
+  </context>
+</include>

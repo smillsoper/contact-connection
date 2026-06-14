@@ -1,0 +1,5 @@
+<configuration name="local_stream.conf" description="Local stream (hold music)">
+  <directory name="moh" path="/usr/share/freeswitch/sounds/music/default" shuffle="true" channels="1" rate="8000" interval="20" timer-name="soft">
+    <param name="volume" value="0.5"/>
+  </directory>
+</configuration>

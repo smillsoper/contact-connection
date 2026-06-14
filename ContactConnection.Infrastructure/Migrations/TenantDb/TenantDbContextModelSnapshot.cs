@@ -93,6 +93,118 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                     b.ToTable("agents", (string)null);
                 });
 
+            modelBuilder.Entity("ContactConnection.Domain.Entities.AgentCampaignAssignment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AgentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("agent_id");
+
+                    b.Property<DateTimeOffset>("AssignedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("assigned_at");
+
+                    b.Property<Guid>("CampaignId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("campaign_id");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
+                    b.Property<int>("Proficiency")
+                        .HasColumnType("integer")
+                        .HasColumnName("proficiency");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CampaignId");
+
+                    b.HasIndex("AgentId", "CampaignId")
+                        .IsUnique();
+
+                    b.HasIndex("CampaignId", "IsActive", "Proficiency");
+
+                    b.ToTable("agent_campaign_assignments", (string)null);
+                });
+
+            modelBuilder.Entity("ContactConnection.Domain.Entities.AgentGroup", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("description");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Slug")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("slug");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Slug")
+                        .IsUnique();
+
+                    b.ToTable("agent_groups", (string)null);
+                });
+
+            modelBuilder.Entity("ContactConnection.Domain.Entities.AgentGroupMember", b =>
+                {
+                    b.Property<Guid>("GroupId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("group_id");
+
+                    b.Property<Guid>("AgentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("agent_id");
+
+                    b.Property<DateTimeOffset>("JoinedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("joined_at");
+
+                    b.HasKey("GroupId", "AgentId");
+
+                    b.HasIndex("AgentId");
+
+                    b.ToTable("agent_group_members", (string)null);
+                });
+
             modelBuilder.Entity("ContactConnection.Domain.Entities.CallInteraction", b =>
                 {
                     b.Property<Guid>("Id")
@@ -382,6 +494,125 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                     b.ToTable("call_records", (string)null);
                 });
 
+            modelBuilder.Entity("ContactConnection.Domain.Entities.Campaign", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ClientId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("client_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("description");
+
+                    b.Property<Guid?>("FlowId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("flow_id");
+
+                    b.Property<int>("MaxQueueSize")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_queue_size");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<int>("QueueTimeoutSeconds")
+                        .HasColumnType("integer")
+                        .HasColumnName("queue_timeout_seconds");
+
+                    b.Property<int>("ServiceLevelThresholdSeconds")
+                        .HasColumnType("integer")
+                        .HasColumnName("service_level_threshold_seconds");
+
+                    b.Property<string>("Slug")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("slug");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("TenantId", "Slug")
+                        .IsUnique();
+
+                    b.ToTable("campaigns", (string)null);
+                });
+
+            modelBuilder.Entity("ContactConnection.Domain.Entities.Client", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("AccountNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("account_number");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("TenantId", "AccountNumber");
+
+                    b.ToTable("clients", (string)null);
+                });
+
             modelBuilder.Entity("ContactConnection.Domain.Entities.CustomFieldDefinition", b =>
                 {
                     b.Property<Guid>("Id")
@@ -658,6 +889,47 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .HasDatabaseName("idx_flow_sessions_agent_date");
 
                     b.ToTable("flow_sessions", (string)null);
+                });
+
+            modelBuilder.Entity("ContactConnection.Domain.Entities.GroupCampaignAssignment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("AssignedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("assigned_at");
+
+                    b.Property<Guid>("CampaignId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("campaign_id");
+
+                    b.Property<Guid>("GroupId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("group_id");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
+                    b.Property<int>("Proficiency")
+                        .HasColumnType("integer")
+                        .HasColumnName("proficiency");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GroupId", "CampaignId")
+                        .IsUnique();
+
+                    b.HasIndex("CampaignId", "IsActive", "Proficiency");
+
+                    b.ToTable("group_campaign_assignments", (string)null);
                 });
 
             modelBuilder.Entity("ContactConnection.Domain.Entities.Offer", b =>
@@ -1104,6 +1376,54 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .HasDatabaseName("ix_order_lines_tenant_id");
 
                     b.ToTable("order_lines", (string)null);
+                });
+
+            modelBuilder.Entity("ContactConnection.Domain.Entities.PhoneNumber", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("CampaignId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("campaign_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("Label")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("label");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("number");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CampaignId");
+
+                    b.HasIndex("Number")
+                        .IsUnique();
+
+                    b.ToTable("phone_numbers", (string)null);
                 });
 
             modelBuilder.Entity("ContactConnection.Domain.Entities.Product", b =>
@@ -1802,6 +2122,24 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                     b.ToTable("product_category_map", (string)null);
                 });
 
+            modelBuilder.Entity("ContactConnection.Domain.Entities.AgentCampaignAssignment", b =>
+                {
+                    b.HasOne("ContactConnection.Domain.Entities.Campaign", null)
+                        .WithMany("AgentAssignments")
+                        .HasForeignKey("CampaignId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ContactConnection.Domain.Entities.AgentGroupMember", b =>
+                {
+                    b.HasOne("ContactConnection.Domain.Entities.AgentGroup", null)
+                        .WithMany("Members")
+                        .HasForeignKey("GroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("ContactConnection.Domain.Entities.CallInteraction", b =>
                 {
                     b.HasOne("ContactConnection.Domain.Entities.CallRecord", null)
@@ -1809,6 +2147,17 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .HasForeignKey("CallRecordId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("ContactConnection.Domain.Entities.Campaign", b =>
+                {
+                    b.HasOne("ContactConnection.Domain.Entities.Client", "Client")
+                        .WithMany("Campaigns")
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Client");
                 });
 
             modelBuilder.Entity("ContactConnection.Domain.Entities.CustomFieldValue", b =>
@@ -1820,6 +2169,23 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .IsRequired();
 
                     b.Navigation("Definition");
+                });
+
+            modelBuilder.Entity("ContactConnection.Domain.Entities.GroupCampaignAssignment", b =>
+                {
+                    b.HasOne("ContactConnection.Domain.Entities.Campaign", null)
+                        .WithMany("GroupAssignments")
+                        .HasForeignKey("CampaignId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ContactConnection.Domain.Entities.AgentGroup", "Group")
+                        .WithMany("CampaignAssignments")
+                        .HasForeignKey("GroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Group");
                 });
 
             modelBuilder.Entity("ContactConnection.Domain.Entities.Offer", b =>
@@ -1842,6 +2208,17 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .IsRequired();
 
                     b.Navigation("Order");
+                });
+
+            modelBuilder.Entity("ContactConnection.Domain.Entities.PhoneNumber", b =>
+                {
+                    b.HasOne("ContactConnection.Domain.Entities.Campaign", "Campaign")
+                        .WithMany("PhoneNumbers")
+                        .HasForeignKey("CampaignId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Campaign");
                 });
 
             modelBuilder.Entity("ContactConnection.Domain.Entities.Product", b =>
@@ -1917,9 +2294,30 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("ContactConnection.Domain.Entities.AgentGroup", b =>
+                {
+                    b.Navigation("CampaignAssignments");
+
+                    b.Navigation("Members");
+                });
+
             modelBuilder.Entity("ContactConnection.Domain.Entities.CallRecord", b =>
                 {
                     b.Navigation("Interactions");
+                });
+
+            modelBuilder.Entity("ContactConnection.Domain.Entities.Campaign", b =>
+                {
+                    b.Navigation("AgentAssignments");
+
+                    b.Navigation("GroupAssignments");
+
+                    b.Navigation("PhoneNumbers");
+                });
+
+            modelBuilder.Entity("ContactConnection.Domain.Entities.Client", b =>
+                {
+                    b.Navigation("Campaigns");
                 });
 
             modelBuilder.Entity("ContactConnection.Domain.Entities.Order", b =>

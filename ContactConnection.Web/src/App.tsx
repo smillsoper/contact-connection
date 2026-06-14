@@ -19,6 +19,8 @@ import AdminAgentsPage from './pages/admin/AdminAgentsPage'
 import AdminApiDefinitionsPage from './pages/admin/AdminApiDefinitionsPage'
 import AdminApiDefinitionDetailPage from './pages/admin/AdminApiDefinitionDetailPage'
 import AdminCredentialsPage from './pages/admin/AdminCredentialsPage'
+import TelephonyPage from './pages/admin/TelephonyPage'
+import SipGatewaysPage from './pages/admin/SipGatewaysPage'
 import PortalApiDefinitionsPage from './pages/portal/PortalApiDefinitionsPage'
 import PortalApiDefinitionDetailPage from './pages/portal/PortalApiDefinitionDetailPage'
 import PortalCredentialsPage from './pages/portal/PortalCredentialsPage'
@@ -177,6 +179,22 @@ export default function App() {
           element={
             <RequireAdminAuth>
               <AdminCredentialsPage />
+            </RequireAdminAuth>
+          }
+        />
+        <Route
+          path="/admin/telephony"
+          element={
+            <RequireAdminAuth>
+              <TelephonyPage />
+            </RequireAdminAuth>
+          }
+        />
+        <Route
+          path="/admin/sip-gateways"
+          element={
+            <RequireAdminAuth>
+              <SipGatewaysPage />
             </RequireAdminAuth>
           }
         />

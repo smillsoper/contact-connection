@@ -297,8 +297,16 @@ export default function NodeDisplay({ node, onAdvance, onJump, advancing, valida
       if (get('address2')) next.address2 = get('address2')!
       if (get('city'))     next.city     = get('city')!
       if (get('state'))    next.state    = get('state')!
-      if (get('zip'))      next.zip      = get('zip')!
-      if (get('zip4'))     next.zip4     = get('zip4')!
+      if (get('zip')) {
+        const zipVal  = get('zip')!
+        const zip4Val = get('zip4')
+        // Non-international mode stores ZIP+4 combined in the masked zip field (e.g. "97470-3706").
+        // International mode keeps zip4 separate.
+        next.zip  = (!node.allowInternational && zip4Val)
+          ? applyZipCaMask(`${zipVal}-${zip4Val}`)
+          : applyZipCaMask(zipVal)
+        next.zip4 = node.allowInternational ? (zip4Val ?? '') : ''
+      }
       if (get('country'))  next.country  = get('country')!
       const lat = get('latitude')
       const lon = get('longitude')
@@ -411,18 +419,19 @@ export default function NodeDisplay({ node, onAdvance, onJump, advancing, valida
     // Build a string-only submission for address validation and the advance payload.
     // lat/lng are numbers — stringify them so the backend Dictionary<string,string> can deserialize.
     const submission: Record<string, string> = {
-      firstName: form.firstName,
-      mi:        form.mi,
-      lastName:  form.lastName,
-      address1:  form.address1,
-      prefix1:   form.prefix1,
-      address2:  form.address2,
-      prefix2:   form.prefix2,
-      zip:       form.zip,
-      zip4:      form.zip4,
-      city:      form.city,
-      state:     form.state,
-      country:   form.country,
+      firstName:      form.firstName,
+      middleInitial:  form.middleInitial,
+      lastName:       form.lastName,
+      company:        form.company,
+      address1Prefix: form.address1Prefix,
+      address1:       form.address1,
+      address2Prefix: form.address2Prefix,
+      address2:       form.address2,
+      zip:            form.zip,
+      zip4:           form.zip4,
+      city:           form.city,
+      state:          form.state,
+      country:        form.country,
     }
     if (form.latitude  != null) submission.latitude  = String(form.latitude)
     if (form.longitude != null) submission.longitude = String(form.longitude)

@@ -30,21 +30,24 @@ services:
       timeout: 5s
       retries: 5
 
-  # freeswitch:
-  #   Enabled when telephony session begins.
-  #   Requires SignalWire registry login: docker login freeswitch.signalwire.com
-  #   image: signalwire/freeswitch:latest
-  #   container_name: cc_freeswitch
-  #   ports:
-  #     - "5060:5060/udp"          # SIP
-  #     - "5060:5060/tcp"          # SIP TCP
-  #     - "8021:8021/tcp"          # ESL (Event Socket Layer)
-  #     - "16384-16394:16384-16394/udp"  # RTP media
-  #   volumes:
-  #     - ./freeswitch/conf:/etc/freeswitch
-  #     - ./freeswitch/sounds:/usr/share/freeswitch/sounds/contactconnection
-  #   environment:
-  #     - FREESWITCH_DOMAIN=127.0.0.1
+  freeswitch:
+    build:
+      context: ./freeswitch
+      args:
+        SIGNALWIRE_PAT: ${SIGNALWIRE_PAT}
+    container_name: cc_freeswitch
+    ports:
+      - "5060:5060/udp"              # SIP — internal profile (agent softphones)
+      - "5060:5060/tcp"              # SIP TCP
+      - "5080:5080/udp"              # SIP — external profile (SIP trunk)
+      - "5080:5080/tcp"              # SIP TCP
+      - "8021:8021/tcp"              # ESL — .NET Worker connects here
+      - "16384-16394:16384-16394/udp" # RTP media
+    volumes:
+      - ./freeswitch/conf:/etc/freeswitch
+      - ./freeswitch/sounds:/usr/share/freeswitch/sounds/contactconnection
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   nginx:
     image: nginx:alpine

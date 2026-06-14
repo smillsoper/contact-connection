@@ -65,6 +65,12 @@ public static class ServiceCollectionExtensions
 
         services.AddScoped<ITenantInviteRepository, TenantInviteRepository>();
         services.AddScoped<ITenantAdminInviteRepository, TenantAdminInviteRepository>();
+        services.AddScoped<ISipGatewayRepository, SipGatewayRepository>();
+        services.AddScoped<IClientRepository, ClientRepository>();
+        services.AddScoped<ICampaignRepository, CampaignRepository>();
+        services.AddScoped<IPhoneNumberRepository, PhoneNumberRepository>();
+        services.AddScoped<IAgentGroupRepository, AgentGroupRepository>();
+        services.AddScoped<IPhoneNumberRoutingRepository, PhoneNumberRoutingRepository>();
 
         // Platform auth
         services.AddScoped<IPlatformTokenService, PlatformJwtTokenService>();

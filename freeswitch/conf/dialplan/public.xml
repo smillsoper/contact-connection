@@ -1,0 +1,26 @@
+<include>
+  <!--
+    Public dialplan context — applies to all inbound calls arriving from a SIP trunk
+    on the external profile (port 5080).
+
+    All inbound calls are parked here. The ContactConnection ESL service receives the
+    CHANNEL_CREATE and CHANNEL_PARK events, identifies the tenant by DID (destination
+    number), creates a CallRecord, and issues ESL commands to bridge the call to an
+    available agent or play queue audio.
+  -->
+  <context name="public">
+
+    <extension name="inbound-to-cc">
+      <condition field="destination_number" expression=".*">
+        <!-- Tag this channel so the ESL service knows it's an inbound external call -->
+        <action application="set"  data="cc_inbound=true"/>
+        <action application="set"  data="cc_did=${destination_number}"/>
+        <action application="set"  data="cc_caller_id=${caller_id_number}"/>
+        <action application="set"  data="cc_caller_name=${caller_id_name}"/>
+        <!-- Park the call — ESL service takes over from here -->
+        <action application="park"/>
+      </condition>
+    </extension>
+
+  </context>
+</include>

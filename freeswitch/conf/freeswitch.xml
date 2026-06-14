@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<document type="freeswitch/xml">
+
+  <!-- Global variables — loaded before everything else -->
+  <X-PRE-PROCESS cmd="include" data="vars.xml"/>
+
+  <!-- Module configuration (autoload_configs/*.xml) -->
+  <section name="configuration" description="Module configuration">
+    <X-PRE-PROCESS cmd="include" data="autoload_configs/*.xml"/>
+  </section>
+
+  <!-- Dialplan contexts -->
+  <section name="dialplan" description="XML dialplan">
+    <X-PRE-PROCESS cmd="include" data="dialplan/*.xml"/>
+  </section>
+
+  <!-- SIP user directory -->
+  <section name="directory" description="User directory">
+    <X-PRE-PROCESS cmd="include" data="directory/**/*.xml"/>
+  </section>
+
+</document>

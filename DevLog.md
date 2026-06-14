@@ -56,6 +56,91 @@
 | 44 | 2026-06-06 | 2:27 PM CDT | 3:44 PM CDT | 77 min | ~2721 min |
 | 45 | 2026-06-07 | 8:29 AM CDT | 10:09 AM CDT | 100 min | ~2821 min |
 | 46 | 2026-06-07 | 10:09 AM CDT | 12:00 PM CDT | 111 min | ~2932 min |
+| 47 | 2026-06-07 | 6:25 PM CDT | 7:08 PM CDT | 43 min | ~2975 min |
+| 48 | 2026-06-14 | 7:30 AM CDT | 10:05 AM CDT | 155 min | ~3130 min |
+
+---
+
+## Session 48
+
+**Date:** 2026-06-14
+**Start:** 7:30 AM CDT
+**End:** 10:05 AM CDT
+**Duration:** 155 minutes
+
+### Accomplished
+
+**Telephony Foundation — API endpoint completion**
+
+- Fixed reflection bug in `CampaignsEndpoints.cs` — `AssignAgent` and `AssignGroup` were using `GetType().GetMethod()` reflection; replaced with proper repository calls (`AddAgentAssignmentAsync`, `GetAgentAssignmentAsync`, `AddGroupAssignmentAsync`, `GetGroupAssignmentAsync`)
+- Made `AgentGroupMember.Create()` public (was `internal`) to allow construction from API layer without going through navigation collection
+- Created `PhoneNumbersEndpoints.cs` — `POST/GET/PATCH/activate/deactivate` for DIDs; validates campaign exists on create; supports label update and campaign reassignment via PATCH
+- Created `AgentGroupsEndpoints.cs` — full CRUD + activate/deactivate + `POST/DELETE /members/{agentId}`
+- Registered all 5 new endpoint groups in `Program.cs`: `MapSipGatewaysEndpoints`, `MapClientsEndpoints`, `MapCampaignsEndpoints`, `MapPhoneNumbersEndpoints`, `MapAgentGroupsEndpoints`
+- Applied EF migrations to both tenant schemas (`tenant_test_tenant` already current; caught up `tenant_test_contact_center` with 6 pending migrations)
+
+**Telephony Foundation — FreeSWITCH ESL service**
+
+- Updated `FreeSwitchEslService` with full three-step tenant resolution cascade:
+  1. `sip_to_host` subdomain (ContactConnection-as-carrier via Telnyx)
+  2. `sip_gateway_name` → SIP gateway → tenant (BYOC with credentials)
+  3. DNIS → `public.phone_number_routing` → tenant (IP-routing carriers — Commio, CLECs)
+- Added `_channelTenants` dictionary to preserve subdomain across call lifecycle for hangup finalization
+- Removed `DefaultTenantSubdomain` from Worker `appsettings.json`
+
+**UI — Telephony admin views**
+
+- Created `src/api/telephony.ts` — full API client for clients, campaigns, phone numbers, agent groups, SIP gateways
+- Created `src/pages/admin/TelephonyPage.tsx` — four-tab admin page (Clients | Campaigns | Phone Numbers | Agent Groups) with inline create forms, filtering, and status controls
+- Created `src/pages/admin/SipGatewaysPage.tsx` — SIP gateway list + create form (name, proxy, username, password, transport, register toggle)
+- Added "Telephony" and "SIP Gateways" nav items to `AdminShell`
+- Added routes `/admin/telephony` and `/admin/sip-gateways` to `App.tsx`
+
+**Global DID routing — architecture and implementation**
+
+- Architecture discussion: three carrier integration patterns identified:
+  - **ContactConnection-native** (Telnyx): subdomain routing, primary target
+  - **BYOC with SIP auth** (Twilio, Bandwidth): `sip_gateways` table
+  - **IP-routing carriers** (Commio, CLECs): global DNIS routing table
+- E.164 uniqueness insight: ported DIDs are globally unique — DNIS alone unambiguously identifies tenant for IP-routing carriers, unlike virtual/shared numbers (the InContact failure mode)
+- Created `PhoneNumberRouting` domain entity — public schema, global DID registry
+- Created `IPhoneNumberRoutingRepository` with `UpsertAsync` and `SetActiveAsync`
+- Created `PhoneNumberRoutingConfiguration` — `public.phone_number_routing`, unique index on `Number`, composite index on `(TenantId, IsActive)`
+- Created `PhoneNumberRoutingRepository` using `ContactConnectionDbContext`
+- Registered `IPhoneNumberRoutingRepository` in DI
+- Updated `PhoneNumbersEndpoints` to sync all mutations (create, reassign, activate, deactivate) to routing table
+- Migration `AddPhoneNumberRouting` created and applied to public schema
+- Discussed Commio direct vs Telnyx pass-through; decided direct Commio → FreeSWITCH via DNIS routing is simpler and cheaper for beta
+- Discussed number porting: standard practice for call center migrations, not a blocker; simplifies architecture by making Telnyx the universal carrier layer
+- **Strategic decision:** primary carrier target is Telnyx; `sip_gateways` retained as clean fallback for BYOC edge cases
+
+**Build status:** 0 warnings, 0 errors ✓
+
+---
+
+## Session 47
+
+**Date:** 2026-06-07
+**Start:** 6:25 PM CDT
+**End:** 7:08 PM CDT
+**Duration:** 43 minutes
+
+### Accomplished
+
+**Realtime Address Autocomplete — selection debugging and fixes**
+
+- Added `!response.Success` check in `SelectAutocompleteAddress` to surface HTTP 4xx errors from the Google Places Details API as an `error` string (previously, a 403 body was silently treated as a valid JSON response and field extraction returned empty).
+- Added temporary debug fallback to expose raw Google response body when `EvaluateDetails` returns zero fields.
+- Diagnosed 403 `API_KEY_HTTP_REFERRER_BLOCKED` on the details call: the Details headers in the Response Mapping config were missing `Referer: http://localhost:5173/` (the main endpoint headers had it but Details headers are a separate HTTP request).
+- Diagnosed suggestions disappearing: user changed `X-Goog-FieldMask` to `suggestions.placePrediction.placeId,suggestions.placePrediction.text.text` (drilling into a nested scalar); correct value is `suggestions.placePrediction.placeId,suggestions.placePrediction.text` (stopping at the object level). Fixed.
+- Autocomplete address selection now fully working end-to-end: suggestion dropdown → place details call → address fields populated in the form.
+- Removed `console.log` and debug raw-body error from both files after confirming the feature works.
+
+**Address form — structural consistency fixes**
+
+- **Root crash fix:** `AddressSubmission.Latitude` and `Longitude` declared as `double?` but frontend sends them as JSON strings (e.g. `"44.123456"`) because the submission dict is `Record<string, string>`. `JsonSerializer.Deserialize` was throwing `JsonException`, caught silently, setting `sub = null` → "Invalid address submission. Please try again." Fixed by adding `[JsonNumberHandling(AllowReadingFromString)]` to both properties.
+- **ZIP+4 display fix:** Autocomplete was setting `addrForm.zip = "97470"` and `addrForm.zip4 = "3706"` separately. Non-international mode stores ZIP+4 combined in the masked zip field (`97470-3706`); the standalone `zip4` field is not displayed. Fixed by combining them with `applyZipCaMask` in the autocomplete effect, matching the same pattern used by the prefilledAddress prefill logic.
+- **Key name consistency fix:** Submission object was using `mi`, `prefix1`, `prefix2` which don't exist on `AddrForm` (undefined at runtime → omitted by `JSON.stringify`). Fixed to use actual field names: `middleInitial`, `address1Prefix`, `address2Prefix`, `company`. This ensures the submission, correctedFields merge, and `AddressSubmission` deserialization all use the same canonical key names.
 
 ---
 

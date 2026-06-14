@@ -91,6 +91,11 @@ app.MapSubscriptionsEndpoints();
 app.MapFlowsEndpoints();
 app.MapFlowSessionsEndpoints();
 app.MapCustomFieldsEndpoints();
+app.MapSipGatewaysEndpoints();
+app.MapClientsEndpoints();
+app.MapCampaignsEndpoints();
+app.MapPhoneNumbersEndpoints();
+app.MapAgentGroupsEndpoints();
 
 // Tenant admin portal
 app.MapAdminAgentsEndpoints();
