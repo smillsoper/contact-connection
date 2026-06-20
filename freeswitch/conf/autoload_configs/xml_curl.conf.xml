@@ -1,0 +1,14 @@
+<configuration name="xml_curl.conf" description="Dynamic XML — fetches directory from the ContactConnection API">
+  <bindings>
+    <!--
+      Directory binding: FreeSWITCH POSTs here when it needs to authenticate a SIP REGISTER
+      or look up a user. The API resolves tenant from the SIP domain and returns the a1-hash.
+      host.docker.internal routes to the Windows host where the .NET API runs on port 5135.
+    -->
+    <binding name="directory">
+      <param name="gateway-url" value="http://host.docker.internal:5135/api/v1/freeswitch/directory"/>
+      <param name="bindings"    value="directory"/>
+      <param name="timeout"     value="5000"/>
+    </binding>
+  </bindings>
+</configuration>

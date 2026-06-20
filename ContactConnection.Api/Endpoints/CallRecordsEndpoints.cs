@@ -13,11 +13,40 @@ public static class CallRecordsEndpoints
     {
         var group = app.MapGroup("/api/v1/call-records").RequireAuthorization();
 
+        group.MapPost("inbound", CreateInbound);
         group.MapGet("{id:guid}", GetById);
         group.MapGet("{id:guid}/cart", GetCart);
         group.MapPut("{id:guid}/cart", SetCart);
 
         return app;
+    }
+
+    // ── POST /api/v1/call-records/inbound ───────────────────────────────────
+    // Called by the agent UI when answering an incoming call via JsSIP.
+    // Creates a stub CallRecord with caller info; agent resolves client/campaign during the call.
+
+    private static async Task<IResult> CreateInbound(
+        InboundCallRequest request,
+        System.Security.Claims.ClaimsPrincipal user,
+        ICallRecordRepository callRecords,
+        TenantContext tenantContext,
+        CancellationToken ct)
+    {
+        if (tenantContext.Current is null) return Results.Unauthorized();
+
+        var agentIdClaim = user.FindFirst("sub")?.Value;
+        if (!Guid.TryParse(agentIdClaim, out var agentId)) return Results.Unauthorized();
+
+        var record = CallRecord.CreateInbound(
+            tenantId: tenantContext.Current.Id,
+            callerId: request.CallerNumber,
+            agentId: agentId,
+            contactIdExternal: request.ChannelUuid);
+
+        await callRecords.AddAsync(record, ct);
+        await callRecords.SaveChangesAsync(ct);
+
+        return Results.Created($"/api/v1/call-records/{record.Id}", new { id = record.Id });
     }
 
     private static async Task<IResult> GetById(
@@ -149,3 +178,5 @@ public static class CallRecordsEndpoints
         r.UpdatedAt
     };
 }
+
+public record InboundCallRequest(string? CallerNumber, string? CallerName, string? ChannelUuid);

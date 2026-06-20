@@ -36,5 +36,12 @@ public class AgentConfiguration : IEntityTypeConfiguration<Agent>
         builder.Property(a => a.LastLoginAt).HasColumnName("last_login_at");
         builder.Property(a => a.MfaSecret).HasColumnName("mfa_secret").HasMaxLength(64);
         builder.Property(a => a.MfaEnabled).HasColumnName("mfa_enabled");
+
+        builder.Property(a => a.SipExtension).HasColumnName("sip_extension").HasMaxLength(20);
+        builder.Property(a => a.SipA1Hash).HasColumnName("sip_a1hash").HasMaxLength(32);
+        builder.HasIndex(a => a.SipExtension)
+            .IsUnique()
+            .HasFilter("sip_extension IS NOT NULL")
+            .HasDatabaseName("idx_agents_sip_extension");
     }
 }

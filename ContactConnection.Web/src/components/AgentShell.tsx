@@ -1,7 +1,9 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
+import { useSipStore } from '../stores/sipStore'
 import { useSessionTimeout } from '../hooks/useSessionTimeout'
+import { authApi } from '../api/auth'
 import SessionTimeoutModal from './SessionTimeoutModal'
 import SoftphonePanel from './SoftphonePanel'
 import FlowPanel from './FlowPanel'
@@ -9,12 +11,31 @@ import ChatPanel from './ChatPanel'
 
 export default function AgentShell() {
   const clearAuth = useAuthStore((s) => s.clearAuth)
+  const setAuth = useAuthStore((s) => s.setAuth)
+  const clearSip = useSipStore((s) => s.clear)
+  const sipExtension = useSipStore((s) => s.sipExtension)
+  const setSipCredentials = useSipStore((s) => s.setSipCredentials)
   const navigate = useNavigate()
+
+  // On page refresh the SIP store is empty (non-persisted by design).
+  // Fire a token refresh to get a fresh SIP password without requiring re-login.
+  useEffect(() => {
+    if (sipExtension) return
+    authApi.refresh().then((res) => {
+      setAuth(res.token, res.agentId, res.tenantSubdomain, res.role, res.firstName, res.lastName)
+      if (res.sipExtension && res.sipPassword) {
+        setSipCredentials(res.sipExtension, res.sipPassword)
+      }
+    }).catch(() => {
+      // Token expired or invalid — session timeout handler will redirect to login
+    })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleLogout = useCallback(() => {
     clearAuth()
+    clearSip()
     navigate('/login', { replace: true })
-  }, [clearAuth, navigate])
+  }, [clearAuth, clearSip, navigate])
 
   const { showWarning, secondsLeft, keepAlive } = useSessionTimeout(handleLogout)
 

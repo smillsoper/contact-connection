@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import * as signalR from '@microsoft/signalr'
 import { useAuthStore } from '../stores/authStore'
+import { useCallStore } from '../stores/callStore'
 import { flowsApi, type AddressValidationResult, type ZipLookupResult, type AutocompleteSuggestion, type AutocompleteSelectionResult } from '../api/flows'
 import type { FlowNodeState } from '../types/flow'
 import NodeDisplay from './NodeDisplay'
@@ -14,6 +15,7 @@ type PanelState =
 
 export default function FlowPanel() {
   const { token, tenantSubdomain } = useAuthStore()
+  const { setCallRecordId } = useCallStore()
   const [state, setState] = useState<PanelState>({ phase: 'idle' })
   const [advancing, setAdvancing] = useState(false)
   const [validating, setValidating] = useState(false)
@@ -46,13 +48,18 @@ export default function FlowPanel() {
       .withAutomaticReconnect()
       .build()
 
+    // ESL screen pop — inbound call parked for this agent
+    connection.on('receiveIncomingCall', (callRecordId: string, _callerNumber: string, _callerName: string) => {
+      setCallRecordId(callRecordId)
+    })
+
     connection.start().catch(console.error)
     setHub(connection)
 
     return () => {
       connection.stop()
     }
-  }, [token, tenantSubdomain])
+  }, [token, tenantSubdomain]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Join session room when a session becomes active
   useEffect(() => {

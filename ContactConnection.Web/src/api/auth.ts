@@ -16,6 +16,8 @@ export type LoginResponse =
       lastName: string
       role: string
       tenantSubdomain: string
+      sipExtension: string | null
+      sipPassword: string | null   // plaintext, returned once — store in memory only
     }
   | {
       mfaPending: true
@@ -35,6 +37,8 @@ export interface FullAuthResponse {
   lastName: string
   role: string
   tenantSubdomain: string
+  sipExtension: string | null
+  sipPassword: string | null
 }
 
 export interface MfaSetupData {

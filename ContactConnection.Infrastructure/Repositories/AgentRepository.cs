@@ -34,4 +34,17 @@ public class AgentRepository : IAgentRepository
 
     public Task SaveChangesAsync(CancellationToken ct = default) =>
         Db.SaveChangesAsync(ct);
+
+    public async Task<int> GetMaxSipExtensionAsync(CancellationToken ct = default)
+    {
+        var extensions = await Db.Agents
+            .Where(a => a.SipExtension != null)
+            .Select(a => a.SipExtension!)
+            .ToListAsync(ct);
+
+        return extensions.Count == 0 ? 999 : extensions.Select(int.Parse).Max();
+    }
+
+    public Task<Agent?> GetBySipExtensionAsync(string extension, CancellationToken ct = default) =>
+        Db.Agents.FirstOrDefaultAsync(a => a.SipExtension == extension && a.IsActive, ct);
 }

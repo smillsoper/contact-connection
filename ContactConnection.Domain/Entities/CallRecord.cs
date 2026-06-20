@@ -98,6 +98,35 @@ public class CallRecord
         };
     }
 
+    /// <summary>
+    /// Creates a call record for an inbound telephony event before a client/campaign is known.
+    /// ClientId and CampaignId are left as Guid.Empty and should be resolved during the call.
+    /// </summary>
+    public static CallRecord CreateInbound(
+        Guid tenantId,
+        string? callerId,
+        Guid? agentId = null,
+        string? contactIdExternal = null)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return new CallRecord
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ClientId = Guid.Empty,
+            CampaignId = Guid.Empty,
+            Source = CallSource.Inbound,
+            RecordType = CallRecordType.Full,
+            OverallStatus = CallRecordStatus.Active,
+            CallerId = callerId,
+            AgentId = agentId,
+            ContactIdExternal = contactIdExternal,
+            CallStartAt = now,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+    }
+
     /// <summary>Creates a stub record for telephony events (abandon, callback, etc.) with no agent session.</summary>
     public static CallRecord CreateStub(Guid tenantId, Guid clientId, Guid campaignId, string? callerId = null)
     {
@@ -117,6 +146,12 @@ public class CallRecord
     public void SetAgent(Guid agentId)
     {
         AgentId = agentId;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void SetContactIdExternal(string contactId)
+    {
+        ContactIdExternal = contactId;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 

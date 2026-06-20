@@ -13,6 +13,9 @@
     <!-- Dialplan -->
     <load module="mod_dialplan_xml"/>
 
+    <!-- Dynamic XML config via HTTP — directory lookups go to the ContactConnection API -->
+    <load module="mod_xml_curl"/>
+
     <!-- Core API and applications -->
     <load module="mod_commands"/>
     <load module="mod_dptools"/>

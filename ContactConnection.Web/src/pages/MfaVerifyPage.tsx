@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { authApi } from '../api/auth'
 import { useAuthStore } from '../stores/authStore'
+import { useSipStore } from '../stores/sipStore'
 
 interface LocationState {
   preAuthToken: string
@@ -13,6 +14,7 @@ export default function MfaVerifyPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const setAuth = useAuthStore((s) => s.setAuth)
+  const setSipCredentials = useSipStore((s) => s.setSipCredentials)
 
   const state = location.state as LocationState | null
   if (!state?.preAuthToken || !state?.subdomain) {
@@ -33,6 +35,8 @@ export default function MfaVerifyPage() {
     try {
       const res = await authApi.mfaVerify(preAuthToken, subdomain, code)
       setAuth(res.token, res.agentId, subdomain, res.role, res.firstName, res.lastName)
+      if (res.sipExtension && res.sipPassword)
+        setSipCredentials(res.sipExtension, res.sipPassword)
       const dest = res.role === 'admin' || res.role === 'supervisor' ? '/admin' : '/agent'
       navigate(dest, { replace: true })
     } catch (err) {

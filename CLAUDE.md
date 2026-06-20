@@ -74,7 +74,7 @@ Build status: **0 warnings, 0 errors.**
 - `TenantDbContext` — no default schema, `agents` + `call_records` + `call_interactions`; search_path applied per connection
 - `TenantDbContextFactory` — builds `TenantDbContext` with `Search Path=tenant_{schema},public`
 - `ScopedTenantDbContextFactory` — resolves tenant from `TenantContext`, creates context for current request
-- `TenantDbContextDesignTimeFactory` — EF tooling targets `tenant_tms`
+- `TenantDbContextDesignTimeFactory` — EF tooling targets `tenant_test_tenant` (dev test schema; never use TMS here)
 - All EF configurations: `TenantConfiguration`, `AgentConfiguration`, `CallRecordConfiguration`, `CallInteractionConfiguration`
 - All repositories: `TenantRepository`, `AgentRepository`, `CallRecordRepository`
 - `TenantProvisioningService` — creates schema + runs `MigrateAsync` on provision

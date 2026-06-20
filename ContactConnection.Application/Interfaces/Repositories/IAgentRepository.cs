@@ -11,4 +11,8 @@ public interface IAgentRepository
     Task AddAsync(Agent agent, CancellationToken ct = default);
     Task DeleteAllAsync(CancellationToken ct = default);
     Task SaveChangesAsync(CancellationToken ct = default);
+
+    // SIP identity
+    Task<int> GetMaxSipExtensionAsync(CancellationToken ct = default);
+    Task<Agent?> GetBySipExtensionAsync(string extension, CancellationToken ct = default);
 }

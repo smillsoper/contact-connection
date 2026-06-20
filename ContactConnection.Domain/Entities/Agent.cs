@@ -18,6 +18,8 @@ public class Agent
     public DateTimeOffset? LastLoginAt { get; private set; }
     public string? MfaSecret { get; private set; }
     public bool MfaEnabled { get; private set; }
+    public string? SipExtension { get; private set; }   // e.g. "1001" — assigned at creation, fixed for life
+    public string? SipA1Hash { get; private set; }      // MD5("{ext}:{realm}:{password}") — refreshed every login
 
     // Required by EF Core
     private Agent() { }
@@ -60,6 +62,12 @@ public class Agent
     public void StoreMfaSecret(string secret) => MfaSecret = secret;
     public void EnableMfa() => MfaEnabled = true;
     public void ClearMfa() { MfaSecret = null; MfaEnabled = false; }
+
+    public void SetSipCredentials(string extension, string a1hash)
+    {
+        SipExtension = extension;
+        SipA1Hash = a1hash;
+    }
 
     public string FullName => $"{FirstName} {LastName}".Trim();
 }

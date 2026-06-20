@@ -1,7 +1,9 @@
 using System.Security.Claims;
+using ContactConnection.Application.Helpers;
 using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
+using ContactConnection.Domain.Entities;
 
 namespace ContactConnection.Api.Endpoints;
 
@@ -38,19 +40,11 @@ public static class AuthEndpoints
         var agent = await agents.GetByIdAsync(agentId, ct);
         if (agent is null) return Results.Unauthorized();
 
-        var token = tokens.GenerateToken(agent, tenantContext.Current);
+        var (sipExt, sipPwd) = await RefreshSipCredentialsAsync(agent, tenantContext.Current, agents, ct);
+        await agents.SaveChangesAsync(ct);
 
-        return Results.Ok(new LoginResponse(
-            MfaPending: false,
-            Token: token,
-            AgentId: agent.Id,
-            Email: agent.Email,
-            FirstName: agent.FirstName,
-            LastName: agent.LastName,
-            Role: agent.Role,
-            TenantSubdomain: tenantContext.Current.Subdomain,
-            PreAuthToken: null,
-            MfaSetupRequired: null));
+        var token = tokens.GenerateToken(agent, tenantContext.Current);
+        return Results.Ok(BuildFullLoginResponse(token, agent, tenantContext.Current.Subdomain, sipExt, sipPwd));
     }
 
     private static async Task<IResult> Login(
@@ -92,9 +86,13 @@ public static class AuthEndpoints
                 Role: null,
                 TenantSubdomain: tenant.Subdomain,
                 PreAuthToken: preAuthToken,
-                MfaSetupRequired: needsSetup));
+                MfaSetupRequired: needsSetup,
+                SipExtension: null,
+                SipPassword: null));
         }
 
+        // Full login — refresh SIP credentials and return the plaintext password once
+        var (sipExt, sipPwd) = await RefreshSipCredentialsAsync(agent, tenant, agents, ct);
         agent.RecordLogin();
         await agents.SaveChangesAsync(ct);
 
@@ -110,7 +108,9 @@ public static class AuthEndpoints
             Role: agent.Role,
             TenantSubdomain: tenant.Subdomain,
             PreAuthToken: null,
-            MfaSetupRequired: null));
+            MfaSetupRequired: null,
+            SipExtension: sipExt,
+            SipPassword: sipPwd));
     }
 
     // GET /api/v1/auth/mfa/setup — called when agent needs to configure MFA for the first time
@@ -159,11 +159,12 @@ public static class AuthEndpoints
             return Results.UnprocessableEntity(new { error = "Invalid code." });
 
         agent.EnableMfa();
+        var (sipExt1, sipPwd1) = await RefreshSipCredentialsAsync(agent, tenantContext.Current!, agents, ct);
         agent.RecordLogin();
         await agents.SaveChangesAsync(ct);
 
         var token = tokens.GenerateToken(agent, tenantContext.Current!);
-        return Results.Ok(BuildFullLoginResponse(token, agent, tenantContext.Current!.Subdomain));
+        return Results.Ok(BuildFullLoginResponse(token, agent, tenantContext.Current!.Subdomain, sipExt1, sipPwd1));
     }
 
     // POST /api/v1/auth/mfa/verify — TOTP challenge for agents who already have MFA enabled
@@ -186,11 +187,12 @@ public static class AuthEndpoints
         if (!mfa.Verify(agent.MfaSecret, request.Code))
             return Results.UnprocessableEntity(new { error = "Invalid code." });
 
+        var (sipExt2, sipPwd2) = await RefreshSipCredentialsAsync(agent, tenantContext.Current!, agents, ct);
         agent.RecordLogin();
         await agents.SaveChangesAsync(ct);
 
         var token = tokens.GenerateToken(agent, tenantContext.Current!);
-        return Results.Ok(BuildFullLoginResponse(token, agent, tenantContext.Current!.Subdomain));
+        return Results.Ok(BuildFullLoginResponse(token, agent, tenantContext.Current!.Subdomain, sipExt2, sipPwd2));
     }
 
     private static bool ResolveAgent(ClaimsPrincipal user, TenantContext tenantContext, out Guid agentId)
@@ -201,7 +203,9 @@ public static class AuthEndpoints
         return Guid.TryParse(sub, out agentId);
     }
 
-    private static LoginResponse BuildFullLoginResponse(string token, Domain.Entities.Agent agent, string subdomain) =>
+    private static LoginResponse BuildFullLoginResponse(
+        string token, Agent agent, string subdomain,
+        string? sipExt = null, string? sipPwd = null) =>
         new(
             MfaPending: false,
             Token: token,
@@ -212,7 +216,32 @@ public static class AuthEndpoints
             Role: agent.Role,
             TenantSubdomain: subdomain,
             PreAuthToken: null,
-            MfaSetupRequired: null);
+            MfaSetupRequired: null,
+            SipExtension: sipExt,
+            SipPassword: sipPwd);
+
+    // Generates a fresh SIP password on every full login.
+    // Backfills SipExtension for agents created before this feature.
+    // Saves nothing — caller must call agents.SaveChangesAsync().
+    private static async Task<(string Extension, string Password)> RefreshSipCredentialsAsync(
+        Agent agent,
+        Domain.Entities.Tenant tenant,
+        IAgentRepository agents,
+        CancellationToken ct)
+    {
+        var extension = agent.SipExtension;
+        if (extension is null)
+        {
+            var maxExt = await agents.GetMaxSipExtensionAsync(ct);
+            extension = (maxExt + 1).ToString();
+        }
+
+        var password = SipCredentialHelper.GeneratePassword();
+        var a1hash = SipCredentialHelper.ComputeA1Hash(extension, tenant.Subdomain, password);
+        agent.SetSipCredentials(extension, a1hash);
+
+        return (extension, password);
+    }
 }
 
 public record LoginRequest(string Email, string Password);
@@ -227,7 +256,9 @@ public record LoginResponse(
     string? Role,
     string TenantSubdomain,
     string? PreAuthToken,
-    bool? MfaSetupRequired);
+    bool? MfaSetupRequired,
+    string? SipExtension,   // null on MFA-pending responses
+    string? SipPassword);   // plaintext, returned on every full login or token refresh — never persisted
 
 public record MfaSetupResponse(string Secret, string OtpAuthUri);
 

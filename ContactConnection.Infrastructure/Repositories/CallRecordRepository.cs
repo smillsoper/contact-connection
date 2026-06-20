@@ -21,6 +21,9 @@ public class CallRecordRepository : ICallRecordRepository
             .Include(r => r.Interactions)
             .FirstOrDefaultAsync(r => r.Id == id, ct);
 
+    public Task<CallRecord?> GetByContactIdExternalAsync(string contactIdExternal, CancellationToken ct = default) =>
+        Db.CallRecords.FirstOrDefaultAsync(r => r.ContactIdExternal == contactIdExternal, ct);
+
     public async Task AddAsync(CallRecord record, CancellationToken ct = default) =>
         await Db.CallRecords.AddAsync(record, ct);
 

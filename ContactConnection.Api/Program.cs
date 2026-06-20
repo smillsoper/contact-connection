@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using ContactConnection.Api.Endpoints;
 using ContactConnection.Api.Hubs;
 using ContactConnection.Api.Middleware;
+using ContactConnection.Api.Telephony;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Infrastructure.Extensions;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -21,6 +22,9 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 // SignalR — must be registered before IFlowNotifier which depends on IHubContext
 builder.Services.AddSignalR();
 builder.Services.AddScoped<IFlowNotifier, FlowNotifier>();
+
+// ESL background service — connects to FreeSWITCH and handles CHANNEL_PARK / CHANNEL_HANGUP
+builder.Services.AddHostedService<EslBackgroundService>();
 
 // JWT Bearer authentication
 var signingKey = builder.Configuration["Jwt:SigningKey"]
@@ -110,10 +114,14 @@ app.MapPortalTenantsEndpoints();
 app.MapPortalApiDefinitionsEndpoints();
 app.MapPortalApiEndpointsEndpoints();
 app.MapPortalCredentialsEndpoints();
+app.MapPortalMaintenanceEndpoints();
 
 // Tenant onboarding and agent invite acceptance (public — no auth required)
 app.MapOnboardingEndpoints();
 app.MapTenantAdminInviteEndpoints();
+
+// FreeSWITCH internal endpoints (no bearer auth — internal network only)
+app.MapFreeSwitchDirectoryEndpoints();
 
 // SignalR hub
 app.MapHub<FlowHub>("/hubs/flow");

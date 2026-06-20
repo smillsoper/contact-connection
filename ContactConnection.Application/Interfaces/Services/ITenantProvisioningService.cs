@@ -15,4 +15,12 @@ public interface ITenantProvisioningService
         TenantFeatureFlags? featureFlags = null,
         string? inviteEmail = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Applies any pending EF migrations to every tenant schema.
+    /// Returns a summary of tenants migrated and any that errored.
+    /// </summary>
+    Task<MigrationResult> MigrateAllTenantsAsync(CancellationToken ct = default);
 }
+
+public record MigrationResult(int Migrated, List<string> Errors);

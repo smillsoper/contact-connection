@@ -65,4 +65,27 @@ public class TenantProvisioningService : ITenantProvisioningService
 
         return (tenant, inviteToken);
     }
+
+    public async Task<MigrationResult> MigrateAllTenantsAsync(CancellationToken ct = default)
+    {
+        var tenants = await _tenants.GetAllAsync(ct);
+        var errors = new List<string>();
+        var migrated = 0;
+
+        foreach (var tenant in tenants)
+        {
+            try
+            {
+                await using var tenantCtx = _tenantDbContextFactory.Create(tenant.SchemaName);
+                await tenantCtx.Database.MigrateAsync(ct);
+                migrated++;
+            }
+            catch (Exception ex)
+            {
+                errors.Add($"{tenant.Subdomain}: {ex.Message}");
+            }
+        }
+
+        return new MigrationResult(migrated, errors);
+    }
 }

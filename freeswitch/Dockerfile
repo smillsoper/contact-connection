@@ -28,6 +28,7 @@ https://freeswitch.signalwire.com/repo/deb/debian-release/ bookworm main" \
        freeswitch-mod-dialplan-xml \
        freeswitch-mod-console \
        freeswitch-mod-logfile \
+       freeswitch-mod-xml-curl \
        freeswitch-mod-opus \
        freeswitch-mod-tone-stream \
        freeswitch-mod-sndfile \

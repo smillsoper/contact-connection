@@ -59,6 +59,99 @@
 | 47 | 2026-06-07 | 6:25 PM CDT | 7:08 PM CDT | 43 min | ~2975 min |
 | 48 | 2026-06-14 | 7:30 AM CDT | 10:05 AM CDT | 155 min | ~3130 min |
 | 49 | 2026-06-14 | 10:14 AM CDT | 10:22 AM CDT | 8 min | ~3138 min |
+| 50 | 2026-06-18 | 4:14 PM CDT | 4:41 PM CDT | 27 min | ~3165 min |
+| 51 | 2026-06-18 | 4:45 PM CDT | 5:26 PM CDT | 41 min | ~3206 min |
+| 52 | 2026-06-18 / 2026-06-20 | 5:27 PM CDT (6/18) + 6:25 AM CDT (6/20) | 6:05 PM CDT (6/18) + 6:39 AM CDT (6/20) | 52 min (38 + 14) | ~3258 min |
+
+---
+
+## Session 52
+
+**Date:** 2026-06-18 (part 1) / 2026-06-20 (part 2)
+**Start:** 5:27 PM CDT (6/18) + 6:25 AM CDT (6/20)
+**End:** 6:05 PM CDT (6/18) + 6:39 AM CDT (6/20)
+**Duration:** 52 minutes (38 + 14)
+
+### Accomplished
+
+**Full call control — ESL background service + JsSIP call handling + FreeSWITCH media fixes**
+
+- `CallRecord.CreateInbound` static factory + `SetContactIdExternal` method added to domain (clientId/campaignId = Guid.Empty, resolved during call)
+- `GetByContactIdExternalAsync` added to `ICallRecordRepository` + `CallRecordRepository` (FreeSWITCH UUID lookup for CHANNEL_HANGUP)
+- `EslClient.cs` + `EslMessage` created in `ContactConnection.Api/Telephony/` — TCP ESL protocol: auth handshake, plain event subscription, line-by-line message reading, URL-decode of body values
+- `EslBackgroundService.cs` — hosted service with auto-reconnect; `CHANNEL_PARK` → find agent by SipExtension across all tenants → create `CallRecord` → push `ReceiveIncomingCall` via SignalR to `agent:{agentId}` group; `CHANNEL_HANGUP` → find `CallRecord` by `ContactIdExternal` → `record.Complete()`
+- `FlowHub.OnConnectedAsync` — auto-joins `agent:{agentId}` group from JWT `sub` claim; `IFlowHubClient.ReceiveIncomingCall` added
+- `POST /api/v1/call-records/inbound` endpoint added to `CallRecordsEndpoints.cs`
+- `EslBackgroundService` registered in `Program.cs`; `FreeSWITCH` config section added to `appsettings.json`
+- `callStore.ts` — non-persisted Zustand store: `callStatus` (idle/ringing/on-call), `callerNumber`, `callerName`, `isMuted`, `callStartedAt`, `callRecordId`
+- `SoftphonePanel.tsx` — full rewrite: JsSIP `newRTCSession` handler for incoming calls; ringing UI (animated pulse + caller info + Answer/Reject buttons); on-call UI (green timer box + Mute/HangUp); remote audio via hidden `<audio autoPlay>` element wired to `peerconnection` track event; `POST /api/v1/call-records/inbound` on answer
+- `FlowPanel.tsx` — `receiveIncomingCall` SignalR listener sets `callRecordId` in callStore
+- **FreeSWITCH `event_socket.conf.xml`** — added `apply-inbound-acl = any_v4.auto`; Docker host (`172.19.0.1`) was being rejected by `loopback.auto` ACL
+- **FreeSWITCH `FreeSwitchDirectoryEndpoints.cs`** — moved `dial-string` from `<variables>` to `<params>` (FreeSWITCH only reads dial-string from params, not variables); fixed raw string literal to `$$"""..."""` to avoid C# brace-escaping conflicts with FreeSWITCH `${...}` variable syntax; added `DialString` const
+- **FreeSWITCH `sip_profiles/internal.xml`** — added `apply-candidate-acl = any_v4.auto`; default `wan.auto` was rejecting RFC1918 ICE candidates from the browser, causing `INCOMPATIBLE_DESTINATION`
+- Chrome flag `chrome://flags/#enable-webrtc-hide-local-ips-with-mdns` → Disabled (prevents mDNS `.local` ICE candidates that FreeSWITCH can't resolve)
+- **Verified end-to-end**: `fs_cli originate ... user/1000@test-tenant &park()` → softphone ringing UI → Answer → WebRTC audio stream + timer running → Hang up → idle state restored ✓
+
+---
+
+## Session 51
+
+**Date:** 2026-06-18
+**Start:** 4:45 PM CDT
+**End:** 5:26 PM CDT
+**Duration:** 41 minutes
+
+### Accomplished
+
+**SIP Registration — Step 5 (JsSIP frontend wiring) + debugging and fixes**
+
+- `SoftphonePanel.tsx` — full rewrite with JsSIP v3.13.8: auto-registers on mount using credentials from sipStore; colored status dot (idle/registering/registered/failed); extension badge; error box; "Waiting for calls…" placeholder
+- `sipStore.ts` — new Zustand store (non-persisted): `sipExtension`, `sipPassword`, `registrationStatus`; `clear()` on logout
+- `LoginPage.tsx`, `MfaVerifyPage.tsx`, `MfaSetupPage.tsx` — save SIP creds to sipStore after successful auth
+- `AgentShell.tsx` — `clearSip()` on logout; startup `useEffect` fires token refresh if sipExtension is missing (page refresh recovery)
+- `.env` — `VITE_SIP_WS_URL=ws://localhost:7080` (already in `.gitignore`)
+- `POST /auth/refresh` — now generates a fresh SIP password (same as full login); `AgentShell` calls it on mount if sipStore is empty, repopulating credentials without re-login
+- `FreeSwitchDirectoryEndpoints.cs` — added `.DisableAntiforgery()` (required in .NET 8+/10 for form-accepting endpoints not using browser antiforgery tokens)
+- `freeswitch/Dockerfile` — added `freeswitch-mod-xml-curl` package (was missing; caused 500 on directory lookups)
+- `freeswitch/conf/sip_profiles/internal.xml` — removed WSS binding (no TLS cert in local dev); kept plain WS on port 7080; `localhost` is a secure context so WebRTC works
+- Rebuilt and restarted FreeSWITCH container to pick up new image with `mod_xml_curl`
+- **Verified end-to-end**: page refresh → token refresh → fresh SIP creds → JsSIP registers → green dot → FreeSWITCH directory endpoint returns correct a1hash → "Registered" ✓
+
+---
+
+## Session 50
+
+**Date:** 2026-06-18
+**Start:** 4:14 PM CDT
+**End:** 4:41 PM CDT
+**Duration:** 27 minutes
+
+### Accomplished
+
+**SIP Registration — Steps 1–4 (full backend implementation)**
+
+- `Agent` entity — added `SipExtension` (string?, nullable) and `SipA1Hash` (string?, nullable) properties; `SetSipCredentials(extension, a1hash)` method
+- `SipCredentialHelper` — static class in `Application/Helpers/`; `GeneratePassword()` (96-bit random, base64) and `ComputeA1Hash(ext, realm, password)` (RFC 2617 MD5 hash)
+- `IAgentRepository` — added `GetMaxSipExtensionAsync` and `GetBySipExtensionAsync`
+- `AgentConfiguration` — mapped `sip_extension` (varchar 20) and `sip_a1hash` (varchar 32); partial unique index on `sip_extension WHERE NOT NULL`
+- Migration `AddAgentSipIdentity` created and applied to both real tenant schemas (`tenant_test_tenant`, `tenant_test_contact_center`)
+- `POST /agents` — auto-assigns SIP extension (MAX + 1, starting at 1000 per tenant); generates SIP password; returns it plaintext once in creation response
+- `POST /agents/{id}/sip-credentials/reset` — TenantAdmin-protected; preserves extension, issues fresh password
+- `POST /auth/login` — generates fresh SIP creds on every full login; returns `sipExtension` + `sipPassword` in `LoginResponse`; MFA flows (verify + setup/confirm) also refresh SIP creds
+- `POST /auth/refresh` — returns `sipExtension` only (no fresh password — full login required for that)
+- `LoginResponse` record extended with `SipExtension?` and `SipPassword?`
+- Backfill: existing agents with null `SipExtension` get one auto-assigned on first login after migration
+- `POST /api/v1/freeswitch/directory` — AllowAnonymous (internal network only); accepts mod_xml_curl form-encoded POST; extracts subdomain from SIP domain; resolves tenant via `ITenantRepository`; queries agent by `SipExtension`; returns FreeSWITCH XML with `a1-hash` param and caller ID variables; returns `<result status="not found"/>` on miss or bare IP domain
+- `ITenantProvisioningService.MigrateAllTenantsAsync` — loops all tenants, runs `MigrateAsync` on each schema; returns migrated count + per-tenant error list
+- `POST /api/v1/portal/maintenance/migrate-tenants` — PlatformAdmin-only; applies pending EF migrations to all tenant schemas (avoids EF tooling design-time limitation)
+- `modules.conf.xml` — added `mod_xml_curl`
+- `xml_curl.conf.xml` (new) — binding to `http://host.docker.internal:5135/api/v1/freeswitch/directory`
+- `sip_profiles/internal.xml` — WSS binding on port 7443 with TLS cert dir
+- `docker-compose.yml` — port 7443/tcp exposed for WebRTC softphone
+- CLAUDE.md — corrected `TenantDbContextDesignTimeFactory` reference (targets `tenant_test_tenant`, not `tenant_tms`; TMS is a future production tenant only)
+- Clarified: `tenant_tms` never existed as a real schema; was a stale reference in CLAUDE.md from early sessions before the no-TMS-hardcoding decision was in place
+
+**Remaining (Step 5 — next session):** JsSIP/SIP.js softphone panel wiring in the agent UI; SIP domain/realm alignment in `vars.xml`
 
 ---
 

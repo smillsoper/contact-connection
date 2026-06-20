@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import QRCode from 'qrcode'
 import { authApi } from '../api/auth'
 import { useAuthStore } from '../stores/authStore'
+import { useSipStore } from '../stores/sipStore'
 
 interface LocationState {
   preAuthToken: string
@@ -14,6 +15,7 @@ export default function MfaSetupPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const setAuth = useAuthStore((s) => s.setAuth)
+  const setSipCredentials = useSipStore((s) => s.setSipCredentials)
 
   const state = location.state as LocationState | null
   const { preAuthToken, subdomain, email } = state ?? {}
@@ -49,6 +51,8 @@ export default function MfaSetupPage() {
     try {
       const res = await authApi.mfaSetupConfirm(preAuthToken, subdomain, code)
       setAuth(res.token, res.agentId, subdomain, res.role, res.firstName, res.lastName)
+      if (res.sipExtension && res.sipPassword)
+        setSipCredentials(res.sipExtension, res.sipPassword)
       const dest = res.role === 'admin' || res.role === 'supervisor' ? '/admin' : '/agent'
       navigate(dest, { replace: true })
     } catch (err) {

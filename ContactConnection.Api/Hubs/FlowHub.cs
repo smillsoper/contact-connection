@@ -20,6 +20,15 @@ namespace ContactConnection.Api.Hubs;
 [Authorize]
 public class FlowHub : Hub<IFlowHubClient>
 {
+    /// <summary>Auto-join the agent's personal group on connect so ESL screen pops can reach them.</summary>
+    public override async Task OnConnectedAsync()
+    {
+        var agentId = Context.User?.FindFirst("sub")?.Value;
+        if (!string.IsNullOrEmpty(agentId))
+            await Groups.AddToGroupAsync(Context.ConnectionId, $"agent:{agentId}");
+        await base.OnConnectedAsync();
+    }
+
     /// <summary>Agent calls this after starting a flow session to receive node pushes.</summary>
     public async Task JoinSession(string sessionId)
     {
@@ -49,4 +58,7 @@ public interface IFlowHubClient
 
     /// <summary>Push error notification (e.g. commitment lock violation).</summary>
     Task ReceiveError(string message);
+
+    /// <summary>ESL screen pop — inbound call parked for this agent.</summary>
+    Task ReceiveIncomingCall(string callRecordId, string callerNumber, string callerName);
 }

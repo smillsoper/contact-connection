@@ -1,3 +1,4 @@
+using ContactConnection.Application.Helpers;
 using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
@@ -14,6 +15,8 @@ public static class AgentsEndpoints
 
         group.MapGet("{id:guid}", GetById);
         group.MapPost("", Create).AllowAnonymous(); // Bootstrap: first agent has no JWT yet
+        group.MapPost("{id:guid}/sip-credentials/reset", ResetSipCredentials)
+            .RequireAuthorization("TenantAdmin");
 
         return app;
     }
@@ -53,10 +56,53 @@ public static class AgentsEndpoints
             hasher.Hash(request.Password),
             request.Role);
 
+        // Auto-assign SIP extension (starts at 1000, increments per tenant)
+        var maxExt = await agents.GetMaxSipExtensionAsync(ct);
+        var sipExt = (maxExt + 1).ToString();
+        var sipPwd = SipCredentialHelper.GeneratePassword();
+        var a1hash = SipCredentialHelper.ComputeA1Hash(sipExt, tenantContext.Current.Subdomain, sipPwd);
+        agent.SetSipCredentials(sipExt, a1hash);
+
         await agents.AddAsync(agent, ct);
         await agents.SaveChangesAsync(ct);
 
-        return Results.Created($"/api/v1/agents/{agent.Id}", ToResponse(agent));
+        return Results.Created($"/api/v1/agents/{agent.Id}", new
+        {
+            agent.Id,
+            agent.TenantId,
+            agent.FirstName,
+            agent.LastName,
+            agent.Email,
+            agent.Role,
+            agent.IsActive,
+            agent.CreatedAt,
+            agent.LastLoginAt,
+            agent.SipExtension,
+            SipPassword = sipPwd  // plaintext returned once only
+        });
+    }
+
+    private static async Task<IResult> ResetSipCredentials(
+        Guid id,
+        IAgentRepository agents,
+        TenantContext tenantContext,
+        CancellationToken ct)
+    {
+        if (!tenantContext.HasTenant) return Results.Unauthorized();
+
+        var agent = await agents.GetByIdAsync(id, ct);
+        if (agent is null) return Results.NotFound();
+
+        // Preserve existing extension; issue a fresh password and recompute a1hash
+        var sipExt = agent.SipExtension
+            ?? ((await agents.GetMaxSipExtensionAsync(ct)) + 1).ToString();
+        var sipPwd = SipCredentialHelper.GeneratePassword();
+        var a1hash = SipCredentialHelper.ComputeA1Hash(sipExt, tenantContext.Current!.Subdomain, sipPwd);
+        agent.SetSipCredentials(sipExt, a1hash);
+
+        await agents.SaveChangesAsync(ct);
+
+        return Results.Ok(new { SipExtension = sipExt, SipPassword = sipPwd });
     }
 
     private static object ToResponse(Agent a) => new
@@ -69,8 +115,9 @@ public static class AgentsEndpoints
         a.Role,
         a.IsActive,
         a.CreatedAt,
-        a.LastLoginAt
-        // PasswordHash intentionally excluded
+        a.LastLoginAt,
+        a.SipExtension
+        // PasswordHash and SipA1Hash intentionally excluded
     };
 }
 

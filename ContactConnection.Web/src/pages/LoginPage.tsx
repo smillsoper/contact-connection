@@ -1,11 +1,13 @@
 import { useState, useEffect, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
+import { useSipStore } from '../stores/sipStore'
 import { authApi } from '../api/auth'
 
 export default function LoginPage() {
   const navigate = useNavigate()
   const setAuth = useAuthStore((s) => s.setAuth)
+  const setSipCredentials = useSipStore((s) => s.setSipCredentials)
 
   const [subdomain, setSubdomain] = useState('')
   const [email, setEmail] = useState('')
@@ -37,6 +39,8 @@ export default function LoginPage() {
         return
       }
       setAuth(res.token, res.agentId, subdomain, res.role, res.firstName, res.lastName)
+      if (res.sipExtension && res.sipPassword)
+        setSipCredentials(res.sipExtension, res.sipPassword)
       const dest = res.role === 'admin' || res.role === 'supervisor' ? '/admin' : '/agent'
       navigate(dest, { replace: true })
     } catch {
