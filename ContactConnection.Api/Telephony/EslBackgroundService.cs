@@ -1,4 +1,5 @@
 using ContactConnection.Api.Hubs;
+using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Domain.Entities;
 using ContactConnection.Infrastructure.Data;
 using Microsoft.AspNetCore.SignalR;
@@ -8,9 +9,13 @@ namespace ContactConnection.Api.Telephony;
 
 /// <summary>
 /// Hosted service that maintains a persistent ESL connection to FreeSWITCH.
-/// Handles CHANNEL_PARK (inbound call → create CallRecord + SignalR screen pop)
-/// and CHANNEL_HANGUP (call ended → mark CallRecord complete).
-/// Reconnects automatically on disconnect.
+///
+/// CHANNEL_PARK routing:
+///   1. Look up Caller-Destination-Number in PhoneNumberRouting (global DID table).
+///      If found → run the tenant's telephony call flow (pre-answer routing).
+///   2. If not found → treat as a direct agent extension call (screen pop).
+///
+/// CHANNEL_HANGUP → mark CallRecord complete.
 /// </summary>
 public sealed class EslBackgroundService : BackgroundService
 {
@@ -63,7 +68,7 @@ public sealed class EslBackgroundService : BackgroundService
         while (!ct.IsCancellationRequested)
         {
             var msg = await esl.ReadMessageAsync(ct);
-            if (msg is null) break; // clean disconnect
+            if (msg is null) break;
 
             if (msg.ContentType != "text/event-plain") continue;
 
@@ -73,7 +78,7 @@ public sealed class EslBackgroundService : BackgroundService
             switch (eventName)
             {
                 case "CHANNEL_PARK":
-                    await HandleChannelParkAsync(vars, ct);
+                    await HandleChannelParkAsync(vars, esl, ct);
                     break;
                 case "CHANNEL_HANGUP":
                     await HandleChannelHangupAsync(vars, ct);
@@ -82,22 +87,130 @@ public sealed class EslBackgroundService : BackgroundService
         }
     }
 
-    /// <summary>
-    /// Inbound call parked — find the target agent, create a CallRecord, push screen pop.
-    /// </summary>
-    private async Task HandleChannelParkAsync(Dictionary<string, string> vars, CancellationToken ct)
+    private async Task HandleChannelParkAsync(
+        Dictionary<string, string> vars, EslClient esl, CancellationToken ct)
     {
-        var agentExtension = vars.GetValueOrDefault("Caller-Destination-Number");
-        var callerNumber   = vars.GetValueOrDefault("Caller-Caller-ID-Number") ?? "Unknown";
-        var callerName     = vars.GetValueOrDefault("Caller-Caller-ID-Name") ?? "";
-        var channelUuid    = vars.GetValueOrDefault("Unique-ID");
+        var destination  = vars.GetValueOrDefault("Caller-Destination-Number") ?? "";
+        var callerNumber = vars.GetValueOrDefault("Caller-Caller-ID-Number") ?? "Unknown";
+        var callerName   = vars.GetValueOrDefault("Caller-Caller-ID-Name") ?? "";
+        var channelUuid  = vars.GetValueOrDefault("Unique-ID") ?? "";
 
-        if (string.IsNullOrEmpty(agentExtension) || string.IsNullOrEmpty(channelUuid)) return;
+        if (string.IsNullOrEmpty(destination) || string.IsNullOrEmpty(channelUuid)) return;
 
-        using var scope = _scopeFactory.CreateScope();
-        var dbFactory  = scope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
-        var platformDb = scope.ServiceProvider.GetRequiredService<ContactConnectionDbContext>();
+        using var scope      = _scopeFactory.CreateScope();
+        var platformDb       = scope.ServiceProvider.GetRequiredService<ContactConnectionDbContext>();
+        var dbFactory        = scope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
+        var telephonyEngine  = scope.ServiceProvider.GetRequiredService<ITelephonyFlowEngine>();
 
+        // ── DID routing: check if destination matches a provisioned phone number ──
+        var routing = await platformDb.PhoneNumberRoutings
+            .FirstOrDefaultAsync(r => r.Number == destination && r.IsActive, ct);
+
+        if (routing is not null)
+        {
+            await HandleDidCallAsync(
+                routing, callerNumber, callerName, channelUuid, vars,
+                esl, telephonyEngine, platformDb, dbFactory, ct);
+            return;
+        }
+
+        // ── Agent extension: fall through to screen pop (existing behavior) ──
+        await HandleAgentExtensionCallAsync(
+            destination, callerNumber, callerName, channelUuid,
+            platformDb, dbFactory, ct);
+    }
+
+    /// <summary>
+    /// Inbound DID call — look up tenant + campaign, create CallRecord, run telephony flow.
+    /// </summary>
+    private async Task HandleDidCallAsync(
+        PhoneNumberRouting routing,
+        string callerNumber,
+        string callerName,
+        string channelUuid,
+        Dictionary<string, string> eventVars,
+        EslClient esl,
+        ITelephonyFlowEngine telephonyEngine,
+        ContactConnectionDbContext platformDb,
+        ITenantDbContextFactory dbFactory,
+        CancellationToken ct)
+    {
+        var tenant = await platformDb.Tenants.FirstOrDefaultAsync(t => t.Id == routing.TenantId, ct);
+        if (tenant is null)
+        {
+            _logger.LogWarning("CHANNEL_PARK DID {Uuid}: tenant {TenantId} not found", channelUuid, routing.TenantId);
+            return;
+        }
+
+        await using var db = dbFactory.Create(tenant.SchemaName);
+
+        var record = CallRecord.CreateInbound(
+            tenantId: tenant.Id,
+            callerId: callerNumber,
+            agentId: null,
+            contactIdExternal: channelUuid);
+
+        // Stamp the campaign so the CallRecord knows where it belongs
+        record.SetCampaign(routing.CampaignId);
+
+        db.CallRecords.Add(record);
+        await db.SaveChangesAsync(ct);
+
+        _logger.LogInformation(
+            "CHANNEL_PARK DID {Uuid}: tenant={Tenant} campaign={Campaign} → CallRecord {RecordId}",
+            channelUuid, tenant.Subdomain, routing.CampaignId, record.Id);
+
+        // Extract SIP headers from event vars (variable_sip_h_* → sip_h_*) for flow handlers
+        var channelVars = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in eventVars)
+        {
+            if (key.StartsWith("variable_sip_h_", StringComparison.OrdinalIgnoreCase))
+                channelVars[key["variable_sip_h_".Length..]] = value;
+            else if (key.StartsWith("variable_", StringComparison.OrdinalIgnoreCase))
+                channelVars[key["variable_".Length..]] = value;
+        }
+
+        var ctx = new TelephonyFlowContext
+        {
+            ChannelUuid       = channelUuid,
+            CallerNumber      = callerNumber,
+            DestinationNumber = routing.Number,
+            TenantId          = tenant.Id,
+            CampaignId        = routing.CampaignId,
+            CallRecordId      = record.Id,
+            TenantSubdomain   = tenant.Subdomain,
+            TenantSchemaName  = tenant.SchemaName,
+            Esl               = esl,
+            ChannelVars       = channelVars,
+        };
+
+        await telephonyEngine.ExecuteAsync(ctx, ct);
+
+        // If the flow queued the call, broadcast screen pop to eligible agents
+        if (ctx.Vars.TryGetValue("_queued", out _) && ctx.Vars.TryGetValue("_eligible_agents", out var agentList))
+        {
+            foreach (var agentIdStr in agentList.Split(',', StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (!Guid.TryParse(agentIdStr.Trim(), out var agentId)) continue;
+                await _hub.Clients
+                    .Group($"agent:{agentId}")
+                    .ReceiveIncomingCall(record.Id.ToString(), callerNumber, callerName);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Direct agent extension call (agent-to-agent or originate test) — create CallRecord and push screen pop.
+    /// </summary>
+    private async Task HandleAgentExtensionCallAsync(
+        string agentExtension,
+        string callerNumber,
+        string callerName,
+        string channelUuid,
+        ContactConnectionDbContext platformDb,
+        ITenantDbContextFactory dbFactory,
+        CancellationToken ct)
+    {
         var tenants = await platformDb.Tenants.Where(t => t.IsActive).ToListAsync(ct);
 
         foreach (var tenant in tenants)
@@ -139,9 +252,9 @@ public sealed class EslBackgroundService : BackgroundService
         var channelUuid = vars.GetValueOrDefault("Unique-ID");
         if (string.IsNullOrEmpty(channelUuid)) return;
 
-        using var scope = _scopeFactory.CreateScope();
-        var dbFactory  = scope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
-        var platformDb = scope.ServiceProvider.GetRequiredService<ContactConnectionDbContext>();
+        using var scope    = _scopeFactory.CreateScope();
+        var dbFactory      = scope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
+        var platformDb     = scope.ServiceProvider.GetRequiredService<ContactConnectionDbContext>();
 
         var tenants = await platformDb.Tenants.Where(t => t.IsActive).ToListAsync(ct);
 

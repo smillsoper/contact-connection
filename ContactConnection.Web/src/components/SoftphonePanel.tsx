@@ -32,14 +32,15 @@ export default function SoftphonePanel() {
   const tenantSubdomain = useAuthStore((s) => s.tenantSubdomain)
   const {
     callStatus, callerNumber, callerName, isMuted, callStartedAt,
-    setRinging, setOnCall, setMuted, setCallRecordId, reset,
+    setRinging, setDialing, setOnCall, setMuted, setCallRecordId, reset,
   } = useCallStore()
 
   const uaRef          = useRef<InstanceType<typeof JsSIP.UA> | null>(null)
   const sessionRef     = useRef<any>(null)
   const remoteAudioRef = useRef<HTMLAudioElement>(null)
 
-  const [elapsed, setElapsed] = useState(0)
+  const [elapsed, setElapsed]       = useState(0)
+  const [dialInput, setDialInput]   = useState('')
 
   // Call timer — ticks every second while on a call
   useEffect(() => {
@@ -48,7 +49,7 @@ export default function SoftphonePanel() {
     return () => clearInterval(id)
   }, [callStatus, callStartedAt])
 
-  // JsSIP UA — register and listen for incoming calls
+  // JsSIP UA — register and listen for incoming + outbound call events
   useEffect(() => {
     if (!sipExtension || !sipPassword || !tenantSubdomain) return
 
@@ -59,6 +60,7 @@ export default function SoftphonePanel() {
       password:         sipPassword,
       register:         true,
       register_expires: 300,
+      session_timers:   false,
     })
 
     ua.on('registered',         () => setRegistrationStatus('registered'))
@@ -66,25 +68,46 @@ export default function SoftphonePanel() {
     ua.on('registrationFailed', () => setRegistrationStatus('failed'))
 
     ua.on('newRTCSession', ({ session }: { session: any }) => {
-      if (session.direction !== 'incoming') return
-
-      const num  = session.remote_identity?.uri?.user ?? 'Unknown'
-      const name = session.remote_identity?.display_name ?? ''
-      setRinging(num, name)
       sessionRef.current = session
 
-      // Wire remote audio before answer so the track listener is ready
-      session.on('peerconnection', ({ peerconnection }: { peerconnection: RTCPeerConnection }) => {
+      const wireAudio = (peerconnection: RTCPeerConnection) => {
         peerconnection.addEventListener('track', (e: RTCTrackEvent) => {
           if (remoteAudioRef.current && e.streams[0]) {
             remoteAudioRef.current.srcObject = e.streams[0]
+            // Chrome requires explicit play() when srcObject is set programmatically
+            remoteAudioRef.current.play().catch(() => {})
           }
         })
-      })
+      }
 
-      session.on('accepted', () => setOnCall())
-      session.on('ended',    () => { sessionRef.current = null; reset() })
-      session.on('failed',   () => { sessionRef.current = null; reset() })
+      // For outbound calls JsSIP may fire 'peerconnection' before 'newRTCSession' returns,
+      // so also check session.connection immediately in case we missed it.
+      session.on('peerconnection', ({ peerconnection }: { peerconnection: RTCPeerConnection }) => wireAudio(peerconnection))
+      if ((session as any).connection) wireAudio((session as any).connection)
+
+      if (session.direction === 'incoming') {
+        const num  = session.remote_identity?.uri?.user ?? 'Unknown'
+        const name = session.remote_identity?.display_name ?? ''
+        setRinging(num, name)
+
+        session.on('accepted', () => setOnCall())
+        session.on('ended',    () => { sessionRef.current = null; reset() })
+        session.on('failed',   () => { sessionRef.current = null; reset() })
+      } else {
+        // outbound — progress fires while remote is ringing, accepted when answered
+        session.on('progress', () => { /* already in dialing state */ })
+        session.on('accepted', async () => {
+          setOnCall()
+          try {
+            const rec = await api.post<{ id: string }>('/api/v1/call-records/outbound', {
+              dialedNumber: session.remote_identity?.uri?.user ?? null,
+            })
+            setCallRecordId(rec.id)
+          } catch { /* don't block on record creation failure */ }
+        })
+        session.on('ended',  () => { sessionRef.current = null; reset() })
+        session.on('failed', () => { sessionRef.current = null; reset() })
+      }
     })
 
     setRegistrationStatus('registering')
@@ -98,7 +121,6 @@ export default function SoftphonePanel() {
     const session = sessionRef.current
     if (!session) return
 
-    // Create call record so the center panel can screen-pop
     try {
       const rec = await api.post<{ id: string }>('/api/v1/call-records/inbound', {
         callerNumber,
@@ -135,6 +157,28 @@ export default function SoftphonePanel() {
     }
   }
 
+  const handleDial = () => {
+    const ua = uaRef.current
+    if (!ua || !tenantSubdomain || !dialInput.trim()) return
+
+    const target = `sip:${dialInput.trim()}@${tenantSubdomain}`
+    setDialing(dialInput.trim())
+    setDialInput('')
+
+    try {
+      ua.call(target, {
+        mediaConstraints: { audio: true, video: false },
+        pcConfig: { iceServers: [] },
+      })
+    } catch {
+      reset()
+    }
+  }
+
+  const handleDialKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') handleDial()
+  }
+
   return (
     <div className="flex flex-col h-full p-3 gap-3">
       {/* Hidden audio element for remote stream */}
@@ -165,10 +209,9 @@ export default function SoftphonePanel() {
         </div>
       )}
 
-      {/* ── RINGING ── */}
+      {/* ── RINGING (inbound) ── */}
       {callStatus === 'ringing' && (
         <div className="flex flex-col gap-3 flex-1">
-          {/* Pulsing ring indicator */}
           <div className="flex justify-center pt-2">
             <div className="relative flex items-center justify-center">
               <span className="absolute w-12 h-12 rounded-full bg-green-500 opacity-30 animate-ping" />
@@ -186,7 +229,6 @@ export default function SoftphonePanel() {
             {callerName && <p className="text-gray-400 text-xs truncate">{callerName}</p>}
           </div>
 
-          {/* Answer / Reject */}
           <div className="flex gap-3 justify-center mt-1">
             <button
               onClick={handleReject}
@@ -210,6 +252,39 @@ export default function SoftphonePanel() {
         </div>
       )}
 
+      {/* ── DIALING (outbound — waiting for remote answer) ── */}
+      {callStatus === 'dialing' && (
+        <div className="flex flex-col gap-3 flex-1">
+          <div className="flex justify-center pt-2">
+            <div className="relative flex items-center justify-center">
+              <span className="absolute w-12 h-12 rounded-full bg-blue-500 opacity-30 animate-ping" />
+              <span className="relative w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center">
+                <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.01-.24 11.48 11.48 0 003.6.57 1 1 0 011 1V21a1 1 0 01-1 1A17 17 0 013 5a1 1 0 011-1h3.5a1 1 0 011 1 11.48 11.48 0 00.57 3.6 1 1 0 01-.25 1.01l-2.2 2.18z"/>
+                </svg>
+              </span>
+            </div>
+          </div>
+
+          <div className="text-center">
+            <p className="text-xs text-gray-500 mb-1">Calling…</p>
+            <p className="text-white font-semibold text-sm truncate">{callerNumber ?? 'Unknown'}</p>
+          </div>
+
+          <div className="flex justify-center mt-1">
+            <button
+              onClick={handleHangUp}
+              className="w-12 h-12 rounded-full bg-red-600 hover:bg-red-500 flex items-center justify-center transition-colors"
+              title="Cancel"
+            >
+              <svg className="w-5 h-5 text-white rotate-135" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.01-.24 11.48 11.48 0 003.6.57 1 1 0 011 1V21a1 1 0 01-1 1A17 17 0 013 5a1 1 0 011-1h3.5a1 1 0 011 1 11.48 11.48 0 00.57 3.6 1 1 0 01-.25 1.01l-2.2 2.18z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── ON CALL ── */}
       {callStatus === 'on-call' && (
         <div className="flex flex-col gap-3 flex-1">
@@ -223,7 +298,6 @@ export default function SoftphonePanel() {
             {callerName && <p className="text-gray-400 text-xs truncate">{callerName}</p>}
           </div>
 
-          {/* Mute + Hang Up */}
           <div className="flex gap-3 justify-center mt-1">
             <button
               onClick={handleMute}
@@ -258,10 +332,30 @@ export default function SoftphonePanel() {
         </div>
       )}
 
-      {/* Idle / waiting */}
+      {/* ── IDLE — dialpad + waiting indicator ── */}
       {callStatus === 'idle' && sipExtension && registrationStatus === 'registered' && (
-        <div className="flex-1 flex items-center justify-center">
-          <p className="text-gray-700 text-xs text-center">Waiting for calls…</p>
+        <div className="flex flex-col gap-2">
+          <div className="flex gap-1">
+            <input
+              type="tel"
+              value={dialInput}
+              onChange={(e) => setDialInput(e.target.value)}
+              onKeyDown={handleDialKeyDown}
+              placeholder="Number to dial"
+              className="flex-1 min-w-0 bg-gray-800 text-white text-sm rounded-lg px-3 py-2 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            <button
+              onClick={handleDial}
+              disabled={!dialInput.trim()}
+              className="w-10 h-10 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 flex items-center justify-center transition-colors shrink-0"
+              title="Call"
+            >
+              <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.01-.24 11.48 11.48 0 003.6.57 1 1 0 011 1V21a1 1 0 01-1 1A17 17 0 013 5a1 1 0 011-1h3.5a1 1 0 011 1 11.48 11.48 0 00.57 3.6 1 1 0 01-.25 1.01l-2.2 2.18z"/>
+              </svg>
+            </button>
+          </div>
+          <p className="text-gray-700 text-xs text-center pt-1">Waiting for calls…</p>
         </div>
       )}
 

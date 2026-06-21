@@ -43,7 +43,7 @@
 
     <!-- Accept ICE candidates from private/RFC1918 IPs (browser on same LAN or Docker host) -->
     <!-- Default wan.auto rejects RFC1918 addresses; any_v4.auto accepts all IPv4 candidates -->
-    <param name="apply-candidate-acl" value="any_v4.auto"/>
+    <param name="apply-candidate-acl" value="webrtc_candidates"/>
   </settings>
 
   <!-- No gateways on the internal profile — agents register inbound -->

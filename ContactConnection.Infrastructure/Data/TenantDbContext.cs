@@ -41,6 +41,7 @@ public class TenantDbContext : DbContext
     public DbSet<AgentGroup> AgentGroups => Set<AgentGroup>();
     public DbSet<AgentGroupMember> AgentGroupMembers => Set<AgentGroupMember>();
     public DbSet<GroupCampaignAssignment> GroupCampaignAssignments => Set<GroupCampaignAssignment>();
+    public DbSet<BlockListEntry> BlockListEntries => Set<BlockListEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -70,6 +71,7 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new AgentGroupConfiguration());
         modelBuilder.ApplyConfiguration(new AgentGroupMemberConfiguration());
         modelBuilder.ApplyConfiguration(new GroupCampaignAssignmentConfiguration());
+        modelBuilder.ApplyConfiguration(new BlockListConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 

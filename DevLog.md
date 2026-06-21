@@ -62,6 +62,99 @@
 | 50 | 2026-06-18 | 4:14 PM CDT | 4:41 PM CDT | 27 min | ~3165 min |
 | 51 | 2026-06-18 | 4:45 PM CDT | 5:26 PM CDT | 41 min | ~3206 min |
 | 52 | 2026-06-18 / 2026-06-20 | 5:27 PM CDT (6/18) + 6:25 AM CDT (6/20) | 6:05 PM CDT (6/18) + 6:39 AM CDT (6/20) | 52 min (38 + 14) | ~3258 min |
+| 53 | 2026-06-21 | 7:49 AM CDT | 8:43 AM CDT | 54 min | ~3312 min |
+| 54 | 2026-06-21 | 8:46 AM CDT | 9:39 AM CDT | 53 min | ~3365 min |
+| 55 | 2026-06-21 | 10:00 AM CDT | 11:08 AM CDT | 68 min | ~3433 min |
+
+---
+
+## Session 55
+
+**Date:** 2026-06-21
+**Start:** 10:00 AM CDT
+**End:** 11:08 AM CDT
+**Duration:** 68 minutes
+
+### Accomplished
+
+**Telephony flow designer — UX fixes + 3 new node types + SIP header variable support**
+
+- **ENTRY badge fix**: stale closure bug in `onDrop` — `nodes` captured as empty on first render; fixed with functional updater `setNodes((nds) => {...})` to read current node list before deciding entry status
+- **Target handle fix**: `TelNodeShell` was suppressing entry handles on terminal nodes (Reject, Hang Up, End); changed to show target handle unconditionally on all nodes
+- **Route to Queue fix**: meta had `handles: 'none'`; changed to `handles: 'single'` so it renders both entry and exit handles
+- **Single-connection enforcement**: `onConnect` now filters existing edges for same source+handle before calling `addEdge` — prevents double connector lines
+- **Delete key for edges**: `onKeyDown` extended to also filter `setEdges((eds) => eds.filter((ed) => !ed.selected))`
+- **Edge labels from Time of Day**: `onConnect` and `fromTelDef` now set `label: transition` on named handles so Time of Day branches show their window name (e.g. `business_hours`) on the connector line
+- **Timezone dropdown**: `TelephonyNodePropertiesPanel` `TimeOfDayEditor` — replaced freetext input with `<select>` using `<optgroup>` for 5 regions; 8 US timezones including Arizona (no DST) and Indiana East (no DST)
+- **Holiday schedule windows**: `TimeOfDayEditor` — "+ Holiday" button adds a window with amber HOLIDAY badge and dropdown of 13 US holidays; `TimeWindow` interface extended with `windowType`, `holiday`, `date` fields
+- **Date override windows**: `TimeOfDayEditor` — "+ Date" button adds a violet DATE badge window with a `type="date"` picker; evaluated first (highest priority), overrides both holidays and weekly schedules
+- **`TimeOfDayNodeHandler.cs`**: full rewrite — three-pass evaluation (date overrides → holidays → weekly); `IsHoliday()` handles 13 holidays including fixed-date and floating (NthWeekdayOfMonth, LastWeekdayOfMonth helpers)
+- **`tf_set_variable` node**: `TelSetVariableNode` canvas component (violet, shows up to 3 `key = value` assignments); `TelSetVariableNodeHandler` backend (processes `assignments` array, `Resolve()` static helper for `{{caller.ani}}`, `{{call.did}}`, `{{varName}}` templates)
+- **Block List `checkVariable`**: `CheckBlockListNodeHandler` updated to check `ctx.Vars[checkVariable]` when set instead of `ctx.CallerNumber`; `CheckBlockListNode` canvas updated to display `checking: {{varName}}` or `checking: ANI`; properties panel adds text input with X-Original-ANI hint
+- **`TelephonyFlowContext.ChannelVars`**: `IReadOnlyDictionary<string, string>` added to context; `EslBackgroundService.HandleDidCallAsync` pre-populates from `variable_sip_h_*` and `variable_*` CHANNEL_PARK event vars
+- **`IEslCommander.SetChannelVarAsync`** + `EslClient` implementation: `uuid_setvar uuid name value`
+- **`tf_get_sip_header` node**: `GetSipHeaderNode` canvas (teal, shows `headerName → variableName`); `GetSipHeaderNodeHandler` reads `ctx.ChannelVars[headerName]` → stores in `ctx.Vars[variableName]`; properties panel: two inputs (header name + variable name)
+- **`tf_set_sip_header` node**: `SetSipHeaderNode` canvas (cyan, shows `X-headerName: value`); `SetSipHeaderNodeHandler` calls `ctx.Esl.SetChannelVarAsync(uuid, sip_h_HeaderName, resolved)` using `TelSetVariableNodeHandler.Resolve()`; properties panel: header name + value with `{{caller.ani}}` / `{{call.did}}` hint; live preview of `X-HeaderName`
+- **`SetVariableEditor` component**: reusable dynamic key/value assignment list (add/remove rows) used by `tf_set_variable` properties panel
+- **Palette**: all 3 new node types added to `TelephonyNodePalette` between Route to Queue and End
+- **DI**: `TelSetVariableNodeHandler`, `GetSipHeaderNodeHandler`, `SetSipHeaderNodeHandler` registered in `ServiceCollectionExtensions`
+- **Build result**: `npm run build` 0 TypeScript errors, 618 modules ✓; `dotnet build` 0 warnings 0 errors ✓
+
+---
+
+## Session 54
+
+**Date:** 2026-06-21
+**Start:** 8:46 AM CDT
+**End:** 9:39 AM CDT
+**Duration:** 53 minutes
+
+### Accomplished
+
+**Telephony call flow engine — full implementation + TypeScript build fix**
+
+- `BlockListEntry` domain entity with `Matches()` (exact/prefix), `Update()`, `Remove()` (soft-delete via `ExpiresAt`); `BlockListMatchType` constants
+- `CallRecord.SetCampaign()` method added — allows DID routing to update campaign after resolution
+- `IBlockListRepository`, `IEslCommander`, `ITelephonyNodeHandler`, `ITelephonyFlowEngine` Application interfaces; `TelephonyFlowContext` context class
+- `BlockListConfiguration`, `BlockListRepository`; `TenantDbContext.BlockListEntries` DbSet added
+- 9 telephony node handlers: `CheckBlockListNodeHandler`, `CheckAgentAvailabilityNodeHandler`, `RejectNodeHandler` (Q.850 SIP codes), `AnswerNodeHandler`, `HangupNodeHandler`, `RouteToQueueNodeHandler`, `TimeOfDayNodeHandler` (timezone-aware, overnight ranges), `TelBranchNodeHandler`, `TelEndNodeHandler`
+- `TelephonyFlowEngine` — loads campaign → FlowId → flow definition JSON → dispatches to handlers; 50-iteration safety cap
+- `EslClient` now implements `IEslCommander` — `SendApiAsync`, `KillChannelAsync`, `AnswerChannelAsync`, `HangupChannelAsync`, `BridgeToAgentAsync`
+- `EslBackgroundService.HandleChannelParkAsync` refactored — DID lookup in `PhoneNumberRoutings` (platform DB); DID path builds `TelephonyFlowContext` and runs `ITelephonyFlowEngine`; non-DID falls through to existing agent extension screen-pop logic unchanged
+- `BlockListEndpoints` — POST/GET/PUT/DELETE `/api/v1/block-list`
+- `GET /api/v1/flows/all` updated — optional `?type=crm|telephony` filter
+- `Program.cs` — `MapBlockListEndpoints()` added
+- All new infrastructure services registered in `ServiceCollectionExtensions`
+- FreeSWITCH `default.xml` — DID-format park extension (`^\+?1?(\d{10})$` → `park`) for dev testing; `inbound.xml` production context added
+- Frontend: `telephony-designer.ts` types (`TelephonyNodeType`, `TelNodeData`, `TelephonyFlowDefinition`, `TELEPHONY_NODE_META`, `defaultTelNodeData`)
+- Frontend: `TelNodeShell`, 9 node display components, `TelephonyNodePalette`, `TelephonyNodePropertiesPanel` (with `TimeOfDayEditor` schedule builder)
+- Frontend: `TelephonyDesignerPage` — full React Flow canvas with save/publish/load; `TelephonyFlowsPage` — flow management list
+- Routes `/telephony-designer`, `/telephony-designer/:id`, `/telephony-flows` added; "Telephony" nav button added to `AgentShell`
+- **TypeScript build fix**: all 9 node components changed from `NodeProps<TelNodeData>` to `NodeProps & { data: TelNodeData }` (React Flow v12 pattern); `useNodesState<TelNodeData>` → `useNodesState<Node<TelNodeData>>`; `useEdgesState` typed as `<Edge>`; removed `{ data }` API response destructuring (client returns `T` directly, not `{data: T}`); removed `require()` in render — imported `TELEPHONY_NODE_META` at module level
+- **Build result**: `dotnet build` 0 warnings 0 errors; `npm run build` 0 TypeScript errors, 615 modules ✓
+
+---
+
+## Session 53
+
+**Date:** 2026-06-21
+**Start:** 7:49 AM CDT
+**End:** 8:43 AM CDT
+**Duration:** 54 minutes
+
+### Accomplished
+
+**Outbound dialing — full end-to-end implementation + FreeSWITCH fixes**
+
+- `CallRecord.CreateOutbound` static factory added to domain (`Source = Outbound`, deferred client/campaign same as `CreateInbound`)
+- `POST /api/v1/call-records/outbound` endpoint added — called when remote party answers; returns `{ id }`; `OutboundCallRequest` record added
+- `callStore.ts` — `CallStatus` extended with `'dialing'`; `setDialing(dialedNumber)` action added
+- `SoftphonePanel.tsx` — idle state (registered): number input + blue call button, Enter key triggers dial; `handleDial` calls `ua.call()` and sets dialing state; outbound `newRTCSession` handler wires `accepted` → `setOnCall()` + `POST /call-records/outbound`, `ended`/`failed` → `reset()`; dialing UI: blue pulsing ring, "Calling…" label, cancel button
+- `session_timers: false` added to JsSIP UA config — FreeSWITCH requires Min-SE of 120s; JsSIP defaults to 90s, causing `422 Session Interval Too Small` rejection
+- `acl.conf.xml` created (`webrtc_candidates` list, `0.0.0.0/0 allow`) — fixes `apply-candidate-acl` startup ordering issue where `any_v4.auto` didn't exist when the Sofia profile first loaded, causing `NO candidate ACL defined` on every container restart; `internal.xml` updated to reference `webrtc_candidates`
+- Dialplan `default.xml` — agent-to-agent bridge changed from `user/$1@${domain}` to `user/$1@${sip_to_host}` — static `domain = 127.0.0.1` caused `480 Temporarily Unavailable` because `sofia_contact(1002@127.0.0.1)` found nothing; `sip_to_host` uses the tenant domain from the INVITE
+- `wireAudio()` helper extracted in `SoftphonePanel` — adds `track` listener to peerconnection; explicit `remoteAudioRef.current.play()` call added (Chrome does not auto-play `srcObject` set programmatically despite `autoPlay` attribute); also checks `session.connection` immediately for outbound calls where `peerconnection` may fire before `newRTCSession`
+- **Verified end-to-end**: dial `9196` → FreeSWITCH echo app → two-way audio confirmed; dial extension 1002 → second registered agent in incognito tab receives inbound call ✓
 
 ---
 

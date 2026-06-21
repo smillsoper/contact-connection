@@ -130,14 +130,18 @@ public static class FlowsEndpoints
             return Results.Ok(list.Select(f => f.ToResponse()));
         });
 
-        // List all flows for the tenant including drafts (management page)
+        // List all flows for the tenant including drafts (management page).
+        // Optional ?type=crm|telephony filter.
         group.MapGet("/all", async (
             IFlowRepository flows,
             TenantContext tenantContext,
+            string? type,
             CancellationToken ct) =>
         {
             if (tenantContext.Current is null) return Results.Unauthorized();
             var list = await flows.GetAllByTenantAsync(tenantContext.Current.Id, ct);
+            if (!string.IsNullOrWhiteSpace(type))
+                list = list.Where(f => f.FlowType == type).ToList();
             return Results.Ok(list.Select(f => f.ToResponse()));
         });
     }

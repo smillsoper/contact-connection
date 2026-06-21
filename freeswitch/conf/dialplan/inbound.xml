@@ -1,0 +1,17 @@
+<include>
+  <!--
+    Inbound context — used by the external SIP profile (port 5080) for carrier/DID calls.
+    Calls park WITHOUT answer so ESL controls the answer decision via the telephony call flow engine.
+    ESL can reject pre-answer (SIP 486/480/603) or answer + route to agent queue.
+  -->
+  <context name="inbound">
+
+    <!-- All DID inbound calls — park without answering for ESL/telephony flow control -->
+    <extension name="did-inbound">
+      <condition field="destination_number" expression="^\+?(\d{7,})$">
+        <action application="park"/>
+      </condition>
+    </extension>
+
+  </context>
+</include>

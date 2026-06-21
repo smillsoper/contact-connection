@@ -1,0 +1,12 @@
+<configuration name="acl.conf" description="Network Lists">
+  <network-lists>
+    <!--
+      Permissive ACL for WebRTC ICE candidate filtering.
+      Allows all IPv4 candidates from browser softphones on the same LAN or Docker host.
+      Referenced by apply-candidate-acl in sip_profiles/internal.xml.
+    -->
+    <list name="webrtc_candidates" default="allow">
+      <node type="allow" cidr="0.0.0.0/0"/>
+    </list>
+  </network-lists>
+</configuration>

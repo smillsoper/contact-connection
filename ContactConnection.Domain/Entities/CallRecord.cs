@@ -127,6 +127,33 @@ public class CallRecord
         };
     }
 
+    /// <summary>
+    /// Creates a call record for an agent-initiated outbound call before a client/campaign is known.
+    /// dialedNumber is stored as CallerId (the number being called); resolved during the call.
+    /// </summary>
+    public static CallRecord CreateOutbound(
+        Guid tenantId,
+        string? dialedNumber,
+        Guid? agentId = null)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return new CallRecord
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ClientId = Guid.Empty,
+            CampaignId = Guid.Empty,
+            Source = CallSource.Outbound,
+            RecordType = CallRecordType.Full,
+            OverallStatus = CallRecordStatus.Active,
+            CallerId = dialedNumber,
+            AgentId = agentId,
+            CallStartAt = now,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+    }
+
     /// <summary>Creates a stub record for telephony events (abandon, callback, etc.) with no agent session.</summary>
     public static CallRecord CreateStub(Guid tenantId, Guid clientId, Guid campaignId, string? callerId = null)
     {
@@ -146,6 +173,12 @@ public class CallRecord
     public void SetAgent(Guid agentId)
     {
         AgentId = agentId;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void SetCampaign(Guid campaignId)
+    {
+        CampaignId = campaignId;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 

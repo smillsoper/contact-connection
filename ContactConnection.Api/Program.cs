@@ -100,6 +100,7 @@ app.MapClientsEndpoints();
 app.MapCampaignsEndpoints();
 app.MapPhoneNumbersEndpoints();
 app.MapAgentGroupsEndpoints();
+app.MapBlockListEndpoints();
 
 // Tenant admin portal
 app.MapAdminAgentsEndpoints();

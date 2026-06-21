@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type CallStatus = 'idle' | 'ringing' | 'on-call'
+export type CallStatus = 'idle' | 'ringing' | 'dialing' | 'on-call'
 
 interface CallState {
   callStatus: CallStatus
@@ -8,9 +8,10 @@ interface CallState {
   callerName: string | null
   isMuted: boolean
   callStartedAt: number | null  // Date.now() timestamp when call was answered
-  callRecordId: string | null   // set after inbound record is created
+  callRecordId: string | null
 
   setRinging: (callerNumber: string, callerName: string) => void
+  setDialing: (dialedNumber: string) => void
   setOnCall: () => void
   setMuted: (muted: boolean) => void
   setCallRecordId: (id: string) => void
@@ -27,6 +28,9 @@ export const useCallStore = create<CallState>((set) => ({
 
   setRinging: (callerNumber, callerName) =>
     set({ callStatus: 'ringing', callerNumber, callerName, isMuted: false, callStartedAt: null, callRecordId: null }),
+
+  setDialing: (dialedNumber) =>
+    set({ callStatus: 'dialing', callerNumber: dialedNumber, callerName: null, isMuted: false, callStartedAt: null, callRecordId: null }),
 
   setOnCall: () =>
     set({ callStatus: 'on-call', callStartedAt: Date.now() }),

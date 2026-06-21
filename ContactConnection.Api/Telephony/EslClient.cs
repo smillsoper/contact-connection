@@ -1,13 +1,15 @@
 using System.Net.Sockets;
 using System.Text;
+using ContactConnection.Application.Interfaces.Services;
 
 namespace ContactConnection.Api.Telephony;
 
 /// <summary>
 /// Minimal FreeSWITCH Event Socket Library (ESL) client.
 /// Handles auth handshake, event subscription, and line-by-line event reading.
+/// Also implements IEslCommander so it can be injected into telephony node handlers.
 /// </summary>
-public sealed class EslClient : IAsyncDisposable
+public sealed class EslClient : IAsyncDisposable, IEslCommander
 {
     private TcpClient? _tcp;
     private StreamReader? _reader;
@@ -71,6 +73,35 @@ public sealed class EslClient : IAsyncDisposable
 
         return new EslMessage(headers, body);
     }
+
+    // ── Command sending ──────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Sends a FreeSWITCH API command and waits for the api/response reply.
+    /// Safe to call from within an event handler — the main read loop is awaiting this handler,
+    /// so there is no concurrent ReadMessageAsync on the socket.
+    /// </summary>
+    public async Task SendApiAsync(string command, CancellationToken ct = default)
+    {
+        await _writer!.WriteLineAsync($"api {command}");
+        await _writer.WriteLineAsync();
+        await ReadMessageAsync(ct);  // consume the api/response
+    }
+
+    public Task KillChannelAsync(string uuid, int causeCode, CancellationToken ct = default) =>
+        SendApiAsync($"uuid_kill {uuid} Q.850:{causeCode}", ct);
+
+    public Task AnswerChannelAsync(string uuid, CancellationToken ct = default) =>
+        SendApiAsync($"uuid_answer {uuid}", ct);
+
+    public Task HangupChannelAsync(string uuid, CancellationToken ct = default) =>
+        SendApiAsync($"uuid_hangup {uuid} NORMAL_CLEARING", ct);
+
+    public Task BridgeToAgentAsync(string uuid, string extension, string domain, CancellationToken ct = default) =>
+        SendApiAsync($"uuid_execute {uuid} bridge user/{extension}@{domain}", ct);
+
+    public Task SetChannelVarAsync(string uuid, string name, string value, CancellationToken ct = default) =>
+        SendApiAsync($"uuid_setvar {uuid} {name} {value}", ct);
 
     public ValueTask DisposeAsync()
     {

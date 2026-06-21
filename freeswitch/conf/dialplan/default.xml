@@ -8,10 +8,12 @@
   <context name="default">
 
     <!-- Agent-to-agent direct call: dial 1xxx to reach another agent extension -->
+    <!-- Use sip_to_host (the domain from the INVITE To header) so sofia_contact -->
+    <!-- resolves against the tenant domain the agent registered under, not 127.0.0.1 -->
     <extension name="agent-extension">
       <condition field="destination_number" expression="^(1\d{3})$">
         <action application="set"    data="call_timeout=30"/>
-        <action application="bridge" data="user/$1@$${domain}"/>
+        <action application="bridge" data="user/$1@${sip_to_host}"/>
       </condition>
     </extension>
 
@@ -28,6 +30,16 @@
       <condition field="destination_number" expression="^9196$">
         <action application="answer"/>
         <action application="echo"/>
+      </condition>
+    </extension>
+
+    <!-- DID inbound (dev/test): 10+ digit numbers routed through telephony call flow engine.
+         Park WITHOUT answer so ESL can reject pre-answer (busy/unavailable/declined).
+         In production, inbound DIDs arrive on the external profile (port 5080) and are
+         routed to the separate "inbound" context defined in dialplan/inbound.xml. -->
+    <extension name="did-inbound-test">
+      <condition field="destination_number" expression="^\+?1?(\d{10})$">
+        <action application="park"/>
       </condition>
     </extension>
 

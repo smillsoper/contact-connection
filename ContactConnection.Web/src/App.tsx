@@ -7,6 +7,8 @@ import MfaVerifyPage from './pages/MfaVerifyPage'
 import AgentPage from './pages/AgentPage'
 import FlowDesignerPage from './pages/FlowDesignerPage'
 import FlowsPage from './pages/FlowsPage'
+import TelephonyDesignerPage from './pages/TelephonyDesignerPage'
+import TelephonyFlowsPage from './pages/TelephonyFlowsPage'
 import PortalLoginPage from './pages/portal/PortalLoginPage'
 import PortalAuthCallbackPage from './pages/portal/PortalAuthCallbackPage'
 import TenantListPage from './pages/portal/TenantListPage'
@@ -80,6 +82,30 @@ export default function App() {
           element={
             <RequireAuth>
               <FlowsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/telephony-designer"
+          element={
+            <RequireAuth>
+              <TelephonyDesignerPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/telephony-designer/:id"
+          element={
+            <RequireAuth>
+              <TelephonyDesignerPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/telephony-flows"
+          element={
+            <RequireAuth>
+              <TelephonyFlowsPage />
             </RequireAuth>
           }
         />

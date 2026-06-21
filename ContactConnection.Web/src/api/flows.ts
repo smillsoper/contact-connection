@@ -56,6 +56,9 @@ export const flowsApi = {
   // Flows management page — all flows including drafts
   listAll: () => api.get<FlowSummary[]>('/api/v1/flows/all'),
 
+  // Filtered by flow type (crm or telephony)
+  listAllByType: (type: string) => api.get<FlowSummary[]>(`/api/v1/flows/all?type=${type}`),
+
   startSession: (req: StartSessionRequest) =>
     api.post<FlowNodeState>('/api/v1/flow-sessions', req),
 

@@ -13,6 +13,8 @@ using ContactConnection.Infrastructure.FlowEngine;
 using ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 using ContactConnection.Infrastructure.FlowEngine.Services;
 using ContactConnection.Infrastructure.Repositories;
+using ContactConnection.Infrastructure.Telephony;
+using ContactConnection.Infrastructure.Telephony.NodeHandlers;
 using ContactConnection.Infrastructure.Tenants;
 using DnsClient;
 using Microsoft.EntityFrameworkCore;
@@ -122,6 +124,27 @@ public static class ServiceCollectionExtensions
 
         // Flow engine (scoped — uses scoped repositories and tenant context)
         services.AddScoped<IFlowEngine, FlowEngine.FlowEngine>();
+
+        // Telephony flow engine node handlers — registered as ITelephonyNodeHandler
+        // (scoped; handlers that need DB use ITenantDbContextFactory directly)
+        services.AddScoped<ITelephonyNodeHandler, CheckBlockListNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, CheckAgentAvailabilityNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, RejectNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, AnswerNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, HangupNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, RouteToQueueNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, TimeOfDayNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, TelBranchNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, TelEndNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, TelSetVariableNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, GetSipHeaderNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, SetSipHeaderNodeHandler>();
+
+        // Telephony flow engine (scoped — used by EslBackgroundService per call via IServiceScope)
+        services.AddScoped<ITelephonyFlowEngine, TelephonyFlowEngine>();
+
+        // Block list repository (scoped — for API endpoints with HTTP context)
+        services.AddScoped<IBlockListRepository, BlockListRepository>();
 
         // Email
         services.AddSingleton<IEmailService, ResendEmailService>();
