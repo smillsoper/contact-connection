@@ -11,6 +11,13 @@ public static class TenantsEndpoints
     {
         var group = app.MapGroup("/api/v1/tenants").RequireAuthorization();
 
+        // Anonymous — login page uses this to display tenant name before credentials are entered
+        app.MapGet("/api/v1/tenants/info", (TenantContext tenantContext) =>
+            tenantContext.Current is null
+                ? Results.NotFound()
+                : Results.Ok(new { tenantContext.Current.Name, tenantContext.Current.DisplayName, tenantContext.Current.LogoUrl }))
+            .AllowAnonymous();
+
         group.MapGet("me", GetCurrentTenant);
         group.MapGet("{id:guid}", GetById);
         group.MapPost("", Provision);

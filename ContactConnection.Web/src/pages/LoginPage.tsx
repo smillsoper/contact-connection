@@ -3,13 +3,16 @@ import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import { useSipStore } from '../stores/sipStore'
 import { authApi } from '../api/auth'
+import { getSubdomainFromHostname } from '../utils/subdomain'
 
 export default function LoginPage() {
   const navigate = useNavigate()
   const setAuth = useAuthStore((s) => s.setAuth)
   const setSipCredentials = useSipStore((s) => s.setSipCredentials)
 
-  const [subdomain, setSubdomain] = useState('')
+  const urlSubdomain = getSubdomainFromHostname()
+  const [subdomain, setSubdomain] = useState(urlSubdomain ?? '')
+  const [tenantName, setTenantName] = useState<string | null>(null)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -19,9 +22,20 @@ export default function LoginPage() {
   const [splash, setSplash] = useState<'splash' | 'fading' | 'done'>('splash')
 
   useEffect(() => {
-    const fadeTimer = setTimeout(() => setSplash('fading'), 4400)   // start fade at 4.4s
-    const doneTimer = setTimeout(() => setSplash('done'),  5000)    // remove at 5s
+    const fadeTimer = setTimeout(() => setSplash('fading'), 4400)
+    const doneTimer = setTimeout(() => setSplash('done'),  5000)
     return () => { clearTimeout(fadeTimer); clearTimeout(doneTimer) }
+  }, [])
+
+  // Fetch tenant display name when subdomain is known from URL
+  useEffect(() => {
+    if (!urlSubdomain) return
+    fetch('/api/v1/tenants/info', {
+      headers: { 'X-Tenant-Subdomain': urlSubdomain },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (data?.name) setTenantName(data.displayName || data.name) })
+      .catch(() => {})
   }, [])
 
   async function handleSubmit(e: FormEvent) {
@@ -86,20 +100,30 @@ export default function LoginPage() {
       >
         <div className="flex flex-col items-center mb-7">
           <img src="/cc-logo-dark.svg" alt="Contact Connection" className="h-14 mb-4" />
-          <p className="text-white font-medium" style={{ fontSize: 18 }}>Sign In</p>
+          {tenantName ? (
+            <>
+              <p className="text-gray-400 text-xs uppercase tracking-widest mb-1">Sign in to</p>
+              <p className="text-white font-semibold text-lg">{tenantName}</p>
+            </>
+          ) : (
+            <p className="text-white font-medium" style={{ fontSize: 18 }}>Sign In</p>
+          )}
         </div>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <div>
-            <label className="block mb-1" style={{ color: '#38BDF8', fontSize: 16 }}>Tenant subdomain</label>
-            <input
-              type="text"
-              required
-              value={subdomain}
-              onChange={(e) => setSubdomain(e.target.value)}
-              className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-          </div>
+          {/* Subdomain field shown only in dev (localhost) — hidden when URL subdomain is detected */}
+          {!urlSubdomain && (
+            <div>
+              <label className="block mb-1" style={{ color: '#38BDF8', fontSize: 16 }}>Tenant subdomain</label>
+              <input
+                type="text"
+                required
+                value={subdomain}
+                onChange={(e) => setSubdomain(e.target.value)}
+                className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+          )}
           <div>
             <label className="block mb-1" style={{ color: '#38BDF8', fontSize: 16 }}>Email</label>
             <input

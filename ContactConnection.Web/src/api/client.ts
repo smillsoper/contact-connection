@@ -1,4 +1,5 @@
 import { useAuthStore } from '../stores/authStore'
+import { getSubdomainFromHostname } from '../utils/subdomain'
 
 async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const { token, tenantSubdomain } = useAuthStore.getState()
@@ -9,7 +10,10 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
 
   if (token) headers['Authorization'] = `Bearer ${token}`
-  if (tenantSubdomain) headers['X-Tenant-Subdomain'] = tenantSubdomain
+
+  // URL subdomain is authoritative (production); authStore subdomain is the dev fallback
+  const subdomain = getSubdomainFromHostname() ?? tenantSubdomain
+  if (subdomain) headers['X-Tenant-Subdomain'] = subdomain
 
   const res = await fetch(path, { ...init, headers })
 

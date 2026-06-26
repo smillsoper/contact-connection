@@ -6,6 +6,8 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     port: 5173,
+    host: true,
+    allowedHosts: ['.cc.local'],   // allow all *.cc.local subdomains in dev
     proxy: {
       '/api': {
         target: 'http://localhost:5135',

@@ -72,10 +72,11 @@ public static class PortalTenantsEndpoints
                 {
                     var baseUrl = configuration["App:BaseUrl"] ?? "https://contactconnection.cc";
                     var onboardingUrl = $"{baseUrl}/onboarding/{inviteToken}";
+                    var loginUrl = $"https://{tenant.Subdomain}.{new Uri(baseUrl).Host}/login";
                     await email.SendAsync(
                         tenant.InviteEmail,
                         TenantInviteEmail.Subject(tenant.Name),
-                        TenantInviteEmail.HtmlBody(tenant.Name, tenant.Subdomain, onboardingUrl),
+                        TenantInviteEmail.HtmlBody(tenant.Name, tenant.Subdomain, onboardingUrl, loginUrl),
                         ct);
                 }
                 catch (Exception ex)
@@ -182,10 +183,11 @@ public static class PortalTenantsEndpoints
         {
             var baseUrl = configuration["App:BaseUrl"] ?? "https://contactconnection.cc";
             var onboardingUrl = $"{baseUrl}/onboarding/{invite.Token}";
+            var loginUrl = $"https://{tenant.Subdomain}.{new Uri(baseUrl).Host}/login";
             await email.SendAsync(
                 tenant.InviteEmail,
                 TenantInviteEmail.Subject(tenant.Name),
-                TenantInviteEmail.HtmlBody(tenant.Name, tenant.Subdomain, onboardingUrl),
+                TenantInviteEmail.HtmlBody(tenant.Name, tenant.Subdomain, onboardingUrl, loginUrl),
                 ct);
         }
         catch (Exception ex)
@@ -246,10 +248,11 @@ public static class PortalTenantsEndpoints
         {
             var baseUrl = configuration["App:BaseUrl"] ?? "https://contactconnection.cc";
             var acceptUrl = $"{baseUrl}/admin-invite/{invite.Token}";
+            var loginUrl = $"https://{tenant.Subdomain}.{new Uri(baseUrl).Host}/login";
             await email.SendAsync(
                 invite.Email,
                 TenantAdminInviteEmail.Subject(tenant.Name),
-                TenantAdminInviteEmail.HtmlBody(tenant.Name, tenant.DisplayName, tenant.Subdomain, acceptUrl),
+                TenantAdminInviteEmail.HtmlBody(tenant.Name, tenant.DisplayName, tenant.Subdomain, acceptUrl, loginUrl),
                 ct);
         }
         catch (Exception ex)

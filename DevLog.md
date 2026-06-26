@@ -65,6 +65,36 @@
 | 53 | 2026-06-21 | 7:49 AM CDT | 8:43 AM CDT | 54 min | ~3312 min |
 | 54 | 2026-06-21 | 8:46 AM CDT | 9:39 AM CDT | 53 min | ~3365 min |
 | 55 | 2026-06-21 | 10:00 AM CDT | 11:08 AM CDT | 68 min | ~3433 min |
+| 56 | 2026-06-25 | 5:01 PM CDT | 5:47 PM CDT | 46 min | ~3479 min |
+
+---
+
+## Session 56
+
+**Date:** 2026-06-25
+**Start:** 5:01 PM CDT
+**End:** 5:47 PM CDT
+**Duration:** 46 minutes
+
+### Accomplished
+
+**Telnyx SIP provider planning + subdomain-based tenant login**
+
+- Discussed Telnyx as backing SIP provider; planned per-tenant SIP subdomain routing (`tms.contactconnection.cc:5080`) so ESL can extract tenant from `variable_sip_req_host` without a DID DB lookup
+- Confirmed production domain: `contactconnection.cc`; wildcard DNS `*.contactconnection.cc` → server IP covers all tenant subdomains automatically
+- Discussed Spectrum Business upgrade for static public IP (cheaper than current residential plan, enables real production-grade Telnyx testing with 1–2 DIDs)
+- Confirmed ngrok is not viable for SIP+RTP (SIP headers embed IPs, RTP is UDP — neither work through ngrok tunnels)
+- Noted Telnyx has `.cc` domain blacklisted; user submitted whitelist request to Telnyx sales team
+- **Subdomain-based tenant login** — full implementation:
+  - `src/utils/subdomain.ts` (new) — `getSubdomainFromHostname()` checks `?subdomain=` query param first (dev override), then extracts from hostname for `*.contactconnection.cc` and `*.cc.local`; returns null on `localhost`/IP
+  - `src/api/client.ts` — URL subdomain is now the authoritative source for `X-Tenant-Subdomain` header; `authStore.tenantSubdomain` is dev fallback only
+  - `src/pages/LoginPage.tsx` — subdomain input field hidden when URL subdomain detected; fetches tenant name from `/api/v1/tenants/info` and shows "Sign in to [Tenant Name]"; field preserved on `localhost` for dev workflow
+  - `GET /api/v1/tenants/info` (new, anonymous) — returns `{ name, displayName, logoUrl }` using resolved `TenantContext`; login page uses this pre-auth
+  - `TenantInviteEmail.cs` — "Your login URL" callout with clickable `https://{subdomain}.contactconnection.cc/login` replaces old "save your subdomain" instructions; `loginUrl` parameter added
+  - `TenantAdminInviteEmail.cs` — same callout update
+  - `PortalTenantsEndpoints.cs` — all 3 email send call sites updated to derive and pass `loginUrl` from `App:BaseUrl` config
+  - `vite.config.ts` — `host: true` (bind to 0.0.0.0) + `allowedHosts: ['.cc.local']` for custom hostname dev access
+  - **MSAL `crypto_nonexistent` fix**: custom hostnames like `test-tenant.cc.local` are plain HTTP (not a secure context), crashing MSAL before React mounts; resolved by using `localhost:5173/login?subdomain=tms` for dev testing instead — query param detected first in `getSubdomainFromHostname()`
 
 ---
 
