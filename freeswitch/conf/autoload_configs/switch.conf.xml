@@ -1,0 +1,8 @@
+<configuration name="switch.conf" description="Core Configuration">
+  <settings>
+    <!-- Restrict RTP to the port range exposed in docker-compose.
+         11 ports = 5 concurrent calls max — sufficient for dev/testing. -->
+    <param name="rtp-start-port" value="16384"/>
+    <param name="rtp-end-port"   value="16394"/>
+  </settings>
+</configuration>

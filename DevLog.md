@@ -66,6 +66,33 @@
 | 54 | 2026-06-21 | 8:46 AM CDT | 9:39 AM CDT | 53 min | ~3365 min |
 | 55 | 2026-06-21 | 10:00 AM CDT | 11:08 AM CDT | 68 min | ~3433 min |
 | 56 | 2026-06-25 | 5:01 PM CDT | 5:47 PM CDT | 46 min | ~3479 min |
+| 57 | 2026-06-28 | 10:00 AM CDT | 11:16 AM CDT | 76 min | ~3555 min |
+
+---
+
+## Session 57
+
+**Date:** 2026-06-28
+**Start:** 10:00 AM CDT
+**End:** 11:16 AM CDT
+**Duration:** 76 minutes
+
+### Accomplished
+
+**Cloudflare tunnel setup + subdomain routing for HTTPS testing**
+
+- **Error 522 root cause identified and fixed**: wildcard `*` A record in Cloudflare DNS was competing with the tunnel route; deleted wildcard A record, kept `sip.contactconnection.cc` A record as DNS-only (gray cloud) for FreeSWITCH
+- **Wildcard CNAME for tunnel**: Cloudflare does not auto-create DNS records for wildcard public hostname routes; manually added `*` CNAME → tunnel (Cloudflare displays type as "Tunnel" pointing to tunnel name); wildcard `*.contactconnection.cc` now routes all web traffic through tunnel
+- **502 Bad Gateway fix**: `cloudflared` runs in Docker; `localhost:5173` in the tunnel service URL resolves to the container itself, not the host machine; changed service URL to `http://host.docker.internal:5173` in Cloudflare tunnel public hostname config
+- **Vite `allowedHosts` update**: added `.contactconnection.cc` to `allowedHosts` in `vite.config.ts` so Vite accepts requests arriving with subdomain Host headers
+- **Verified `test-tenant.contactconnection.cc/login`**: full end-to-end working — Cloudflare tunnel → `host.docker.internal:5173` → Vite → subdomain detected from hostname → `/api/v1/tenants/info` → "Sign in to Test Tenant" displayed over HTTPS
+- **`admin.contactconnection.cc/login` → portal admin**:
+  - `App.tsx`: `isAdminSubdomain = getSubdomainFromHostname() === 'admin'` constant
+  - `/login` route renders `<PortalLoginPage />` when on admin subdomain, `<LoginPage />` otherwise
+  - `RequirePortalAuth` redirects to `/login` (not `/portal/login`) when on admin subdomain
+  - Catch-all `*` redirects to `/login` on admin subdomain instead of `/agent`
+- **Azure Entra redirect URI**: added `https://admin.contactconnection.cc/portal/auth/callback` to app registration `ad33c007-8cf4-4ba5-bcfd-3ccb4907115c`; MSAL OAuth flow completes successfully
+- **Verified `admin.contactconnection.cc/login`**: portal login page loads, Entra sign-in completes, portal dashboard accessible
 
 ---
 

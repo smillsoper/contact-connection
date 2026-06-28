@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from './stores/authStore'
 import { usePortalAuthStore } from './stores/portalAuthStore'
+import { getSubdomainFromHostname } from './utils/subdomain'
 import LoginPage from './pages/LoginPage'
 import MfaSetupPage from './pages/MfaSetupPage'
 import MfaVerifyPage from './pages/MfaVerifyPage'
@@ -32,9 +33,11 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return token ? <>{children}</> : <Navigate to="/login" replace />
 }
 
+const isAdminSubdomain = getSubdomainFromHostname() === 'admin'
+
 function RequirePortalAuth({ children }: { children: React.ReactNode }) {
   const token = usePortalAuthStore((s) => s.token)
-  return token ? <>{children}</> : <Navigate to="/portal/login" replace />
+  return token ? <>{children}</> : <Navigate to={isAdminSubdomain ? '/login' : '/portal/login'} replace />
 }
 
 function RequireAdminAuth({ children }: { children: React.ReactNode }) {
@@ -50,7 +53,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         {/* ── Agent routes ── */}
-        <Route path="/login" element={<LoginPage />} />
+        <Route path="/login" element={isAdminSubdomain ? <PortalLoginPage /> : <LoginPage />} />
         <Route path="/mfa/setup" element={<MfaSetupPage />} />
         <Route path="/mfa/verify" element={<MfaVerifyPage />} />
         <Route
@@ -225,7 +228,7 @@ export default function App() {
           }
         />
 
-        <Route path="*" element={<Navigate to="/agent" replace />} />
+        <Route path="*" element={<Navigate to={isAdminSubdomain ? '/login' : '/agent'} replace />} />
       </Routes>
     </BrowserRouter>
   )

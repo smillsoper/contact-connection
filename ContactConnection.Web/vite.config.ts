@@ -7,7 +7,7 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
-    allowedHosts: ['.cc.local'],   // allow all *.cc.local subdomains in dev
+    allowedHosts: ['.cc.local', '.contactconnection.cc'],
     proxy: {
       '/api': {
         target: 'http://localhost:5135',
