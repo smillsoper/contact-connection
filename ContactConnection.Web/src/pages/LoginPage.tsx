@@ -1,6 +1,6 @@
 import { useState, useEffect, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuthStore } from '../stores/authStore'
+import { useAuthStore, getLandingRoute } from '../stores/authStore'
 import { useSipStore } from '../stores/sipStore'
 import { authApi } from '../api/auth'
 import { getSubdomainFromHostname } from '../utils/subdomain'
@@ -52,11 +52,10 @@ export default function LoginPage() {
         })
         return
       }
-      setAuth(res.token, res.agentId, subdomain, res.role, res.firstName, res.lastName)
+      setAuth(res.token, res.agentId, subdomain, res.role, res.firstName, res.lastName, res.permissions ?? [], res.landingPage ?? undefined)
       if (res.sipExtension && res.sipPassword)
         setSipCredentials(res.sipExtension, res.sipPassword)
-      const dest = res.role === 'admin' || res.role === 'supervisor' ? '/admin' : '/agent'
-      navigate(dest, { replace: true })
+      navigate(getLandingRoute(res.landingPage ?? null), { replace: true })
     } catch {
       setError('Invalid credentials. Please try again.')
     } finally {

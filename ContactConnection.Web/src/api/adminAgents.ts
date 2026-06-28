@@ -6,6 +6,8 @@ export interface AgentRecord {
   lastName: string
   email: string
   role: string
+  roleId: string | null
+  roleName: string | null
   isActive: boolean
   createdAt: string
   lastLoginAt: string | null
@@ -19,10 +21,16 @@ export function resetAgentPassword(id: string, newPassword: string): Promise<Age
   return api.post<AgentRecord>(`/api/v1/admin/agents/${id}/reset-password`, { newPassword })
 }
 
-export function updateAgent(id: string, data: { role?: string; isActive?: boolean }): Promise<AgentRecord> {
+export function updateAgent(id: string, data: { role?: string; roleId?: string | null; isActive?: boolean }): Promise<AgentRecord> {
   return api.patch<AgentRecord>(`/api/v1/admin/agents/${id}`, data)
 }
 
-export function inviteAdmin(email: string): Promise<{ message: string }> {
-  return api.post<{ message: string }>('/api/v1/admin/agents/invite', { email })
+export interface InviteResult {
+  sent: number
+  failed: string[]
+  message: string
+}
+
+export function inviteUsers(emails: string, roleId: string): Promise<InviteResult> {
+  return api.post<InviteResult>('/api/v1/admin/agents/invite', { emails, roleId })
 }

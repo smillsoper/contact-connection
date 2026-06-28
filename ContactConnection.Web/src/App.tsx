@@ -19,6 +19,7 @@ import OnboardingPage from './pages/OnboardingPage'
 import TenantAdminInviteAcceptPage from './pages/TenantAdminInviteAcceptPage'
 import TenantAdminPage from './pages/admin/TenantAdminPage'
 import AdminAgentsPage from './pages/admin/AdminAgentsPage'
+import AdminRolesPage from './pages/admin/AdminRolesPage'
 import AdminApiDefinitionsPage from './pages/admin/AdminApiDefinitionsPage'
 import AdminApiDefinitionDetailPage from './pages/admin/AdminApiDefinitionDetailPage'
 import AdminCredentialsPage from './pages/admin/AdminCredentialsPage'
@@ -40,12 +41,18 @@ function RequirePortalAuth({ children }: { children: React.ReactNode }) {
   return token ? <>{children}</> : <Navigate to={isAdminSubdomain ? '/login' : '/portal/login'} replace />
 }
 
+const ADMIN_PERMISSIONS = ['agents.view', 'agents.manage', 'roles.manage', 'flows.view', 'flows.manage', 'telephony.view', 'telephony.manage', 'integrations.view', 'integrations.manage', 'reports.view', 'supervisor.monitor']
+
 function RequireAdminAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
   const role = useAuthStore((s) => s.role)
+  const permissions = useAuthStore((s) => s.permissions)
   if (!token) return <Navigate to="/login" replace />
-  if (role !== 'admin' && role !== 'supervisor') return <Navigate to="/agent" replace />
-  return <>{children}</>
+  // Legacy built-in roles
+  if (role === 'admin' || role === 'supervisor') return <>{children}</>
+  // Custom role with any admin-level permission
+  if (ADMIN_PERMISSIONS.some(p => permissions.includes(p))) return <>{children}</>
+  return <Navigate to="/agent" replace />
 }
 
 export default function App() {
@@ -184,6 +191,14 @@ export default function App() {
           element={
             <RequireAdminAuth>
               <AdminAgentsPage />
+            </RequireAdminAuth>
+          }
+        />
+        <Route
+          path="/admin/roles"
+          element={
+            <RequireAdminAuth>
+              <AdminRolesPage />
             </RequireAdminAuth>
           }
         />

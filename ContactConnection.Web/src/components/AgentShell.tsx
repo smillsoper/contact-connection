@@ -22,7 +22,7 @@ export default function AgentShell() {
   useEffect(() => {
     if (sipExtension) return
     authApi.refresh().then((res) => {
-      setAuth(res.token, res.agentId, res.tenantSubdomain, res.role, res.firstName, res.lastName)
+      setAuth(res.token, res.agentId, res.tenantSubdomain, res.role, res.firstName, res.lastName, res.permissions ?? [], res.landingPage ?? undefined)
       if (res.sipExtension && res.sipPassword) {
         setSipCredentials(res.sipExtension, res.sipPassword)
       }

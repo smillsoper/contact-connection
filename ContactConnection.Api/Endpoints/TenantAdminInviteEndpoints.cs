@@ -68,6 +68,9 @@ public static class TenantAdminInviteEndpoints
             passwordHash,
             invite.Role);
 
+        if (invite.RoleId.HasValue)
+            agent.SetCustomRole(invite.RoleId.Value);
+
         await agents.AddAsync(agent, ct);
         await agents.SaveChangesAsync(ct);
 

@@ -143,8 +143,9 @@ public static class ServiceCollectionExtensions
         // Telephony flow engine (scoped — used by EslBackgroundService per call via IServiceScope)
         services.AddScoped<ITelephonyFlowEngine, TelephonyFlowEngine>();
 
-        // Block list repository (scoped — for API endpoints with HTTP context)
+        // Block list + roles repositories (scoped — for API endpoints with HTTP context)
         services.AddScoped<IBlockListRepository, BlockListRepository>();
+        services.AddScoped<IRoleRepository, RoleRepository>();
 
         // Email
         services.AddSingleton<IEmailService, ResendEmailService>();

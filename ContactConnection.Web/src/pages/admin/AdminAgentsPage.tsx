@@ -1,15 +1,11 @@
 import { useEffect, useState } from 'react'
 import AdminShell from '../../components/admin/AdminShell'
-import { listAdminAgents, resetAgentPassword, updateAgent, inviteAdmin, type AgentRecord } from '../../api/adminAgents'
-
-const ROLE_STYLES: Record<string, string> = {
-  admin:      'bg-indigo-900/50 text-indigo-300',
-  supervisor: 'bg-sky-900/50 text-sky-300',
-  agent:      'bg-gray-700/60 text-gray-300',
-}
+import { listAdminAgents, resetAgentPassword, updateAgent, inviteUsers, type AgentRecord, type InviteResult } from '../../api/adminAgents'
+import { rolesApi, type Role } from '../../api/roles'
 
 export default function AdminAgentsPage() {
   const [agents, setAgents] = useState<AgentRecord[]>([])
+  const [roles, setRoles] = useState<Role[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -22,15 +18,21 @@ export default function AdminAgentsPage() {
   // Per-row update (role/status) state
   const [updatingId, setUpdatingId] = useState<string | null>(null)
 
-  // Invite admin state
+  // Invite state
   const [showInvite, setShowInvite] = useState(false)
-  const [inviteEmail, setInviteEmail] = useState('')
-  const [inviteStatus, setInviteStatus] = useState<{ ok: boolean; msg: string } | null>(null)
+  const [inviteEmails, setInviteEmails] = useState('')
+  const [inviteRoleId, setInviteRoleId] = useState('')
+  const [inviteResult, setInviteResult] = useState<InviteResult | null>(null)
   const [inviteSending, setInviteSending] = useState(false)
 
   useEffect(() => {
-    listAdminAgents()
-      .then(setAgents)
+    Promise.all([listAdminAgents(), rolesApi.getAll()])
+      .then(([agentList, roleList]) => {
+        setAgents(agentList)
+        setRoles(roleList)
+        // Default to first role
+        if (roleList.length > 0) setInviteRoleId(roleList[0].id)
+      })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false))
   }, [])
@@ -64,19 +66,27 @@ export default function AdminAgentsPage() {
   }
 
   async function handleInvite() {
-    if (!inviteEmail.trim()) return
+    if (!inviteEmails.trim() || !inviteRoleId) return
     setInviteSending(true)
-    setInviteStatus(null)
+    setInviteResult(null)
     try {
-      await inviteAdmin(inviteEmail.trim())
-      setInviteStatus({ ok: true, msg: `Invitation sent to ${inviteEmail.trim()}.` })
-      setInviteEmail('')
-      setShowInvite(false)
+      const result = await inviteUsers(inviteEmails.trim(), inviteRoleId)
+      setInviteResult(result)
+      if (result.failed.length === 0) {
+        setInviteEmails('')
+        setShowInvite(false)
+      }
     } catch (e) {
-      setInviteStatus({ ok: false, msg: e instanceof Error ? e.message : 'Failed to send invitation.' })
+      setInviteResult({ sent: 0, failed: [], message: e instanceof Error ? e.message : 'Failed to send invitations.' })
     } finally {
       setInviteSending(false)
     }
+  }
+
+  function closeInvite() {
+    setShowInvite(false)
+    setInviteEmails('')
+    setInviteResult(null)
   }
 
   async function handleToggleActive(agent: AgentRecord) {
@@ -91,61 +101,94 @@ export default function AdminAgentsPage() {
     }
   }
 
+  async function handleRoleChange(agent: AgentRecord, roleId: string) {
+    setUpdatingId(agent.id)
+    try {
+      const updated = await updateAgent(agent.id, { roleId: roleId || null })
+      setAgents((prev) => prev.map((a) => a.id === agent.id ? updated : a))
+    } catch {
+      // swallow
+    } finally {
+      setUpdatingId(null)
+    }
+  }
+
   return (
     <AdminShell>
       <div className="p-6 max-w-5xl">
         <div className="flex items-start justify-between mb-6">
           <div>
-            <h1 className="text-white text-xl font-semibold">Agents</h1>
+            <h1 className="text-white text-xl font-semibold">Users</h1>
             <p className="text-gray-500 text-sm mt-0.5">All users in your workspace.</p>
           </div>
           <button
-            onClick={() => { setShowInvite((v) => !v); setInviteStatus(null); setInviteEmail('') }}
+            onClick={() => { setShowInvite((v) => !v); setInviteResult(null) }}
             className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
           >
-            Invite admin
+            Invite Users
           </button>
         </div>
 
-        {/* Invite admin form */}
+        {/* Invite users form */}
         {showInvite && (
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-6">
-            <p className="text-gray-300 text-sm font-medium mb-3">Invite an administrator</p>
-            <div className="flex items-center gap-3">
-              <input
-                type="email"
-                autoFocus
-                value={inviteEmail}
-                onChange={(e) => { setInviteEmail(e.target.value); setInviteStatus(null) }}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleInvite() }}
-                placeholder="admin@example.com"
-                className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 w-72"
-              />
-              <button
-                onClick={handleInvite}
-                disabled={inviteSending || !inviteEmail.trim()}
-                className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
-              >
-                {inviteSending ? 'Sending…' : 'Send invite'}
-              </button>
-              <button
-                onClick={() => { setShowInvite(false); setInviteStatus(null) }}
-                className="text-gray-500 hover:text-white text-sm transition-colors"
-              >
-                Cancel
-              </button>
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
+            <p className="text-gray-200 text-sm font-medium mb-1">Invite Users</p>
+            <p className="text-gray-500 text-xs mb-4">Enter one or more email addresses separated by commas or new lines.</p>
+            <div className="flex gap-4">
+              <div className="flex-1">
+                <textarea
+                  autoFocus
+                  value={inviteEmails}
+                  onChange={(e) => { setInviteEmails(e.target.value); setInviteResult(null) }}
+                  placeholder={"alice@example.com\nbob@example.com, carol@example.com"}
+                  rows={4}
+                  className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                />
+              </div>
+              <div className="flex flex-col gap-3 w-44 flex-shrink-0">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Role</label>
+                  <select
+                    value={inviteRoleId}
+                    onChange={e => setInviteRoleId(e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-600 text-gray-200 text-sm rounded-lg px-2 py-2"
+                  >
+                    {roles.map(r => (
+                      <option key={r.id} value={r.id}>{r.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex flex-col gap-2 mt-auto">
+                  <button
+                    onClick={handleInvite}
+                    disabled={inviteSending || !inviteEmails.trim() || !inviteRoleId}
+                    className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors w-full"
+                  >
+                    {inviteSending ? 'Sending…' : 'Send invites'}
+                  </button>
+                  <button
+                    onClick={closeInvite}
+                    className="text-gray-500 hover:text-white text-sm transition-colors text-center"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
             </div>
-            {inviteStatus && (
-              <p className={`mt-2 text-xs ${inviteStatus.ok ? 'text-emerald-400' : 'text-red-400'}`}>
-                {inviteStatus.msg}
-              </p>
+            {inviteResult && (
+              <div className={`mt-3 text-xs ${inviteResult.failed.length > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                <p>{inviteResult.message}</p>
+                {inviteResult.failed.length > 0 && (
+                  <p className="mt-1 text-red-400">Failed: {inviteResult.failed.join(', ')}</p>
+                )}
+              </div>
             )}
           </div>
         )}
 
         {/* Success flash when invite panel is closed */}
-        {!showInvite && inviteStatus?.ok && (
-          <p className="text-emerald-400 text-sm mb-4">{inviteStatus.msg}</p>
+        {!showInvite && inviteResult?.sent != null && inviteResult.sent > 0 && (
+          <p className="text-emerald-400 text-sm mb-4">{inviteResult.message}</p>
         )}
 
         {loading && <p className="text-gray-400 text-sm">Loading…</p>}
@@ -180,19 +223,26 @@ export default function AdminAgentsPage() {
                       </td>
                       <td className="px-4 py-3 text-gray-300">{agent.email}</td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${ROLE_STYLES[agent.role] ?? ROLE_STYLES.agent}`}>
-                          {agent.role}
-                        </span>
+                        <select
+                          value={agent.roleId ?? ''}
+                          onChange={e => handleRoleChange(agent, e.target.value)}
+                          disabled={updatingId === agent.id}
+                          className="bg-gray-800 border border-gray-600 text-gray-200 text-xs rounded px-2 py-1 disabled:opacity-50"
+                        >
+                          <option value="">{agent.roleName ?? agent.role} (legacy)</option>
+                          {roles.map(r => (
+                            <option key={r.id} value={r.id}>{r.name}</option>
+                          ))}
+                        </select>
                       </td>
                       <td className="px-4 py-3">
                         <button
                           onClick={() => handleToggleActive(agent)}
                           disabled={updatingId === agent.id}
-                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium transition-colors disabled:opacity-50 ${
-                            agent.isActive
+                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium transition-colors disabled:opacity-50 ${agent.isActive
                               ? 'bg-emerald-900/50 text-emerald-400 hover:bg-emerald-900/80'
                               : 'bg-red-900/50 text-red-400 hover:bg-red-900/80'
-                          }`}
+                            }`}
                         >
                           {agent.isActive ? 'Active' : 'Inactive'}
                         </button>

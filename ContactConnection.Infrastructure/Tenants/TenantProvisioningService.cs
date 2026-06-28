@@ -3,6 +3,8 @@ using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Domain.Entities;
 using ContactConnection.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using static ContactConnection.Domain.Entities.Permission;
+using static ContactConnection.Domain.Entities.LandingPage;
 
 namespace ContactConnection.Infrastructure.Tenants;
 
@@ -51,7 +53,10 @@ public class TenantProvisioningService : ITenantProvisioningService
         await using var tenantCtx = _tenantDbContextFactory.Create(tenant.SchemaName);
         await tenantCtx.Database.MigrateAsync(ct);
 
-        // 3. Create invite record if an email was provided
+        // 3. Seed built-in roles
+        await SeedBuiltInRolesAsync(tenantCtx, tenant.Id, ct);
+
+        // 4. Create invite record if an email was provided
         string? inviteToken = null;
         if (!string.IsNullOrWhiteSpace(inviteEmail))
         {
@@ -60,10 +65,24 @@ public class TenantProvisioningService : ITenantProvisioningService
             await _invites.AddAsync(invite, ct);
         }
 
-        // 4. Save tenant + invite records atomically
+        // 5. Save tenant + invite records atomically
         await _tenants.SaveChangesAsync(ct);
 
         return (tenant, inviteToken);
+    }
+
+    private static async Task SeedBuiltInRolesAsync(TenantDbContext ctx, Guid tenantId, CancellationToken ct)
+    {
+        var hasRoles = await ctx.Roles.AnyAsync(ct);
+        if (hasRoles) return;
+
+        ctx.Roles.AddRange(
+            Role.Create(tenantId, "Administrator", Permission.All.ToList(), AdminDashboard, isBuiltIn: true),
+            Role.Create(tenantId, "Supervisor",    [AgentsView, FlowsView, CallsView, CallsExport, SupervisorMonitor, SupervisorOverride, ReportsView], AgentPortal, isBuiltIn: true),
+            Role.Create(tenantId, "Agent",         [CallsView], AgentPortal, isBuiltIn: true)
+        );
+
+        await ctx.SaveChangesAsync(ct);
     }
 
     public async Task<MigrationResult> MigrateAllTenantsAsync(CancellationToken ct = default)

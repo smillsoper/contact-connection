@@ -18,6 +18,9 @@ public class Agent
     public DateTimeOffset? LastLoginAt { get; private set; }
     public string? MfaSecret { get; private set; }
     public bool MfaEnabled { get; private set; }
+    public Guid? RoleId { get; private set; }
+    public Role? CustomRole { get; private set; }
+
     public string? SipExtension { get; private set; }   // e.g. "1001" — assigned at creation, fixed for life
     public string? SipA1Hash { get; private set; }      // MD5("{ext}:{realm}:{password}") — refreshed every login
 
@@ -50,6 +53,7 @@ public class Agent
     public void Deactivate() => IsActive = false;
     public void Activate() => IsActive = true;
     public void SetRole(string role) => Role = role;
+    public void SetCustomRole(Guid? roleId) => RoleId = roleId;
 
     public void UpdateProfile(string firstName, string lastName)
     {

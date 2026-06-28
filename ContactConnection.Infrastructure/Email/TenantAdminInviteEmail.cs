@@ -2,16 +2,16 @@ namespace ContactConnection.Infrastructure.Email;
 
 public static class TenantAdminInviteEmail
 {
-    public static string Subject(string tenantName) =>
-        $"You've been invited to {tenantName} — set up your account";
+    public static string Subject(string tenantName, string roleName) =>
+        $"You've been invited to {tenantName} as {ArticleFor(roleName)} {roleName}";
 
-    public static string HtmlBody(string tenantName, string? tenantDisplayName, string subdomain, string acceptUrl, string loginUrl = "") => $"""
+    public static string HtmlBody(string tenantName, string? tenantDisplayName, string subdomain, string acceptUrl, string roleName, string loginUrl = "") => $"""
         <!DOCTYPE html>
         <html lang="en">
         <head>
           <meta charset="utf-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Admin Invitation</title>
+          <title>Invitation</title>
         </head>
         <body style="margin:0;padding:0;background-color:#030712;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
           <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
@@ -24,7 +24,7 @@ public static class TenantAdminInviteEmail
                   <tr>
                     <td style="padding:32px 40px 24px;border-bottom:1px solid #1f2937;">
                       <p style="margin:0 0 4px;color:#6b7280;font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;">
-                        Admin Invitation
+                        Invitation
                       </p>
                       <p style="margin:0;color:#f9fafb;font-size:20px;font-weight:700;letter-spacing:-0.02em;">
                         {tenantDisplayName ?? tenantName}
@@ -36,15 +36,15 @@ public static class TenantAdminInviteEmail
                   <tr>
                     <td style="padding:32px 40px 28px;">
                       <h1 style="margin:0 0 12px;color:#f9fafb;font-size:22px;font-weight:700;letter-spacing:-0.02em;">
-                        You've been invited as an admin
+                        You've been invited as {ArticleFor(roleName)} {roleName}
                       </h1>
                       <p style="margin:0 0 8px;color:#9ca3af;font-size:15px;line-height:1.65;">
-                        You've been added as an administrator for
+                        You've been added to
                         <strong style="color:#e5e7eb;">{tenantDisplayName ?? tenantName}</strong>
-                        on ContactConnection.
+                        on ContactConnection with the <strong style="color:#e5e7eb;">{roleName}</strong> role.
                       </p>
                       <p style="margin:0 0 28px;color:#9ca3af;font-size:15px;line-height:1.65;">
-                        Click the button below to set up your account and access the admin portal.
+                        Click the button below to set up your account and get started.
                       </p>
                       <a href="{acceptUrl}"
                          style="display:inline-block;background-color:#4f46e5;color:#ffffff;text-decoration:none;
@@ -91,4 +91,7 @@ public static class TenantAdminInviteEmail
         </body>
         </html>
         """;
+
+    private static string ArticleFor(string word) =>
+        word.Length > 0 && "AEIOUaeiou".Contains(word[0]) ? "an" : "a";
 }

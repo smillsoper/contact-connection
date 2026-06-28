@@ -4,6 +4,8 @@ using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
 using ContactConnection.Domain.Entities;
+using static ContactConnection.Domain.Entities.Permission;
+using static ContactConnection.Domain.Entities.LandingPage;
 
 namespace ContactConnection.Api.Endpoints;
 
@@ -27,6 +29,7 @@ public static class AuthEndpoints
     private static async Task<IResult> Refresh(
         ClaimsPrincipal user,
         IAgentRepository agents,
+        IRoleRepository roles,
         ITokenService tokens,
         TenantContext tenantContext,
         CancellationToken ct)
@@ -40,17 +43,20 @@ public static class AuthEndpoints
         var agent = await agents.GetByIdAsync(agentId, ct);
         if (agent is null) return Results.Unauthorized();
 
+        var role = agent.RoleId.HasValue ? await roles.GetByIdAsync(agent.RoleId.Value, ct) : null;
+
         var (sipExt, sipPwd) = await RefreshSipCredentialsAsync(agent, tenantContext.Current, agents, ct);
         await agents.SaveChangesAsync(ct);
 
-        var token = tokens.GenerateToken(agent, tenantContext.Current);
-        return Results.Ok(BuildFullLoginResponse(token, agent, tenantContext.Current.Subdomain, sipExt, sipPwd));
+        var token = tokens.GenerateToken(agent, tenantContext.Current, role);
+        return Results.Ok(BuildFullLoginResponse(token, agent, tenantContext.Current.Subdomain, role, sipExt, sipPwd));
     }
 
     private static async Task<IResult> Login(
         LoginRequest request,
         IAgentRepository agents,
         ITenantRepository tenants,
+        IRoleRepository roles,
         IPasswordHasher hasher,
         ITokenService tokens,
         IMfaService mfa,
@@ -88,15 +94,18 @@ public static class AuthEndpoints
                 PreAuthToken: preAuthToken,
                 MfaSetupRequired: needsSetup,
                 SipExtension: null,
-                SipPassword: null));
+                SipPassword: null,
+                Permissions: null,
+                LandingPage: null));
         }
 
         // Full login — refresh SIP credentials and return the plaintext password once
+        var role = agent.RoleId.HasValue ? await roles.GetByIdAsync(agent.RoleId.Value, ct) : null;
         var (sipExt, sipPwd) = await RefreshSipCredentialsAsync(agent, tenant, agents, ct);
         agent.RecordLogin();
         await agents.SaveChangesAsync(ct);
 
-        var token = tokens.GenerateToken(agent, tenant);
+        var token = tokens.GenerateToken(agent, tenant, role);
 
         return Results.Ok(new LoginResponse(
             MfaPending: false,
@@ -105,12 +114,14 @@ public static class AuthEndpoints
             Email: agent.Email,
             FirstName: agent.FirstName,
             LastName: agent.LastName,
-            Role: agent.Role,
+            Role: role?.Name ?? agent.Role,
             TenantSubdomain: tenant.Subdomain,
             PreAuthToken: null,
             MfaSetupRequired: null,
             SipExtension: sipExt,
-            SipPassword: sipPwd));
+            SipPassword: sipPwd,
+            Permissions: (role?.Permissions ?? Permission.ForLegacyRole(agent.Role).ToList()).ToArray(),
+            LandingPage: role?.DefaultLandingPage ?? LandingPage.ForLegacyRole(agent.Role)));
     }
 
     // GET /api/v1/auth/mfa/setup — called when agent needs to configure MFA for the first time
@@ -144,6 +155,7 @@ public static class AuthEndpoints
         MfaCodeRequest request,
         ClaimsPrincipal user,
         IAgentRepository agents,
+        IRoleRepository roles,
         ITokenService tokens,
         IMfaService mfa,
         TenantContext tenantContext,
@@ -163,8 +175,9 @@ public static class AuthEndpoints
         agent.RecordLogin();
         await agents.SaveChangesAsync(ct);
 
-        var token = tokens.GenerateToken(agent, tenantContext.Current!);
-        return Results.Ok(BuildFullLoginResponse(token, agent, tenantContext.Current!.Subdomain, sipExt1, sipPwd1));
+        var role1 = agent.RoleId.HasValue ? await roles.GetByIdAsync(agent.RoleId.Value, ct) : null;
+        var token1 = tokens.GenerateToken(agent, tenantContext.Current!, role1);
+        return Results.Ok(BuildFullLoginResponse(token1, agent, tenantContext.Current!.Subdomain, role1, sipExt1, sipPwd1));
     }
 
     // POST /api/v1/auth/mfa/verify — TOTP challenge for agents who already have MFA enabled
@@ -172,6 +185,7 @@ public static class AuthEndpoints
         MfaCodeRequest request,
         ClaimsPrincipal user,
         IAgentRepository agents,
+        IRoleRepository roles,
         ITokenService tokens,
         IMfaService mfa,
         TenantContext tenantContext,
@@ -191,8 +205,9 @@ public static class AuthEndpoints
         agent.RecordLogin();
         await agents.SaveChangesAsync(ct);
 
-        var token = tokens.GenerateToken(agent, tenantContext.Current!);
-        return Results.Ok(BuildFullLoginResponse(token, agent, tenantContext.Current!.Subdomain, sipExt2, sipPwd2));
+        var role2 = agent.RoleId.HasValue ? await roles.GetByIdAsync(agent.RoleId.Value, ct) : null;
+        var token2 = tokens.GenerateToken(agent, tenantContext.Current!, role2);
+        return Results.Ok(BuildFullLoginResponse(token2, agent, tenantContext.Current!.Subdomain, role2, sipExt2, sipPwd2));
     }
 
     private static bool ResolveAgent(ClaimsPrincipal user, TenantContext tenantContext, out Guid agentId)
@@ -204,7 +219,7 @@ public static class AuthEndpoints
     }
 
     private static LoginResponse BuildFullLoginResponse(
-        string token, Agent agent, string subdomain,
+        string token, Agent agent, string subdomain, Role? role,
         string? sipExt = null, string? sipPwd = null) =>
         new(
             MfaPending: false,
@@ -213,12 +228,14 @@ public static class AuthEndpoints
             Email: agent.Email,
             FirstName: agent.FirstName,
             LastName: agent.LastName,
-            Role: agent.Role,
+            Role: role?.Name ?? agent.Role,
             TenantSubdomain: subdomain,
             PreAuthToken: null,
             MfaSetupRequired: null,
             SipExtension: sipExt,
-            SipPassword: sipPwd);
+            SipPassword: sipPwd,
+            Permissions: (role?.Permissions ?? Permission.ForLegacyRole(agent.Role).ToList()).ToArray(),
+            LandingPage: role?.DefaultLandingPage ?? LandingPage.ForLegacyRole(agent.Role));
 
     // Generates a fresh SIP password on every full login.
     // Backfills SipExtension for agents created before this feature.
@@ -257,8 +274,10 @@ public record LoginResponse(
     string TenantSubdomain,
     string? PreAuthToken,
     bool? MfaSetupRequired,
-    string? SipExtension,   // null on MFA-pending responses
-    string? SipPassword);   // plaintext, returned on every full login or token refresh — never persisted
+    string? SipExtension,    // null on MFA-pending responses
+    string? SipPassword,     // plaintext, returned on every full login or token refresh — never persisted
+    string[]? Permissions,   // null on MFA-pending responses
+    string? LandingPage);    // null on MFA-pending responses
 
 public record MfaSetupResponse(string Secret, string OtpAuthUri);
 

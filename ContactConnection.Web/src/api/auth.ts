@@ -18,6 +18,8 @@ export type LoginResponse =
       tenantSubdomain: string
       sipExtension: string | null
       sipPassword: string | null   // plaintext, returned once — store in memory only
+      permissions: string[]
+      landingPage: string
     }
   | {
       mfaPending: true
@@ -39,6 +41,8 @@ export interface FullAuthResponse {
   tenantSubdomain: string
   sipExtension: string | null
   sipPassword: string | null
+  permissions: string[]
+  landingPage: string
 }
 
 export interface MfaSetupData {

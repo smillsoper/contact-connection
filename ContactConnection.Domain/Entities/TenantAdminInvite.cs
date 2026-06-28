@@ -8,6 +8,8 @@ public class TenantAdminInvite
     public Guid TenantId { get; private set; }
     public string Email { get; private set; } = string.Empty;
     public string Role { get; private set; } = AgentRole.Admin;
+    public Guid? RoleId { get; private set; }
+    public string? RoleName { get; private set; }
     public string Token { get; private set; } = string.Empty;
     public DateTimeOffset ExpiresAt { get; private set; }
     public DateTimeOffset? AcceptedAt { get; private set; }
@@ -18,7 +20,7 @@ public class TenantAdminInvite
     // Required by EF Core
     private TenantAdminInvite() { }
 
-    public static TenantAdminInvite Create(Guid tenantId, string email, string role = AgentRole.Admin)
+    public static TenantAdminInvite Create(Guid tenantId, string email, string role = AgentRole.Admin, Guid? roleId = null, string? roleName = null)
     {
         var tokenBytes = RandomNumberGenerator.GetBytes(32);
         var token = Convert.ToBase64String(tokenBytes)
@@ -29,6 +31,8 @@ public class TenantAdminInvite
             TenantId = tenantId,
             Email = email.ToLowerInvariant(),
             Role = role,
+            RoleId = roleId,
+            RoleName = roleName,
             Token = token,
             ExpiresAt = DateTimeOffset.UtcNow.AddDays(7),
         };

@@ -14,16 +14,17 @@ public static class AdminAgentsEndpoints
             .RequireAuthorization("TenantAdmin");
 
         group.MapGet("", List);
-        group.MapPost("invite", InviteAdmin);
+        group.MapPost("invite", InviteUsers);
         group.MapPost("{id:guid}/reset-password", ResetPassword);
         group.MapPatch("{id:guid}", Update);
 
         return app;
     }
 
-    private static async Task<IResult> InviteAdmin(
-        InviteAdminAgentRequest request,
+    private static async Task<IResult> InviteUsers(
+        InviteUsersRequest request,
         ITenantAdminInviteRepository invites,
+        IRoleRepository roles,
         IEmailService email,
         IConfiguration configuration,
         ILoggerFactory loggerFactory,
@@ -33,31 +34,68 @@ public static class AdminAgentsEndpoints
         if (!tenantContext.HasTenant) return Results.Unauthorized();
         var tenant = tenantContext.Current!;
 
-        if (string.IsNullOrWhiteSpace(request.Email))
-            return Results.BadRequest(new { error = "Email is required." });
+        // Parse emails from comma/newline/semicolon delimited input
+        var emails = (request.Emails ?? "")
+            .Split([',', '\n', '\r', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(e => e.Contains('@'))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
-        var invite = TenantAdminInvite.Create(tenant.Id, request.Email.Trim().ToLowerInvariant(), AgentRole.Admin);
-        await invites.AddAsync(invite, ct);
-        await invites.SaveChangesAsync(ct);
+        if (emails.Count == 0)
+            return Results.BadRequest(new { error = "At least one valid email address is required." });
 
-        try
+        // Resolve role
+        Role? role = null;
+        if (request.RoleId.HasValue)
+            role = await roles.GetByIdAsync(request.RoleId.Value, ct);
+
+        var legacyRole = role?.Name switch
         {
-            var baseUrl = configuration["App:BaseUrl"] ?? "https://contactconnection.cc";
-            var acceptUrl = $"{baseUrl}/admin-invite/{invite.Token}";
-            await email.SendAsync(
-                invite.Email,
-                TenantAdminInviteEmail.Subject(tenant.Name),
-                TenantAdminInviteEmail.HtmlBody(tenant.Name, tenant.DisplayName, tenant.Subdomain, acceptUrl),
-                ct);
-        }
-        catch (Exception ex)
+            "Administrator" => AgentRole.Admin,
+            "Supervisor"    => AgentRole.Supervisor,
+            _               => AgentRole.Agent,
+        };
+        var roleName = role?.Name ?? "Agent";
+
+        var baseUrl = configuration["App:BaseUrl"] ?? "https://contactconnection.cc";
+        var logger = loggerFactory.CreateLogger("AdminAgents");
+        var sent = new List<string>();
+        var failed = new List<string>();
+
+        foreach (var emailAddress in emails)
         {
-            loggerFactory.CreateLogger("AdminAgents")
-                .LogError(ex, "Failed to send admin invite to {Email} for tenant {TenantId}", invite.Email, tenant.Id);
-            return Results.Problem("Invite created but email delivery failed. Check logs.");
+            var invite = TenantAdminInvite.Create(
+                tenant.Id, emailAddress, legacyRole,
+                roleId: role?.Id, roleName: roleName);
+            await invites.AddAsync(invite, ct);
+            await invites.SaveChangesAsync(ct);
+
+            try
+            {
+                var acceptUrl = $"{baseUrl}/admin-invite/{invite.Token}";
+                var loginUrl = $"https://{tenant.Subdomain}.contactconnection.cc/login";
+                await email.SendAsync(
+                    invite.Email,
+                    TenantAdminInviteEmail.Subject(tenant.Name, roleName),
+                    TenantAdminInviteEmail.HtmlBody(tenant.Name, tenant.DisplayName, tenant.Subdomain, acceptUrl, roleName, loginUrl),
+                    ct);
+                sent.Add(emailAddress);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to send invite to {Email} for tenant {TenantId}", emailAddress, tenant.Id);
+                failed.Add(emailAddress);
+            }
         }
 
-        return Results.Ok(new { message = "Invitation sent." });
+        return Results.Ok(new
+        {
+            sent = sent.Count,
+            failed,
+            message = failed.Count == 0
+                ? $"{sent.Count} invitation{(sent.Count != 1 ? "s" : "")} sent."
+                : $"{sent.Count} sent, {failed.Count} failed.",
+        });
     }
 
     private static async Task<IResult> List(
@@ -96,6 +134,7 @@ public static class AdminAgentsEndpoints
         Guid id,
         UpdateAgentRequest request,
         IAgentRepository agents,
+        IRoleRepository roles,
         TenantContext tenantContext,
         CancellationToken ct)
     {
@@ -104,7 +143,21 @@ public static class AdminAgentsEndpoints
         var agent = await agents.GetByIdAsync(id, ct);
         if (agent is null) return Results.NotFound();
 
-        if (request.Role is not null)
+        // Custom role assignment takes precedence over legacy role string
+        if (request.RoleId is not null)
+        {
+            if (request.RoleId == Guid.Empty)
+            {
+                agent.SetCustomRole(null);
+            }
+            else
+            {
+                var role = await roles.GetByIdAsync(request.RoleId.Value, ct);
+                if (role is null) return Results.BadRequest(new { error = "Role not found." });
+                agent.SetCustomRole(role.Id);
+            }
+        }
+        else if (request.Role is not null)
         {
             if (!AgentRole.IsValid(request.Role))
                 return Results.BadRequest(new { error = $"Invalid role '{request.Role}'." });
@@ -125,6 +178,8 @@ public static class AdminAgentsEndpoints
         a.LastName,
         a.Email,
         a.Role,
+        RoleId = a.RoleId,
+        RoleName = a.CustomRole?.Name,
         a.IsActive,
         a.CreatedAt,
         a.LastLoginAt,
@@ -132,5 +187,5 @@ public static class AdminAgentsEndpoints
 }
 
 public record ResetAgentPasswordRequest(string NewPassword);
-public record UpdateAgentRequest(string? Role, bool? IsActive);
-public record InviteAdminAgentRequest(string Email);
+public record UpdateAgentRequest(string? Role, Guid? RoleId, bool? IsActive);
+public record InviteUsersRequest(string? Emails, Guid? RoleId);

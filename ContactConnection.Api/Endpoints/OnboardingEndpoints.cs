@@ -46,6 +46,7 @@ public static class OnboardingEndpoints
         ITenantInviteRepository invites,
         ITenantAdminInviteRepository agentInvites,
         IAgentRepository agents,
+        IRoleRepository roles,
         IPasswordHasher passwordHasher,
         ITokenService tokenService,
         TenantContext tenantContext,
@@ -60,7 +61,7 @@ public static class OnboardingEndpoints
 
         var tenant = invite.Tenant;
 
-        // Populate TenantContext so tenant-scoped repositories (AgentRepository) work correctly
+        // Populate TenantContext so tenant-scoped repositories (AgentRepository, IRoleRepository) work correctly
         tenantContext.Current = tenant;
 
         // Apply wizard settings
@@ -79,6 +80,10 @@ public static class OnboardingEndpoints
         if (request.FeatureFlags is not null)
             tenant.UpdateFeatureFlags(request.FeatureFlags);
 
+        // Load the built-in Administrator role so new admin gets it assigned
+        var allRoles = await roles.GetAllAsync(ct);
+        var adminRole = allRoles.FirstOrDefault(r => r.IsBuiltIn && r.Name == "Administrator");
+
         // Create the first admin agent
         var passwordHash = passwordHasher.Hash(request.Password);
         var admin = Agent.Create(
@@ -88,6 +93,9 @@ public static class OnboardingEndpoints
             invite.Email,
             passwordHash,
             AgentRole.Admin);
+
+        if (adminRole is not null)
+            admin.SetCustomRole(adminRole.Id);
 
         await agents.AddAsync(admin, ct);
         await agents.SaveChangesAsync(ct);
@@ -103,7 +111,9 @@ public static class OnboardingEndpoints
 
         foreach (var adminEmail in additionalEmails)
         {
-            var agentInvite = TenantAdminInvite.Create(tenant.Id, adminEmail, AgentRole.Admin);
+            var agentInvite = TenantAdminInvite.Create(
+                tenant.Id, adminEmail, AgentRole.Admin,
+                roleId: adminRole?.Id, roleName: "Administrator");
             await agentInvites.AddAsync(agentInvite, ct);
 
             try
@@ -112,8 +122,8 @@ public static class OnboardingEndpoints
                 var acceptUrl = $"{baseUrl}/admin-invite/{agentInvite.Token}";
                 await email.SendAsync(
                     adminEmail,
-                    TenantAdminInviteEmail.Subject(tenant.Name),
-                    TenantAdminInviteEmail.HtmlBody(tenant.Name, tenant.DisplayName, tenant.Subdomain, acceptUrl),
+                    TenantAdminInviteEmail.Subject(tenant.Name, "Administrator"),
+                    TenantAdminInviteEmail.HtmlBody(tenant.Name, tenant.DisplayName, tenant.Subdomain, acceptUrl, "Administrator"),
                     ct);
             }
             catch (Exception ex)
@@ -128,7 +138,7 @@ public static class OnboardingEndpoints
         await invites.SaveChangesAsync(ct);
 
         admin.RecordLogin();
-        var jwtToken = tokenService.GenerateToken(admin, tenant);
+        var jwtToken = tokenService.GenerateToken(admin, tenant, adminRole);
 
         return Results.Ok(new
         {

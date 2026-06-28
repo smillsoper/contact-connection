@@ -2,7 +2,7 @@ import { useState, useEffect, type FormEvent } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import QRCode from 'qrcode'
 import { authApi } from '../api/auth'
-import { useAuthStore } from '../stores/authStore'
+import { useAuthStore, getLandingRoute } from '../stores/authStore'
 import { useSipStore } from '../stores/sipStore'
 
 interface LocationState {
@@ -50,11 +50,10 @@ export default function MfaSetupPage() {
     setLoading(true)
     try {
       const res = await authApi.mfaSetupConfirm(preAuthToken, subdomain, code)
-      setAuth(res.token, res.agentId, subdomain, res.role, res.firstName, res.lastName)
+      setAuth(res.token, res.agentId, subdomain, res.role, res.firstName, res.lastName, res.permissions ?? [], res.landingPage ?? undefined)
       if (res.sipExtension && res.sipPassword)
         setSipCredentials(res.sipExtension, res.sipPassword)
-      const dest = res.role === 'admin' || res.role === 'supervisor' ? '/admin' : '/agent'
-      navigate(dest, { replace: true })
+      navigate(getLandingRoute(res.landingPage ?? null), { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid code. Please try again.')
     } finally {

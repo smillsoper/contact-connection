@@ -25,6 +25,12 @@ public class TenantAdminInviteConfiguration : IEntityTypeConfiguration<TenantAdm
             .IsRequired()
             .HasMaxLength(20);
 
+        builder.Property(i => i.RoleId).HasColumnName("role_id");
+
+        builder.Property(i => i.RoleName)
+            .HasColumnName("role_name")
+            .HasMaxLength(100);
+
         builder.Property(i => i.Token)
             .HasColumnName("token")
             .IsRequired()

@@ -101,6 +101,7 @@ app.MapCampaignsEndpoints();
 app.MapPhoneNumbersEndpoints();
 app.MapAgentGroupsEndpoints();
 app.MapBlockListEndpoints();
+app.MapRolesEndpoints();
 
 // Tenant admin portal
 app.MapAdminAgentsEndpoints();

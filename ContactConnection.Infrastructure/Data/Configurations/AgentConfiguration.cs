@@ -37,6 +37,12 @@ public class AgentConfiguration : IEntityTypeConfiguration<Agent>
         builder.Property(a => a.MfaSecret).HasColumnName("mfa_secret").HasMaxLength(64);
         builder.Property(a => a.MfaEnabled).HasColumnName("mfa_enabled");
 
+        builder.Property(a => a.RoleId).HasColumnName("role_id");
+        builder.HasOne(a => a.CustomRole)
+            .WithMany()
+            .HasForeignKey(a => a.RoleId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         builder.Property(a => a.SipExtension).HasColumnName("sip_extension").HasMaxLength(20);
         builder.Property(a => a.SipA1Hash).HasColumnName("sip_a1hash").HasMaxLength(32);
         builder.HasIndex(a => a.SipExtension)

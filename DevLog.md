@@ -67,6 +67,41 @@
 | 55 | 2026-06-21 | 10:00 AM CDT | 11:08 AM CDT | 68 min | ~3433 min |
 | 56 | 2026-06-25 | 5:01 PM CDT | 5:47 PM CDT | 46 min | ~3479 min |
 | 57 | 2026-06-28 | 10:00 AM CDT | 11:16 AM CDT | 76 min | ~3555 min |
+| 58 | 2026-06-28 | 11:23 AM CDT | 12:41 PM CDT | 78 min | ~3633 min |
+
+---
+
+## Session 58
+
+**Date:** 2026-06-28
+**Start:** 11:23 AM CDT
+**End:** 12:41 PM CDT
+**Duration:** 78 minutes
+
+### Accomplished
+
+**Custom RBAC — roles, permissions, bulk user invites, and onboarding role wiring**
+
+- **`Role` entity** (`ContactConnection.Domain`) — `Name`, `IsBuiltIn`, `Permissions` (JSONB `List<string>`), `DefaultLandingPage`; `HasPermission()` guard; `Update()` method
+- **`Permission` static class** — 16 permission constants across 8 groups; `ForLegacyRole(string)` backward-compat fallback
+- **`LandingPage` static class** — 5 landing page constants; `ForLegacyRole(string)` fallback
+- **`Agent.RoleId` / `Agent.CustomRole`** — nullable FK to `roles`; `SetCustomRole()` method
+- **`IRoleRepository`** + `RoleRepository` (lazy factory pattern)
+- **`RoleConfiguration`** — `roles` table in tenant schema; JSONB permissions; unique index `(tenant_id, name)`
+- **`AgentConfiguration`** — `role_id` FK with `ON DELETE SET NULL`
+- **`JwtTokenService`** — extended `GenerateToken(agent, tenant, role?)` to include `permissions` (comma-joined), `landing_page`, `role_id` claims; falls back to legacy role if no custom role
+- **`TenantProvisioningService`** — `SeedBuiltInRolesAsync` seeds 3 built-in roles (Administrator, Supervisor, Agent) on every new tenant provision
+- **Migration `AddRoles`** applied to tenant schemas; built-in roles seeded into `tenant_test_tenant` and `tenant_test_contact_center` via direct SQL (migration applied to `test_contact_center` which was missing it)
+- **`RolesEndpoints`** — full CRUD at `/api/v1/roles`; `GET /api/v1/permissions`; `GET /api/v1/landing-pages`; built-in roles reject update/delete
+- **`AuthEndpoints`** — all 4 login/refresh handlers load agent's custom role; `LoginResponse` extended with `permissions[]` + `landingPage`; post-login redirect uses `getLandingRoute(landingPage)`
+- **`AdminAgentsEndpoints`** — role column is live `<select>` dropdown; `PATCH` accepts `RoleId` (custom) or `Role` (legacy)
+- **Auth store** — `permissions[]` + `landingPage` state; `hasPermission()` helper; `LANDING_ROUTES` map; `RequireAdminAuth` checks both legacy role strings and permissions array
+- **`AdminRolesPage`** — full role editor modal: name, landing page select, grouped permission toggles with group-level all-on/all-off; role list with permission badge summary; CRUD actions
+- **Toggle fix** — replaced `absolute`-positioned thumb with `inline-block` + `p-0.5` pattern (Headless UI style); thumb now correctly slides right when permission is on
+- **Bulk user invite** — "Invite Users" replaces "Invite admin"; textarea accepts comma/newline/semicolon-delimited emails; role dropdown; sends one invite per address; returns `{ sent, failed[], message }`; `TenantAdminInvite` extended with `RoleId` + `RoleName` columns; migration `AddRoleToAdminInvite` applied
+- **Invite email** — `TenantAdminInviteEmail` updated with `roleName` parameter; subject + body say "You've been invited as a/an [Role]"; `ArticleFor()` helper for a/an
+- **Onboarding role wiring** — `OnboardingEndpoints.Complete` now loads the built-in Administrator role and calls `admin.SetCustomRole(adminRole.Id)` on the first admin; additional admin invites get `roleId`/`roleName`; JWT returned includes role claims; `PortalTenantsEndpoints.InviteAdmin` sets `TenantContext` + loads Administrator role before creating invite
+- **Admin portal UX** — navbar nav links removed; logo is now a `<Link to="/admin">`; CC fallback logo uses `self-stretch h-full` to match Agent Portal height; single "Dashboard" link remains in navbar; `TenantAdminPage` expanded to grouped navigation cards (Team, Telephony, Flow Engine, Integrations, Coming Soon) covering all built sections
 
 ---
 

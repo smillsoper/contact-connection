@@ -94,7 +94,7 @@ export function useSessionTimeout(onLogout: () => void) {
   const keepAlive = useCallback(async () => {
     try {
       const res = await authApi.refresh()
-      setAuth(res.token, res.agentId, tenantSubdomain ?? res.tenantSubdomain)
+      setAuth(res.token, res.agentId, tenantSubdomain ?? res.tenantSubdomain, res.role, res.firstName, res.lastName, res.permissions ?? [], res.landingPage ?? undefined)
       setShowWarning(false)
       // scheduleTimers will fire via the token useEffect above
     } catch {

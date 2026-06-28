@@ -42,7 +42,7 @@ public class JwtTokenService : ITokenService
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
-    public string GenerateToken(Agent agent, Tenant tenant)
+    public string GenerateToken(Agent agent, Tenant tenant, Role? role = null)
     {
         var signingKey = _configuration["Jwt:SigningKey"]
             ?? throw new InvalidOperationException("Jwt:SigningKey is not configured.");
@@ -54,6 +54,10 @@ public class JwtTokenService : ITokenService
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(signingKey));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
+        var roleName    = role?.Name ?? agent.Role;
+        var permissions = role?.Permissions ?? Domain.Entities.Permission.ForLegacyRole(agent.Role).ToList();
+        var landingPage = role?.DefaultLandingPage ?? Domain.Entities.LandingPage.ForLegacyRole(agent.Role);
+
         var claims = new[]
         {
             new Claim(JwtRegisteredClaimNames.Sub, agent.Id.ToString()),
@@ -64,7 +68,10 @@ public class JwtTokenService : ITokenService
             new Claim("tenant_id", tenant.Id.ToString()),
             new Claim("tenant_schema", tenant.SchemaName),
             new Claim("tenant_subdomain", tenant.Subdomain),
-            new Claim("role", agent.Role)
+            new Claim("role", roleName),
+            new Claim("role_id", role?.Id.ToString() ?? string.Empty),
+            new Claim("permissions", string.Join(",", permissions)),
+            new Claim("landing_page", landingPage)
         };
 
         var token = new JwtSecurityToken(

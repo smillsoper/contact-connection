@@ -229,6 +229,8 @@ public static class PortalTenantsEndpoints
         InviteAdminRequest request,
         ITenantRepository tenants,
         ITenantAdminInviteRepository adminInvites,
+        IRoleRepository roles,
+        TenantContext tenantContext,
         IEmailService email,
         IConfiguration configuration,
         ILoggerFactory loggerFactory,
@@ -240,7 +242,14 @@ public static class PortalTenantsEndpoints
         if (string.IsNullOrWhiteSpace(request.Email))
             return Results.BadRequest(new { error = "Email is required." });
 
-        var invite = TenantAdminInvite.Create(tenant.Id, request.Email.Trim().ToLowerInvariant(), AgentRole.Admin);
+        // Load the built-in Administrator role from the tenant schema
+        tenantContext.Current = tenant;
+        var allRoles = await roles.GetAllAsync(ct);
+        var adminRole = allRoles.FirstOrDefault(r => r.IsBuiltIn && r.Name == "Administrator");
+
+        var invite = TenantAdminInvite.Create(
+            tenant.Id, request.Email.Trim().ToLowerInvariant(), AgentRole.Admin,
+            roleId: adminRole?.Id, roleName: "Administrator");
         await adminInvites.AddAsync(invite, ct);
         await adminInvites.SaveChangesAsync(ct);
 
@@ -251,8 +260,8 @@ public static class PortalTenantsEndpoints
             var loginUrl = $"https://{tenant.Subdomain}.{new Uri(baseUrl).Host}/login";
             await email.SendAsync(
                 invite.Email,
-                TenantAdminInviteEmail.Subject(tenant.Name),
-                TenantAdminInviteEmail.HtmlBody(tenant.Name, tenant.DisplayName, tenant.Subdomain, acceptUrl, loginUrl),
+                TenantAdminInviteEmail.Subject(tenant.Name, "Administrator"),
+                TenantAdminInviteEmail.HtmlBody(tenant.Name, tenant.DisplayName, tenant.Subdomain, acceptUrl, "Administrator", loginUrl),
                 ct);
         }
         catch (Exception ex)

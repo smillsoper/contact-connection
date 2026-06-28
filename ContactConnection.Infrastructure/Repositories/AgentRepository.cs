@@ -14,10 +14,10 @@ public class AgentRepository : IAgentRepository
     public AgentRepository(ScopedTenantDbContextFactory factory) => _factory = factory;
 
     public Task<List<Agent>> GetAllAsync(CancellationToken ct = default) =>
-        Db.Agents.OrderBy(a => a.LastName).ThenBy(a => a.FirstName).ToListAsync(ct);
+        Db.Agents.Include(a => a.CustomRole).OrderBy(a => a.LastName).ThenBy(a => a.FirstName).ToListAsync(ct);
 
     public Task<Agent?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
-        Db.Agents.FirstOrDefaultAsync(a => a.Id == id, ct);
+        Db.Agents.Include(a => a.CustomRole).FirstOrDefaultAsync(a => a.Id == id, ct);
 
     public Task<Agent?> GetByEmailAsync(string email, CancellationToken ct = default) =>
         Db.Agents.FirstOrDefaultAsync(

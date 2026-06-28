@@ -16,6 +16,7 @@ public class TenantDbContext : DbContext
     public TenantDbContext(DbContextOptions<TenantDbContext> options) : base(options) { }
 
     public DbSet<Agent> Agents => Set<Agent>();
+    public DbSet<Role> Roles => Set<Role>();
     public DbSet<CallRecord> CallRecords => Set<CallRecord>();
     public DbSet<CallInteraction> CallInteractions => Set<CallInteraction>();
     public DbSet<Flow> Flows => Set<Flow>();
@@ -45,6 +46,7 @@ public class TenantDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.ApplyConfiguration(new RoleConfiguration());
         modelBuilder.ApplyConfiguration(new AgentConfiguration());
         modelBuilder.ApplyConfiguration(new CallRecordConfiguration());
         modelBuilder.ApplyConfiguration(new CallInteractionConfiguration());
