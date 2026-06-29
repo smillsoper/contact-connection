@@ -29,13 +29,15 @@ public static class FlowsEndpoints
                 return Results.BadRequest(new { error = $"Invalid flow_type. Valid values: {string.Join(", ", FlowType.All)}" });
 
             var flow = Flow.Create(
-                tenantId:       tenantContext.Current.Id,
+                tenantId:         tenantContext.Current.Id,
                 createdByAgentId: agentId,
-                name:           req.Name,
-                flowType:       req.FlowType,
-                definition:     req.Definition,
-                clientId:       req.ClientId,
-                campaignId:     req.CampaignId);
+                name:             req.Name,
+                flowType:         req.FlowType,
+                definition:       req.Definition,
+                clientId:         req.ClientId,
+                campaignId:       req.CampaignId,
+                flowDirection:    req.FlowDirection,
+                flowSubType:      req.FlowSubType);
 
             await flows.AddAsync(flow, ct);
             await flows.SaveChangesAsync(ct);
@@ -76,6 +78,7 @@ public static class FlowsEndpoints
             if (!string.IsNullOrWhiteSpace(req.Name))
                 flow.Rename(req.Name);
             flow.UpdateDefinition(req.Definition);
+            flow.UpdateMetadata(req.FlowDirection, req.FlowSubType);
             await flows.SaveChangesAsync(ct);
 
             return Results.Ok(flow.ToDetailResponse());
@@ -148,29 +151,33 @@ public static class FlowsEndpoints
 
     private static object ToResponse(this Flow f) => new
     {
-        id          = f.Id,
-        name        = f.Name,
-        flow_type   = f.FlowType,
-        version     = f.Version,
-        is_active   = f.IsActive,
-        client_id   = f.ClientId,
-        campaign_id = f.CampaignId,
-        created_at  = f.CreatedAt,
-        updated_at  = f.UpdatedAt,
+        id             = f.Id,
+        name           = f.Name,
+        flow_type      = f.FlowType,
+        flow_direction = f.FlowDirection,
+        flow_sub_type  = f.FlowSubType,
+        version        = f.Version,
+        is_active      = f.IsActive,
+        client_id      = f.ClientId,
+        campaign_id    = f.CampaignId,
+        created_at     = f.CreatedAt,
+        updated_at     = f.UpdatedAt,
     };
 
     private static object ToDetailResponse(this Flow f) => new
     {
-        id          = f.Id,
-        name        = f.Name,
-        flow_type   = f.FlowType,
-        version     = f.Version,
-        is_active   = f.IsActive,
-        client_id   = f.ClientId,
-        campaign_id = f.CampaignId,
-        created_at  = f.CreatedAt,
-        updated_at  = f.UpdatedAt,
-        definition  = f.Definition,
+        id             = f.Id,
+        name           = f.Name,
+        flow_type      = f.FlowType,
+        flow_direction = f.FlowDirection,
+        flow_sub_type  = f.FlowSubType,
+        version        = f.Version,
+        is_active      = f.IsActive,
+        client_id      = f.ClientId,
+        campaign_id    = f.CampaignId,
+        created_at     = f.CreatedAt,
+        updated_at     = f.UpdatedAt,
+        definition     = f.Definition,
     };
 }
 
@@ -179,6 +186,12 @@ public record CreateFlowRequest(
     string FlowType,
     string Definition,
     Guid? ClientId,
-    Guid? CampaignId);
+    Guid? CampaignId,
+    string? FlowDirection = null,
+    string? FlowSubType = null);
 
-public record UpdateFlowRequest(string Definition, string? Name = null);
+public record UpdateFlowRequest(
+    string Definition,
+    string? Name = null,
+    string? FlowDirection = null,
+    string? FlowSubType = null);

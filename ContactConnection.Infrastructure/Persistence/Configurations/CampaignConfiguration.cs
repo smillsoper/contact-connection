@@ -19,9 +19,18 @@ public class CampaignConfiguration : IEntityTypeConfiguration<Campaign>
         builder.Property(c => c.Status).HasColumnName("status").HasMaxLength(20).IsRequired();
         builder.Property(c => c.Description).HasColumnName("description").HasMaxLength(500);
         builder.Property(c => c.FlowId).HasColumnName("flow_id");
+        builder.Property(c => c.OutboundFlowId).HasColumnName("outbound_flow_id");
+        builder.Property(c => c.Direction).HasColumnName("direction").HasMaxLength(20).IsRequired();
+        builder.Property(c => c.DialMode).HasColumnName("dial_mode").HasMaxLength(20).IsRequired();
+        builder.Property(c => c.CallerIdNumber).HasColumnName("caller_id_number").HasMaxLength(30);
+        builder.Property(c => c.Priority).HasColumnName("priority");
+        builder.Property(c => c.AfterCallWorkSeconds).HasColumnName("after_call_work_seconds");
         builder.Property(c => c.MaxQueueSize).HasColumnName("max_queue_size");
         builder.Property(c => c.QueueTimeoutSeconds).HasColumnName("queue_timeout_seconds");
         builder.Property(c => c.ServiceLevelThresholdSeconds).HasColumnName("service_level_threshold_seconds");
+        builder.Property(c => c.QueueAccelerationEnabled).HasColumnName("queue_acceleration_enabled");
+        builder.Property(c => c.QueueAccelerationIntervalSeconds).HasColumnName("queue_acceleration_interval_seconds");
+        builder.Property(c => c.QueueAccelerationPriorityBoost).HasColumnName("queue_acceleration_priority_boost");
         builder.Property(c => c.CreatedAt).HasColumnName("created_at");
         builder.Property(c => c.UpdatedAt).HasColumnName("updated_at");
 

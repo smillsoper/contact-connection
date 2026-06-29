@@ -39,6 +39,14 @@ public class FlowConfiguration : IEntityTypeConfiguration<Flow>
             .HasMaxLength(20)
             .IsRequired();
 
+        builder.Property(f => f.FlowDirection)
+            .HasColumnName("flow_direction")
+            .HasMaxLength(20);
+
+        builder.Property(f => f.FlowSubType)
+            .HasColumnName("flow_sub_type")
+            .HasMaxLength(20);
+
         builder.Property(f => f.Version)
             .HasColumnName("version")
             .IsRequired();

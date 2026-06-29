@@ -17,7 +17,7 @@ public class ClientRepository : IClientRepository
         Db.Clients.Include(c => c.Campaigns).FirstOrDefaultAsync(c => c.Id == id, ct);
 
     public Task<List<Client>> GetAllAsync(CancellationToken ct = default) =>
-        Db.Clients.OrderBy(c => c.Name).ToListAsync(ct);
+        Db.Clients.Include(c => c.Campaigns).OrderBy(c => c.Name).ToListAsync(ct);
 
     public async Task AddAsync(Client client, CancellationToken ct = default) =>
         await Db.Clients.AddAsync(client, ct);

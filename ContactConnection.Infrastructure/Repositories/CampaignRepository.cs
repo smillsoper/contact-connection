@@ -49,6 +49,39 @@ public class CampaignRepository : ICampaignRepository
     public Task<GroupCampaignAssignment?> GetGroupAssignmentAsync(Guid campaignId, Guid groupId, CancellationToken ct = default) =>
         Db.GroupCampaignAssignments.FirstOrDefaultAsync(a => a.CampaignId == campaignId && a.GroupId == groupId, ct);
 
+    public Task<List<CampaignExternalNumber>> GetExternalNumbersAsync(Guid campaignId, CancellationToken ct = default) =>
+        Db.CampaignExternalNumbers
+            .Where(n => n.CampaignId == campaignId && n.IsActive)
+            .OrderBy(n => n.DisplayOrder).ThenBy(n => n.Label)
+            .ToListAsync(ct);
+
+    public Task<CampaignExternalNumber?> GetExternalNumberByIdAsync(Guid campaignId, Guid numberId, CancellationToken ct = default) =>
+        Db.CampaignExternalNumbers
+            .FirstOrDefaultAsync(n => n.CampaignId == campaignId && n.Id == numberId, ct);
+
+    public async Task<List<CampaignExternalNumber>> GetClientTransferNumbersAsync(Guid campaignId, CancellationToken ct = default)
+    {
+        var campaign = await Db.Campaigns.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == campaignId, ct);
+        if (campaign is null) return [];
+
+        return await Db.CampaignExternalNumbers
+            .Include(n => n.Campaign)
+            .Where(n =>
+                n.Campaign!.ClientId == campaign.ClientId &&
+                n.Campaign.Direction == CampaignDirection.Outbound &&
+                n.Campaign.DialMode  == CampaignDialMode.Manual &&
+                n.Campaign.Status    != CampaignStatus.Inactive &&
+                n.IsActive)
+            .OrderBy(n => n.Campaign!.Name)
+            .ThenBy(n => n.DisplayOrder)
+            .ThenBy(n => n.Label)
+            .ToListAsync(ct);
+    }
+
+    public async Task AddExternalNumberAsync(CampaignExternalNumber number, CancellationToken ct = default) =>
+        await Db.CampaignExternalNumbers.AddAsync(number, ct);
+
     public Task SaveChangesAsync(CancellationToken ct = default) =>
         Db.SaveChangesAsync(ct);
 }

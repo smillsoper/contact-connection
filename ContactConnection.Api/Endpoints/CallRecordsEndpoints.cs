@@ -30,6 +30,7 @@ public static class CallRecordsEndpoints
         InboundCallRequest request,
         System.Security.Claims.ClaimsPrincipal user,
         ICallRecordRepository callRecords,
+        IPhoneNumberRepository phoneNumbers,
         TenantContext tenantContext,
         CancellationToken ct)
     {
@@ -47,7 +48,15 @@ public static class CallRecordsEndpoints
         await callRecords.AddAsync(record, ct);
         await callRecords.SaveChangesAsync(ct);
 
-        return Results.Created($"/api/v1/call-records/{record.Id}", new { id = record.Id });
+        // Resolve campaign from the DID if provided — used by softphone for transfer number context
+        Guid? campaignId = null;
+        if (!string.IsNullOrWhiteSpace(request.CalledNumber))
+        {
+            var phoneNumber = await phoneNumbers.GetByNumberAsync(request.CalledNumber, ct);
+            campaignId = phoneNumber?.CampaignId;
+        }
+
+        return Results.Created($"/api/v1/call-records/{record.Id}", new { id = record.Id, campaignId });
     }
 
     // ── POST /api/v1/call-records/outbound ─────────────────────────────────
@@ -206,5 +215,5 @@ public static class CallRecordsEndpoints
     };
 }
 
-public record InboundCallRequest(string? CallerNumber, string? CallerName, string? ChannelUuid);
+public record InboundCallRequest(string? CallerNumber, string? CallerName, string? ChannelUuid, string? CalledNumber);
 public record OutboundCallRequest(string? DialedNumber);

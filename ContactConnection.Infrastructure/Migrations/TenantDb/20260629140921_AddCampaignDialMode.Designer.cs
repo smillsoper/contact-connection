@@ -3,6 +3,7 @@ using System;
 using ContactConnection.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace ContactConnection.Infrastructure.Migrations.TenantDb
 {
     [DbContext(typeof(TenantDbContext))]
-    partial class TenantDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260629140921_AddCampaignDialMode")]
+    partial class AddCampaignDialMode
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -621,10 +624,6 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .HasColumnType("character varying(200)")
                         .HasColumnName("name");
 
-                    b.Property<Guid?>("OutboundFlowId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("outbound_flow_id");
-
                     b.Property<int>("Priority")
                         .HasColumnType("integer")
                         .HasColumnName("priority");
@@ -679,54 +678,6 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .IsUnique();
 
                     b.ToTable("campaigns", (string)null);
-                });
-
-            modelBuilder.Entity("ContactConnection.Domain.Entities.CampaignExternalNumber", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<Guid>("CampaignId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("campaign_id");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<int>("DisplayOrder")
-                        .HasColumnType("integer")
-                        .HasColumnName("display_order");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_active");
-
-                    b.Property<string>("Label")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("label");
-
-                    b.Property<string>("Number")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)")
-                        .HasColumnName("number");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("tenant_id");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CampaignId");
-
-                    b.HasIndex("TenantId");
-
-                    b.ToTable("campaign_external_numbers", (string)null);
                 });
 
             modelBuilder.Entity("ContactConnection.Domain.Entities.Client", b =>
@@ -932,16 +883,6 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .IsRequired()
                         .HasColumnType("jsonb")
                         .HasColumnName("definition");
-
-                    b.Property<string>("FlowDirection")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)")
-                        .HasColumnName("flow_direction");
-
-                    b.Property<string>("FlowSubType")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)")
-                        .HasColumnName("flow_sub_type");
 
                     b.Property<string>("FlowType")
                         .IsRequired()
@@ -2390,17 +2331,6 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                     b.Navigation("Client");
                 });
 
-            modelBuilder.Entity("ContactConnection.Domain.Entities.CampaignExternalNumber", b =>
-                {
-                    b.HasOne("ContactConnection.Domain.Entities.Campaign", "Campaign")
-                        .WithMany("ExternalNumbers")
-                        .HasForeignKey("CampaignId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Campaign");
-                });
-
             modelBuilder.Entity("ContactConnection.Domain.Entities.CustomFieldValue", b =>
                 {
                     b.HasOne("ContactConnection.Domain.Entities.CustomFieldDefinition", "Definition")
@@ -2550,8 +2480,6 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
             modelBuilder.Entity("ContactConnection.Domain.Entities.Campaign", b =>
                 {
                     b.Navigation("AgentAssignments");
-
-                    b.Navigation("ExternalNumbers");
 
                     b.Navigation("GroupAssignments");
 

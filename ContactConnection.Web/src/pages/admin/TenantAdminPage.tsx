@@ -25,14 +25,15 @@ const NAV_SECTIONS: NavSection[] = [
   {
     heading: 'Telephony',
     cards: [
-      { title: 'Telephony', desc: 'DIDs, campaigns, clients, and agent groups.', path: '/admin/telephony', live: true },
+      { title: 'Clients / Telephony', desc: 'DIDs, campaigns, clients, and agent groups.', path: '/admin/telephony', live: true },
       { title: 'SIP Gateways', desc: 'Configure carrier gateways and SIP trunks.', path: '/admin/sip-gateways', live: true },
     ],
   },
   {
     heading: 'Flow Engine',
     cards: [
-      { title: 'Flows', desc: 'Build and publish call flows for your contact center.', path: '/admin/flows', live: true },
+      { title: 'Flows', desc: 'Build and publish call flows for your contact center.', path: '/flows', live: true },
+      { title: 'Agent Portal', desc: 'Open the agent workspace — softphone, live flow, and chat.', path: '/agent', live: true },
     ],
   },
   {

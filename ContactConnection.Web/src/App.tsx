@@ -25,6 +25,7 @@ import AdminApiDefinitionDetailPage from './pages/admin/AdminApiDefinitionDetail
 import AdminCredentialsPage from './pages/admin/AdminCredentialsPage'
 import TelephonyPage from './pages/admin/TelephonyPage'
 import SipGatewaysPage from './pages/admin/SipGatewaysPage'
+import CampaignDetailPage from './pages/admin/CampaignDetailPage'
 import PortalApiDefinitionsPage from './pages/portal/PortalApiDefinitionsPage'
 import PortalApiDefinitionDetailPage from './pages/portal/PortalApiDefinitionDetailPage'
 import PortalCredentialsPage from './pages/portal/PortalCredentialsPage'
@@ -239,6 +240,14 @@ export default function App() {
           element={
             <RequireAdminAuth>
               <SipGatewaysPage />
+            </RequireAdminAuth>
+          }
+        />
+        <Route
+          path="/admin/campaigns/:id"
+          element={
+            <RequireAdminAuth>
+              <CampaignDetailPage />
             </RequireAdminAuth>
           }
         />

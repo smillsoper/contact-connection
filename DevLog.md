@@ -68,6 +68,64 @@
 | 56 | 2026-06-25 | 5:01 PM CDT | 5:47 PM CDT | 46 min | ~3479 min |
 | 57 | 2026-06-28 | 10:00 AM CDT | 11:16 AM CDT | 76 min | ~3555 min |
 | 58 | 2026-06-28 | 11:23 AM CDT | 12:41 PM CDT | 78 min | ~3633 min |
+| 59 | 2026-06-28 | 3:36 PM CDT | 4:35 PM CDT | 59 min | ~3692 min |
+| 60 | 2026-06-29 | 6:51 AM CDT | 8:42 AM CDT | 111 min | ~3803 min |
+
+---
+
+## Session 60
+
+**Date:** 2026-06-29
+**Start:** 6:51 AM CDT
+**End:** 8:42 AM CDT
+**Duration:** 111 minutes
+
+### Accomplished
+
+**Telephony admin UI — campaign external numbers, tabbed flow execution, outbound flow config, and flow direction/sub-type metadata**
+
+- **`AddCampaignExternalNumbers` migration** — `campaign_external_numbers` table (id, campaign_id FK cascade, label, number, created_at); two indexes; applied to `tenant_test_tenant` and `tenant_test_contact_center`
+- **`CampaignExternalNumberConfiguration` registration** — added to `TenantDbContext.OnModelCreating` (was missing, causing runtime/migration issues)
+- **`IPhoneNumberRepository.GetByNumberAsync`** wired to inbound call record endpoint — `InboundCallRequest` now accepts `CalledNumber`; resolves `campaignId` from DID lookup; returns `{ id, campaignId }` in 201 response
+- **`CampaignExternalNumbersEndpoints`** — `GET/POST /campaigns/{id}/external-numbers`, `DELETE /campaigns/{id}/external-numbers/{numberId}`, `GET /campaigns/{id}/client-transfer-numbers`; `ClientTransferNumber` response includes `CampaignFlowId` (warm transfer auto-pop)
+- **Frontend telephony.ts** — `CampaignExternalNumber` and `ClientTransferNumber` interfaces; `listExternalNumbers`, `addExternalNumber`, `removeExternalNumber`, `getClientTransferNumbers` API functions
+- **`callStore.ts`** — added `campaignId` state and `setCampaignId`; cleared on `setRinging`, `setDialing`, and `reset`
+- **`flowSessionsStore.ts`** (new Zustand store) — `FlowSessionEntry` (id, label, sessionId, initialNode); `addSession`, `removeSession`, `setActiveId`; completely independent of `callStore` — tabs survive call lifecycle
+- **`SoftphonePanel.tsx`** — fetches transfer numbers when `campaignId` changes; transfer numbers collapsible panel in ON CALL block; `handleAnswer` extracts `campaignId` from inbound response and calls `setCampaignId`; `handleDial(transferTarget?)` starts flow session and adds tab if `campaignFlowId` present
+- **`FlowPanel.tsx`** (major rewrite) — tabbed execution with `TabBar` (no close buttons); `FlowSessionView` encapsulates per-session machinery; tabs survive call start/end; only close when flow reaches end node (2s "Flow complete" then `onEnd()`); all session views mounted simultaneously, shown via block/hidden; manual start toolbar shown when no sessions active
+- **`Campaign.OutboundFlowId`** — new nullable FK on Campaign entity; `AssignOutboundFlow()` / `RemoveOutboundFlow()` methods; `CampaignConfiguration` updated; `PUT/DELETE /campaigns/{id}/outbound-flow` endpoints; migration `AddCampaignOutboundFlowId` applied
+- **`CampaignDetailPage` — outbound flow dropdown** — `SearchableSelect` for Outbound Call Flow, shown only for outbound+manual campaigns; filtered to `flow_type === 'telephony' && flow_direction === 'outbound' && flow_sub_type === 'manual'`
+- **`ExternalNumbersSection`** component in `CampaignDetailPage` — load, list, add, remove external numbers; rendered only when `direction === 'outbound' && dialMode === 'manual'`; external numbers section visibility bug fixed (existing rows had `dial_mode = ''` from old default; patched via SQL)
+- **`Flow.FlowDirection` + `Flow.FlowSubType`** — nullable metadata on Flow entity; static classes `FlowTelephonyDirection` (inbound/outbound) and `FlowTelephonySubType` (manual/progressive/predictive); `Flow.Create()` accepts both (only stored for telephony flows); `UpdateMetadata()` method; migration `AddFlowDirectionAndSubType` applied
+- **`FlowDesignerPage`** — three new toolbar selects: Flow Type, Direction (telephony only), Sub-type (outbound only); load restores all three; save passes all three to API
+- **`FlowsPage`** — Type/Direction column shows `telephony · outbound / manual` annotation
+- **`FlowsEndpoints`** — `ToResponse`/`ToDetailResponse` include `flow_direction`/`flow_sub_type`; `CreateFlowRequest` and `UpdateFlowRequest` include both; `UpdateMetadata` called on PUT
+- **Bugs fixed** — `handleDial` type error (wrapped with arrow fn); second dialpad `onClick={handleDial}` also wrapped; docker container name corrected to `cc_postgres`
+
+---
+
+## Session 59
+
+**Date:** 2026-06-28
+**Start:** 3:36 PM CDT
+**End:** 4:35 PM CDT
+**Duration:** 59 minutes
+
+### Accomplished
+
+**Tenant admin portal — telephony UI fixes and campaign detail page**
+
+- **Dashboard nav fixes** — Flows card now points to `/flows` (agent-facing); new "Agent Portal" card added pointing to `/agent`; Flows page back-link now returns to `/admin`
+- **Card rename** — "Telephony" card title renamed to "Clients / Telephony"
+- **Telephony page bug fixes** — `ClientRepository.GetAllAsync` now includes `.Include(c => c.Campaigns)` (was showing 0 counts); status badge and button comparisons fixed to lowercase (`active`, `paused`, `inactive`) matching domain strings
+- **Search on all 4 tabs** — client-side search added to Clients, Campaigns, Phone Numbers, and Agent Groups tabs
+- **Searchable dropdowns** — `SearchableSelect` component created; used for client filter on Campaigns tab and campaign selector on Phone Numbers tab; outside-click dismiss, Escape key, Enter-to-select-single-result
+- **Campaign telephony settings** — 7 new domain fields on `Campaign`: `Direction`, `Priority`, `AfterCallWorkSeconds`, `CallerIdNumber`, `QueueAccelerationEnabled`, `QueueAccelerationIntervalSeconds`, `QueueAccelerationPriorityBoost`; `CampaignDirection` static class; `Update()` expanded with all fields; `CampaignConfiguration` updated; migration `AddCampaignTelephonySettings` applied to all tenant schemas
+- **Campaign detail page** (`/admin/campaigns/:id`) — full management page: telephony settings form (direction toggle, priority slider, ACW input, caller ID conditional on outbound, searchable flow dropdown, queue settings, queue acceleration toggle with conditional sub-fields); agent roster with single add, bulk add (checkbox list + search), inline proficiency editing, remove; active-only filter on agent assignments
+- **Bulk assign endpoint** — `POST /api/v1/campaigns/{id}/agents/bulk`; re-activates soft-deleted assignments instead of erroring
+- **403 fix (AdminAgentsEndpoints)** — removed `MapGroup` entirely; all 4 routes now use flat `app.MapXxx` with explicit per-route auth; `GET` uses `AgentsView` policy (accepts `role=admin`, `role=supervisor`, or `agents.view` in permissions claim); write endpoints keep `TenantAdmin`
+- **Campaign page resilience** — `listAdminAgents()` now loads outside the main `Promise.all`; a failure shows empty agent list instead of blocking the whole page
+- **Toggle fix** — Queue Acceleration toggle knob changed from `absolute`-positioned to `inline-flex items-center` + `inline-block` pattern; knob now stays within track bounds
 
 ---
 

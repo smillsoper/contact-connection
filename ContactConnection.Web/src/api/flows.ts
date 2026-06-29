@@ -6,6 +6,8 @@ export interface FlowSummary {
   id: string
   name: string
   flow_type: string
+  flow_direction?: string
+  flow_sub_type?: string
   is_active: boolean
   version: number
   created_at: string
@@ -81,17 +83,36 @@ export const flowsApi = {
     api.post<AutocompleteSelectionResult>(`/api/v1/flow-sessions/${sessionId}/select-autocomplete-address`, { placeId, sessionToken }),
 
   // Flow designer
-  create: (name: string, flowType: string, definition: ContactConnectionFlowDefinition) =>
+  create: (
+    name: string,
+    flowType: string,
+    definition: ContactConnectionFlowDefinition,
+    flowDirection?: string,
+    flowSubType?: string,
+  ) =>
     api.post<FlowDetail>('/api/v1/flows', {
       name,
       flowType,
       definition: JSON.stringify(definition),
+      flowDirection: flowDirection ?? null,
+      flowSubType:   flowSubType   ?? null,
     }),
 
   getDetail: (id: string) => api.get<FlowDetail>(`/api/v1/flows/${id}`),
 
-  updateDefinition: (id: string, name: string, definition: ContactConnectionFlowDefinition) =>
-    api.put<FlowDetail>(`/api/v1/flows/${id}`, { name, definition: JSON.stringify(definition) }),
+  updateDefinition: (
+    id: string,
+    name: string,
+    definition: ContactConnectionFlowDefinition,
+    flowDirection?: string,
+    flowSubType?: string,
+  ) =>
+    api.put<FlowDetail>(`/api/v1/flows/${id}`, {
+      name,
+      definition: JSON.stringify(definition),
+      flowDirection: flowDirection ?? null,
+      flowSubType:   flowSubType   ?? null,
+    }),
 
   publish: (id: string) => api.post<FlowDetail>(`/api/v1/flows/${id}/publish`),
 

@@ -13,6 +13,11 @@ public class Flow
 
     public string Name { get; private set; } = string.Empty;
     public string FlowType { get; private set; } = Entities.FlowType.Crm;  // crm | telephony
+
+    // Telephony flows only: routing direction and dial-mode sub-type
+    public string? FlowDirection { get; private set; }   // inbound | outbound
+    public string? FlowSubType   { get; private set; }   // manual | progressive | predictive
+
     public int Version { get; private set; }
     public bool IsActive { get; private set; }
 
@@ -36,7 +41,9 @@ public class Flow
         string flowType,
         string definition,
         Guid? clientId = null,
-        Guid? campaignId = null)
+        Guid? campaignId = null,
+        string? flowDirection = null,
+        string? flowSubType = null)
     {
         return new Flow
         {
@@ -47,6 +54,8 @@ public class Flow
             CreatedByAgentId = createdByAgentId,
             Name = name,
             FlowType = flowType,
+            FlowDirection = flowType == Entities.FlowType.Telephony ? flowDirection : null,
+            FlowSubType   = flowType == Entities.FlowType.Telephony ? flowSubType   : null,
             Version = 1,
             IsActive = false,   // flows start as drafts; explicitly published
             Definition = definition,
@@ -79,6 +88,14 @@ public class Flow
         Version++;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
+
+    public void UpdateMetadata(string? flowDirection, string? flowSubType)
+    {
+        if (FlowType != Entities.FlowType.Telephony) return;
+        FlowDirection = flowDirection;
+        FlowSubType   = flowSubType;
+        UpdatedAt     = DateTimeOffset.UtcNow;
+    }
 }
 
 public static class FlowType
@@ -88,4 +105,19 @@ public static class FlowType
 
     public static readonly IReadOnlyList<string> All = [Crm, Telephony];
     public static bool IsValid(string type) => All.Contains(type);
+}
+
+public static class FlowTelephonyDirection
+{
+    public const string Inbound  = "inbound";
+    public const string Outbound = "outbound";
+}
+
+public static class FlowTelephonySubType
+{
+    public const string Manual      = "manual";
+    public const string Progressive = "progressive";
+    public const string Predictive  = "predictive";
+
+    public static readonly IReadOnlyList<string> All = [Manual, Progressive, Predictive];
 }

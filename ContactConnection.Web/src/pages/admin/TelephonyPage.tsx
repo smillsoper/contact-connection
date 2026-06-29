@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import AdminShell from '../../components/admin/AdminShell'
+import SearchableSelect from '../../components/SearchableSelect'
 import {
   listClients, createClient, activateClient, deactivateClient,
   listCampaigns, createCampaign, activateCampaign, pauseCampaign, deactivateCampaign,
@@ -18,9 +20,14 @@ const TABS: { id: Tab; label: string }[] = [
 ]
 
 const STATUS_COLORS: Record<string, string> = {
-  Active:   'bg-emerald-900/50 text-emerald-400',
-  Paused:   'bg-amber-900/50 text-amber-400',
-  Inactive: 'bg-gray-700/60 text-gray-400',
+  active:   'bg-emerald-900/50 text-emerald-400',
+  paused:   'bg-amber-900/50 text-amber-400',
+  inactive: 'bg-gray-700/60 text-gray-400',
+}
+
+const DIRECTION_COLORS: Record<string, string> = {
+  inbound:  'bg-blue-900/50 text-blue-400',
+  outbound: 'bg-violet-900/50 text-violet-400',
 }
 
 // ── Clients Tab ───────────────────────────────────────────────────────────────
@@ -29,6 +36,7 @@ function ClientsTab() {
   const [clients, setClients] = useState<Client[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
 
   const [showCreate, setShowCreate] = useState(false)
   const [newName, setNewName] = useState('')
@@ -60,17 +68,31 @@ function ClientsTab() {
 
   async function handleToggleActive(client: Client) {
     try {
-      const updated = client.status === 'Active'
+      const updated = client.status === 'active'
         ? await deactivateClient(client.id)
         : await activateClient(client.id)
       setClients((prev) => prev.map((c) => c.id === client.id ? updated : c))
     } catch {}
   }
 
+  const q = search.toLowerCase()
+  const visible = clients.filter((c) =>
+    c.name.toLowerCase().includes(q) ||
+    (c.accountNumber ?? '').toLowerCase().includes(q)
+  )
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <p className="text-gray-500 text-sm">Clients are the organizations your campaigns serve.</p>
+        <div className="flex items-center gap-3">
+          <p className="text-gray-500 text-sm">Clients are the organizations your campaigns serve.</p>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search…"
+            className="bg-gray-800 text-white rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 w-48"
+          />
+        </div>
         <button
           onClick={() => { setShowCreate((v) => !v); setCreateError(null) }}
           className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
@@ -117,8 +139,11 @@ function ClientsTab() {
       {!loading && !error && clients.length === 0 && (
         <p className="text-gray-500 text-sm">No clients yet.</p>
       )}
+      {!loading && !error && clients.length > 0 && visible.length === 0 && (
+        <p className="text-gray-500 text-sm">No clients match "{search}".</p>
+      )}
 
-      {clients.length > 0 && (
+      {visible.length > 0 && (
         <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
           <table className="w-full text-sm">
             <thead>
@@ -131,13 +156,13 @@ function ClientsTab() {
               </tr>
             </thead>
             <tbody>
-              {clients.map((c) => (
+              {visible.map((c) => (
                 <tr key={c.id} className="border-b border-gray-800 last:border-0 hover:bg-gray-800/30">
                   <td className="px-4 py-3 text-white font-medium">{c.name}</td>
                   <td className="px-4 py-3 text-gray-400">{c.accountNumber ?? <span className="text-gray-600">—</span>}</td>
                   <td className="px-4 py-3 text-gray-400">{c.campaigns.length}</td>
                   <td className="px-4 py-3">
-                    <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[c.status] ?? STATUS_COLORS.Inactive}`}>
+                    <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[c.status] ?? STATUS_COLORS.inactive}`}>
                       {c.status}
                     </span>
                   </td>
@@ -146,7 +171,7 @@ function ClientsTab() {
                       onClick={() => handleToggleActive(c)}
                       className="text-indigo-400 hover:text-indigo-300 text-xs font-medium"
                     >
-                      {c.status === 'Active' ? 'Deactivate' : 'Activate'}
+                      {c.status === 'active' ? 'Deactivate' : 'Activate'}
                     </button>
                   </td>
                 </tr>
@@ -162,9 +187,11 @@ function ClientsTab() {
 // ── Campaigns Tab ─────────────────────────────────────────────────────────────
 
 function CampaignsTab() {
+  const navigate = useNavigate()
   const [clients, setClients] = useState<Client[]>([])
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [filterClientId, setFilterClientId] = useState('')
+  const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -183,9 +210,11 @@ function CampaignsTab() {
       .finally(() => setLoading(false))
   }, [])
 
-  const visible = filterClientId
-    ? campaigns.filter((c) => c.clientId === filterClientId)
-    : campaigns
+  const q = search.toLowerCase()
+  const visible = campaigns.filter((c) =>
+    (filterClientId ? c.clientId === filterClientId : true) &&
+    (c.name.toLowerCase().includes(q) || c.slug.toLowerCase().includes(q))
+  )
 
   async function handleCreate() {
     if (!newClientId || !newName.trim() || !newSlug.trim()) return
@@ -217,14 +246,19 @@ function CampaignsTab() {
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <p className="text-gray-500 text-sm">Campaigns map phone numbers to flows and queues.</p>
-          <select
+          <SearchableSelect
+            options={clients.map((c) => ({ value: c.id, label: c.name }))}
             value={filterClientId}
-            onChange={(e) => setFilterClientId(e.target.value)}
-            className="bg-gray-800 text-white rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            <option value="">All clients</option>
-            {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+            onChange={setFilterClientId}
+            allLabel="All clients"
+            className="w-48"
+          />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search…"
+            className="bg-gray-800 text-white rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 w-48"
+          />
         </div>
         <button
           onClick={() => { setShowCreate((v) => !v); setCreateError(null) }}
@@ -284,8 +318,11 @@ function CampaignsTab() {
 
       {loading && <p className="text-gray-400 text-sm">Loading…</p>}
       {error && <p className="text-red-400 text-sm">{error}</p>}
-      {!loading && !error && visible.length === 0 && (
-        <p className="text-gray-500 text-sm">No campaigns{filterClientId ? ' for this client' : ''} yet.</p>
+      {!loading && !error && visible.length === 0 && campaigns.length === 0 && (
+        <p className="text-gray-500 text-sm">No campaigns yet.</p>
+      )}
+      {!loading && !error && visible.length === 0 && campaigns.length > 0 && (
+        <p className="text-gray-500 text-sm">No campaigns match your filters.</p>
       )}
 
       {visible.length > 0 && (
@@ -296,6 +333,7 @@ function CampaignsTab() {
                 <th className="px-4 py-3 font-medium">Name</th>
                 <th className="px-4 py-3 font-medium">Client</th>
                 <th className="px-4 py-3 font-medium">Slug</th>
+                <th className="px-4 py-3 font-medium">Direction</th>
                 <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 font-medium"></th>
               </tr>
@@ -309,21 +347,32 @@ function CampaignsTab() {
                   </td>
                   <td className="px-4 py-3 text-gray-500 font-mono text-xs">{c.slug}</td>
                   <td className="px-4 py-3">
-                    <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[c.status] ?? STATUS_COLORS.Inactive}`}>
+                    <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${DIRECTION_COLORS[c.direction] ?? 'bg-gray-700/60 text-gray-400'}`}>
+                      {c.direction}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[c.status] ?? STATUS_COLORS.inactive}`}>
                       {c.status}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-3">
-                      {c.status !== 'Active' && (
+                      {c.status !== 'active' && (
                         <button onClick={() => handleStatusChange(c, 'activate')} className="text-emerald-400 hover:text-emerald-300 text-xs font-medium">Activate</button>
                       )}
-                      {c.status === 'Active' && (
+                      {c.status === 'active' && (
                         <button onClick={() => handleStatusChange(c, 'pause')} className="text-amber-400 hover:text-amber-300 text-xs font-medium">Pause</button>
                       )}
-                      {c.status !== 'Inactive' && (
+                      {c.status !== 'inactive' && (
                         <button onClick={() => handleStatusChange(c, 'deactivate')} className="text-gray-500 hover:text-gray-300 text-xs font-medium">Deactivate</button>
                       )}
+                      <button
+                        onClick={() => navigate(`/admin/campaigns/${c.id}`)}
+                        className="text-indigo-400 hover:text-indigo-300 text-xs font-medium border border-indigo-900 hover:border-indigo-700 rounded px-2.5 py-1 transition-colors"
+                      >
+                        Manage →
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -342,6 +391,7 @@ function PhoneNumbersTab() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [numbers, setNumbers] = useState<PhoneNumber[]>([])
   const [selectedCampaignId, setSelectedCampaignId] = useState('')
+  const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [numLoading, setNumLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -393,19 +443,32 @@ function PhoneNumbersTab() {
     } catch {}
   }
 
+  const pq = search.toLowerCase()
+  const visibleNumbers = numbers.filter((n) =>
+    n.number.toLowerCase().includes(pq) ||
+    (n.label ?? '').toLowerCase().includes(pq)
+  )
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <p className="text-gray-500 text-sm">DIDs assigned to campaigns.</p>
-          <select
+          <SearchableSelect
+            options={campaigns.map((c) => ({ value: c.id, label: c.name }))}
             value={selectedCampaignId}
-            onChange={(e) => setSelectedCampaignId(e.target.value)}
-            className="bg-gray-800 text-white rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            <option value="">Select a campaign…</option>
-            {campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+            onChange={(v) => { setSelectedCampaignId(v); setSearch('') }}
+            placeholder="Select a campaign…"
+            className="w-56"
+          />
+          {selectedCampaignId && (
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search…"
+              className="bg-gray-800 text-white rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 w-48"
+            />
+          )}
         </div>
         <button
           onClick={() => {
@@ -468,8 +531,11 @@ function PhoneNumbersTab() {
       {!numLoading && selectedCampaignId && numbers.length === 0 && (
         <p className="text-gray-500 text-sm">No phone numbers assigned to this campaign yet.</p>
       )}
+      {!numLoading && selectedCampaignId && numbers.length > 0 && visibleNumbers.length === 0 && (
+        <p className="text-gray-500 text-sm">No numbers match "{search}".</p>
+      )}
 
-      {numbers.length > 0 && (
+      {visibleNumbers.length > 0 && (
         <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
           <table className="w-full text-sm">
             <thead>
@@ -481,13 +547,13 @@ function PhoneNumbersTab() {
               </tr>
             </thead>
             <tbody>
-              {numbers.map((n) => (
+              {visibleNumbers.map((n) => (
                 <tr key={n.id} className="border-b border-gray-800 last:border-0 hover:bg-gray-800/30">
                   <td className="px-4 py-3 text-white font-mono">{n.number}</td>
                   <td className="px-4 py-3 text-gray-400">{n.label ?? <span className="text-gray-600">—</span>}</td>
                   <td className="px-4 py-3">
-                    <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${n.isActive ? STATUS_COLORS.Active : STATUS_COLORS.Inactive}`}>
-                      {n.isActive ? 'Active' : 'Inactive'}
+                    <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${n.isActive ? STATUS_COLORS.active : STATUS_COLORS.inactive}`}>
+                      {n.isActive ? 'active' : 'inactive'}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right">
@@ -514,6 +580,7 @@ function AgentGroupsTab() {
   const [groups, setGroups] = useState<AgentGroup[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
 
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [detail, setDetail] = useState<AgentGroupDetail | null>(null)
@@ -588,10 +655,24 @@ function AgentGroupsTab() {
     } catch {}
   }
 
+  const gq = search.toLowerCase()
+  const visibleGroups = groups.filter((g) =>
+    g.name.toLowerCase().includes(gq) ||
+    g.slug.toLowerCase().includes(gq)
+  )
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <p className="text-gray-500 text-sm">Groups allow agents to serve multiple campaigns in parallel.</p>
+        <div className="flex items-center gap-3">
+          <p className="text-gray-500 text-sm">Groups allow agents to serve multiple campaigns in parallel.</p>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search…"
+            className="bg-gray-800 text-white rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 w-48"
+          />
+        </div>
         <button
           onClick={() => { setShowCreate((v) => !v); setCreateError(null) }}
           className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
@@ -645,28 +726,31 @@ function AgentGroupsTab() {
       {!loading && !error && groups.length === 0 && (
         <p className="text-gray-500 text-sm">No agent groups yet.</p>
       )}
+      {!loading && !error && groups.length > 0 && visibleGroups.length === 0 && (
+        <p className="text-gray-500 text-sm">No groups match "{search}".</p>
+      )}
 
-      {groups.length > 0 && (
+      {visibleGroups.length > 0 && (
         <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
-          {groups.map((g, i) => (
+          {visibleGroups.map((g, i) => (
             <div key={g.id}>
               {/* Group row */}
               <div
-                className={`flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-gray-800/30 transition-colors ${i < groups.length - 1 || expandedId === g.id ? 'border-b border-gray-800' : ''}`}
+                className={`flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-gray-800/30 transition-colors ${i < visibleGroups.length - 1 || expandedId === g.id ? 'border-b border-gray-800' : ''}`}
                 onClick={() => handleExpand(g)}
               >
                 <span className="text-gray-400 text-xs w-4">{expandedId === g.id ? '▾' : '▸'}</span>
                 <span className="text-white font-medium text-sm flex-1">{g.name}</span>
                 <span className="text-gray-500 font-mono text-xs">{g.slug}</span>
                 <span className="text-gray-500 text-xs">{g.memberCount} member{g.memberCount !== 1 ? 's' : ''}</span>
-                <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${g.isActive ? STATUS_COLORS.Active : STATUS_COLORS.Inactive}`}>
-                  {g.isActive ? 'Active' : 'Inactive'}
+                <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${g.isActive ? STATUS_COLORS.active : STATUS_COLORS.inactive}`}>
+                  {g.isActive ? 'active' : 'inactive'}
                 </span>
               </div>
 
               {/* Expanded member panel */}
               {expandedId === g.id && (
-                <div className={`bg-gray-950 px-6 py-4 ${i < groups.length - 1 ? 'border-b border-gray-800' : ''}`}>
+                <div className={`bg-gray-950 px-6 py-4 ${i < visibleGroups.length - 1 ? 'border-b border-gray-800' : ''}`}>
                   {detailLoading && <p className="text-gray-400 text-sm">Loading…</p>}
                   {detail && (
                     <>
@@ -724,7 +808,9 @@ function AgentGroupsTab() {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function TelephonyPage() {
-  const [tab, setTab] = useState<Tab>('clients')
+  const location = useLocation()
+  const initialTab = (location.state as { tab?: Tab } | null)?.tab ?? 'clients'
+  const [tab, setTab] = useState<Tab>(initialTab)
 
   return (
     <AdminShell>

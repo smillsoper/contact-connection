@@ -22,12 +22,44 @@ export interface Campaign {
   status: string
   description?: string
   flowId?: string
+  outboundFlowId?: string
+  direction: string
+  dialMode: string
+  callerIdNumber?: string
+  priority: number
+  afterCallWorkSeconds: number
   maxQueueSize: number
   queueTimeoutSeconds: number
   serviceLevelThresholdSeconds: number
+  queueAccelerationEnabled: boolean
+  queueAccelerationIntervalSeconds: number
+  queueAccelerationPriorityBoost: number
   client?: { id: string; name: string }
   createdAt: string
   updatedAt: string
+}
+
+export interface AgentAssignment {
+  id: string
+  agentId: string
+  campaignId: string
+  proficiency: number
+  isActive: boolean
+  assignedAt: string
+}
+
+export interface CampaignDetail extends Campaign {
+  phoneNumbers: { id: string; number: string; label?: string; isActive: boolean }[]
+  agentAssignments: AgentAssignment[]
+  groupAssignments: {
+    id: string
+    groupId: string
+    campaignId: string
+    proficiency: number
+    isActive: boolean
+    assignedAt: string
+    group?: { id: string; name: string }
+  }[]
 }
 
 export interface PhoneNumber {
@@ -99,12 +131,43 @@ export const deactivateClient = (id: string) =>
 export const listCampaigns = (clientId?: string) =>
   api.get<Campaign[]>(`/api/v1/campaigns${clientId ? `?clientId=${clientId}` : ''}`)
 
+export const getCampaign = (id: string) =>
+  api.get<CampaignDetail>(`/api/v1/campaigns/${id}`)
+
 export const createCampaign = (
   clientId: string,
   name: string,
   slug: string,
   description?: string,
 ) => api.post<Campaign>('/api/v1/campaigns', { clientId, name, slug, description })
+
+export const updateCampaign = (id: string, data: {
+  name: string
+  description?: string
+  direction: string
+  dialMode: string
+  priority: number
+  afterCallWorkSeconds: number
+  callerIdNumber?: string
+  maxQueueSize: number
+  queueTimeoutSeconds: number
+  serviceLevelThresholdSeconds: number
+  queueAccelerationEnabled: boolean
+  queueAccelerationIntervalSeconds: number
+  queueAccelerationPriorityBoost: number
+}) => api.put<Campaign>(`/api/v1/campaigns/${id}`, data)
+
+export const setCampaignFlow = (id: string, flowId: string) =>
+  api.put<Campaign>(`/api/v1/campaigns/${id}/flow`, { flowId })
+
+export const removeCampaignFlow = (id: string) =>
+  api.delete<Campaign>(`/api/v1/campaigns/${id}/flow`)
+
+export const setCampaignOutboundFlow = (id: string, flowId: string) =>
+  api.put<Campaign>(`/api/v1/campaigns/${id}/outbound-flow`, { flowId })
+
+export const removeCampaignOutboundFlow = (id: string) =>
+  api.delete<Campaign>(`/api/v1/campaigns/${id}/outbound-flow`)
 
 export const activateCampaign = (id: string) =>
   api.post<Campaign>(`/api/v1/campaigns/${id}/activate`)
@@ -114,6 +177,18 @@ export const pauseCampaign = (id: string) =>
 
 export const deactivateCampaign = (id: string) =>
   api.post<Campaign>(`/api/v1/campaigns/${id}/deactivate`)
+
+export const assignCampaignAgent = (campaignId: string, agentId: string, proficiency: number) =>
+  api.post<AgentAssignment>(`/api/v1/campaigns/${campaignId}/agents`, { agentId, proficiency })
+
+export const bulkAssignCampaignAgents = (campaignId: string, agents: { agentId: string; proficiency: number }[]) =>
+  api.post<{ added: number; updated: number }>(`/api/v1/campaigns/${campaignId}/agents/bulk`, { agents })
+
+export const updateCampaignAgentProficiency = (campaignId: string, agentId: string, proficiency: number) =>
+  api.put<AgentAssignment>(`/api/v1/campaigns/${campaignId}/agents/${agentId}`, { proficiency })
+
+export const removeCampaignAgent = (campaignId: string, agentId: string) =>
+  api.delete<void>(`/api/v1/campaigns/${campaignId}/agents/${agentId}`)
 
 // ── Phone Numbers ─────────────────────────────────────────────────────────────
 
@@ -170,3 +245,36 @@ export const activateSipGateway = (id: string) =>
 
 export const deactivateSipGateway = (id: string) =>
   api.post<SipGateway>(`/api/v1/sip-gateways/${id}/deactivate`)
+
+// ── Campaign External Numbers ─────────────────────────────────────────────────
+
+export interface CampaignExternalNumber {
+  id: string
+  campaignId: string
+  label: string
+  number: string
+  displayOrder: number
+  isActive: boolean
+  createdAt: string
+}
+
+export interface ClientTransferNumber {
+  id: string
+  campaignId: string
+  campaignName?: string
+  campaignFlowId?: string
+  label: string
+  number: string
+}
+
+export const listExternalNumbers = (campaignId: string) =>
+  api.get<CampaignExternalNumber[]>(`/api/v1/campaigns/${campaignId}/external-numbers`)
+
+export const addExternalNumber = (campaignId: string, label: string, number: string) =>
+  api.post<CampaignExternalNumber>(`/api/v1/campaigns/${campaignId}/external-numbers`, { label, number })
+
+export const removeExternalNumber = (campaignId: string, numberId: string) =>
+  api.delete<void>(`/api/v1/campaigns/${campaignId}/external-numbers/${numberId}`)
+
+export const getClientTransferNumbers = (campaignId: string) =>
+  api.get<ClientTransferNumber[]>(`/api/v1/campaigns/${campaignId}/client-transfer-numbers`)

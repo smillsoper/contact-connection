@@ -11,13 +11,32 @@ public class Campaign
     public string Status { get; private set; } = CampaignStatus.Active;
     public string? Description { get; private set; }
 
-    // The flow agents run for calls in this campaign.
+    // The fallback CRM script flow agents run for calls in this campaign.
     public Guid? FlowId { get; private set; }
+
+    // Telephony flow to execute before the agent dials (manual outbound only).
+    public Guid? OutboundFlowId { get; private set; }
+
+    // Telephony direction
+    public string Direction { get; private set; } = CampaignDirection.Inbound;
+    public string DialMode { get; private set; } = CampaignDialMode.Manual;  // outbound only
+    public string? CallerIdNumber { get; private set; }   // outbound only
+
+    // Campaign-level routing priority (1–10; higher = preferred when agent eligible for multiple)
+    public int Priority { get; private set; } = 5;
+
+    // After-call work time agents must complete before going ready again
+    public int AfterCallWorkSeconds { get; private set; } = 30;
 
     // Queue behaviour
     public int MaxQueueSize { get; private set; } = 50;
-    public int QueueTimeoutSeconds { get; private set; } = 300;           // abandon after 5 min
-    public int ServiceLevelThresholdSeconds { get; private set; } = 30;   // SL target
+    public int QueueTimeoutSeconds { get; private set; } = 300;
+    public int ServiceLevelThresholdSeconds { get; private set; } = 30;
+
+    // Queue acceleration: raise waiting caller's effective priority every N seconds
+    public bool QueueAccelerationEnabled { get; private set; }
+    public int QueueAccelerationIntervalSeconds { get; private set; } = 60;
+    public int QueueAccelerationPriorityBoost { get; private set; } = 1;
 
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -33,6 +52,9 @@ public class Campaign
 
     private readonly List<GroupCampaignAssignment> _groupAssignments = [];
     public IReadOnlyList<GroupCampaignAssignment> GroupAssignments => _groupAssignments.AsReadOnly();
+
+    private readonly List<CampaignExternalNumber> _externalNumbers = [];
+    public IReadOnlyList<CampaignExternalNumber> ExternalNumbers => _externalNumbers.AsReadOnly();
 
     private Campaign() { }
 
@@ -58,23 +80,45 @@ public class Campaign
         };
     }
 
-    public void Update(string name, string? description,
-        int maxQueueSize, int queueTimeoutSeconds, int serviceLevelThresholdSeconds)
+    public void Update(
+        string name,
+        string? description,
+        string direction,
+        string dialMode,
+        int priority,
+        int afterCallWorkSeconds,
+        string? callerIdNumber,
+        int maxQueueSize,
+        int queueTimeoutSeconds,
+        int serviceLevelThresholdSeconds,
+        bool queueAccelerationEnabled,
+        int queueAccelerationIntervalSeconds,
+        int queueAccelerationPriorityBoost)
     {
-        Name                          = name.Trim();
-        Description                   = description?.Trim();
-        MaxQueueSize                  = maxQueueSize;
-        QueueTimeoutSeconds           = queueTimeoutSeconds;
-        ServiceLevelThresholdSeconds  = serviceLevelThresholdSeconds;
-        UpdatedAt                     = DateTimeOffset.UtcNow;
+        Name                                 = name.Trim();
+        Description                          = description?.Trim();
+        Direction                            = direction == CampaignDirection.Outbound ? CampaignDirection.Outbound : CampaignDirection.Inbound;
+        DialMode                             = Direction == CampaignDirection.Outbound && CampaignDialMode.IsValid(dialMode) ? dialMode : CampaignDialMode.Manual;
+        Priority                             = Math.Clamp(priority, 1, 10);
+        AfterCallWorkSeconds                 = Math.Max(0, afterCallWorkSeconds);
+        CallerIdNumber                       = callerIdNumber?.Trim();
+        MaxQueueSize                         = Math.Max(1, maxQueueSize);
+        QueueTimeoutSeconds                  = Math.Max(0, queueTimeoutSeconds);
+        ServiceLevelThresholdSeconds         = Math.Max(0, serviceLevelThresholdSeconds);
+        QueueAccelerationEnabled             = queueAccelerationEnabled;
+        QueueAccelerationIntervalSeconds     = Math.Max(1, queueAccelerationIntervalSeconds);
+        QueueAccelerationPriorityBoost       = Math.Max(1, queueAccelerationPriorityBoost);
+        UpdatedAt                            = DateTimeOffset.UtcNow;
     }
 
-    public void AssignFlow(Guid flowId)  { FlowId = flowId; UpdatedAt = DateTimeOffset.UtcNow; }
-    public void RemoveFlow()             { FlowId = null;   UpdatedAt = DateTimeOffset.UtcNow; }
+    public void AssignFlow(Guid flowId)         { FlowId = flowId;         UpdatedAt = DateTimeOffset.UtcNow; }
+    public void RemoveFlow()                    { FlowId = null;           UpdatedAt = DateTimeOffset.UtcNow; }
+    public void AssignOutboundFlow(Guid flowId) { OutboundFlowId = flowId; UpdatedAt = DateTimeOffset.UtcNow; }
+    public void RemoveOutboundFlow()            { OutboundFlowId = null;   UpdatedAt = DateTimeOffset.UtcNow; }
 
-    public void Activate()  { Status = CampaignStatus.Active;   UpdatedAt = DateTimeOffset.UtcNow; }
-    public void Pause()     { Status = CampaignStatus.Paused;   UpdatedAt = DateTimeOffset.UtcNow; }
-    public void Deactivate(){ Status = CampaignStatus.Inactive; UpdatedAt = DateTimeOffset.UtcNow; }
+    public void Activate()   { Status = CampaignStatus.Active;   UpdatedAt = DateTimeOffset.UtcNow; }
+    public void Pause()      { Status = CampaignStatus.Paused;   UpdatedAt = DateTimeOffset.UtcNow; }
+    public void Deactivate() { Status = CampaignStatus.Inactive; UpdatedAt = DateTimeOffset.UtcNow; }
 }
 
 public static class CampaignStatus
@@ -82,4 +126,20 @@ public static class CampaignStatus
     public const string Active   = "active";
     public const string Paused   = "paused";
     public const string Inactive = "inactive";
+}
+
+public static class CampaignDirection
+{
+    public const string Inbound  = "inbound";
+    public const string Outbound = "outbound";
+}
+
+public static class CampaignDialMode
+{
+    public const string Manual      = "manual";
+    public const string Progressive = "progressive";
+    public const string Predictive  = "predictive";
+
+    public static bool IsValid(string value) =>
+        value is Manual or Progressive or Predictive;
 }

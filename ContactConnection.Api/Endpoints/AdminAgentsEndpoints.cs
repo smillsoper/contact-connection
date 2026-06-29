@@ -10,13 +10,12 @@ public static class AdminAgentsEndpoints
 {
     public static IEndpointRouteBuilder MapAdminAgentsEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/v1/admin/agents")
-            .RequireAuthorization("TenantAdmin");
+        const string prefix = "/api/v1/admin/agents";
 
-        group.MapGet("", List);
-        group.MapPost("invite", InviteUsers);
-        group.MapPost("{id:guid}/reset-password", ResetPassword);
-        group.MapPatch("{id:guid}", Update);
+        app.MapGet(prefix,                                   List)           .RequireAuthorization("AgentsView");
+        app.MapPost($"{prefix}/invite",                      InviteUsers)    .RequireAuthorization("TenantAdmin");
+        app.MapPost($"{prefix}/{{id:guid}}/reset-password",  ResetPassword)  .RequireAuthorization("TenantAdmin");
+        app.MapPatch($"{prefix}/{{id:guid}}",                Update)         .RequireAuthorization("TenantAdmin");
 
         return app;
     }

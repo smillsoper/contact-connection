@@ -3,6 +3,7 @@ using System;
 using ContactConnection.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace ContactConnection.Infrastructure.Migrations.TenantDb
 {
     [DbContext(typeof(TenantDbContext))]
-    partial class TenantDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260629144432_AddCampaignExternalNumbers")]
+    partial class AddCampaignExternalNumbers
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -621,10 +624,6 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .HasColumnType("character varying(200)")
                         .HasColumnName("name");
 
-                    b.Property<Guid?>("OutboundFlowId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("outbound_flow_id");
-
                     b.Property<int>("Priority")
                         .HasColumnType("integer")
                         .HasColumnName("priority");
@@ -932,16 +931,6 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .IsRequired()
                         .HasColumnType("jsonb")
                         .HasColumnName("definition");
-
-                    b.Property<string>("FlowDirection")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)")
-                        .HasColumnName("flow_direction");
-
-                    b.Property<string>("FlowSubType")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)")
-                        .HasColumnName("flow_sub_type");
 
                     b.Property<string>("FlowType")
                         .IsRequired()

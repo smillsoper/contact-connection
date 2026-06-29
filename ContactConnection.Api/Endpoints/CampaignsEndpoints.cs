@@ -16,12 +16,15 @@ public static class CampaignsEndpoints
         group.MapPut("{id:guid}",                     Update);
         group.MapPut("{id:guid}/flow",                SetFlow);
         group.MapDelete("{id:guid}/flow",             RemoveFlow);
+        group.MapPut("{id:guid}/outbound-flow",       SetOutboundFlow);
+        group.MapDelete("{id:guid}/outbound-flow",    RemoveOutboundFlow);
         group.MapPost("{id:guid}/activate",           Activate);
         group.MapPost("{id:guid}/pause",              Pause);
         group.MapPost("{id:guid}/deactivate",         Deactivate);
 
         // Agent assignments
         group.MapPost("{id:guid}/agents",                         AssignAgent);
+        group.MapPost("{id:guid}/agents/bulk",                    BulkAssignAgents);
         group.MapPut("{id:guid}/agents/{agentId:guid}",           UpdateAgentProficiency);
         group.MapDelete("{id:guid}/agents/{agentId:guid}",        RemoveAgent);
 
@@ -93,8 +96,11 @@ public static class CampaignsEndpoints
         var campaign = await repo.GetByIdAsync(id, ct);
         if (campaign is null) return Results.NotFound();
 
-        campaign.Update(req.Name, req.Description,
-            req.MaxQueueSize, req.QueueTimeoutSeconds, req.ServiceLevelThresholdSeconds);
+        campaign.Update(
+            req.Name, req.Description,
+            req.Direction, req.DialMode, req.Priority, req.AfterCallWorkSeconds, req.CallerIdNumber,
+            req.MaxQueueSize, req.QueueTimeoutSeconds, req.ServiceLevelThresholdSeconds,
+            req.QueueAccelerationEnabled, req.QueueAccelerationIntervalSeconds, req.QueueAccelerationPriorityBoost);
         await repo.SaveChangesAsync(ct);
         return Results.Ok(ToSummaryResponse(campaign));
     }
@@ -122,6 +128,33 @@ public static class CampaignsEndpoints
         var campaign = await repo.GetByIdAsync(id, ct);
         if (campaign is null) return Results.NotFound();
         campaign.RemoveFlow();
+        await repo.SaveChangesAsync(ct);
+        return Results.Ok(ToSummaryResponse(campaign));
+    }
+
+    // ── PUT /api/v1/campaigns/{id}/outbound-flow ────────────────────────────
+
+    private static async Task<IResult> SetOutboundFlow(
+        Guid id, SetCampaignFlowRequest req,
+        ICampaignRepository repo, TenantContext tenantContext, CancellationToken ct)
+    {
+        if (!tenantContext.HasTenant) return Results.Unauthorized();
+        var campaign = await repo.GetByIdAsync(id, ct);
+        if (campaign is null) return Results.NotFound();
+        campaign.AssignOutboundFlow(req.FlowId);
+        await repo.SaveChangesAsync(ct);
+        return Results.Ok(ToSummaryResponse(campaign));
+    }
+
+    // ── DELETE /api/v1/campaigns/{id}/outbound-flow ─────────────────────────
+
+    private static async Task<IResult> RemoveOutboundFlow(
+        Guid id, ICampaignRepository repo, TenantContext tenantContext, CancellationToken ct)
+    {
+        if (!tenantContext.HasTenant) return Results.Unauthorized();
+        var campaign = await repo.GetByIdAsync(id, ct);
+        if (campaign is null) return Results.NotFound();
+        campaign.RemoveOutboundFlow();
         await repo.SaveChangesAsync(ct);
         return Results.Ok(ToSummaryResponse(campaign));
     }
@@ -169,12 +202,44 @@ public static class CampaignsEndpoints
 
         var existing = await repo.GetAgentAssignmentAsync(id, req.AgentId, ct);
         if (existing is not null)
-            return Results.Conflict(new { error = "Agent is already assigned to this campaign." });
+        {
+            if (existing.IsActive)
+                return Results.Conflict(new { error = "Agent is already assigned to this campaign." });
+            // Re-activate previously removed assignment
+            existing.Activate();
+            existing.SetProficiency(req.Proficiency);
+            await repo.SaveChangesAsync(ct);
+            return Results.Ok(ToAssignmentResponse(existing));
+        }
 
         var assignment = AgentCampaignAssignment.Create(req.AgentId, id, req.Proficiency);
         await repo.AddAgentAssignmentAsync(assignment, ct);
         await repo.SaveChangesAsync(ct);
         return Results.Created("", ToAssignmentResponse(assignment));
+    }
+
+    private static async Task<IResult> BulkAssignAgents(
+        Guid id, BulkAssignAgentsRequest req,
+        ICampaignRepository repo, TenantContext ctx, CancellationToken ct)
+    {
+        if (!ctx.HasTenant) return Results.Unauthorized();
+        if (await repo.GetByIdAsync(id, ct) is null) return Results.NotFound();
+
+        int added = 0, updated = 0;
+        foreach (var entry in req.Agents)
+        {
+            var existing = await repo.GetAgentAssignmentAsync(id, entry.AgentId, ct);
+            if (existing is not null)
+            {
+                if (!existing.IsActive) { existing.Activate(); updated++; }
+                existing.SetProficiency(entry.Proficiency);
+                continue;
+            }
+            await repo.AddAgentAssignmentAsync(AgentCampaignAssignment.Create(entry.AgentId, id, entry.Proficiency), ct);
+            added++;
+        }
+        await repo.SaveChangesAsync(ct);
+        return Results.Ok(new { added, updated });
     }
 
     private static async Task<IResult> UpdateAgentProficiency(
@@ -255,20 +320,24 @@ public static class CampaignsEndpoints
 
     internal static object ToSummaryResponse(Campaign c) => new
     {
-        c.Id, c.TenantId, c.ClientId, c.Name, c.Slug, c.Status, c.Description, c.FlowId,
+        c.Id, c.TenantId, c.ClientId, c.Name, c.Slug, c.Status, c.Description, c.FlowId, c.OutboundFlowId,
+        c.Direction, c.DialMode, c.CallerIdNumber, c.Priority, c.AfterCallWorkSeconds,
         c.MaxQueueSize, c.QueueTimeoutSeconds, c.ServiceLevelThresholdSeconds,
+        c.QueueAccelerationEnabled, c.QueueAccelerationIntervalSeconds, c.QueueAccelerationPriorityBoost,
         Client = c.Client is null ? null : new { c.Client.Id, c.Client.Name },
         c.CreatedAt, c.UpdatedAt
     };
 
     internal static object ToDetailResponse(Campaign c) => new
     {
-        c.Id, c.TenantId, c.ClientId, c.Name, c.Slug, c.Status, c.Description, c.FlowId,
+        c.Id, c.TenantId, c.ClientId, c.Name, c.Slug, c.Status, c.Description, c.FlowId, c.OutboundFlowId,
+        c.Direction, c.DialMode, c.CallerIdNumber, c.Priority, c.AfterCallWorkSeconds,
         c.MaxQueueSize, c.QueueTimeoutSeconds, c.ServiceLevelThresholdSeconds,
+        c.QueueAccelerationEnabled, c.QueueAccelerationIntervalSeconds, c.QueueAccelerationPriorityBoost,
         Client = c.Client is null ? null : new { c.Client.Id, c.Client.Name },
-        PhoneNumbers = c.PhoneNumbers.Select(p => new { p.Id, p.Number, p.Label, p.IsActive }),
-        AgentAssignments = c.AgentAssignments.Select(ToAssignmentResponse),
-        GroupAssignments  = c.GroupAssignments.Select(ToGroupAssignmentResponse),
+        PhoneNumbers     = c.PhoneNumbers.Select(p => new { p.Id, p.Number, p.Label, p.IsActive }),
+        AgentAssignments = c.AgentAssignments.Where(a => a.IsActive).Select(ToAssignmentResponse),
+        GroupAssignments = c.GroupAssignments.Where(a => a.IsActive).Select(ToGroupAssignmentResponse),
         c.CreatedAt, c.UpdatedAt
     };
 
@@ -281,9 +350,23 @@ public static class CampaignsEndpoints
 }
 
 public record CreateCampaignRequest(Guid ClientId, string Name, string Slug, string? Description = null);
-public record UpdateCampaignRequest(string Name, string? Description,
-    int MaxQueueSize = 50, int QueueTimeoutSeconds = 300, int ServiceLevelThresholdSeconds = 30);
+public record UpdateCampaignRequest(
+    string Name,
+    string? Description,
+    string Direction = "inbound",
+    string DialMode = "manual",
+    int Priority = 5,
+    int AfterCallWorkSeconds = 30,
+    string? CallerIdNumber = null,
+    int MaxQueueSize = 50,
+    int QueueTimeoutSeconds = 300,
+    int ServiceLevelThresholdSeconds = 30,
+    bool QueueAccelerationEnabled = false,
+    int QueueAccelerationIntervalSeconds = 60,
+    int QueueAccelerationPriorityBoost = 1);
 public record SetCampaignFlowRequest(Guid FlowId);
 public record AssignAgentRequest(Guid AgentId, int Proficiency = 50);
+public record BulkAssignAgentsRequest(List<BulkAgentEntry> Agents);
+public record BulkAgentEntry(Guid AgentId, int Proficiency = 50);
 public record AssignGroupRequest(Guid GroupId, int Proficiency = 50);
 public record SetProficiencyRequest(int Proficiency);

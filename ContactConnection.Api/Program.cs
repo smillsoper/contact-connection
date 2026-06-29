@@ -68,6 +68,11 @@ builder.Services.AddAuthorization(options =>
         policy.RequireClaim("role", "platform_admin"));
     options.AddPolicy("TenantAdmin", policy =>
         policy.RequireClaim("role", "admin", "supervisor"));
+    options.AddPolicy("AgentsView", policy =>
+        policy.RequireAssertion(ctx =>
+            ctx.User.HasClaim("role", "admin") ||
+            ctx.User.HasClaim("role", "supervisor") ||
+            (ctx.User.FindFirst("permissions")?.Value ?? "").Split(',').Contains("agents.view")));
     options.AddPolicy("MfaPending", policy =>
         policy.RequireClaim("role", "mfa_pending"));
 });
@@ -98,6 +103,7 @@ app.MapCustomFieldsEndpoints();
 app.MapSipGatewaysEndpoints();
 app.MapClientsEndpoints();
 app.MapCampaignsEndpoints();
+app.MapCampaignExternalNumbersEndpoints();
 app.MapPhoneNumbersEndpoints();
 app.MapAgentGroupsEndpoints();
 app.MapBlockListEndpoints();

@@ -17,5 +17,11 @@ public interface ICampaignRepository
     Task AddGroupAssignmentAsync(GroupCampaignAssignment assignment, CancellationToken ct = default);
     Task<GroupCampaignAssignment?> GetGroupAssignmentAsync(Guid campaignId, Guid groupId, CancellationToken ct = default);
 
+    // External numbers (manual outbound transfer targets)
+    Task<List<CampaignExternalNumber>> GetExternalNumbersAsync(Guid campaignId, CancellationToken ct = default);
+    Task<CampaignExternalNumber?> GetExternalNumberByIdAsync(Guid campaignId, Guid numberId, CancellationToken ct = default);
+    Task<List<CampaignExternalNumber>> GetClientTransferNumbersAsync(Guid campaignId, CancellationToken ct = default);
+    Task AddExternalNumberAsync(CampaignExternalNumber number, CancellationToken ct = default);
+
     Task SaveChangesAsync(CancellationToken ct = default);
 }

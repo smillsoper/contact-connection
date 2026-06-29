@@ -175,6 +175,9 @@ function DesignerCanvas({
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [flowName, setFlowName] = useState(initialFlowName)
   const [flowId, setFlowId] = useState<string | null>(initialFlowId)
+  const [flowType, setFlowType] = useState<'crm' | 'telephony'>('crm')
+  const [flowDirection, setFlowDirection] = useState<'inbound' | 'outbound' | ''>('')
+  const [flowSubType, setFlowSubType] = useState<'manual' | 'progressive' | 'predictive' | ''>('')
   const [entryNodeId, setEntryNodeId] = useState<string | null>(null)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -250,6 +253,9 @@ function DesignerCanvas({
     if (!initialFlowId) return
     flowsApi.getDetail(initialFlowId).then((detail) => {
       setFlowName(detail.name)
+      if (detail.flow_type === 'telephony') setFlowType('telephony')
+      if (detail.flow_direction) setFlowDirection(detail.flow_direction as 'inbound' | 'outbound')
+      if (detail.flow_sub_type) setFlowSubType(detail.flow_sub_type as 'manual' | 'progressive' | 'predictive')
       try {
         const def: ContactConnectionFlowDefinition = JSON.parse(detail.definition)
         const { nodes: n, edges: e, entryNodeId: entry } = fromContactConnectionDef(def)
@@ -394,11 +400,13 @@ function DesignerCanvas({
     setStatusMsg('')
     try {
       const def = toContactConnectionDef(nodes as Node<NodeData>[], edges, entryNodeId, flowName)
+      const dir = flowType === 'telephony' && flowDirection ? flowDirection : undefined
+      const sub = flowType === 'telephony' && flowSubType   ? flowSubType   : undefined
       if (flowId) {
-        await flowsApi.updateDefinition(flowId, flowName, def)
+        await flowsApi.updateDefinition(flowId, flowName, def, dir, sub)
         setStatusMsg('Saved')
       } else {
-        const detail = await flowsApi.create(flowName, 'crm', def)
+        const detail = await flowsApi.create(flowName, flowType, def, dir, sub)
         setFlowId(detail.id)
         navigate(`/designer/${detail.id}`, { replace: true })
         setStatusMsg('Saved')
@@ -454,6 +462,51 @@ function DesignerCanvas({
             onChange={(e) => setFlowName(e.target.value)}
             placeholder="Flow name"
           />
+
+          {/* Flow type */}
+          <select
+            value={flowType}
+            onChange={(e) => {
+              setFlowType(e.target.value as 'crm' | 'telephony')
+              setFlowDirection('')
+              setFlowSubType('')
+            }}
+            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-300 focus:outline-none focus:border-sky-500"
+          >
+            <option value="crm">CRM</option>
+            <option value="telephony">Telephony</option>
+          </select>
+
+          {/* Direction — telephony only */}
+          {flowType === 'telephony' && (
+            <select
+              value={flowDirection}
+              onChange={(e) => {
+                setFlowDirection(e.target.value as 'inbound' | 'outbound' | '')
+                setFlowSubType('')
+              }}
+              className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-300 focus:outline-none focus:border-sky-500"
+            >
+              <option value="">Direction…</option>
+              <option value="inbound">Inbound</option>
+              <option value="outbound">Outbound</option>
+            </select>
+          )}
+
+          {/* Sub-type — outbound telephony only */}
+          {flowType === 'telephony' && flowDirection === 'outbound' && (
+            <select
+              value={flowSubType}
+              onChange={(e) => setFlowSubType(e.target.value as 'manual' | 'progressive' | 'predictive' | '')}
+              className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-300 focus:outline-none focus:border-sky-500"
+            >
+              <option value="">Sub-type…</option>
+              <option value="manual">Manual</option>
+              <option value="progressive">Progressive</option>
+              <option value="predictive">Predictive</option>
+            </select>
+          )}
+
           {statusMsg && (
             <span className="text-sm text-gray-400 italic">{statusMsg}</span>
           )}

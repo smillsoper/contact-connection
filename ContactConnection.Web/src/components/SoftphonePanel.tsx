@@ -4,6 +4,9 @@ import { useSipStore, type SipRegistrationStatus } from '../stores/sipStore'
 import { useCallStore } from '../stores/callStore'
 import { useAuthStore } from '../stores/authStore'
 import { api } from '../api/client'
+import { getClientTransferNumbers, type ClientTransferNumber } from '../api/telephony'
+import { flowsApi } from '../api/flows'
+import { useFlowSessionsStore } from '../stores/flowSessionsStore'
 
 const SIP_WS_URL = import.meta.env.VITE_SIP_WS_URL as string ?? 'ws://localhost:7080'
 
@@ -31,16 +34,19 @@ export default function SoftphonePanel() {
   const { sipExtension, sipPassword, registrationStatus, setRegistrationStatus } = useSipStore()
   const tenantSubdomain = useAuthStore((s) => s.tenantSubdomain)
   const {
-    callStatus, callerNumber, callerName, isMuted, callStartedAt,
-    setRinging, setDialing, setOnCall, setMuted, setCallRecordId, reset,
+    callStatus, callerNumber, callerName, isMuted, callStartedAt, campaignId, callRecordId,
+    setRinging, setDialing, setOnCall, setMuted, setCallRecordId, setCampaignId, reset,
   } = useCallStore()
+  const addFlowSession = useFlowSessionsStore((s) => s.addSession)
 
   const uaRef          = useRef<InstanceType<typeof JsSIP.UA> | null>(null)
   const sessionRef     = useRef<any>(null)
   const remoteAudioRef = useRef<HTMLAudioElement>(null)
 
-  const [elapsed, setElapsed]       = useState(0)
-  const [dialInput, setDialInput]   = useState('')
+  const [elapsed, setElapsed]         = useState(0)
+  const [dialInput, setDialInput]     = useState('')
+  const [transferNumbers, setTransferNumbers] = useState<ClientTransferNumber[]>([])
+  const [showTransfers, setShowTransfers]     = useState(false)
 
   // Call timer — ticks every second while on a call
   useEffect(() => {
@@ -48,6 +54,12 @@ export default function SoftphonePanel() {
     const id = setInterval(() => setElapsed(Math.floor((Date.now() - callStartedAt) / 1000)), 1000)
     return () => clearInterval(id)
   }, [callStatus, callStartedAt])
+
+  // Fetch transfer numbers whenever the active call's campaign is resolved
+  useEffect(() => {
+    if (!campaignId) { setTransferNumbers([]); return }
+    getClientTransferNumbers(campaignId).then(setTransferNumbers).catch(() => {})
+  }, [campaignId])
 
   // JsSIP UA — register and listen for incoming + outbound call events
   useEffect(() => {
@@ -122,12 +134,15 @@ export default function SoftphonePanel() {
     if (!session) return
 
     try {
-      const rec = await api.post<{ id: string }>('/api/v1/call-records/inbound', {
+      const calledNumber = session.local_identity?.uri?.user ?? null
+      const rec = await api.post<{ id: string; campaignId?: string }>('/api/v1/call-records/inbound', {
         callerNumber,
         callerName,
         channelUuid: null,
+        calledNumber,
       })
       setCallRecordId(rec.id)
+      if (rec.campaignId) setCampaignId(rec.campaignId)
     } catch { /* don't block the answer if record creation fails */ }
 
     session.answer({ mediaConstraints: { audio: true, video: false } })
@@ -157,13 +172,14 @@ export default function SoftphonePanel() {
     }
   }
 
-  const handleDial = () => {
+  const handleDial = (transferTarget?: ClientTransferNumber) => {
     const ua = uaRef.current
-    if (!ua || !tenantSubdomain || !dialInput.trim()) return
+    const number = transferTarget?.number ?? dialInput.trim()
+    if (!ua || !tenantSubdomain || !number) return
 
-    const target = `sip:${dialInput.trim()}@${tenantSubdomain}`
-    setDialing(dialInput.trim())
-    setDialInput('')
+    const target = `sip:${number}@${tenantSubdomain}`
+    setDialing(number)
+    if (!transferTarget) setDialInput('')
 
     try {
       ua.call(target, {
@@ -173,11 +189,22 @@ export default function SoftphonePanel() {
     } catch {
       reset()
     }
+
+    // If this transfer number has a CRM script flow on the outbound campaign, open a flow tab
+    if (transferTarget?.campaignFlowId) {
+      const flowId = transferTarget.campaignFlowId
+      const label = transferTarget.campaignName ? `${transferTarget.campaignName} Script` : 'Transfer Script'
+      flowsApi.startSession({ flowId, callRecordId: callRecordId ?? undefined })
+        .then((node) => addFlowSession({ id: node.sessionId, label, sessionId: node.sessionId, initialNode: node }))
+        .catch(console.error)
+    }
   }
 
   const handleDialKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') handleDial()
   }
+
+  const handleDialTransfer = (t: ClientTransferNumber) => handleDial(t)
 
   return (
     <div className="flex flex-col h-full p-3 gap-3">
@@ -329,6 +356,43 @@ export default function SoftphonePanel() {
               </svg>
             </button>
           </div>
+
+          {/* Transfer Numbers — shown when this call's campaign has external numbers configured */}
+          {transferNumbers.length > 0 && (
+            <div className="mt-2 border border-gray-700 rounded-lg overflow-hidden">
+              <button
+                onClick={() => setShowTransfers(v => !v)}
+                className="w-full flex items-center justify-between px-3 py-2 bg-gray-800 hover:bg-gray-750 text-left"
+              >
+                <span className="text-xs font-medium text-gray-300">Transfer Numbers</span>
+                <svg
+                  className={`w-3 h-3 text-gray-500 transition-transform ${showTransfers ? 'rotate-180' : ''}`}
+                  fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {showTransfers && (
+                <div className="divide-y divide-gray-700/50">
+                  {transferNumbers.map(t => (
+                    <div key={t.id} className="flex items-center gap-2 px-3 py-2 bg-gray-900">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium text-gray-200 truncate">{t.label}</p>
+                        <p className="text-xs text-gray-500 font-mono truncate">{t.number}</p>
+                      </div>
+                      <button
+                        onClick={() => handleDialTransfer(t)}
+                        className="shrink-0 px-2 py-1 rounded bg-blue-700 hover:bg-blue-600 text-xs text-white transition-colors"
+                        title={`Dial ${t.number}`}
+                      >
+                        Dial
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -345,7 +409,7 @@ export default function SoftphonePanel() {
               className="flex-1 min-w-0 bg-gray-800 text-white text-sm rounded-lg px-3 py-2 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
             <button
-              onClick={handleDial}
+              onClick={() => handleDial()}
               disabled={!dialInput.trim()}
               className="w-10 h-10 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 flex items-center justify-center transition-colors shrink-0"
               title="Call"

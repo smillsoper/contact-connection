@@ -61,7 +61,7 @@ export default function FlowsPage() {
           <div className="flex items-center gap-3">
             <div className="w-px h-5 bg-gray-700" />
             <button
-              onClick={() => navigate('/agent')}
+              onClick={() => navigate('/admin')}
               className="text-gray-400 hover:text-gray-200 text-sm flex items-center gap-1 transition-colors"
             >
               ← Back
@@ -105,7 +105,7 @@ export default function FlowsPage() {
               <thead>
                 <tr className="border-b border-gray-800 bg-gray-800/50">
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide">Name</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide">Type</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide">Type / Direction</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide">Status</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide">Version</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide">Updated</th>
@@ -116,7 +116,15 @@ export default function FlowsPage() {
                 {flows.map((flow) => (
                   <tr key={flow.id} className="border-b border-gray-800 last:border-0 hover:bg-gray-800/40 transition-colors">
                     <td className="px-4 py-3 font-medium text-white">{flow.name}</td>
-                    <td className="px-4 py-3 text-gray-400 capitalize">{flow.flow_type}</td>
+                    <td className="px-4 py-3 text-gray-400">
+                      <span className="capitalize">{flow.flow_type}</span>
+                      {flow.flow_direction && (
+                        <span className="ml-1 text-gray-500 capitalize">
+                          · {flow.flow_direction}
+                          {flow.flow_sub_type && ` / ${flow.flow_sub_type}`}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       {flow.is_active ? (
                         <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-400 bg-emerald-900/30 border border-emerald-700 px-2 py-0.5 rounded-full">
