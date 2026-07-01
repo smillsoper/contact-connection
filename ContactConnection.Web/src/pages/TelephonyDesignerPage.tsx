@@ -32,9 +32,23 @@ import TelEndNode from '../components/telephony-designer/nodes/TelEndNode'
 import TelSetVariableNode from '../components/telephony-designer/nodes/TelSetVariableNode'
 import GetSipHeaderNode from '../components/telephony-designer/nodes/GetSipHeaderNode'
 import SetSipHeaderNode from '../components/telephony-designer/nodes/SetSipHeaderNode'
+import SetCallerIdNode from '../components/telephony-designer/nodes/SetCallerIdNode'
+import CancelDialNode from '../components/telephony-designer/nodes/CancelDialNode'
+import ScriptPopNode from '../components/telephony-designer/nodes/ScriptPopNode'
+import OnAgentSelectedNode from '../components/telephony-designer/nodes/OnAgentSelectedNode'
+import OnAgentAnswerNode from '../components/telephony-designer/nodes/OnAgentAnswerNode'
+import OnCallDisconnectedNode from '../components/telephony-designer/nodes/OnCallDisconnectedNode'
+import OnCustomEventNode from '../components/telephony-designer/nodes/OnCustomEventNode'
 
 import type { TelNodeData, TelephonyNodeType, TelephonyFlowDefinition, TelephonyNodeDef } from '../types/telephony-designer'
 import { defaultTelNodeData, TELEPHONY_NODE_META } from '../types/telephony-designer'
+
+const EVENT_LISTENER_TYPES: TelephonyNodeType[] = [
+  'tf_on_agent_selected',
+  'tf_on_agent_answer',
+  'tf_on_call_disconnected',
+  'tf_on_custom_event',
+]
 
 const nodeTypes = {
   tf_check_block_list: CheckBlockListNode,
@@ -49,6 +63,13 @@ const nodeTypes = {
   tf_set_variable: TelSetVariableNode,
   tf_get_sip_header: GetSipHeaderNode,
   tf_set_sip_header: SetSipHeaderNode,
+  tf_set_caller_id: SetCallerIdNode,
+  tf_cancel_dial: CancelDialNode,
+  tf_script_pop: ScriptPopNode,
+  tf_on_agent_selected: OnAgentSelectedNode,
+  tf_on_agent_answer: OnAgentAnswerNode,
+  tf_on_call_disconnected: OnCallDisconnectedNode,
+  tf_on_custom_event: OnCustomEventNode,
 }
 
 const edgeTypes = { editable: EditableEdge }
@@ -157,6 +178,8 @@ function DesignerCanvas() {
   const [entryNodeId, setEntryNodeId] = useState<string | null>(null)
   const [flowId, setFlowId] = useState<string | null>(routeId ?? null)
   const [flowName, setFlowName] = useState('New Telephony Flow')
+  const [flowDirection, setFlowDirection] = useState<string>('inbound')
+  const [flowSubType, setFlowSubType] = useState<string>('')
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [status, setStatus] = useState('')
   const idCounter = useRef(0)
@@ -172,6 +195,8 @@ function DesignerCanvas() {
       setEdges(e)
       setEntryNodeId(entry)
       setFlowName(detail.name)
+      setFlowDirection(detail.flow_direction ?? 'inbound')
+      setFlowSubType(detail.flow_sub_type ?? '')
       setFlowId(detail.id)
     })
   }, [routeId])
@@ -207,14 +232,15 @@ function DesignerCanvas() {
       if (!type) return
       const position = screenToFlowPosition({ x: e.clientX, y: e.clientY })
       const id = `${type}_${++idCounter.current}`
+      const isEventNode = EVENT_LISTENER_TYPES.includes(type)
       setNodes((nds) => {
         const noEntry = !nds.some((n) => n.data.isEntry)
-        if (noEntry) setEntryNodeId(id)
+        if (noEntry && !isEventNode) setEntryNodeId(id)
         return [...nds, {
           id,
           type,
           position,
-          data: { ...defaultTelNodeData(type), isEntry: noEntry },
+          data: { ...defaultTelNodeData(type), isEntry: noEntry && !isEventNode },
         }]
       })
     },
@@ -244,11 +270,13 @@ function DesignerCanvas() {
     const def = toTelDef(nodes, edges, entryNodeId, flowName)
     setStatus('Saving…')
     try {
+      const dir = flowDirection || undefined
+      const sub = (flowDirection === 'outbound' && flowSubType) ? flowSubType : undefined
       if (flowId) {
-        await flowsApi.updateDefinition(flowId, flowName, def as unknown as import('../types/designer').ContactConnectionFlowDefinition)
+        await flowsApi.updateDefinition(flowId, flowName, def as unknown as import('../types/designer').ContactConnectionFlowDefinition, dir, sub)
         setStatus('Saved')
       } else {
-        const created = await flowsApi.create(flowName, 'telephony', def as unknown as import('../types/designer').ContactConnectionFlowDefinition)
+        const created = await flowsApi.create(flowName, 'telephony', def as unknown as import('../types/designer').ContactConnectionFlowDefinition, dir, sub)
         setFlowId(created.id)
         navigate(`/telephony-designer/${created.id}`, { replace: true })
         setStatus('Saved')
@@ -272,10 +300,10 @@ function DesignerCanvas() {
       {/* Top bar */}
       <div className="flex items-center gap-3 px-4 py-2 bg-gray-900 border-b border-gray-700 shrink-0">
         <button
-          onClick={() => navigate('/telephony-flows')}
+          onClick={() => navigate('/flows')}
           className="text-sm text-gray-400 hover:text-gray-200"
         >
-          ← Telephony Flows
+          ← Flows
         </button>
         <div className="w-px h-5 bg-gray-700" />
         <input
@@ -283,6 +311,27 @@ function DesignerCanvas() {
           value={flowName}
           onChange={(e) => setFlowName(e.target.value)}
         />
+        <div className="w-px h-5 bg-gray-700" />
+        <select
+          value={flowDirection}
+          onChange={(e) => { setFlowDirection(e.target.value); if (e.target.value === 'inbound') setFlowSubType('') }}
+          className="bg-gray-800 border border-gray-600 text-gray-200 text-sm rounded px-2 py-1 focus:outline-none focus:border-blue-500"
+        >
+          <option value="inbound">Inbound</option>
+          <option value="outbound">Outbound</option>
+        </select>
+        {flowDirection === 'outbound' && (
+          <select
+            value={flowSubType}
+            onChange={(e) => setFlowSubType(e.target.value)}
+            className="bg-gray-800 border border-gray-600 text-gray-200 text-sm rounded px-2 py-1 focus:outline-none focus:border-blue-500"
+          >
+            <option value="">Sub-type…</option>
+            <option value="manual">Manual</option>
+            <option value="progressive">Progressive</option>
+            <option value="predictive">Predictive</option>
+          </select>
+        )}
         <div className="flex-1" />
         {status && <span className="text-xs text-gray-400">{status}</span>}
         <button
@@ -301,7 +350,7 @@ function DesignerCanvas() {
 
       {/* Main content */}
       <div className="flex flex-1 overflow-hidden">
-        <TelephonyNodePalette />
+        <TelephonyNodePalette direction={flowDirection} subType={flowSubType} />
 
         <div className="flex-1">
           <ReactFlow

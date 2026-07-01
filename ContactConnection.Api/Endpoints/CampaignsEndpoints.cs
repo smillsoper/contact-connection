@@ -16,6 +16,8 @@ public static class CampaignsEndpoints
         group.MapPut("{id:guid}",                     Update);
         group.MapPut("{id:guid}/flow",                SetFlow);
         group.MapDelete("{id:guid}/flow",             RemoveFlow);
+        group.MapPut("{id:guid}/inbound-flow",        SetInboundFlow);
+        group.MapDelete("{id:guid}/inbound-flow",     RemoveInboundFlow);
         group.MapPut("{id:guid}/outbound-flow",       SetOutboundFlow);
         group.MapDelete("{id:guid}/outbound-flow",    RemoveOutboundFlow);
         group.MapPost("{id:guid}/activate",           Activate);
@@ -128,6 +130,33 @@ public static class CampaignsEndpoints
         var campaign = await repo.GetByIdAsync(id, ct);
         if (campaign is null) return Results.NotFound();
         campaign.RemoveFlow();
+        await repo.SaveChangesAsync(ct);
+        return Results.Ok(ToSummaryResponse(campaign));
+    }
+
+    // ── PUT /api/v1/campaigns/{id}/inbound-flow ─────────────────────────────
+
+    private static async Task<IResult> SetInboundFlow(
+        Guid id, SetCampaignFlowRequest req,
+        ICampaignRepository repo, TenantContext tenantContext, CancellationToken ct)
+    {
+        if (!tenantContext.HasTenant) return Results.Unauthorized();
+        var campaign = await repo.GetByIdAsync(id, ct);
+        if (campaign is null) return Results.NotFound();
+        campaign.AssignInboundFlow(req.FlowId);
+        await repo.SaveChangesAsync(ct);
+        return Results.Ok(ToSummaryResponse(campaign));
+    }
+
+    // ── DELETE /api/v1/campaigns/{id}/inbound-flow ───────────────────────────
+
+    private static async Task<IResult> RemoveInboundFlow(
+        Guid id, ICampaignRepository repo, TenantContext tenantContext, CancellationToken ct)
+    {
+        if (!tenantContext.HasTenant) return Results.Unauthorized();
+        var campaign = await repo.GetByIdAsync(id, ct);
+        if (campaign is null) return Results.NotFound();
+        campaign.RemoveInboundFlow();
         await repo.SaveChangesAsync(ct);
         return Results.Ok(ToSummaryResponse(campaign));
     }
@@ -320,7 +349,7 @@ public static class CampaignsEndpoints
 
     internal static object ToSummaryResponse(Campaign c) => new
     {
-        c.Id, c.TenantId, c.ClientId, c.Name, c.Slug, c.Status, c.Description, c.FlowId, c.OutboundFlowId,
+        c.Id, c.TenantId, c.ClientId, c.Name, c.Slug, c.Status, c.Description, c.FlowId, c.InboundFlowId, c.OutboundFlowId,
         c.Direction, c.DialMode, c.CallerIdNumber, c.Priority, c.AfterCallWorkSeconds,
         c.MaxQueueSize, c.QueueTimeoutSeconds, c.ServiceLevelThresholdSeconds,
         c.QueueAccelerationEnabled, c.QueueAccelerationIntervalSeconds, c.QueueAccelerationPriorityBoost,
@@ -330,12 +359,12 @@ public static class CampaignsEndpoints
 
     internal static object ToDetailResponse(Campaign c) => new
     {
-        c.Id, c.TenantId, c.ClientId, c.Name, c.Slug, c.Status, c.Description, c.FlowId, c.OutboundFlowId,
+        c.Id, c.TenantId, c.ClientId, c.Name, c.Slug, c.Status, c.Description, c.FlowId, c.InboundFlowId, c.OutboundFlowId,
         c.Direction, c.DialMode, c.CallerIdNumber, c.Priority, c.AfterCallWorkSeconds,
         c.MaxQueueSize, c.QueueTimeoutSeconds, c.ServiceLevelThresholdSeconds,
         c.QueueAccelerationEnabled, c.QueueAccelerationIntervalSeconds, c.QueueAccelerationPriorityBoost,
         Client = c.Client is null ? null : new { c.Client.Id, c.Client.Name },
-        PhoneNumbers     = c.PhoneNumbers.Select(p => new { p.Id, p.Number, p.Label, p.IsActive }),
+        PhoneNumbers     = c.PhoneNumbers.Select(p => new { p.Id, p.Number, p.Label, p.IsActive, p.FlowId, p.TelephonyFlowId }),
         AgentAssignments = c.AgentAssignments.Where(a => a.IsActive).Select(ToAssignmentResponse),
         GroupAssignments = c.GroupAssignments.Where(a => a.IsActive).Select(ToGroupAssignmentResponse),
         c.CreatedAt, c.UpdatedAt

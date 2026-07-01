@@ -70,6 +70,108 @@
 | 58 | 2026-06-28 | 11:23 AM CDT | 12:41 PM CDT | 78 min | ~3633 min |
 | 59 | 2026-06-28 | 3:36 PM CDT | 4:35 PM CDT | 59 min | ~3692 min |
 | 60 | 2026-06-29 | 6:51 AM CDT | 8:42 AM CDT | 111 min | ~3803 min |
+| 61 | 2026-06-29 | 11:00 AM CDT | 11:21 AM CDT | 21 min | ~3824 min |
+| 62 | 2026-06-30 | 7:29 AM CDT | 9:30 AM CDT | 121 min | ~3945 min |
+| 63 | 2026-07-01 | 7:29 AM CDT (break 10:13 AM, resumed 3:00 PM) | 4:04 PM CDT | 228 min (164 + 64) | ~4173 min |
+
+---
+
+## Session 63
+
+**Date:** 2026-07-01
+**Start:** 7:29 AM CDT (context exhausted 10:13 AM; resumed 3:00 PM CDT)
+**End:** 4:04 PM CDT
+**Duration:** 228 minutes (164 min + 64 min across two context windows)
+
+### Accomplished
+
+**Event-driven telephony call session architecture (full rewrite)**
+
+- **`TelephonyCallSession`** — Redis-backed call session keyed by channelUuid (4h TTL); stores FlowDefinitionJson, Vars (shared across branches), EventHandlers (eventName → nodeId map)
+- **`ITelephonyCallSessionStore`** / **`RedisCallSessionStore`** — new Application interface + Infrastructure singleton; explicit `(string)json!` cast required to resolve StackExchange.Redis `JsonSerializer.Deserialize` ambiguity
+- **`ITelephonyFlowEngine`** rewritten — added `FireEventAsync(channelUuid, eventName, FireEventContext)` which loads session from Redis, runs the matching event branch, merges vars back, returns `FireEventResult` with optional `CrmFlowSession`
+- **`ScanEventHandlers`** — scans flow node JSON at call start to pre-build the event→nodeId map; stored in session so no DB round-trip on each event
+- **`TelephonyNodeResult`** — removed `IsPaused`/`PauseEventName`; all pause/resume logic eliminated
+- **Event listener node handlers** — `OnAgentSelectedNodeHandler`, `OnAgentAnswerNodeHandler`, `OnCallDisconnectedNodeHandler`, `OnCustomEventNodeHandler`; all simple pass-throughs that let the event branch continue normally
+
+**Event-driven telephony flow designer**
+
+- **4 new event listener node types** — `tf_on_agent_selected`, `tf_on_agent_answer`, `tf_on_call_disconnected`, `tf_on_custom_event`; each is a source-only canvas entry point (no target handle at top, dashed border, "EVENT" badge)
+- **`TelNodeShell`** — `source-only` handle variant renders no target handle; event badge and dashed styling applied
+- **`EVENT_LISTENER_TYPES` guard** — prevents event nodes from auto-claiming the main `entry_node` slot when dropped on canvas
+- **Designer palette** — removed `tf_event_wait`; added 4 event listener nodes + `tf_script_pop` to inbound node list
+
+**Backend wiring**
+
+- **`TelephonyEndpoints.AnswerQueuedCall`** — after bridging, fires `agent_answer` event via `FireEventAsync`; returns `AnswerQueuedCallResponse(crmFlowSession)` if `tf_script_pop` node returns a CRM session
+- **`EslBackgroundService.HandleChannelHangupAsync`** — checks Redis session first; if found: fires `call_disconnected` event, marks CallRecord complete using session's `TenantSchemaName` (no tenant scan needed), deletes session; falls back to tenant scan only if no session
+
+**Bug fixes (confirmed via end-to-end test)**
+
+- **`FlowPanel.tsx` tab close** — original single `useEffect([state, onEnd])` was cancelling its own 2s close timer when `setState({ phase: 'ending' })` triggered a re-render; fixed by splitting into two effects: first detects end node and transitions phase, second starts the timer only when `state.phase === 'ending'` (stable dependency prevents cancellation)
+- **`BridgeToAgentAsync` caller ID** — was using broken `[origination_caller_id_number=...]bridge:...` syntax (wrong position); fixed with `uuid_setvar effective_caller_id_number` + `uuid_setvar effective_caller_id_name` before the `uuid_transfer bridge:` command so FreeSWITCH uses the original ANI in the SIP INVITE to the agent
+- **`ReceiveIncomingCall` DNIS** — added `destinationNumber` (4th parameter) to `IFlowHubClient`, `EslBackgroundService`, `FlowPanel.tsx` SignalR handler, `callStore.setQueued`, and `SoftphonePanel` display; shown as `→ {DNIS}` below the ANI
+- **DNIS source** — was passing `routing.Number` (DB value, missing leading `1`); now passes raw `Caller-Destination-Number` from the FreeSWITCH event
+- **ANI extraction** — when `Caller-Caller-ID-Number` equals `Caller-Destination-Number` (FreeSWITCH behavior for ESL `originate` test calls), falls back to `variable_origination_caller_id_number` then `variable_sip_from_user`; real inbound Telnyx calls are unaffected
+
+**End-to-end test results (all confirmed working)**
+
+- Originate command `{origination_caller_id_number=5416704541}...` → park → screen pop → agent picks up → script pop appears → softphone shows `5416704541` as ANI + `→ 18001234567` as DNIS → call timer starts ("On call") → script flow runs normally
+
+---
+
+## Session 62
+
+**Date:** 2026-06-30
+**Start:** 7:29 AM CDT
+**End:** 9:30 AM CDT
+**Duration:** 121 minutes
+
+### Accomplished
+
+**FreeSWITCH inbound call pipeline — end-to-end loopback fix + screen pop notification**
+
+- **`mod_loopback` Dockerfile fix** — added `freeswitch-mod-loopback` to apt-get install; this was the root cause of `-ERR DESTINATION_OUT_OF_ORDER`; rebuild confirmed `endpoint,loopback,mod_loopback` registered in `show modules`
+- **`vars.xml` dialplan defaults** — added `default_dialplan=XML` and `default_context=public` as `X-PRE-PROCESS` directives; fixes loopback b-leg "Dialplan [public] not found" error; requires full container restart (not just `reloadxml`)
+- **DID number normalization** — `EslBackgroundService.HandleChannelParkAsync` now matches `PhoneNumberRouting` entries regardless of leading `+` or `1` prefix; handles all four format variants (`8001234567`, `18001234567`, `+18001234567`, `+8001234567`)
+- **`TelephonyFlowEngine` flow resolution fix** — was incorrectly reading `campaign.FlowId` (the CRM script flow); now reads `phoneNumber?.TelephonyFlowId ?? campaign?.InboundFlowId` (per-DID override → campaign inbound telephony flow)
+- **Loopback test confirmed working** — `originate {origination_caller_id_number=5416704541}loopback/18001234567 &park()` returns `+OK`; ESL receives CHANNEL_PARK, creates CallRecord, runs telephony flow engine with no warnings
+- **`callStore.ts`** — added `'queued'` to `CallStatus`; added `setQueued(callerNumber, callerName, callRecordId)` action; `setRinging()` now uses functional update to preserve `callRecordId` when transitioning from `queued` state (DID-routed record survives JsSIP INVITE)
+- **`FlowPanel.tsx` screen pop handler** — `receiveIncomingCall` now calls `setQueued(callerNumber, callerName, callRecordId)` instead of silently setting `callRecordId`; caller number and name now passed through
+- **`SoftphonePanel.tsx` queued call UI** — amber pulsing indicator with "Inbound queue call" label, caller number, "Pick Up" and "Dismiss" buttons; `handlePickUp` calls `POST /api/v1/telephony/answer-queued-call` which bridges the parked channel to the agent's SIP extension; `handleAnswer` skips creating a new CallRecord when the screen-pop already created one
+- **`TelephonyEndpoints.cs`** (new) — `POST /api/v1/telephony/answer-queued-call`; looks up agent's `SipExtension` from DB, gets parked channel UUID from `CallRecord.ContactIdExternal`, opens short-lived ESL connection, issues `uuid_execute {uuid} bridge user/{ext}@{subdomain}`; triggers SIP INVITE to agent's JsSIP softphone
+- **`Program.cs`** — `app.MapTelephonyEndpoints()` registered
+
+**Pending verification:**
+- "Test Call Flow 1" must contain `tf_answer` → `tf_route_to_queue` nodes for `_queued`/`_eligible_agents` to be set
+- Test agent must be assigned to the test campaign in `/admin/campaigns/{id}`
+
+---
+
+## Session 61
+
+**Date:** 2026-06-29
+**Start:** 11:00 AM CDT
+**End:** 11:21 AM CDT
+**Duration:** 21 minutes
+
+### Accomplished
+
+**Inbound flow assignment — two-level DID routing (campaign default + per-DID override)**
+
+- **`Campaign.InboundFlowId`** — new nullable FK; `AssignInboundFlow()` / `RemoveInboundFlow()` methods
+- **`PhoneNumber.FlowId`** — new nullable FK for DID-level flow override; `AssignFlow()` / `RemoveFlow()` methods
+- **`CampaignConfiguration`** — mapped `inbound_flow_id` column
+- **`PhoneNumberConfiguration`** — mapped `flow_id` column
+- **`CampaignsEndpoints`** — `PUT/DELETE /campaigns/{id}/inbound-flow`; `InboundFlowId` included in both summary and detail responses; `FlowId` included in `PhoneNumbers` array within detail response
+- **`PhoneNumbersEndpoints`** — `PUT/DELETE /phone-numbers/{id}/flow`; `FlowId` included in response
+- **Migration `AddInboundFlowAssignments`** — adds `inbound_flow_id` to campaigns, `flow_id` to phone_numbers; applied to `tenant_test_tenant` and `tenant_test_contact_center`
+- **`telephony.ts`** — `Campaign.inboundFlowId`, `PhoneNumber.flowId`, `CampaignDetail.phoneNumbers.flowId` types added; `setCampaignInboundFlow`, `removeCampaignInboundFlow`, `setPhoneNumberFlow`, `removePhoneNumberFlow` API functions added
+- **`CampaignDetailPage`** — "Inbound Call Flow" `SearchableSelect` dropdown added to Settings form (visible for inbound campaigns only); filtered to `telephony + inbound` flows; saves alongside other settings via `setCampaignInboundFlow`/`removeCampaignInboundFlow`
+- **`TelephonyPage` Phone Numbers tab** — loads inbound telephony flows on mount; "Flow Override" column added to DID table with inline `SearchableSelect` per row (shows "Campaign default" when unset); changing selection auto-saves immediately
+- **`SearchableSelect`** — ported to React portal (`createPortal` into `document.body`) with fixed positioning from button's bounding rect; eliminates `overflow-hidden` clipping in all container contexts; `sublabel` support added (shown in dropdown, searchable)
+- **Agent Groups tab** — "Add member" UUID input replaced with `SearchableSelect` showing agent name + email; member list shows name + email instead of raw UUID; eligible agents filtered to active only, excluding existing members; member count updates on add/remove
+- **Resolution order at call time**: DID's `FlowId` → campaign's `InboundFlowId` → no flow (ESL reads whichever is set when processing the inbound park event)
 
 ---
 

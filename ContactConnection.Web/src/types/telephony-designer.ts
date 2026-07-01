@@ -11,6 +11,14 @@ export type TelephonyNodeType =
   | 'tf_set_variable'
   | 'tf_get_sip_header'
   | 'tf_set_sip_header'
+  | 'tf_set_caller_id'
+  | 'tf_cancel_dial'
+  | 'tf_script_pop'
+  // Event listener nodes — independent entry points that fire on lifecycle events
+  | 'tf_on_agent_selected'
+  | 'tf_on_agent_answer'
+  | 'tf_on_call_disconnected'
+  | 'tf_on_custom_event'
 
 export interface TelVariableAssignment {
   key: string
@@ -41,6 +49,14 @@ export interface TelNodeData extends Record<string, unknown> {
   // tf_set_sip_header
   sipHeaderName?: string
   sipHeaderValue?: string
+  // tf_set_caller_id
+  callerIdValue?: string
+  // tf_cancel_dial
+  cancelMessage?: string
+  // tf_script_pop
+  flowId?: string
+  // tf_on_custom_event
+  eventName?: string
 }
 
 export interface TimeWindow {
@@ -62,6 +78,8 @@ export interface TelephonyNodeDef {
   timezone?: string
   windows?: TimeWindow[]
   condition?: string
+  eventName?: string
+  flowId?: string
   _pos?: { x: number; y: number }
   transitions: Record<string, string>
 }
@@ -76,7 +94,7 @@ export interface TelephonyFlowDefinition {
 
 export const TELEPHONY_NODE_META: Record<
   TelephonyNodeType,
-  { label: string; color: string; description: string; handles: 'single' | 'dual' | 'none' | 'multi' }
+  { label: string; color: string; description: string; handles: 'single' | 'dual' | 'none' | 'multi' | 'source-only' }
 > = {
   tf_check_block_list: {
     label: 'Block List',
@@ -129,7 +147,7 @@ export const TELEPHONY_NODE_META: Record<
   tf_end: {
     label: 'End',
     color: '#374151',
-    description: 'End the telephony flow',
+    description: 'End this branch (call session stays live until disconnect)',
     handles: 'none',
   },
   tf_set_variable: {
@@ -149,6 +167,49 @@ export const TELEPHONY_NODE_META: Record<
     color: '#0e7490',
     description: 'Inject a SIP header into subsequent outgoing SIP messages for this channel',
     handles: 'single',
+  },
+  tf_set_caller_id: {
+    label: 'Set Caller ID',
+    color: '#0284c7',
+    description: 'Override the outbound caller ID — accepts a literal number or any {{variable}}',
+    handles: 'single',
+  },
+  tf_cancel_dial: {
+    label: 'Cancel Dial',
+    color: '#c2410c',
+    description: 'Abort the outbound dial and send a message back to the agent',
+    handles: 'none',
+  },
+  tf_script_pop: {
+    label: 'Script Pop',
+    color: '#0891b2',
+    description: "Auto-open the CRM script flow on the answering agent's screen",
+    handles: 'single',
+  },
+  // ── Event listener nodes ──────────────────────────────────────────────────
+  tf_on_agent_selected: {
+    label: 'Agent Selected',
+    color: '#6d28d9',
+    description: 'Fires when an agent is assigned/presented with the call',
+    handles: 'source-only',
+  },
+  tf_on_agent_answer: {
+    label: 'Agent Answer',
+    color: '#0369a1',
+    description: 'Fires when the agent picks up — bridge is live at this point',
+    handles: 'source-only',
+  },
+  tf_on_call_disconnected: {
+    label: 'Call Disconnected',
+    color: '#991b1b',
+    description: 'Fires when the call ends — use for post-call actions',
+    handles: 'source-only',
+  },
+  tf_on_custom_event: {
+    label: 'Custom Event',
+    color: '#92400e',
+    description: 'Fires when a named custom event is emitted (e.g. from a script flow)',
+    handles: 'source-only',
   },
 }
 
@@ -186,5 +247,19 @@ export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
       return { label: 'Get SIP Header', headerName: 'X-Original-ANI', variableName: 'custom_ani' }
     case 'tf_set_sip_header':
       return { label: 'Set SIP Header', sipHeaderName: '', sipHeaderValue: '' }
+    case 'tf_set_caller_id':
+      return { label: 'Set Caller ID', callerIdValue: '{{caller.ani}}' }
+    case 'tf_cancel_dial':
+      return { label: 'Cancel Dial', cancelMessage: 'This transfer number is only available during business hours.' }
+    case 'tf_script_pop':
+      return { label: 'Script Pop', flowId: '' }
+    case 'tf_on_agent_selected':
+      return { label: 'Agent Selected' }
+    case 'tf_on_agent_answer':
+      return { label: 'Agent Answer' }
+    case 'tf_on_call_disconnected':
+      return { label: 'Call Disconnected' }
+    case 'tf_on_custom_event':
+      return { label: 'Custom Event', eventName: '' }
   }
 }

@@ -1,57 +1,9 @@
 import type { Node } from '@xyflow/react'
 import type { TelNodeData, TelephonyNodeType, TimeWindow, TelVariableAssignment } from '../../types/telephony-designer'
 import { TELEPHONY_NODE_META } from '../../types/telephony-designer'
+import { TIMEZONE_GROUPS } from '../../utils/timezones'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-
-const TIMEZONE_GROUPS: { group: string; options: { label: string; value: string }[] }[] = [
-  {
-    group: 'United States',
-    options: [
-      { label: 'Eastern Time (ET)', value: 'America/New_York' },
-      { label: 'Central Time (CT)', value: 'America/Chicago' },
-      { label: 'Mountain Time (MT)', value: 'America/Denver' },
-      { label: 'Pacific Time (PT)', value: 'America/Los_Angeles' },
-      { label: 'Alaska Time (AKT)', value: 'America/Anchorage' },
-      { label: 'Hawaii–Aleutian (HT)', value: 'Pacific/Honolulu' },
-      { label: 'Arizona — no DST', value: 'America/Phoenix' },
-      { label: 'Indiana East — no DST', value: 'America/Indiana/Indianapolis' },
-    ],
-  },
-  {
-    group: 'Canada',
-    options: [
-      { label: 'Atlantic Time (AT)', value: 'America/Halifax' },
-      { label: 'Newfoundland (NT)', value: 'America/St_Johns' },
-    ],
-  },
-  {
-    group: 'Latin America',
-    options: [
-      { label: 'Mexico City (CT)', value: 'America/Mexico_City' },
-      { label: 'São Paulo', value: 'America/Sao_Paulo' },
-    ],
-  },
-  {
-    group: 'Europe',
-    options: [
-      { label: 'London (GMT/BST)', value: 'Europe/London' },
-      { label: 'Paris / Berlin (CET/CEST)', value: 'Europe/Paris' },
-      { label: 'Helsinki / Athens (EET/EEST)', value: 'Europe/Helsinki' },
-      { label: 'Moscow (MSK)', value: 'Europe/Moscow' },
-    ],
-  },
-  {
-    group: 'Asia / Pacific',
-    options: [
-      { label: 'India Standard Time (IST)', value: 'Asia/Kolkata' },
-      { label: 'China Standard Time (CST)', value: 'Asia/Shanghai' },
-      { label: 'Japan Standard Time (JST)', value: 'Asia/Tokyo' },
-      { label: 'Australia Eastern (AEST/AEDT)', value: 'Australia/Sydney' },
-      { label: 'New Zealand (NZST/NZDT)', value: 'Pacific/Auckland' },
-    ],
-  },
-]
 
 const HOLIDAY_OPTIONS: { key: string; label: string }[] = [
   { key: 'new_years', label: "New Year's Day (Jan 1)" },
@@ -88,6 +40,7 @@ export default function TelephonyNodePropertiesPanel({
   const data = node.data
   const meta = TELEPHONY_NODE_META[type]
   const isEntry = entryNodeId === node.id
+  const isEventNode = meta.handles === 'source-only'
 
   const set = (field: string, value: unknown) => onChange(node.id, { [field]: value })
 
@@ -241,9 +194,91 @@ export default function TelephonyNodePropertiesPanel({
         </>
       )}
 
-      {/* Entry + Delete */}
+      {type === 'tf_set_caller_id' && (
+        <>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Caller ID value</label>
+            <input
+              className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-sky-500"
+              placeholder='+15035551234 or {{caller.ani}}'
+              value={(data.callerIdValue as string) ?? ''}
+              onChange={(e) => set('callerIdValue', e.target.value)}
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Literal E.164 number or a <span className="font-mono text-sky-400">{'{{variable}}'}</span>. Click to insert:
+            </p>
+          </div>
+          <CallerIdVariableReference onInsert={(v) => set('callerIdValue', v)} />
+        </>
+      )}
+
+      {type === 'tf_cancel_dial' && (
+        <>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Agent message</label>
+            <textarea
+              rows={4}
+              className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm resize-y focus:outline-none focus:border-orange-500"
+              placeholder="e.g. This number is only available during business hours (Mon–Fri 8am–5pm CT)."
+              value={(data.cancelMessage as string) ?? ''}
+              onChange={(e) => set('cancelMessage', e.target.value)}
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Displayed to the agent when the dial is cancelled. Supports <span className="font-mono text-orange-400">{'{{variables}}'}</span> — click to insert:
+            </p>
+          </div>
+          <CancelDialVariableReference onInsert={(v) => {
+            const current = (data.cancelMessage as string) ?? ''
+            set('cancelMessage', current + v)
+          }} />
+        </>
+      )}
+
+      {type === 'tf_on_custom_event' && (
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Event name</label>
+          <input
+            className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-amber-500"
+            placeholder="e.g. disposition_set"
+            value={(data.eventName as string) ?? ''}
+            onChange={(e) => set('eventName', e.target.value)}
+          />
+          <p className="text-xs text-gray-500 mt-1.5 leading-snug">
+            Fire this branch via <span className="font-mono text-amber-400">FireEventAsync(uuid, "custom:{'{eventName}'}")</span>.
+            Use this for cross-talk between script flows and the telephony flow.
+          </p>
+        </div>
+      )}
+
+      {isEventNode && type !== 'tf_on_custom_event' && (
+        <p className="text-xs text-gray-500 leading-snug bg-gray-800 border border-gray-700 rounded p-2">
+          This branch fires automatically when the <strong className="text-gray-300">{meta.label}</strong> event
+          occurs. Drop action nodes below this to define what happens at that moment in the call.
+        </p>
+      )}
+
+      {type === 'tf_script_pop' && (
+        <div className="flex flex-col gap-2">
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">CRM flow ID override (optional)</label>
+            <input
+              className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-cyan-500"
+              placeholder="Leave blank to use campaign's default flow"
+              value={(data.flowId as string) ?? ''}
+              onChange={(e) => set('flowId', e.target.value)}
+            />
+          </div>
+          <p className="text-xs text-gray-500 leading-snug">
+            Starts the CRM script flow on the answering agent's screen.
+            Resolution: node override → campaign's assigned Script Flow.
+          </p>
+        </div>
+      )}
+
+      {/* Entry / Delete footer */}
       <div className="flex gap-2 pt-2 border-t border-gray-700 mt-auto">
-        {!isEntry && (
+        {/* Event nodes are self-contained entry points — no "Set as Entry" needed */}
+        {!isEventNode && !isEntry && (
           <button
             onClick={() => onSetEntry(node.id)}
             className="flex-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 rounded py-1.5"
@@ -251,8 +286,11 @@ export default function TelephonyNodePropertiesPanel({
             Set as Entry
           </button>
         )}
-        {isEntry && (
+        {!isEventNode && isEntry && (
           <span className="flex-1 text-xs text-center text-green-400 py-1.5">Entry node ✓</span>
+        )}
+        {isEventNode && (
+          <span className="flex-1 text-xs text-center text-violet-400 py-1.5">Event entry ✓</span>
         )}
         <button
           onClick={() => onDelete(node.id)}
@@ -452,6 +490,108 @@ function TimeOfDayEditor({
           + Date
         </button>
       </div>
+    </div>
+  )
+}
+
+const CALLER_ID_VARS: { group: string; items: { tag: string; desc: string }[] }[] = [
+  {
+    group: 'Inbound call',
+    items: [
+      { tag: '{{caller.ani}}',       desc: "Caller's number (ANI)" },
+      { tag: '{{call.dnis}}',        desc: 'Dialed number (DNIS / DID)' },
+      { tag: '{{call.campaign_id}}', desc: 'Matched campaign ID' },
+      { tag: '{{call.direction}}',   desc: '"inbound" or "outbound"' },
+    ],
+  },
+  {
+    group: 'SIP headers (via Get SIP Header node)',
+    items: [
+      { tag: '{{flow.original_ani}}',   desc: 'Example — X-Original-ANI extracted to flow.original_ani' },
+      { tag: '{{flow.forwarded_for}}',  desc: 'Example — X-Forwarded-For extracted to flow.forwarded_for' },
+    ],
+  },
+  {
+    group: 'Flow variables (via Set Variable node)',
+    items: [
+      { tag: '{{flow.variable_name}}', desc: 'Any named variable set earlier in this flow' },
+    ],
+  },
+]
+
+const CANCEL_DIAL_VARS: { group: string; items: { tag: string; desc: string }[] }[] = [
+  {
+    group: 'Inbound call',
+    items: [
+      { tag: '{{caller.ani}}',       desc: "Original caller's number (ANI)" },
+      { tag: '{{call.dnis}}',        desc: 'Number the caller dialed (DNIS)' },
+      { tag: '{{call.campaign_id}}', desc: 'Campaign ID' },
+    ],
+  },
+  {
+    group: 'Time context',
+    items: [
+      { tag: '{{now.time}}',         desc: 'Current time (HH:mm)' },
+      { tag: '{{now.day_name}}',     desc: 'Current day (e.g. Monday)' },
+      { tag: '{{now.timezone}}',     desc: 'Flow timezone name' },
+    ],
+  },
+  {
+    group: 'Flow variables',
+    items: [
+      { tag: '{{flow.variable_name}}', desc: 'Any variable stored earlier in this flow' },
+    ],
+  },
+]
+
+function CancelDialVariableReference({ onInsert }: { onInsert: (tag: string) => void }) {
+  return (
+    <div className="bg-gray-800 border border-gray-700 rounded p-2 flex flex-col gap-0.5">
+      {CANCEL_DIAL_VARS.map((group) => (
+        <div key={group.group}>
+          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mt-1 mb-0.5 first:mt-0">
+            {group.group}
+          </p>
+          {group.items.map(({ tag, desc }) => (
+            <button
+              key={tag}
+              type="button"
+              onClick={() => onInsert(tag)}
+              title={`Insert ${tag}`}
+              className="w-full flex items-start gap-2 text-left hover:bg-gray-700 rounded px-1.5 py-0.5"
+            >
+              <span className="font-mono text-[10px] text-orange-400 shrink-0 leading-4">{tag}</span>
+              <span className="text-[10px] text-gray-500 leading-4">{desc}</span>
+            </button>
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function CallerIdVariableReference({ onInsert }: { onInsert: (tag: string) => void }) {
+  return (
+    <div className="bg-gray-800 border border-gray-700 rounded p-2 flex flex-col gap-0.5">
+      {CALLER_ID_VARS.map((group) => (
+        <div key={group.group}>
+          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mt-1 mb-0.5 first:mt-0">
+            {group.group}
+          </p>
+          {group.items.map(({ tag, desc }) => (
+            <button
+              key={tag}
+              type="button"
+              onClick={() => onInsert(tag)}
+              title={`Insert ${tag}`}
+              className="w-full flex items-start gap-2 text-left hover:bg-gray-700 rounded px-1.5 py-0.5"
+            >
+              <span className="font-mono text-[10px] text-sky-400 shrink-0 leading-4">{tag}</span>
+              <span className="text-[10px] text-gray-500 leading-4">{desc}</span>
+            </button>
+          ))}
+        </div>
+      ))}
     </div>
   )
 }

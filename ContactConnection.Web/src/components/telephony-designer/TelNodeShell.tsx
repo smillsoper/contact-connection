@@ -13,25 +13,28 @@ interface TelNodeShellProps {
 
 export default function TelNodeShell({ type, label, isEntry, selected, children, extraHandles }: TelNodeShellProps) {
   const meta = TELEPHONY_NODE_META[type]
-  const hasSingle = meta.handles === 'single'
-  const hasDual = meta.handles === 'dual'
+  const hasSingle    = meta.handles === 'single'
+  const hasDual      = meta.handles === 'dual'
+  const isEventNode  = meta.handles === 'source-only'
 
-  // Dual handles for check-style nodes
-  const isDualCheck = type === 'tf_check_block_list' || type === 'tf_check_agent_availability'
-  const isGenericBranch = type === 'tf_branch'
+  const isDualCheck      = type === 'tf_check_block_list' || type === 'tf_check_agent_availability'
+  const isGenericBranch  = type === 'tf_branch'
 
   return (
     <div
       style={{
         width: 210,
         position: 'relative',
-        borderColor: selected ? meta.color : '#374151',
+        borderColor: selected ? meta.color : isEventNode ? '#4b5563' : '#374151',
         borderWidth: selected ? 2 : 1,
+        borderStyle: isEventNode ? 'dashed' : 'solid',
       }}
       className="bg-gray-800 rounded-lg border shadow-sm"
     >
-      {/* Target handle (top) — all nodes can receive connections */}
-      <Handle type="target" position={Position.Top} style={{ background: '#6b7280' }} />
+      {/* Target handle (top) — event listener nodes are source-only */}
+      {!isEventNode && (
+        <Handle type="target" position={Position.Top} style={{ background: '#6b7280' }} />
+      )}
 
       {/* Colored header */}
       <div
@@ -41,7 +44,12 @@ export default function TelNodeShell({ type, label, isEntry, selected, children,
         <span className="text-white text-xs font-semibold uppercase tracking-wide">
           {meta.label}
         </span>
-        {isEntry && (
+        {isEventNode && (
+          <span className="bg-white/30 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">
+            EVENT
+          </span>
+        )}
+        {!isEventNode && isEntry && (
           <span className="bg-white/30 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">
             ENTRY
           </span>
@@ -57,8 +65,8 @@ export default function TelNodeShell({ type, label, isEntry, selected, children,
       {/* Extra handles (e.g. time-of-day multiple transitions) */}
       {extraHandles}
 
-      {/* Single source handle */}
-      {!extraHandles && hasSingle && (
+      {/* Single source handle — regular nodes and event listener nodes */}
+      {!extraHandles && (hasSingle || isEventNode) && (
         <Handle type="source" position={Position.Bottom} id="default" style={{ background: '#9ca3af' }} />
       )}
 

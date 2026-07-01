@@ -21,7 +21,7 @@ public class RouteToQueueNodeHandler : ITelephonyNodeHandler
         if (!string.IsNullOrWhiteSpace(directExtension))
         {
             // Direct bridge to a specific agent extension
-            await ctx.Esl.BridgeToAgentAsync(ctx.ChannelUuid, directExtension, ctx.TenantSubdomain, ct);
+            await ctx.Esl.BridgeToAgentAsync(ctx.ChannelUuid, directExtension, ctx.TenantSubdomain, ctx.CallerNumber, ct);
             return new TelephonyNodeResult(null, "bridged");
         }
 

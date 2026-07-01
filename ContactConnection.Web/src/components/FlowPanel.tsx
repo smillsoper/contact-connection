@@ -36,7 +36,8 @@ function FlowSessionView({ entry, hub, onEnd }: FlowSessionViewProps) {
     result: AddressValidationResult
     address: Record<string, string>
   } | null>(null)
-  const endTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const onEndRef = useRef(onEnd)
+  useEffect(() => { onEndRef.current = onEnd })
 
   // Join SignalR session room for live updates
   useEffect(() => {
@@ -45,16 +46,19 @@ function FlowSessionView({ entry, hub, onEnd }: FlowSessionViewProps) {
     return () => { hub.invoke('LeaveSession', entry.sessionId).catch(console.error) }
   }, [hub, entry.sessionId])
 
-  // Auto-close when end node is reached — give agent 2s to see the completion state
+  // Detect end node → transition to ending phase
   useEffect(() => {
     if (state.phase === 'running' && state.node.nodeType === 'end') {
       setState({ phase: 'ending' })
-      endTimerRef.current = setTimeout(onEnd, 2000)
     }
-    return () => {
-      if (endTimerRef.current) clearTimeout(endTimerRef.current)
-    }
-  }, [state, onEnd])
+  }, [state])
+
+  // Start close timer exactly once when entering ending phase
+  useEffect(() => {
+    if (state.phase !== 'ending') return
+    const timer = setTimeout(() => onEndRef.current(), 2000)
+    return () => clearTimeout(timer)
+  }, [state.phase])
 
   const advance = useCallback(
     async (input?: string) => {
@@ -258,7 +262,7 @@ function TabBar({ sessions, activeSessionId, onSelect }: TabBarProps) {
 
 export default function FlowPanel() {
   const { token, tenantSubdomain } = useAuthStore()
-  const { setCallRecordId, callRecordId } = useCallStore()
+  const { setQueued, callRecordId } = useCallStore()
   const { sessions, activeSessionId, addSession, removeSession, setActiveSession } = useFlowSessionsStore()
   const [hub, setHub] = useState<signalR.HubConnection | null>(null)
 
@@ -282,9 +286,9 @@ export default function FlowPanel() {
       .withAutomaticReconnect()
       .build()
 
-    // ESL screen pop — inbound call parked for this agent
-    connection.on('receiveIncomingCall', (callRecordId: string, _callerNumber: string, _callerName: string) => {
-      setCallRecordId(callRecordId)
+    // ESL screen pop — inbound call queued for this agent (DID route → telephony flow → tf_route_to_queue)
+    connection.on('receiveIncomingCall', (callRecordId: string, callerNumber: string, callerName: string, destinationNumber: string) => {
+      setQueued(callerNumber, callerName, callRecordId, destinationNumber)
     })
 
     connection.start().catch(console.error)

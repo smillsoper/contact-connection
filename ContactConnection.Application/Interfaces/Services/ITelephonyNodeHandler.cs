@@ -12,4 +12,6 @@ public interface ITelephonyNodeHandler
 }
 
 /// <summary>NextNodeId null means terminal (no further nodes to execute).</summary>
-public record TelephonyNodeResult(string? NextNodeId, string TransitionTaken = "default");
+public record TelephonyNodeResult(
+    string? NextNodeId,
+    string TransitionTaken = "default");

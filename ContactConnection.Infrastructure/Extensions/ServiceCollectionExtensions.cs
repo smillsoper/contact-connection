@@ -139,6 +139,16 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ITelephonyNodeHandler, TelSetVariableNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, GetSipHeaderNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, SetSipHeaderNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, SetCallerIdNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, CancelDialNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, OnAgentSelectedNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, OnAgentAnswerNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, OnCallDisconnectedNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, OnCustomEventNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, ScriptPopNodeHandler>();
+
+        // Call session store (singleton — Redis operations are inherently stateless)
+        services.AddSingleton<ITelephonyCallSessionStore, RedisCallSessionStore>();
 
         // Telephony flow engine (scoped — used by EslBackgroundService per call via IServiceScope)
         services.AddScoped<ITelephonyFlowEngine, TelephonyFlowEngine>();

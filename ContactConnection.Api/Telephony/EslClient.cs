@@ -97,8 +97,18 @@ public sealed class EslClient : IAsyncDisposable, IEslCommander
     public Task HangupChannelAsync(string uuid, CancellationToken ct = default) =>
         SendApiAsync($"uuid_hangup {uuid} NORMAL_CLEARING", ct);
 
-    public Task BridgeToAgentAsync(string uuid, string extension, string domain, CancellationToken ct = default) =>
-        SendApiAsync($"uuid_execute {uuid} bridge user/{extension}@{domain}", ct);
+    // Transfer the parked inbound channel to the agent using FreeSWITCH's inline dialplan.
+    // uuid_transfer moves the parked channel into a bridge application that FreeSWITCH
+    // handles internally — it originates a new SIP call to the agent and bridges them.
+    // This is more reliable than bgapi originate &bridge(uuid), which passes the UUID
+    // as a dial string (invalid) and causes an immediate BYE after the agent answers.
+    public async Task BridgeToAgentAsync(string uuid, string extension, string domain, string callerNumber, CancellationToken ct = default)
+    {
+        // Set effective caller ID before bridging so the SIP INVITE to the agent shows the original ANI
+        await SetChannelVarAsync(uuid, "effective_caller_id_number", callerNumber, ct);
+        await SetChannelVarAsync(uuid, "effective_caller_id_name", callerNumber, ct);
+        await SendApiAsync($"uuid_transfer {uuid} 'bridge:user/{extension}@{domain}' inline", ct);
+    }
 
     public Task SetChannelVarAsync(string uuid, string name, string value, CancellationToken ct = default) =>
         SendApiAsync($"uuid_setvar {uuid} {name} {value}", ct);

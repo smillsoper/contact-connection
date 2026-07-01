@@ -60,5 +60,5 @@ public interface IFlowHubClient
     Task ReceiveError(string message);
 
     /// <summary>ESL screen pop — inbound call parked for this agent.</summary>
-    Task ReceiveIncomingCall(string callRecordId, string callerNumber, string callerName);
+    Task ReceiveIncomingCall(string callRecordId, string callerNumber, string callerName, string destinationNumber);
 }
