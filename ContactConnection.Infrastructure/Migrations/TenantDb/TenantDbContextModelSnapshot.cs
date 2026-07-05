@@ -98,6 +98,11 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
 
+                    b.Property<string>("Timezone")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("timezone");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Email")
@@ -224,6 +229,57 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                     b.HasIndex("AgentId");
 
                     b.ToTable("agent_group_members", (string)null);
+                });
+
+            modelBuilder.Entity("ContactConnection.Domain.Entities.AudioFile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(127)
+                        .HasColumnType("character varying(127)")
+                        .HasColumnName("content_type");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<long>("FileSizeBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("file_size_bytes");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("OriginalFileName")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("original_file_name");
+
+                    b.Property<string>("StoredFileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("stored_file_name");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId")
+                        .HasDatabaseName("ix_audio_files_tenant_id");
+
+                    b.ToTable("audio_files", (string)null);
                 });
 
             modelBuilder.Entity("ContactConnection.Domain.Entities.BlockListEntry", b =>
@@ -611,6 +667,10 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .HasColumnType("uuid")
                         .HasColumnName("flow_id");
 
+                    b.Property<Guid?>("InboundFlowId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("inbound_flow_id");
+
                     b.Property<int>("MaxQueueSize")
                         .HasColumnType("integer")
                         .HasColumnName("max_queue_size");
@@ -700,6 +760,10 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .HasColumnType("integer")
                         .HasColumnName("display_order");
 
+                    b.Property<Guid?>("FlowId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("flow_id");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean")
                         .HasColumnName("is_active");
@@ -715,6 +779,10 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .HasMaxLength(30)
                         .HasColumnType("character varying(30)")
                         .HasColumnName("number");
+
+                    b.Property<Guid?>("TelephonyFlowId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("telephony_flow_id");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
@@ -1564,6 +1632,10 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<Guid?>("FlowId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("flow_id");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean")
                         .HasColumnName("is_active");
@@ -1578,6 +1650,10 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)")
                         .HasColumnName("number");
+
+                    b.Property<Guid?>("TelephonyFlowId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("telephony_flow_id");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")

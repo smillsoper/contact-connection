@@ -146,6 +146,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ITelephonyNodeHandler, OnCallDisconnectedNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, OnCustomEventNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, ScriptPopNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, PlayNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, DtmfNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, WhisperNodeHandler>();
 
         // Call session store (singleton — Redis operations are inherently stateless)
         services.AddSingleton<ITelephonyCallSessionStore, RedisCallSessionStore>();

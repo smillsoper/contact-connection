@@ -60,12 +60,6 @@ export default function AgentShell() {
             Flows
           </button>
           <button
-            onClick={() => navigate('/telephony-flows')}
-            className="text-xs text-gray-400 hover:text-indigo-300 transition-colors"
-          >
-            Telephony
-          </button>
-          <button
             onClick={handleLogout}
             className="text-xs text-gray-400 hover:text-white transition-colors"
           >

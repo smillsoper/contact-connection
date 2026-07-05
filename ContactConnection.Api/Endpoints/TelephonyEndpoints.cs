@@ -1,7 +1,10 @@
+using System.Text.Json;
+using ContactConnection.Api.Hubs;
 using ContactConnection.Api.Telephony;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Domain.Entities;
 using ContactConnection.Infrastructure.Data;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 namespace ContactConnection.Api.Endpoints;
@@ -17,17 +20,27 @@ public static class TelephonyEndpoints
 
     /// <summary>
     /// Called when an agent picks up a queued inbound call.
-    /// 1. Bridges the parked FreeSWITCH channel to the agent's SIP extension.
-    /// 2. Fires the "agent_answer" event on the live telephony flow session.
-    /// 3. If the flow has a tf_script_pop node in the agent_answer branch, starts the CRM
-    ///    flow session and returns it so the agent UI can auto-pop the script.
+    ///
+    /// Two paths depending on whether the flow has a tf_on_agent_selected event branch:
+    ///
+    /// No agent_selected branch (simple path):
+    ///   Bridge caller → agent immediately, fire "agent_answer" event, return CRM session if any.
+    ///
+    /// Has agent_selected branch (whisper path):
+    ///   Originate to agent with auto-answer so JsSIP accepts silently → park agent channel →
+    ///   store _agent_uuid + _pending_agent_id/_pending_interaction_id in caller session →
+    ///   fire "agent_selected" event branch (may include tf_whisper) → return NoContent.
+    ///   The bridge happens later inside TelEndNodeHandler (BridgeChannelsAsync).
+    ///   CHANNEL_BRIDGE then fires "agent_answer" and pushes the CRM script pop via SignalR.
     /// </summary>
     private static async Task<IResult> AnswerQueuedCall(
         AnswerQueuedCallRequest req,
         HttpContext http,
         ITenantDbContextFactory dbFactory,
         ITelephonyFlowEngine telephonyFlowEngine,
+        ITelephonyCallSessionStore sessionStore,
         IFlowEngine flowEngine,
+        IHubContext<FlowHub, IFlowHubClient> hub,
         IConfiguration config,
         CancellationToken ct)
     {
@@ -52,36 +65,80 @@ public static class TelephonyEndpoints
         if (string.IsNullOrEmpty(record.ContactIdExternal))
             return Results.BadRequest(new { error = "Call record has no associated channel." });
 
+        var callerUuid = record.ContactIdExternal;
+
         // Assign this agent to the call record and create the interaction
         record.SetAgent(agentId);
         var interaction = record.AddInteraction(InteractionType.CustomerService);
         db.CallInteractions.Add(interaction);
         await db.SaveChangesAsync(ct);
 
-        // Bridge the parked channel to the agent's SIP extension
         var host = config["FreeSWITCH:Host"] ?? "127.0.0.1";
         var port = int.Parse(config["FreeSWITCH:EslPort"] ?? "8021");
         var pass = config["FreeSWITCH:EslPassword"] ?? "ClueCon";
 
         await using var esl = new EslClient();
         await esl.ConnectAsync(host, port, pass, ct);
-        await esl.BridgeToAgentAsync(record.ContactIdExternal, agent.SipExtension, tenantSubdomain, record.CallerId ?? "Unknown", ct);
 
-        // Fire the agent_answer event — runs the tf_on_agent_answer branch (e.g. tf_script_pop)
-        var fireResult = await telephonyFlowEngine.FireEventAsync(
-            channelUuid: record.ContactIdExternal,
-            eventName:   "agent_answer",
-            new FireEventContext
+        // Check whether the telephony flow has an agent_selected event branch
+        var session         = await sessionStore.GetAsync(callerUuid, ct);
+        var hasAgentSelected = session?.EventHandlers.ContainsKey("agent_selected") == true;
+
+        if (hasAgentSelected)
+        {
+            // Originate to agent with auto-answer and park — bridge happens later via TelEndNodeHandler
+            var (agentUuid, originateError) = await esl.OriginateAndParkAsync(
+                agent.SipExtension, tenantSubdomain, record.CallerId ?? "Unknown", ct);
+
+            if (agentUuid is null)
+                return Results.Problem($"Could not connect to agent: {originateError}");
+
+            // Store agent UUID + pending IDs so the CHANNEL_BRIDGE handler can fire agent_answer
+            session!.Vars["_agent_uuid"]            = agentUuid;
+            session.Vars["_pending_agent_id"]        = agentId.ToString();
+            session.Vars["_pending_interaction_id"]  = interaction.Id.ToString();
+            await sessionStore.SaveAsync(session, ct);
+
+            // Store reverse mapping so PLAYBACK_STOP on the agent channel can find the caller session
+            await sessionStore.SetKeyAsync($"whisper:{agentUuid}", callerUuid, TimeSpan.FromMinutes(10), ct);
+
+            // Fire the agent_selected branch (may include tf_whisper, tf_script_pop, etc.)
+            var agentSelectedResult = await telephonyFlowEngine.FireEventAsync(
+                callerUuid, "agent_selected",
+                new FireEventContext
+                {
+                    AgentId       = agentId,
+                    InteractionId = interaction.Id,
+                    FlowEngine    = flowEngine,
+                    Esl           = esl,
+                }, ct);
+
+            // Push CRM script pop immediately if tf_script_pop ran in the agent_selected branch
+            // (e.g. before or after whisper so agent has the script while the whisper plays).
+            if (agentSelectedResult.CrmFlowSession is not null)
             {
-                AgentId       = agentId,
-                InteractionId = interaction.Id,
-                FlowEngine    = flowEngine,
-            }, ct);
+                var sessionJson = JsonSerializer.Serialize(
+                    agentSelectedResult.CrmFlowSession,
+                    new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+                await hub.Clients.Group($"agent:{agentId}").ReceiveScriptPop(sessionJson);
+            }
 
-        if (fireResult.CrmFlowSession is not null)
-            return Results.Ok(new AnswerQueuedCallResponse(fireResult.CrmFlowSession));
+            return Results.NoContent();
+        }
+        else
+        {
+            // Simple path: store pending IDs so CHANNEL_BRIDGE fires agent_answer (same as whisper path)
+            if (session is not null)
+            {
+                session.Vars["_pending_agent_id"]       = agentId.ToString();
+                session.Vars["_pending_interaction_id"] = interaction.Id.ToString();
+                await sessionStore.SaveAsync(session, ct);
+            }
 
-        return Results.NoContent();
+            await esl.BridgeToAgentAsync(callerUuid, agent.SipExtension, tenantSubdomain, record.CallerId ?? "Unknown", ct);
+
+            return Results.NoContent();
+        }
     }
 }
 

@@ -287,11 +287,27 @@ export default function FlowPanel() {
       .build()
 
     // ESL screen pop — inbound call queued for this agent (DID route → telephony flow → tf_route_to_queue)
-    connection.on('receiveIncomingCall', (callRecordId: string, callerNumber: string, callerName: string, destinationNumber: string) => {
-      setQueued(callerNumber, callerName, callRecordId, destinationNumber)
+    connection.on('receiveIncomingCall', (callRecordId: string, callerNumber: string, callerName: string, destinationNumber: string, campaignId: string) => {
+      console.log('[SignalR] receiveIncomingCall', { callRecordId, callerNumber, callerName, destinationNumber, campaignId })
+      setQueued(callerNumber, callerName, callRecordId, destinationNumber, campaignId)
     })
 
-    connection.start().catch(console.error)
+    // Script pop delivered after whisper bridge (agent_selected → tf_whisper → tf_end → CHANNEL_BRIDGE → agent_answer)
+    connection.on('receiveScriptPop', (sessionJson: string) => {
+      try {
+        const node = JSON.parse(sessionJson) as FlowNodeState
+        addSession({
+          id:          node.sessionId,
+          label:       node.flowName ?? 'Script Flow',
+          sessionId:   node.sessionId,
+          initialNode: node,
+        })
+      } catch { /* ignore malformed payload */ }
+    })
+
+    connection.start()
+      .then(() => console.log('[SignalR] FlowHub connected'))
+      .catch((err) => console.error('[SignalR] FlowHub connection failed:', err))
     setHub(connection)
 
     return () => { connection.stop() }

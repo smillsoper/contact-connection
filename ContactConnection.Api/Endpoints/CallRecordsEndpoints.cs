@@ -211,7 +211,8 @@ public static class CallRecordsEndpoints
             i.CompletedAt
         }),
         r.CreatedAt,
-        r.UpdatedAt
+        r.UpdatedAt,
+        TelephonyTrace = r.TelephonyEvents,
     };
 }
 

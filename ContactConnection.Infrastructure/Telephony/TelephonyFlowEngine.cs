@@ -104,6 +104,67 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
         await _sessionStore.SaveAsync(session, ct);
     }
 
+    // ── Audio playback continuation (PLAYBACK_STOP) ───────────────────────────
+
+    public async Task ResumeFromNodeAsync(
+        string channelUuid,
+        string nodeId,
+        IEslCommander esl,
+        CancellationToken ct = default)
+    {
+        var session = await _sessionStore.GetAsync(channelUuid, ct);
+        if (session is null)
+        {
+            _logger.LogDebug(
+                "TelephonyFlowEngine.ResumeFromNodeAsync: no session for channel {Uuid}", channelUuid);
+            return;
+        }
+
+        JsonObject? nodes;
+        try
+        {
+            var def = JsonNode.Parse(session.FlowDefinitionJson)!.AsObject();
+            nodes   = def["nodes"]?.AsObject();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "TelephonyFlowEngine.ResumeFromNodeAsync: failed to parse cached flow definition for channel {Uuid}",
+                channelUuid);
+            return;
+        }
+
+        if (nodes is null) return;
+
+        var ctx = new TelephonyFlowContext
+        {
+            ChannelUuid       = session.ChannelUuid,
+            CallerNumber      = session.CallerNumber,
+            DestinationNumber = session.DestinationNumber,
+            TenantId          = session.TenantId,
+            CampaignId        = session.CampaignId,
+            CallRecordId      = session.CallRecordId,
+            TenantSubdomain   = session.TenantSubdomain,
+            TenantSchemaName  = session.TenantSchemaName,
+            TenantTimezone    = session.TenantTimezone,
+            Esl               = esl,
+        };
+
+        foreach (var (k, v) in session.Vars)
+            ctx.Vars[k] = v;
+
+        ctx.Trace = new TelephonyFlowTrace { FlowId = session.FlowId, StartedAt = DateTimeOffset.UtcNow };
+
+        _logger.LogInformation(
+            "TelephonyFlowEngine.ResumeFromNodeAsync [{Uuid}]: resuming at node {NodeId}", channelUuid, nodeId);
+
+        await ExecuteFromNodeAsync(ctx, session.FlowId, "", nodes, nodeId, ct);
+
+        foreach (var (k, v) in ctx.Vars)
+            session.Vars[k] = v;
+        await _sessionStore.SaveAsync(session, ct);
+    }
+
     // ── Event branch execution ────────────────────────────────────────────────
 
     public async Task<FireEventResult> FireEventAsync(
@@ -185,6 +246,12 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
         // Merge branch vars back into the session (shared state across all branches)
         foreach (var (k, v) in ctx.Vars)
             session.Vars[k] = v;
+
+        // _crm_session_json must not persist into later event branches — consume it now.
+        // If tf_script_pop ran it wrote the key; if not the key may be stale from a prior
+        // branch (e.g. agent_selected). Either way the caller of FireEventAsync is the only
+        // thing that should act on it.
+        session.Vars.Remove("_crm_session_json");
         await _sessionStore.SaveAsync(session, ct);
 
         // Extract CRM session state if tf_script_pop fired during the branch

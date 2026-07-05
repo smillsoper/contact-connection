@@ -49,5 +49,7 @@ public class AgentConfiguration : IEntityTypeConfiguration<Agent>
             .IsUnique()
             .HasFilter("sip_extension IS NOT NULL")
             .HasDatabaseName("idx_agents_sip_extension");
+
+        builder.Property(a => a.Timezone).HasColumnName("timezone").HasMaxLength(64);
     }
 }

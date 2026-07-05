@@ -109,6 +109,7 @@ app.MapAgentGroupsEndpoints();
 app.MapBlockListEndpoints();
 app.MapRolesEndpoints();
 app.MapTelephonyEndpoints();
+app.MapAudioFilesEndpoints();
 
 // Tenant admin portal
 app.MapAdminAgentsEndpoints();

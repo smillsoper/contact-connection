@@ -6,9 +6,13 @@ import {
   listClients, createClient, activateClient, deactivateClient,
   listCampaigns, createCampaign, activateCampaign, pauseCampaign, deactivateCampaign,
   listPhoneNumbers, createPhoneNumber, activatePhoneNumber, deactivatePhoneNumber,
+  setPhoneNumberFlow, removePhoneNumberFlow,
+  setPhoneNumberTelephonyFlow, removePhoneNumberTelephonyFlow,
   listAgentGroups, createAgentGroup, getAgentGroup, addGroupMember, removeGroupMember,
   type Client, type Campaign, type PhoneNumber, type AgentGroup, type AgentGroupDetail,
 } from '../../api/telephony'
+import { listAdminAgents, type AgentRecord } from '../../api/adminAgents'
+import { flowsApi, type FlowSummary } from '../../api/flows'
 
 type Tab = 'clients' | 'campaigns' | 'phone-numbers' | 'agent-groups'
 
@@ -390,6 +394,8 @@ function CampaignsTab() {
 function PhoneNumbersTab() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [numbers, setNumbers] = useState<PhoneNumber[]>([])
+  const [scriptFlows, setScriptFlows] = useState<FlowSummary[]>([])
+  const [inboundFlows, setInboundFlows] = useState<FlowSummary[]>([])
   const [selectedCampaignId, setSelectedCampaignId] = useState('')
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
@@ -404,8 +410,15 @@ function PhoneNumbersTab() {
   const [createError, setCreateError] = useState<string | null>(null)
 
   useEffect(() => {
-    listCampaigns()
-      .then(setCampaigns)
+    Promise.all([
+      listCampaigns(),
+      flowsApi.listAll(),
+    ])
+      .then(([c, allFlows]) => {
+        setCampaigns(c)
+        setScriptFlows(allFlows.filter((f) => f.flow_type === 'crm'))
+        setInboundFlows(allFlows.filter((f) => f.flow_type === 'telephony' && f.flow_direction === 'inbound'))
+      })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false))
   }, [])
@@ -439,6 +452,24 @@ function PhoneNumbersTab() {
       const updated = pn.isActive
         ? await deactivatePhoneNumber(pn.id)
         : await activatePhoneNumber(pn.id)
+      setNumbers((prev) => prev.map((n) => n.id === pn.id ? updated : n))
+    } catch {}
+  }
+
+  async function handleFlowChange(pn: PhoneNumber, flowId: string) {
+    try {
+      const updated = flowId
+        ? await setPhoneNumberFlow(pn.id, flowId)
+        : await removePhoneNumberFlow(pn.id)
+      setNumbers((prev) => prev.map((n) => n.id === pn.id ? updated : n))
+    } catch {}
+  }
+
+  async function handleTelephonyFlowChange(pn: PhoneNumber, flowId: string) {
+    try {
+      const updated = flowId
+        ? await setPhoneNumberTelephonyFlow(pn.id, flowId)
+        : await removePhoneNumberTelephonyFlow(pn.id)
       setNumbers((prev) => prev.map((n) => n.id === pn.id ? updated : n))
     } catch {}
   }
@@ -542,6 +573,8 @@ function PhoneNumbersTab() {
               <tr className="border-b border-gray-800 text-gray-400 text-left">
                 <th className="px-4 py-3 font-medium">Number</th>
                 <th className="px-4 py-3 font-medium">Label</th>
+                <th className="px-4 py-3 font-medium">Script Flow Override</th>
+                <th className="px-4 py-3 font-medium">Telephony Flow Override</th>
                 <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 font-medium"></th>
               </tr>
@@ -551,6 +584,24 @@ function PhoneNumbersTab() {
                 <tr key={n.id} className="border-b border-gray-800 last:border-0 hover:bg-gray-800/30">
                   <td className="px-4 py-3 text-white font-mono">{n.number}</td>
                   <td className="px-4 py-3 text-gray-400">{n.label ?? <span className="text-gray-600">—</span>}</td>
+                  <td className="px-4 py-3 w-56">
+                    <SearchableSelect
+                      options={scriptFlows.map((f) => ({ value: f.id, label: f.name }))}
+                      value={n.flowId ?? ''}
+                      onChange={(v) => handleFlowChange(n, v)}
+                      allLabel="Campaign default"
+                      className="w-full"
+                    />
+                  </td>
+                  <td className="px-4 py-3 w-56">
+                    <SearchableSelect
+                      options={inboundFlows.map((f) => ({ value: f.id, label: f.name }))}
+                      value={n.telephonyFlowId ?? ''}
+                      onChange={(v) => handleTelephonyFlowChange(n, v)}
+                      allLabel="Campaign default"
+                      className="w-full"
+                    />
+                  </td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${n.isActive ? STATUS_COLORS.active : STATUS_COLORS.inactive}`}>
                       {n.isActive ? 'active' : 'inactive'}
@@ -581,6 +632,7 @@ function AgentGroupsTab() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [allAgents, setAllAgents] = useState<AgentRecord[]>([])
 
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [detail, setDetail] = useState<AgentGroupDetail | null>(null)
@@ -593,13 +645,13 @@ function AgentGroupsTab() {
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
 
-  const [memberInput, setMemberInput] = useState('')
+  const [selectedAgentId, setSelectedAgentId] = useState('')
   const [memberError, setMemberError] = useState<string | null>(null)
   const [memberAdding, setMemberAdding] = useState(false)
 
   useEffect(() => {
-    listAgentGroups()
-      .then(setGroups)
+    Promise.all([listAgentGroups(), listAdminAgents()])
+      .then(([g, a]) => { setGroups(g); setAllAgents(a) })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false))
   }, [])
@@ -608,7 +660,7 @@ function AgentGroupsTab() {
     if (expandedId === group.id) { setExpandedId(null); setDetail(null); return }
     setExpandedId(group.id)
     setDetail(null)
-    setMemberInput('')
+    setSelectedAgentId('')
     setMemberError(null)
     setDetailLoading(true)
     try {
@@ -634,13 +686,14 @@ function AgentGroupsTab() {
   }
 
   async function handleAddMember() {
-    if (!expandedId || !memberInput.trim()) return
+    if (!expandedId || !selectedAgentId) return
     setMemberAdding(true)
     setMemberError(null)
     try {
-      const m = await addGroupMember(expandedId, memberInput.trim())
+      const m = await addGroupMember(expandedId, selectedAgentId)
       setDetail((prev) => prev ? { ...prev, members: [...prev.members, m] } : prev)
-      setMemberInput('')
+      setGroups((prev) => prev.map((g) => g.id === expandedId ? { ...g, memberCount: g.memberCount + 1 } : g))
+      setSelectedAgentId('')
     } catch (e) {
       setMemberError(e instanceof Error ? e.message : 'Failed to add member.')
     } finally {
@@ -652,6 +705,7 @@ function AgentGroupsTab() {
     try {
       await removeGroupMember(groupId, agentId)
       setDetail((prev) => prev ? { ...prev, members: prev.members.filter((m) => m.agentId !== agentId) } : prev)
+      setGroups((prev) => prev.map((g) => g.id === groupId ? { ...g, memberCount: Math.max(0, g.memberCount - 1) } : g))
     } catch {}
   }
 
@@ -755,42 +809,58 @@ function AgentGroupsTab() {
                   {detail && (
                     <>
                       {/* Add member */}
-                      <div className="flex items-center gap-3 mb-4">
-                        <input
-                          value={memberInput}
-                          onChange={(e) => { setMemberInput(e.target.value); setMemberError(null) }}
-                          onKeyDown={(e) => e.key === 'Enter' && handleAddMember()}
-                          placeholder="Agent ID (UUID)"
-                          className="bg-gray-800 text-white rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 w-80 font-mono"
-                        />
-                        <button
-                          onClick={handleAddMember}
-                          disabled={memberAdding || !memberInput.trim()}
-                          className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
-                        >
-                          {memberAdding ? 'Adding…' : 'Add member'}
-                        </button>
-                        {memberError && <span className="text-red-400 text-xs">{memberError}</span>}
-                      </div>
+                      {(() => {
+                        const memberIds = new Set(detail.members.map((m) => m.agentId))
+                        const eligible = allAgents.filter((a) => a.isActive && !memberIds.has(a.id))
+                        return (
+                          <div className="flex items-center gap-3 mb-4">
+                            <SearchableSelect
+                              options={eligible.map((a) => ({
+                                value: a.id,
+                                label: `${a.firstName} ${a.lastName}`,
+                                sublabel: a.email,
+                              }))}
+                              value={selectedAgentId}
+                              onChange={(v) => { setSelectedAgentId(v); setMemberError(null) }}
+                              placeholder="Select agent…"
+                              className="w-72"
+                            />
+                            <button
+                              onClick={handleAddMember}
+                              disabled={memberAdding || !selectedAgentId}
+                              className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
+                            >
+                              {memberAdding ? 'Adding…' : 'Add member'}
+                            </button>
+                            {memberError && <span className="text-red-400 text-xs">{memberError}</span>}
+                          </div>
+                        )
+                      })()}
 
                       {detail.members.length === 0 ? (
                         <p className="text-gray-500 text-xs">No members yet.</p>
                       ) : (
                         <div className="space-y-1">
-                          {detail.members.map((m) => (
-                            <div key={m.agentId} className="flex items-center gap-3 text-sm">
-                              <span className="text-gray-300 font-mono text-xs">{m.agentId}</span>
-                              <span className="text-gray-600 text-xs">
-                                joined {new Date(m.joinedAt).toLocaleDateString()}
-                              </span>
-                              <button
-                                onClick={() => handleRemoveMember(g.id, m.agentId)}
-                                className="text-red-500 hover:text-red-400 text-xs ml-auto"
-                              >
-                                Remove
-                              </button>
-                            </div>
-                          ))}
+                          {detail.members.map((m) => {
+                            const agent = allAgents.find((a) => a.id === m.agentId)
+                            return (
+                              <div key={m.agentId} className="flex items-center gap-3 text-sm">
+                                <span className="text-gray-200 text-sm">
+                                  {agent ? `${agent.firstName} ${agent.lastName}` : m.agentId}
+                                </span>
+                                {agent && <span className="text-gray-500 text-xs">{agent.email}</span>}
+                                <span className="text-gray-600 text-xs">
+                                  · joined {new Date(m.joinedAt).toLocaleDateString()}
+                                </span>
+                                <button
+                                  onClick={() => handleRemoveMember(g.id, m.agentId)}
+                                  className="text-red-500 hover:text-red-400 text-xs ml-auto"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            )
+                          })}
                         </div>
                       )}
                     </>

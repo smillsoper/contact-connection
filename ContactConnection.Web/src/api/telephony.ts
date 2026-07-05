@@ -22,6 +22,7 @@ export interface Campaign {
   status: string
   description?: string
   flowId?: string
+  inboundFlowId?: string
   outboundFlowId?: string
   direction: string
   dialMode: string
@@ -49,7 +50,7 @@ export interface AgentAssignment {
 }
 
 export interface CampaignDetail extends Campaign {
-  phoneNumbers: { id: string; number: string; label?: string; isActive: boolean }[]
+  phoneNumbers: { id: string; number: string; label?: string; isActive: boolean; flowId?: string; telephonyFlowId?: string }[]
   agentAssignments: AgentAssignment[]
   groupAssignments: {
     id: string
@@ -69,6 +70,8 @@ export interface PhoneNumber {
   number: string
   label?: string
   isActive: boolean
+  flowId?: string
+  telephonyFlowId?: string
   campaign?: { id: string; name: string }
   createdAt: string
   updatedAt: string
@@ -163,11 +166,29 @@ export const setCampaignFlow = (id: string, flowId: string) =>
 export const removeCampaignFlow = (id: string) =>
   api.delete<Campaign>(`/api/v1/campaigns/${id}/flow`)
 
+export const setCampaignInboundFlow = (id: string, flowId: string) =>
+  api.put<Campaign>(`/api/v1/campaigns/${id}/inbound-flow`, { flowId })
+
+export const removeCampaignInboundFlow = (id: string) =>
+  api.delete<Campaign>(`/api/v1/campaigns/${id}/inbound-flow`)
+
 export const setCampaignOutboundFlow = (id: string, flowId: string) =>
   api.put<Campaign>(`/api/v1/campaigns/${id}/outbound-flow`, { flowId })
 
 export const removeCampaignOutboundFlow = (id: string) =>
   api.delete<Campaign>(`/api/v1/campaigns/${id}/outbound-flow`)
+
+export const setPhoneNumberFlow = (id: string, flowId: string) =>
+  api.put<PhoneNumber>(`/api/v1/phone-numbers/${id}/flow`, { flowId })
+
+export const removePhoneNumberFlow = (id: string) =>
+  api.delete<PhoneNumber>(`/api/v1/phone-numbers/${id}/flow`)
+
+export const setPhoneNumberTelephonyFlow = (id: string, flowId: string) =>
+  api.put<PhoneNumber>(`/api/v1/phone-numbers/${id}/telephony-flow`, { flowId })
+
+export const removePhoneNumberTelephonyFlow = (id: string) =>
+  api.delete<PhoneNumber>(`/api/v1/phone-numbers/${id}/telephony-flow`)
 
 export const activateCampaign = (id: string) =>
   api.post<Campaign>(`/api/v1/campaigns/${id}/activate`)
@@ -255,6 +276,8 @@ export interface CampaignExternalNumber {
   number: string
   displayOrder: number
   isActive: boolean
+  flowId?: string
+  telephonyFlowId?: string
   createdAt: string
 }
 
@@ -275,6 +298,18 @@ export const addExternalNumber = (campaignId: string, label: string, number: str
 
 export const removeExternalNumber = (campaignId: string, numberId: string) =>
   api.delete<void>(`/api/v1/campaigns/${campaignId}/external-numbers/${numberId}`)
+
+export const setExternalNumberFlow = (campaignId: string, numberId: string, flowId: string) =>
+  api.put<CampaignExternalNumber>(`/api/v1/campaigns/${campaignId}/external-numbers/${numberId}/flow`, { flowId })
+
+export const removeExternalNumberFlow = (campaignId: string, numberId: string) =>
+  api.delete<CampaignExternalNumber>(`/api/v1/campaigns/${campaignId}/external-numbers/${numberId}/flow`)
+
+export const setExternalNumberTelephonyFlow = (campaignId: string, numberId: string, flowId: string) =>
+  api.put<CampaignExternalNumber>(`/api/v1/campaigns/${campaignId}/external-numbers/${numberId}/telephony-flow`, { flowId })
+
+export const removeExternalNumberTelephonyFlow = (campaignId: string, numberId: string) =>
+  api.delete<CampaignExternalNumber>(`/api/v1/campaigns/${campaignId}/external-numbers/${numberId}/telephony-flow`)
 
 export const getClientTransferNumbers = (campaignId: string) =>
   api.get<ClientTransferNumber[]>(`/api/v1/campaigns/${campaignId}/client-transfer-numbers`)

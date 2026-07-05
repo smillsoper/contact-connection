@@ -19,7 +19,7 @@ interface CallState {
   transferTarget: string | null       // E.164 number being consulted
   transferTargetLabel: string | null  // Display label from the transfer number config
 
-  setQueued: (callerNumber: string, callerName: string, callRecordId: string, destinationNumber?: string) => void
+  setQueued: (callerNumber: string, callerName: string, callRecordId: string, destinationNumber?: string, campaignId?: string) => void
   setRinging: (callerNumber: string, callerName: string) => void
   setDialing: (dialedNumber: string) => void
   setOnCall: () => void
@@ -55,8 +55,8 @@ export const useCallStore = create<CallState>((set) => ({
   transferTarget: null,
   transferTargetLabel: null,
 
-  setQueued: (callerNumber, callerName, callRecordId, destinationNumber) =>
-    set({ callStatus: 'queued', callerNumber, callerName, destinationNumber: destinationNumber ?? null, callRecordId, isMuted: false, callStartedAt: null, campaignId: null, ...TRANSFER_RESET }),
+  setQueued: (callerNumber, callerName, callRecordId, destinationNumber, campaignId) =>
+    set({ callStatus: 'queued', callerNumber, callerName, destinationNumber: destinationNumber ?? null, callRecordId, isMuted: false, callStartedAt: null, campaignId: campaignId || null, ...TRANSFER_RESET }),
 
   // When transitioning from 'queued' → 'ringing' (agent answered via bridge), preserve the
   // screen-pop callRecordId so we don't lose the DID-routed call record association.

@@ -7,7 +7,6 @@ import { api } from '../api/client'
 import { getClientTransferNumbers, type ClientTransferNumber } from '../api/telephony'
 import { flowsApi } from '../api/flows'
 import { useFlowSessionsStore } from '../stores/flowSessionsStore'
-import type { FlowNodeState } from '../types/flow'
 
 const SIP_WS_URL = import.meta.env.VITE_SIP_WS_URL as string ?? 'ws://localhost:7080'
 
@@ -283,22 +282,9 @@ export default function SoftphonePanel() {
     setPickUpError(null)
     autoAnswerBridgeRef.current = true
     try {
-      const result = await api.post<{ flowSession?: FlowNodeState } | null>(
-        '/api/v1/telephony/answer-queued-call',
-        { callRecordId },
-      )
+      await api.post<void>('/api/v1/telephony/answer-queued-call', { callRecordId })
       setPickingUp(false)
-
-      // Auto-pop CRM script flow if the telephony flow's tf_script_pop node returned a session
-      if (result?.flowSession) {
-        const node = result.flowSession
-        addFlowSession({
-          id:          node.sessionId,
-          label:       node.label ?? 'Script Flow',
-          sessionId:   node.sessionId,
-          initialNode: node,
-        })
-      }
+      // Script pop (if any) arrives via SignalR ReceiveScriptPop after CHANNEL_BRIDGE → agent_answer
     } catch (e) {
       autoAnswerBridgeRef.current = false
       setPickingUp(false)
@@ -562,15 +548,20 @@ export default function SoftphonePanel() {
             </button>
             <button
               onClick={handlePickUp}
-              disabled={pickingUp}
+              disabled={pickingUp || registrationStatus !== 'registered'}
               className="w-12 h-12 rounded-full bg-green-600 hover:bg-green-500 disabled:opacity-60 flex items-center justify-center transition-colors"
-              title="Pick up"
+              title={registrationStatus !== 'registered' ? 'Softphone not registered — waiting…' : 'Pick up'}
             >
               {pickingUp
                 ? <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                : <PhoneIcon className="w-5 h-5 text-white" />}
+                : registrationStatus === 'registering'
+                  ? <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  : <PhoneIcon className="w-5 h-5 text-white" />}
             </button>
           </div>
+          {registrationStatus !== 'registered' && !pickingUp && (
+            <p className="text-center text-xs text-yellow-500">Softphone {registrationStatus === 'registering' ? 'registering…' : 'not registered'}</p>
+          )}
           {pickUpError && <p className="text-center text-xs text-red-400">{pickUpError}</p>}
         </div>
       )}

@@ -26,6 +26,7 @@ import RejectNode from '../components/telephony-designer/nodes/RejectNode'
 import AnswerNode from '../components/telephony-designer/nodes/AnswerNode'
 import HangupNode from '../components/telephony-designer/nodes/HangupNode'
 import RouteToQueueNode from '../components/telephony-designer/nodes/RouteToQueueNode'
+import PlayNode from '../components/telephony-designer/nodes/PlayNode'
 import TimeOfDayNode from '../components/telephony-designer/nodes/TimeOfDayNode'
 import TelBranchNode from '../components/telephony-designer/nodes/TelBranchNode'
 import TelEndNode from '../components/telephony-designer/nodes/TelEndNode'
@@ -39,6 +40,8 @@ import OnAgentSelectedNode from '../components/telephony-designer/nodes/OnAgentS
 import OnAgentAnswerNode from '../components/telephony-designer/nodes/OnAgentAnswerNode'
 import OnCallDisconnectedNode from '../components/telephony-designer/nodes/OnCallDisconnectedNode'
 import OnCustomEventNode from '../components/telephony-designer/nodes/OnCustomEventNode'
+import DtmfNode from '../components/telephony-designer/nodes/DtmfNode'
+import WhisperNode from '../components/telephony-designer/nodes/WhisperNode'
 
 import type { TelNodeData, TelephonyNodeType, TelephonyFlowDefinition, TelephonyNodeDef } from '../types/telephony-designer'
 import { defaultTelNodeData, TELEPHONY_NODE_META } from '../types/telephony-designer'
@@ -50,6 +53,13 @@ const EVENT_LISTENER_TYPES: TelephonyNodeType[] = [
   'tf_on_custom_event',
 ]
 
+// Maps internal handle IDs to display labels shown on edges in the canvas
+const HANDLE_DISPLAY_LABELS: Record<string, string> = {
+  end_of_stream: 'End Of Play Stream',
+  duration_reached: 'Duration Reached',
+  tts_finished: 'TTS Finished',
+}
+
 const nodeTypes = {
   tf_check_block_list: CheckBlockListNode,
   tf_check_agent_availability: CheckAgentAvailabilityNode,
@@ -57,6 +67,7 @@ const nodeTypes = {
   tf_answer: AnswerNode,
   tf_hangup: HangupNode,
   tf_route_to_queue: RouteToQueueNode,
+  tf_play: PlayNode,
   tf_time_of_day: TimeOfDayNode,
   tf_branch: TelBranchNode,
   tf_end: TelEndNode,
@@ -66,6 +77,8 @@ const nodeTypes = {
   tf_set_caller_id: SetCallerIdNode,
   tf_cancel_dial: CancelDialNode,
   tf_script_pop: ScriptPopNode,
+  tf_dtmf: DtmfNode,
+  tf_whisper: WhisperNode,
   tf_on_agent_selected: OnAgentSelectedNode,
   tf_on_agent_answer: OnAgentAnswerNode,
   tf_on_call_disconnected: OnCallDisconnectedNode,
@@ -156,7 +169,9 @@ function fromTelDef(def: TelephonyFlowDefinition): {
         source: id,
         target,
         sourceHandle: normalizedHandle,
-        label: normalizedHandle ?? undefined,
+        label: normalizedHandle
+          ? (HANDLE_DISPLAY_LABELS[normalizedHandle] ?? normalizedHandle)
+          : undefined,
         type: 'editable',
         data: { waypoints: edgeDef ?? [], transition: normalizedHandle ?? 'default' },
       })
@@ -211,11 +226,14 @@ function DesignerCanvas() {
         const transition = connection.sourceHandle && connection.sourceHandle !== 'default'
           ? connection.sourceHandle
           : 'default'
+        const displayLabel = transition !== 'default'
+          ? (HANDLE_DISPLAY_LABELS[transition] ?? transition)
+          : undefined
         return addEdge(
           {
             ...connection,
             type: 'editable',
-            label: transition !== 'default' ? transition : undefined,
+            label: displayLabel,
             data: { waypoints: [], transition },
           },
           filtered,

@@ -34,15 +34,45 @@ public class TelSetVariableNodeHandler : ITelephonyNodeHandler
 
     internal static string Resolve(string template, TelephonyFlowContext ctx)
     {
-        if (!template.StartsWith("{{") || !template.EndsWith("}}"))
+        if (!template.Contains("{{"))
             return template;
 
-        var key = template[2..^2].Trim();
-        return key switch
+        // Multi-token interpolation: replace every {{key}} in the string.
+        return System.Text.RegularExpressions.Regex.Replace(template, @"\{\{(.+?)\}\}", m =>
         {
-            "caller.ani" => ctx.CallerNumber,
-            "call.did"   => ctx.DestinationNumber,
-            _ => ctx.Vars.TryGetValue(key, out var v) ? v : string.Empty,
-        };
+            var key = m.Groups[1].Value.Trim();
+            return ResolveKey(key, ctx);
+        });
+    }
+
+    private static string ResolveKey(string key, TelephonyFlowContext ctx)
+    {
+        // Well-known namespaces
+        if (key == "caller.ani")  return ctx.CallerNumber;
+        if (key == "call.did")    return ctx.DestinationNumber;
+        if (key == "call.dnis")   return ctx.DestinationNumber;    // alias
+
+        if (key.StartsWith("now.", StringComparison.OrdinalIgnoreCase))
+        {
+            TimeZoneInfo tzi;
+            try { tzi = TimeZoneInfo.FindSystemTimeZoneById(ctx.TenantTimezone); }
+            catch { tzi = TimeZoneInfo.Utc; }
+
+            var now = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tzi);
+            return key[4..].ToLowerInvariant() switch
+            {
+                "time"     => now.ToString("HH:mm"),
+                "day_name" => now.DayOfWeek.ToString(),
+                "date"     => now.ToString("yyyy-MM-dd"),
+                "timezone" => tzi.Id,
+                _ => string.Empty,
+            };
+        }
+
+        // {{flow.varname}} — strip the "flow." prefix and look up in Vars
+        if (key.StartsWith("flow.", StringComparison.OrdinalIgnoreCase))
+            key = key[5..];
+
+        return ctx.Vars.TryGetValue(key, out var v) ? v : string.Empty;
     }
 }

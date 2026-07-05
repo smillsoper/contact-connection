@@ -15,6 +15,12 @@ public class PhoneNumber
     public string? Label { get; private set; }                    // human-readable name
     public bool IsActive { get; private set; }
 
+    // DID-level CRM script flow override. Falls back to Campaign.FlowId if null.
+    public Guid? FlowId { get; private set; }
+
+    // DID-level telephony flow override. Falls back to Campaign.InboundFlowId if null.
+    public Guid? TelephonyFlowId { get; private set; }
+
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
@@ -50,6 +56,11 @@ public class PhoneNumber
         Label     = label?.Trim();
         UpdatedAt = DateTimeOffset.UtcNow;
     }
+
+    public void AssignFlow(Guid flowId)           { FlowId          = flowId; UpdatedAt = DateTimeOffset.UtcNow; }
+    public void RemoveFlow()                      { FlowId          = null;   UpdatedAt = DateTimeOffset.UtcNow; }
+    public void AssignTelephonyFlow(Guid flowId)  { TelephonyFlowId = flowId; UpdatedAt = DateTimeOffset.UtcNow; }
+    public void RemoveTelephonyFlow()             { TelephonyFlowId = null;   UpdatedAt = DateTimeOffset.UtcNow; }
 
     public void Activate()   { IsActive = true;  UpdatedAt = DateTimeOffset.UtcNow; }
     public void Deactivate() { IsActive = false; UpdatedAt = DateTimeOffset.UtcNow; }

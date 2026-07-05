@@ -4,11 +4,14 @@ import AdminShell from '../../components/admin/AdminShell'
 import SearchableSelect from '../../components/SearchableSelect'
 import {
   getCampaign, updateCampaign, setCampaignFlow, removeCampaignFlow,
+  setCampaignInboundFlow, removeCampaignInboundFlow,
   setCampaignOutboundFlow, removeCampaignOutboundFlow,
   activateCampaign, pauseCampaign, deactivateCampaign,
   assignCampaignAgent, bulkAssignCampaignAgents,
   updateCampaignAgentProficiency, removeCampaignAgent,
   listExternalNumbers, addExternalNumber, removeExternalNumber,
+  setExternalNumberFlow, removeExternalNumberFlow,
+  setExternalNumberTelephonyFlow, removeExternalNumberTelephonyFlow,
   type CampaignDetail, type AgentAssignment, type CampaignExternalNumber,
 } from '../../api/telephony'
 import { flowsApi, type FlowSummary } from '../../api/flows'
@@ -37,6 +40,7 @@ function SettingsForm({ campaign, flows, onSaved }: SettingsFormProps) {
   const [acwSeconds, setAcwSeconds] = useState(campaign.afterCallWorkSeconds)
   const [callerIdNumber, setCallerIdNumber] = useState(campaign.callerIdNumber ?? '')
   const [flowId, setFlowId] = useState(campaign.flowId ?? '')
+  const [inboundFlowId, setInboundFlowId] = useState(campaign.inboundFlowId ?? '')
   const [outboundFlowId, setOutboundFlowId] = useState(campaign.outboundFlowId ?? '')
   const [maxQueueSize, setMaxQueueSize] = useState(campaign.maxQueueSize)
   const [queueTimeout, setQueueTimeout] = useState(campaign.queueTimeoutSeconds)
@@ -73,6 +77,14 @@ function SettingsForm({ campaign, flows, onSaved }: SettingsFormProps) {
       } else if (!flowId && campaign.flowId) {
         await removeCampaignFlow(campaign.id)
       }
+      // Save inbound call flow (inbound campaigns only)
+      if (!isOutbound) {
+        if (inboundFlowId && inboundFlowId !== campaign.inboundFlowId) {
+          await setCampaignInboundFlow(campaign.id, inboundFlowId)
+        } else if (!inboundFlowId && campaign.inboundFlowId) {
+          await removeCampaignInboundFlow(campaign.id)
+        }
+      }
       // Save outbound call flow (manual outbound only)
       if (isOutbound && dialMode === 'manual') {
         if (outboundFlowId && outboundFlowId !== campaign.outboundFlowId) {
@@ -81,7 +93,7 @@ function SettingsForm({ campaign, flows, onSaved }: SettingsFormProps) {
           await removeCampaignOutboundFlow(campaign.id)
         }
       }
-      onSaved({ ...campaign, ...updated, flowId: flowId || undefined, outboundFlowId: outboundFlowId || undefined })
+      onSaved({ ...campaign, ...updated, flowId: flowId || undefined, inboundFlowId: inboundFlowId || undefined, outboundFlowId: outboundFlowId || undefined })
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
     } catch (e) {
@@ -91,12 +103,16 @@ function SettingsForm({ campaign, flows, onSaved }: SettingsFormProps) {
     }
   }
 
-  const crmFlows       = flows.filter((f) => f.flow_type === 'crm')
-  const telephonyFlows = flows.filter(
+  const crmFlows          = flows.filter((f) => f.flow_type === 'crm')
+  const inboundFlows      = flows.filter(
+    (f) => f.flow_type === 'telephony' && f.flow_direction === 'inbound'
+  )
+  const outboundFlows     = flows.filter(
     (f) => f.flow_type === 'telephony' && f.flow_direction === 'outbound' && f.flow_sub_type === 'manual'
   )
   const flowOptions         = crmFlows.map((f) => ({ value: f.id, label: f.name }))
-  const outboundFlowOptions = telephonyFlows.map((f) => ({ value: f.id, label: f.name }))
+  const inboundFlowOptions  = inboundFlows.map((f) => ({ value: f.id, label: f.name }))
+  const outboundFlowOptions = outboundFlows.map((f) => ({ value: f.id, label: f.name }))
 
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
@@ -213,6 +229,25 @@ function SettingsForm({ campaign, flows, onSaved }: SettingsFormProps) {
               />
               <span className="text-white text-sm w-5 text-right">{priority}</span>
             </div>
+          </div>
+        )}
+
+        {/* Inbound call flow — inbound campaigns only */}
+        {direction === 'inbound' && (
+          <div className="md:col-span-2">
+            <label className="block text-xs text-gray-400 mb-1">Inbound Call Flow</label>
+            <SearchableSelect
+              options={inboundFlowOptions}
+              value={inboundFlowId}
+              onChange={setInboundFlowId}
+              allLabel="No inbound flow"
+              placeholder="Select a telephony flow…"
+              className="w-full"
+            />
+            <p className="text-gray-600 text-xs mt-1">
+              Telephony flow the ESL engine executes when a call arrives on this campaign's DIDs.
+              Individual DIDs can override this with their own flow assignment.
+            </p>
           </div>
         )}
 
@@ -625,9 +660,12 @@ function AgentsSection({ campaignId, assignments, allAgents, onChanged }: Agents
 
 // ── External Numbers section (manual outbound campaigns only) ─────────────────
 
-interface ExternalNumbersSectionProps { campaignId: string }
+interface ExternalNumbersSectionProps {
+  campaignId: string
+  flows: FlowSummary[]
+}
 
-function ExternalNumbersSection({ campaignId }: ExternalNumbersSectionProps) {
+function ExternalNumbersSection({ campaignId, flows }: ExternalNumbersSectionProps) {
   const [numbers, setNumbers]   = useState<CampaignExternalNumber[]>([])
   const [loading, setLoading]   = useState(true)
   const [newLabel, setNewLabel] = useState('')
@@ -635,6 +673,13 @@ function ExternalNumbersSection({ campaignId }: ExternalNumbersSectionProps) {
   const [adding, setAdding]     = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
   const [removingId, setRemovingId] = useState<string | null>(null)
+
+  const crmFlows      = flows.filter((f) => f.flow_type === 'crm')
+  const outboundFlows = flows.filter(
+    (f) => f.flow_type === 'telephony' && f.flow_direction === 'outbound' && f.flow_sub_type === 'manual'
+  )
+  const crmOptions      = crmFlows.map((f) => ({ value: f.id, label: f.name }))
+  const outboundOptions = outboundFlows.map((f) => ({ value: f.id, label: f.name }))
 
   useEffect(() => {
     listExternalNumbers(campaignId)
@@ -666,13 +711,32 @@ function ExternalNumbersSection({ campaignId }: ExternalNumbersSectionProps) {
     finally { setRemovingId(null) }
   }
 
+  async function handleFlowChange(numberId: string, flowId: string) {
+    try {
+      const updated = flowId
+        ? await setExternalNumberFlow(campaignId, numberId, flowId)
+        : await removeExternalNumberFlow(campaignId, numberId)
+      setNumbers((prev) => prev.map((n) => n.id === numberId ? { ...n, flowId: updated.flowId } : n))
+    } catch {}
+  }
+
+  async function handleTelephonyFlowChange(numberId: string, flowId: string) {
+    try {
+      const updated = flowId
+        ? await setExternalNumberTelephonyFlow(campaignId, numberId, flowId)
+        : await removeExternalNumberTelephonyFlow(campaignId, numberId)
+      setNumbers((prev) => prev.map((n) => n.id === numberId ? { ...n, telephonyFlowId: updated.telephonyFlowId } : n))
+    } catch {}
+  }
+
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
       <div className="mb-5">
         <h2 className="text-white text-sm font-semibold">External Transfer Numbers</h2>
         <p className="text-gray-500 text-xs mt-1">
           Numbers agents can dial for transfers while on an inbound call from this client.
-          Shown directly in the softphone during a call.
+          Shown directly in the softphone during a call. Flow overrides let each transfer number
+          pop a specific script or execute a specific telephony flow.
         </p>
       </div>
 
@@ -681,21 +745,41 @@ function ExternalNumbersSection({ campaignId }: ExternalNumbersSectionProps) {
       ) : (
         <>
           {numbers.length > 0 && (
-            <div className="border border-gray-800 rounded-lg overflow-hidden mb-4">
+            <div className="border border-gray-800 rounded-lg overflow-x-auto mb-4">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-800 text-gray-400 text-left">
-                    <th className="px-4 py-2.5 font-medium text-xs">Label</th>
-                    <th className="px-4 py-2.5 font-medium text-xs">Number</th>
+                    <th className="px-4 py-2.5 font-medium text-xs whitespace-nowrap">Label</th>
+                    <th className="px-4 py-2.5 font-medium text-xs whitespace-nowrap">Number</th>
+                    <th className="px-4 py-2.5 font-medium text-xs whitespace-nowrap">Script Flow Override</th>
+                    <th className="px-4 py-2.5 font-medium text-xs whitespace-nowrap">Telephony Flow Override</th>
                     <th className="px-4 py-2.5" />
                   </tr>
                 </thead>
                 <tbody>
                   {numbers.map((n) => (
                     <tr key={n.id} className="border-b border-gray-800 last:border-0 hover:bg-gray-800/30">
-                      <td className="px-4 py-2.5 text-white">{n.label}</td>
-                      <td className="px-4 py-2.5 text-gray-300 font-mono text-xs">{n.number}</td>
-                      <td className="px-4 py-2.5 text-right">
+                      <td className="px-4 py-2.5 text-white whitespace-nowrap">{n.label}</td>
+                      <td className="px-4 py-2.5 text-gray-300 font-mono text-xs whitespace-nowrap">{n.number}</td>
+                      <td className="px-4 py-2.5 min-w-[200px]">
+                        <SearchableSelect
+                          options={crmOptions}
+                          value={n.flowId ?? ''}
+                          onChange={(v) => handleFlowChange(n.id, v)}
+                          allLabel="Campaign default"
+                          placeholder="Select script flow…"
+                        />
+                      </td>
+                      <td className="px-4 py-2.5 min-w-[200px]">
+                        <SearchableSelect
+                          options={outboundOptions}
+                          value={n.telephonyFlowId ?? ''}
+                          onChange={(v) => handleTelephonyFlowChange(n.id, v)}
+                          allLabel="Campaign default"
+                          placeholder="Select telephony flow…"
+                        />
+                      </td>
+                      <td className="px-4 py-2.5 text-right whitespace-nowrap">
                         <button
                           onClick={() => handleRemove(n.id)}
                           disabled={removingId === n.id}
@@ -890,7 +974,7 @@ export default function CampaignDetailPage() {
             onChanged={load}
           />
           {campaign.direction === 'outbound' && campaign.dialMode === 'manual' && (
-            <ExternalNumbersSection campaignId={campaign.id} />
+            <ExternalNumbersSection campaignId={campaign.id} flows={flows} />
           )}
         </div>
       </div>

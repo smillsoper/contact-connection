@@ -20,12 +20,16 @@
     <load module="mod_commands"/>
     <load module="mod_dptools"/>
 
+    <!-- Loopback endpoint — lets you test dialplan with originate loopback/+1234/XML/public -->
+    <load module="mod_loopback"/>
+
     <!-- Audio codecs — G.711/G.722 are compiled into the core, not separate modules -->
     <load module="mod_opus"/>
 
     <!-- Audio sources -->
     <load module="mod_tone_stream"/>
     <load module="mod_sndfile"/>
+    <load module="mod_shout"/>
     <load module="mod_native_file"/>
     <load module="mod_local_stream"/>
   </modules>

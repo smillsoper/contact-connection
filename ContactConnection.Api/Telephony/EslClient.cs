@@ -97,21 +97,65 @@ public sealed class EslClient : IAsyncDisposable, IEslCommander
     public Task HangupChannelAsync(string uuid, CancellationToken ct = default) =>
         SendApiAsync($"uuid_hangup {uuid} NORMAL_CLEARING", ct);
 
-    // Transfer the parked inbound channel to the agent using FreeSWITCH's inline dialplan.
-    // uuid_transfer moves the parked channel into a bridge application that FreeSWITCH
-    // handles internally — it originates a new SIP call to the agent and bridges them.
-    // This is more reliable than bgapi originate &bridge(uuid), which passes the UUID
-    // as a dial string (invalid) and causes an immediate BYE after the agent answers.
+    // Transfer the parked inbound channel to the agent's registered WebRTC endpoint.
+    // Resolves the agent's actual SIP contact via sofia_contact (registration lookup),
+    // then bridges using uuid_transfer inline so the parked channel connects to the agent.
     public async Task BridgeToAgentAsync(string uuid, string extension, string domain, string callerNumber, CancellationToken ct = default)
     {
         // Set effective caller ID before bridging so the SIP INVITE to the agent shows the original ANI
         await SetChannelVarAsync(uuid, "effective_caller_id_number", callerNumber, ct);
         await SetChannelVarAsync(uuid, "effective_caller_id_name", callerNumber, ct);
-        await SendApiAsync($"uuid_transfer {uuid} 'bridge:user/{extension}@{domain}' inline", ct);
+
+        // Resolve the agent's registered WebRTC contact URI — this is the sofia profile +
+        // full SIP contact with fs_path for WebSocket routing, e.g.:
+        // sofia/internal/sip:abc@host.invalid;transport=ws;fs_path=sip:abc@172.x.x.x:port;transport=ws
+        var contact = await SendApiBodyAsync($"sofia_contact {extension}@{domain}", ct);
+        if (string.IsNullOrEmpty(contact) || contact.StartsWith("-ERR"))
+            throw new InvalidOperationException(
+                $"Agent {extension}@{domain} is not registered in FreeSWITCH. sofia_contact returned: {contact}");
+
+        await SendApiAsync($"uuid_transfer {uuid} 'bridge:{contact}' inline", ct);
+    }
+
+    private async Task<string?> SendApiBodyAsync(string command, CancellationToken ct)
+    {
+        await _writer!.WriteLineAsync($"api {command}");
+        await _writer.WriteLineAsync();
+        var msg = await ReadMessageAsync(ct);
+        return msg?.Body?.Trim();
     }
 
     public Task SetChannelVarAsync(string uuid, string name, string value, CancellationToken ct = default) =>
         SendApiAsync($"uuid_setvar {uuid} {name} {value}", ct);
+
+    public Task BreakChannelAsync(string uuid, CancellationToken ct = default) =>
+        SendApiAsync($"uuid_break {uuid} all", ct);
+
+    public Task BroadcastAsync(string uuid, string mediaArg, CancellationToken ct = default) =>
+        SendApiAsync($"uuid_broadcast {uuid} {mediaArg} aleg", ct);
+
+    public Task BridgeChannelsAsync(string uuid1, string uuid2, CancellationToken ct = default) =>
+        SendApiAsync($"uuid_bridge {uuid1} {uuid2}", ct);
+
+    public Task SendDtmfAsync(string uuid, string digits, int durationMs, CancellationToken ct = default) =>
+        SendApiAsync($"uuid_send_dtmf {uuid} {digits}@{durationMs}", ct);
+
+    /// <returns>(uuid, null) on success; (null, errorDetail) on failure so callers can log the cause.</returns>
+    public async Task<(string? Uuid, string? Error)> OriginateAndParkAsync(string extension, string domain, string callerNumber, CancellationToken ct = default)
+    {
+        var contact = await SendApiBodyAsync($"sofia_contact {extension}@{domain}", ct);
+        if (string.IsNullOrEmpty(contact) || contact.StartsWith("-ERR"))
+            return (null, $"sofia_contact {extension}@{domain} → {contact ?? "(null)"}");
+
+        var vars = $"{{sip_auto_answer=true,sip_h_Alert-Info=answer-after=0," +
+                   $"effective_caller_id_number={callerNumber},effective_caller_id_name={callerNumber}," +
+                   $"cc_whisper=true}}";
+        var response = await SendApiBodyAsync($"originate {vars}{contact} &park()", ct);
+
+        return response?.StartsWith("+OK") == true
+            ? (response["+OK".Length..].Trim(), null)
+            : (null, $"originate → {response ?? "(null)"}");
+    }
 
     public ValueTask DisposeAsync()
     {
@@ -126,6 +170,7 @@ public sealed class EslClient : IAsyncDisposable, IEslCommander
 public sealed class EslMessage(Dictionary<string, string> headers, string? body)
 {
     public string? ContentType => GetHeader("Content-Type");
+    public string? Body => body;
 
     public string? GetHeader(string key) =>
         headers.TryGetValue(key, out var v) ? v : null;

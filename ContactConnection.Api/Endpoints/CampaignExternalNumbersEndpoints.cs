@@ -10,10 +10,14 @@ public static class CampaignExternalNumbersEndpoints
     {
         var group = app.MapGroup("/api/v1/campaigns/{id:guid}").RequireAuthorization();
 
-        group.MapGet("external-numbers",                          GetAll);
-        group.MapPost("external-numbers",                         Add);
-        group.MapDelete("external-numbers/{numberId:guid}",       Remove);
-        group.MapGet("client-transfer-numbers",                   GetClientTransferNumbers);
+        group.MapGet("external-numbers",                                    GetAll);
+        group.MapPost("external-numbers",                                   Add);
+        group.MapDelete("external-numbers/{numberId:guid}",                 Remove);
+        group.MapPut("external-numbers/{numberId:guid}/flow",               SetFlow);
+        group.MapDelete("external-numbers/{numberId:guid}/flow",            RemoveFlow);
+        group.MapPut("external-numbers/{numberId:guid}/telephony-flow",     SetTelephonyFlow);
+        group.MapDelete("external-numbers/{numberId:guid}/telephony-flow",  RemoveTelephonyFlow);
+        group.MapGet("client-transfer-numbers",                             GetClientTransferNumbers);
 
         return app;
     }
@@ -62,6 +66,62 @@ public static class CampaignExternalNumbersEndpoints
         return Results.NoContent();
     }
 
+    // ── PUT /api/v1/campaigns/{id}/external-numbers/{numberId}/flow ──────────
+
+    private static async Task<IResult> SetFlow(
+        Guid id, Guid numberId, SetExternalNumberFlowRequest req,
+        ICampaignRepository repo, TenantContext ctx, CancellationToken ct)
+    {
+        if (!ctx.HasTenant) return Results.Unauthorized();
+        var number = await repo.GetExternalNumberByIdAsync(id, numberId, ct);
+        if (number is null) return Results.NotFound();
+        number.AssignFlow(req.FlowId);
+        await repo.SaveChangesAsync(ct);
+        return Results.Ok(ToResponse(number));
+    }
+
+    // ── DELETE /api/v1/campaigns/{id}/external-numbers/{numberId}/flow ────────
+
+    private static async Task<IResult> RemoveFlow(
+        Guid id, Guid numberId,
+        ICampaignRepository repo, TenantContext ctx, CancellationToken ct)
+    {
+        if (!ctx.HasTenant) return Results.Unauthorized();
+        var number = await repo.GetExternalNumberByIdAsync(id, numberId, ct);
+        if (number is null) return Results.NotFound();
+        number.RemoveFlow();
+        await repo.SaveChangesAsync(ct);
+        return Results.Ok(ToResponse(number));
+    }
+
+    // ── PUT /api/v1/campaigns/{id}/external-numbers/{numberId}/telephony-flow ─
+
+    private static async Task<IResult> SetTelephonyFlow(
+        Guid id, Guid numberId, SetExternalNumberFlowRequest req,
+        ICampaignRepository repo, TenantContext ctx, CancellationToken ct)
+    {
+        if (!ctx.HasTenant) return Results.Unauthorized();
+        var number = await repo.GetExternalNumberByIdAsync(id, numberId, ct);
+        if (number is null) return Results.NotFound();
+        number.AssignTelephonyFlow(req.FlowId);
+        await repo.SaveChangesAsync(ct);
+        return Results.Ok(ToResponse(number));
+    }
+
+    // ── DELETE /api/v1/campaigns/{id}/external-numbers/{numberId}/telephony-flow
+
+    private static async Task<IResult> RemoveTelephonyFlow(
+        Guid id, Guid numberId,
+        ICampaignRepository repo, TenantContext ctx, CancellationToken ct)
+    {
+        if (!ctx.HasTenant) return Results.Unauthorized();
+        var number = await repo.GetExternalNumberByIdAsync(id, numberId, ct);
+        if (number is null) return Results.NotFound();
+        number.RemoveTelephonyFlow();
+        await repo.SaveChangesAsync(ct);
+        return Results.Ok(ToResponse(number));
+    }
+
     // ── GET /api/v1/campaigns/{id}/client-transfer-numbers ───────────────────
     // Used by the agent softphone: returns all active external numbers from
     // all manual-outbound campaigns belonging to the same client as {id}.
@@ -81,7 +141,8 @@ public static class CampaignExternalNumbersEndpoints
     }
 
     private static object ToResponse(CampaignExternalNumber n) => new
-    { n.Id, n.CampaignId, n.Label, n.Number, n.DisplayOrder, n.IsActive, n.CreatedAt };
+    { n.Id, n.CampaignId, n.Label, n.Number, n.DisplayOrder, n.IsActive, n.FlowId, n.TelephonyFlowId, n.CreatedAt };
 }
 
 public record AddExternalNumberRequest(string Label, string Number);
+public record SetExternalNumberFlowRequest(Guid FlowId);

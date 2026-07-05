@@ -207,6 +207,18 @@ public class CallRecord
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    public void SetTelephonyTrace(string json)
+    {
+        TelephonyEvents = json;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void SetFlowExecutionState(string? json)
+    {
+        FlowExecutionState = json;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
     public void Complete()
     {
         OverallStatus = DeriveOverallStatus();

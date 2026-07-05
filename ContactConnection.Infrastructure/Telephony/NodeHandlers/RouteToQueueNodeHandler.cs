@@ -56,6 +56,9 @@ public class RouteToQueueNodeHandler : ITelephonyNodeHandler
         ctx.Vars["_queued"] = "true";
         ctx.Vars["_eligible_agents"] = string.Join(",", agentIds.Distinct());
 
-        return new TelephonyNodeResult(null, "queued");
+        // Allow chaining — e.g. RouteToQueue → Play (hold music) — by reading the default transition.
+        // Returns null if no transition is defined (old behavior, call stays parked silently).
+        var nextNodeId = node["transitions"]?["default"]?.GetValue<string>();
+        return new TelephonyNodeResult(nextNodeId, "queued");
     }
 }

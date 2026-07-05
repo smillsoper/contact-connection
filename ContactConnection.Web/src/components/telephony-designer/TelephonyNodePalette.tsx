@@ -10,6 +10,8 @@ const INBOUND_NODES: TelephonyNodeType[] = [
   'tf_reject',
   'tf_hangup',
   'tf_route_to_queue',
+  'tf_play',
+  'tf_dtmf',
   'tf_set_variable',
   'tf_get_sip_header',
   'tf_set_sip_header',
@@ -20,12 +22,15 @@ const INBOUND_NODES: TelephonyNodeType[] = [
   'tf_on_call_disconnected',
   'tf_on_custom_event',
   // Actions available in event branches
+  'tf_whisper',
   'tf_script_pop',
 ]
 
 const OUTBOUND_NODES: TelephonyNodeType[] = [
   'tf_time_of_day',
   'tf_branch',
+  'tf_play',
+  'tf_dtmf',
   'tf_set_variable',
   'tf_set_caller_id',
   'tf_get_sip_header',
@@ -36,6 +41,8 @@ const OUTBOUND_NODES: TelephonyNodeType[] = [
 const OUTBOUND_MANUAL_NODES: TelephonyNodeType[] = [
   'tf_time_of_day',
   'tf_branch',
+  'tf_play',
+  'tf_dtmf',
   'tf_set_variable',
   'tf_set_caller_id',
   'tf_cancel_dial',

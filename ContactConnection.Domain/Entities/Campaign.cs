@@ -14,6 +14,9 @@ public class Campaign
     // The fallback CRM script flow agents run for calls in this campaign.
     public Guid? FlowId { get; private set; }
 
+    // Telephony flow executed by ESL when an inbound call arrives on this campaign's DID.
+    public Guid? InboundFlowId { get; private set; }
+
     // Telephony flow to execute before the agent dials (manual outbound only).
     public Guid? OutboundFlowId { get; private set; }
 
@@ -113,6 +116,8 @@ public class Campaign
 
     public void AssignFlow(Guid flowId)         { FlowId = flowId;         UpdatedAt = DateTimeOffset.UtcNow; }
     public void RemoveFlow()                    { FlowId = null;           UpdatedAt = DateTimeOffset.UtcNow; }
+    public void AssignInboundFlow(Guid flowId)  { InboundFlowId = flowId;  UpdatedAt = DateTimeOffset.UtcNow; }
+    public void RemoveInboundFlow()             { InboundFlowId = null;    UpdatedAt = DateTimeOffset.UtcNow; }
     public void AssignOutboundFlow(Guid flowId) { OutboundFlowId = flowId; UpdatedAt = DateTimeOffset.UtcNow; }
     public void RemoveOutboundFlow()            { OutboundFlowId = null;   UpdatedAt = DateTimeOffset.UtcNow; }
 

@@ -44,6 +44,7 @@ public class TenantDbContext : DbContext
     public DbSet<GroupCampaignAssignment> GroupCampaignAssignments => Set<GroupCampaignAssignment>();
     public DbSet<CampaignExternalNumber> CampaignExternalNumbers => Set<CampaignExternalNumber>();
     public DbSet<BlockListEntry> BlockListEntries => Set<BlockListEntry>();
+    public DbSet<AudioFile> AudioFiles => Set<AudioFile>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -76,6 +77,7 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new GroupCampaignAssignmentConfiguration());
         modelBuilder.ApplyConfiguration(new CampaignExternalNumberConfiguration());
         modelBuilder.ApplyConfiguration(new BlockListConfiguration());
+        modelBuilder.ApplyConfiguration(new AudioFileConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 

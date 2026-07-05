@@ -98,6 +98,7 @@ public class FlowEngine : IFlowEngine
         }
 
         var state = await AdvanceInternalAsync(ctx, entryNodeId, agentInput: null, transition: "default", isStart: true, ct);
+        state.FlowName = flow.Name;
         AttachSectionInfo(ctx, state);
 
         // Save ctx AFTER advance so CurrentNodeId reflects where the engine stopped,

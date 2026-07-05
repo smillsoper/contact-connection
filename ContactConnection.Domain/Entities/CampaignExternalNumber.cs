@@ -9,6 +9,8 @@ public class CampaignExternalNumber
     public string Number { get; private set; } = string.Empty;
     public int DisplayOrder { get; private set; }
     public bool IsActive { get; private set; } = true;
+    public Guid? FlowId { get; private set; }
+    public Guid? TelephonyFlowId { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
 
     // Navigation
@@ -31,4 +33,9 @@ public class CampaignExternalNumber
         };
 
     public void Deactivate() => IsActive = false;
+
+    public void AssignFlow(Guid flowId) => FlowId = flowId;
+    public void RemoveFlow() => FlowId = null;
+    public void AssignTelephonyFlow(Guid flowId) => TelephonyFlowId = flowId;
+    public void RemoveTelephonyFlow() => TelephonyFlowId = null;
 }

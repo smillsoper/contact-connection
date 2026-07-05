@@ -166,6 +166,9 @@ public static class AdminAgentsEndpoints
         if (request.IsActive is true) agent.Activate();
         else if (request.IsActive is false) agent.Deactivate();
 
+        if (request.Timezone is not null)
+            agent.SetTimezone(string.IsNullOrWhiteSpace(request.Timezone) ? null : request.Timezone);
+
         await agents.SaveChangesAsync(ct);
         return Results.Ok(ToResponse(agent));
     }
@@ -182,9 +185,10 @@ public static class AdminAgentsEndpoints
         a.IsActive,
         a.CreatedAt,
         a.LastLoginAt,
+        a.Timezone,
     };
 }
 
 public record ResetAgentPasswordRequest(string NewPassword);
-public record UpdateAgentRequest(string? Role, Guid? RoleId, bool? IsActive);
+public record UpdateAgentRequest(string? Role, Guid? RoleId, bool? IsActive, string? Timezone);
 public record InviteUsersRequest(string? Emails, Guid? RoleId);

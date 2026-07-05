@@ -38,4 +38,23 @@ public class RedisCallSessionStore : ITelephonyCallSessionStore
         var db = _redis.GetDatabase();
         await db.KeyDeleteAsync(Key(channelUuid));
     }
+
+    public async Task SetKeyAsync(string key, string value, TimeSpan ttl, CancellationToken ct = default)
+    {
+        var db = _redis.GetDatabase();
+        await db.StringSetAsync(key, value, ttl);
+    }
+
+    public async Task<string?> GetKeyAsync(string key, CancellationToken ct = default)
+    {
+        var db  = _redis.GetDatabase();
+        var val = await db.StringGetAsync(key);
+        return val.IsNullOrEmpty ? null : (string?)val;
+    }
+
+    public async Task DeleteKeyAsync(string key, CancellationToken ct = default)
+    {
+        var db = _redis.GetDatabase();
+        await db.KeyDeleteAsync(key);
+    }
 }

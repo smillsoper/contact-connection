@@ -270,6 +270,9 @@ function DesignerCanvas({
 
   // When an option is picked in the modal, complete the pending edge.
   // Removes any existing edge for this option first (re-wire case).
+  // NOTE: bypasses addEdge() intentionally — all option edges use sourceHandle=null for rendering,
+  // so addEdge()'s duplicate check (source+sourceHandle+target+targetHandle) would reject any
+  // option beyond the first one that connects to the same target node.
   const onOptionPicked = useCallback((optionValue: string) => {
     if (!pendingConn) return
     const conn = pendingConn
@@ -281,14 +284,15 @@ function DesignerCanvas({
         const key = (e.data?.transition as string | undefined) ?? e.sourceHandle
         return key !== optionValue
       })
-      return addEdge({
+      const newEdge: Edge = {
         ...conn,
         id: `${conn.source}-${optionValue}-${conn.target}`,
         sourceHandle: null,          // visual: renders from the single default handle
         type: 'editable',
         label: optionValue,
         data: { waypoints: [], transition: optionValue },  // semantic: carries the option name
-      } as Edge, withoutOld)
+      }
+      return [...withoutOld, newEdge]
     })
   }, [pendingConn, setEdges])
 

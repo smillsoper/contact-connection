@@ -73,6 +73,210 @@
 | 61 | 2026-06-29 | 11:00 AM CDT | 11:21 AM CDT | 21 min | ~3824 min |
 | 62 | 2026-06-30 | 7:29 AM CDT | 9:30 AM CDT | 121 min | ~3945 min |
 | 63 | 2026-07-01 | 7:29 AM CDT (break 10:13 AM, resumed 3:00 PM) | 4:04 PM CDT | 228 min (164 + 64) | ~4173 min |
+| 64 | 2026-07-01 | 4:20 PM CDT | 4:56 PM CDT | 36 min | ~4209 min |
+| 65 | 2026-07-02 | 8:40 AM CDT | 10:24 AM CDT | 104 min | ~4313 min |
+| 66 | 2026-07-03 | 7:37 AM CDT | 9:06 AM CDT | 89 min | ~4402 min |
+| 67 | 2026-07-03 | 9:09 AM CDT | 10:34 AM CDT | 85 min | ~4487 min |
+| 68 | 2026-07-05 | 8:27 AM CDT | 10:22 AM CDT | 115 min | ~4602 min |
+
+---
+
+## Session 68
+
+**Date:** 2026-07-05
+**Start:** 8:27 AM CDT
+**End:** 10:22 AM CDT
+**Duration:** 115 minutes
+
+### Accomplished
+
+**End-to-end inbound whisper path — full working implementation**
+
+**Root cause fixes**
+
+- **Audio format incompatibility (WebM → OGG)** — Browser `MediaRecorder` records in WebM/Opus; FreeSWITCH `mod_sndfile` cannot play WebM so `uuid_broadcast` silently fails and PLAYBACK_STOP never fires (bridge never happens). Fixed by server-side ffmpeg transcoding in `AudioFilesEndpoints.cs`: saves temp file → runs ffmpeg (`-ar 8000 -ac 1 -c:a libvorbis -q:a 3`) → stores `.ogg`; stderr read concurrently to avoid pipe-buffer deadlock. `FreeSWITCH:FfmpegPath` config key added to `appsettings.Development.json` (full winget install path since running `dotnet watch` doesn't inherit updated PATH).
+
+- **JsSIP registration guard** — `OriginateAndParkAsync` returned null when JsSIP hadn't re-registered after page navigation. Added `disabled={registrationStatus !== 'registered'}` to the pickup button in `SoftphonePanel.tsx` with a spinner/warning label for `registering` state.
+
+- **`OriginateAndParkAsync` error transparency** — changed return type from `Task<string?>` to `Task<(string? Uuid, string? Error)>`; `IEslCommander` interface updated; `AnswerQueuedCall` destructures tuple and includes `originateError` in the 500 response body for diagnosis.
+
+- **TenantContext null in background service** — `HandleChannelBridgeAsync` resolves `IFlowEngine` from a DI scope with no HTTP request context; `ScopedTenantDbContextFactory.Create()` threw `"No tenant resolved for this request"` which was silently caught by `ScriptPopNodeHandler`. Fixed by loading the tenant from the platform DB and setting `TenantContext.Current` on the scope before resolving `IFlowEngine`.
+
+- **Duplicate script pop tabs** — `_crm_session_json` written to `session.Vars` by `ScriptPopNodeHandler` in `agent_selected` was bleeding into later `agent_answer` event branch execution. `FireEventAsync` now removes `_crm_session_json` from `session.Vars` immediately after consuming it so it cannot propagate across event branches.
+
+- **Queue audio audible on bridge** — caller heard MOH/announcement audio bleed into the live conversation after `uuid_bridge`. `TelEndNodeHandler` now calls `uuid_break {callerUuid} all` before `uuid_bridge` to stop any playing audio on the caller's channel cleanly.
+
+**Script pop architecture changes**
+
+- **`agent_selected` branch support** — `tf_script_pop` can now be placed in the `AGENT SELECTED` event branch (before or after whisper) so the script appears while the whisper plays, before the caller connects. `AnswerQueuedCall` now injects `IHubContext<FlowHub, IFlowHubClient>`, checks `agentSelectedResult.CrmFlowSession` after firing the branch, and sends `ReceiveScriptPop` immediately if a CRM session was started.
+
+- **Script flow resolution fallback order** — `ScriptPopNodeHandler` now resolves in priority order: (1) `tf_script_pop` node's `flowId` override field → (2) `PhoneNumber.FlowId` (DID-level "Script Flow Override") → (3) `Campaign.FlowId` (campaign fallback script flow).
+
+**New ESL command**
+
+- **`IEslCommander.BreakChannelAsync`** / **`EslClient.BreakChannelAsync`** — `api uuid_break {uuid} all`; stops current and queued media on a channel without hanging it up.
+
+**End-to-end test confirmed working**
+
+Inbound call → queue (MOH + announcements loop) → agent screen pop → agent picks up → JsSIP auto-answers whisper INVITE → whisper plays (agent ear only, caller on hold) → CRM script pop appears simultaneously → whisper finishes → `uuid_break` stops queue audio → `uuid_bridge` connects caller and agent cleanly → caller hears no bleed-through.
+
+---
+
+## Session 67
+
+**Date:** 2026-07-03
+**Start:** 9:09 AM CDT
+**End:** 10:34 AM CDT
+**Duration:** 85 minutes
+
+### Accomplished
+
+**`tf_whisper` debugging — whisper audio + script pop not firing after agent pickup**
+
+Traced the full whisper path and identified two bugs causing the agent to jump straight to on_call state with no whisper audio and no CRM script pop.
+
+**DTMF node `waitForCompletion` toggle**
+
+- `DtmfNodeHandler.cs` — simplified to always use the same `SendDigitsAsync` loop; `waitForCompletion` flag now only controls whether the task is `await`ed or fire-and-forget; behavior is identical in both cases (same code path, same timing logic) — no duplicate implementations
+
+**Whisper bug fixes**
+
+- **Bug 1 — Spurious CHANNEL_PARK overwriting `callRecordId`:** `originate ... &park()` emits `CHANNEL_PARK` for the agent's whisper channel; `HandleChannelParkAsync` was treating it as a new inbound call, creating a spurious `CallRecord` and sending duplicate `receiveIncomingCall` to the agent, overwriting `callRecordId` in the call store mid-flow
+  - Fix: Added `cc_whisper=true` to originate channel vars in `EslClient.OriginateAndParkAsync`; added early return `if (vars.GetValueOrDefault("variable_cc_whisper") == "true") return;` at top of `HandleChannelParkAsync`
+
+- **Bug 2 — WebRTC ICE/DTLS timing:** `OriginateAndParkAsync` returns `+OK` when FreeSWITCH receives SIP 200 OK from JsSIP, but ICE candidate exchange and DTLS handshake are still in progress asynchronously; calling `uuid_broadcast` immediately after can fail silently because the SRTP media path isn't established yet — no audio plays, no `PLAYBACK_STOP` fires, bridge never happens
+  - Fix: Added `await Task.Delay(600, ct)` in `WhisperNodeHandler` before `BroadcastAsync` to allow WebRTC media path to settle
+
+**FreeSWITCH MP3 support (`mod_shout`)**
+
+- Confirmed all required audio modules are loaded: `mod_opus`, `mod_sndfile`, `mod_tone_stream`, `mod_local_stream`, `mod_dptools`
+- Identified gap: API accepts MP3 uploads but `mod_shout` was not installed — MP3 playback via `uuid_broadcast` would fail silently in FreeSWITCH
+- `freeswitch/Dockerfile` — added `freeswitch-mod-shout` to apt install
+- `freeswitch/conf/autoload_configs/modules.conf.xml` — added `<load module="mod_shout"/>` under audio sources
+
+Pending: User to rebuild FreeSWITCH container (`docker compose build freeswitch && docker compose up -d freeswitch`) and retest the full whisper → bridge → script pop path.
+
+---
+
+## Session 66
+
+**Date:** 2026-07-03
+**Start:** 7:37 AM CDT
+**End:** 9:06 AM CDT
+**Duration:** 89 minutes
+
+### Accomplished
+
+**`tf_play` palette fix, audio recording/preview, periodic announcement playlist** (continued from Session 65)
+
+- `TelephonyNodePalette.tsx` — added `tf_play` to INBOUND, OUTBOUND, and OUTBOUND_MANUAL node lists (was registered in designer but missing from palette)
+- `AudioFilesEndpoints.cs` — added `audio/webm` and `audio/mp4` + extensions to accepted upload types (browser MediaRecorder outputs WebM/MP4)
+- `audioFiles.ts` — added `fetchBlobUrl()` method: fetches audio stream with auth headers, returns blob URL for `<audio>` preview (stream endpoint requires JWT + tenant subdomain headers)
+- `TelephonyNodePropertiesPanel.tsx` — `PlayNodeEditor` rewrote with: in-panel audio preview (`▶ Preview selected file` → blob URL → `<audio controls>`); full browser MediaRecorder workflow (idle → requesting → recording with timer → review → save & select); `getBestMimeType()` priority: webm+opus → webm → ogg+opus → ogg → mp4
+- `telephony-designer.ts` — changed `periodicAnnouncementFileId: string` → `periodicAnnouncements: Array<{ fileId: string }>` (ordered playlist)
+- `PlayNodeHandler.cs` — replaced single announcement var with `_play_announcements_json` (serialized list) + `_play_announcement_index` counter
+- `EslBackgroundService.cs` — announcement cycling: index advances `(idx + 1) % count` after each play; wraps back to 0 after last
+- `TelephonyNodePropertiesPanel.tsx` — `PeriodicAnnouncementEditor` component: ordered list with ▲/▼ reorder, ✕ remove, "+ Add Announcement" button; inline interval input; footer note
+
+**`tf_whisper` node — full backend + frontend implementation**
+
+Agent-selected event branch node that plays audio on the agent's ear only before bridging the caller. The caller and agent audio streams are NOT bridged until the agent_selected branch reaches tf_end (or if no agent_selected branch exists, bridge happens immediately as before).
+
+**Backend**
+
+- **`ITelephonyCallSessionStore`** — added `SetKeyAsync`, `GetKeyAsync`, `DeleteKeyAsync` for arbitrary Redis key/value (used for whisper reverse mapping: `whisper:{agentUuid}` → callerUuid)
+- **`RedisCallSessionStore`** — implemented the three new methods
+- **`IEslCommander`** — added `BridgeChannelsAsync(uuid1, uuid2)` and `OriginateAndParkAsync(extension, domain, callerNumber)` → `Task<string?>`
+- **`EslClient`** — implemented `BridgeChannelsAsync` (`api uuid_bridge {uuid1} {uuid2}`) and `OriginateAndParkAsync` (resolves sofia contact → `api originate {sip_auto_answer=true,sip_h_Alert-Info=answer-after=0,...}{contact} &park()` → returns UUID from `+OK {uuid}` response)
+- **`FlowHub` / `IFlowHubClient`** — added `ReceiveScriptPop(string sessionJson)` method for post-bridge script pop delivery
+- **`WhisperNodeHandler.cs`** (NEW) — `NodeType = "tf_whisper"`; resolves audio file same as PlayNodeHandler; broadcasts to `ctx.Vars["_agent_uuid"]` (agent's parked channel); stores `_whisper_next_default` from transitions; returns `(null, "whisper_playing")`
+- **`TelEndNodeHandler`** — checks `_agent_uuid` in ctx.Vars → calls `BridgeChannelsAsync(callerUuid, agentUuid)` → removes var; existing hangup logic falls through as before when no bridge pending
+- **`TelephonyEndpoints.AnswerQueuedCall`** — injected `ITelephonyCallSessionStore`; checks `session.EventHandlers.ContainsKey("agent_selected")`; if yes: `OriginateAndParkAsync` → store `_agent_uuid`/`_pending_agent_id`/`_pending_interaction_id` in caller session → store `whisper:{agentUuid}` → callerUuid in Redis → `FireEventAsync("agent_selected", esl=...)` → return NoContent; if no: existing immediate bridge + `FireEventAsync("agent_answer")` path unchanged
+- **`EslBackgroundService`**:
+  - `HandlePlaybackStopAsync` — checks `GetKeyAsync("whisper:{uuid}")` BEFORE regular play session lookup; if whisper key found → `HandleWhisperPlaybackStopAsync`
+  - `HandleWhisperPlaybackStopAsync` (NEW) — deletes whisper Redis key; loads caller session; gets `_whisper_next_default`; clears `_whisper_*` vars; if next node → `ResumeFromNodeAsync(callerUuid, nextNodeId, esl)` (which hits tf_end → BridgeChannelsAsync); if no next node → direct `BridgeChannelsAsync`
+  - `HandleChannelBridgeAsync` (NEW) — replaces inline CHANNEL_BRIDGE handler; clears play loop vars; if session has `_pending_agent_id` → removes pending vars from session → fires `agent_answer` event via `ITelephonyFlowEngine` → pushes CRM script pop via SignalR `ReceiveScriptPop` to `agent:{agentId}` group
+- **`ServiceCollectionExtensions`** — registered `WhisperNodeHandler`
+
+**Frontend**
+
+- **`telephony-designer.ts`** — added `'tf_whisper'` to union; `TELEPHONY_NODE_META` entry (purple `#7c3aed`, single handle, "plays on agent's ear only"); `defaultTelNodeData` returns `{ label: 'Whisper', audioFileId: '' }`
+- **`WhisperNode.tsx`** (NEW) — TelNodeShell wrapper; shows "agent ear only" or "⚠ no file selected" in purple
+- **`TelephonyNodePropertiesPanel.tsx`** — `WhisperNodeEditor` component: same audio file picker + upload + record/preview UI as PlayNodeEditor, but scoped to whisper use (no TTS, no duration, no periodic announcements); purple accent color; exit handle info box explains delayed bridge semantics
+- **`TelephonyNodePalette.tsx`** — added `'tf_whisper'` to INBOUND_NODES event branch actions section (alongside tf_script_pop)
+- **`TelephonyDesignerPage.tsx`** — imported + registered `tf_whisper: WhisperNode`
+- **`FlowPanel.tsx`** — added `connection.on('receiveScriptPop', ...)` SignalR handler: parses session JSON → calls `addSession(...)` to open CRM script tab (same pattern as HTTP response path in `handlePickUp`)
+
+Build: **0 errors** (API .pdb lock is pre-existing running server); TypeScript: **0 errors**
+
+---
+
+## Session 65
+
+**Date:** 2026-07-02
+**Start:** 8:40 AM CDT
+**End:** 10:24 AM CDT
+**Duration:** 104 minutes
+
+### Accomplished
+
+**`tf_play` Play audio node — full backend + frontend implementation**
+
+**Backend**
+
+- **`AudioFile` entity** (`ContactConnection.Domain/Entities/AudioFile.cs`) — `Create()` factory; fields: `Id`, `TenantId`, `Name`, `OriginalFileName`, `StoredFileName` (`{Id}.{ext}`), `ContentType`, `FileSizeBytes`, `CreatedAt`
+- **`AudioFileConfiguration`** — maps to `audio_files` table in tenant schema; index on `tenant_id`
+- **`TenantDbContext`** — added `AudioFiles` DbSet and configuration registration
+- **`IEslCommander.BroadcastAsync`** — new method; `EslClient` implements via `api uuid_broadcast {uuid} {mediaArg} aleg`
+- **`ITelephonyFlowEngine.ResumeFromNodeAsync`** — new method; loads Redis session, rebuilds `TelephonyFlowContext`, executes from a specific node ID; enables post-playback flow continuation without a new inbound event
+- **`RouteToQueueNodeHandler`** — changed from terminal return to reading `transitions["default"]` for next node; enables Answer → Route to Queue → Play chaining
+- **`PlayNodeHandler`** (`NodeType = "tf_play"`) — resolves media arg: `local_stream://` and `silence_stream://` pass through; `__builtin:` prefix stripped and used directly; tenant-uploaded files looked up in DB and path constructed as `{SoundsContainerPath}/{schema}/{storedFileName}`; TTS constructs `say:en+flite+{voice}+{text}`; stores `_play_*` state vars; calls `BroadcastAsync`; returns `(null, "playing")` (fire-and-forget)
+- **`EslBackgroundService`** — added `PLAYBACK_STOP` to ESL event subscription; `HandlePlaybackStopAsync` checks duration exceeded → fires `duration_reached`; checks periodic announcement timing; handles announcement replay state; re-broadcasts on loop; fires `end_of_stream`/`tts_finished` via `ResumeFromNodeAsync`; `CHANNEL_BRIDGE` clears `_play_loop` so hold music stops when agent answers
+- **`AudioFilesEndpoints`** — `POST /api/v1/audio-files` (multipart upload, WAV/MP3/OGG); `GET /api/v1/audio-files` (list); `DELETE /api/v1/audio-files/{id}`; `GET /api/v1/audio-files/{id}/stream` (browser preview); files stored to `{SoundsHostPath}/{schema}/{id}.ext` (docker-compose already mounts `./freeswitch/sounds` into container)
+- **Migration `AddAudioFiles`** — creates `audio_files` table; applied successfully
+- **`ServiceCollectionExtensions`** — registered `PlayNodeHandler`
+
+**Frontend**
+
+- **`audioFiles.ts`** — `AudioFileRecord` interface; `BUILTIN_AUDIO_OPTIONS` (Hold Music auto-loop, Comfort Noise, 3 classical music files with `__builtin:` prefix); `audioFilesApi.list/upload/delete/streamUrl`; upload uses manual `fetch` with `FormData` (no `Content-Type` header) to let browser set multipart boundary
+- **`telephony-designer.ts`** — added `tf_play` to node type union; play-specific `TelNodeData` fields (`audioSource`, `audioFileId`, `ttsText`, `ttsVoice`, `durationSeconds`, `startOffsetSeconds`, `rememberPosition`, `autoRestart`, `periodicAnnouncementFileId`, `periodicAnnouncementIntervalSeconds`); `TELEPHONY_NODE_META` entry (teal `#0f766e`, `handles: 'multi'`); `defaultTelNodeData` defaults
+- **`PlayNode.tsx`** — `getPlayHandles()` computes dynamic handles based on `audioSource`, `autoRestart`, `durationSeconds`; always passes `extraHandles` to bypass TelNodeShell built-in handle rendering; shows source summary in body
+- **`TelephonyDesignerPage.tsx`** — registered `tf_play: PlayNode`; `HANDLE_DISPLAY_LABELS` map (`end_of_stream → "End Of Play Stream"`, `duration_reached → "Duration Reached"`, `tts_finished → "TTS Finished"`); `onConnect` and `fromTelDef` both use display labels on edges
+- **`TelephonyNodePropertiesPanel.tsx`** — `PlayNodeEditor` component: audio source toggle (File/TTS); sectioned `<select>` with `<optgroup label="Built-In Options">` (BUILTIN_AUDIO_OPTIONS) and `<optgroup label="Uploaded Files">` (tenant uploads); upload button; TTS textarea + voice selector (kal/slt/awb/rms) + mod_flite note; duration + start offset inputs; auto-restart + remember position checkboxes; periodic announcement section (file selector + interval, shown only for looping file mode); exit handle info box
+
+---
+
+## Session 64
+
+**Date:** 2026-07-01
+**Start:** 4:20 PM CDT
+**End:** 4:56 PM CDT
+**Duration:** 36 minutes
+
+### Accomplished
+
+**Flow tab naming fix**
+
+- **`FlowNodeState.FlowName`** — added nullable `string? FlowName { get; set; }` property to `FlowNodeState` in `IFlowEngine.cs`
+- **`FlowEngine.StartAsync`** — sets `state.FlowName = flow.Name` after the advance loop returns; flows the flow's display name through to the initial node state
+- **`flow.ts`** — added `flowName?: string` to `FlowNodeState` TypeScript interface
+- **`SoftphonePanel.tsx`** — screen-pop tab label now uses `node.flowName ?? 'Script Flow'` instead of `node.label` (which was the first node's label); manually-started flows in `FlowPanel.tsx` were already correct (used the flows dropdown name)
+
+**FreeSWITCH bridge fix — `BridgeToAgentAsync` now resolves agent contact via `sofia_contact`**
+
+- **Root cause** — `user/extension@domain` (previous fix attempt) requires a matching XML directory domain; FreeSWITCH directory only has `127.0.0.1` but agents register under their tenant subdomain (e.g. `test-tenant`); lookup silently returns nothing so bridge fails without error
+- **Previous attempt** — `sofia/internal/extension@domain` sends a direct SIP INVITE to `domain` as a hostname rather than doing a registration lookup; also fails
+- **Correct fix** — `EslClient.BridgeToAgentAsync` now calls `api sofia_contact {extension}@{domain}` first to resolve the agent's actual registered WebRTC contact URI (full `sofia/internal/sip:...;transport=ws;fs_path=...` string), then uses that directly in `uuid_transfer ... 'bridge:{contact}' inline`; throws `InvalidOperationException` if agent is not registered (previously failed silently)
+- **`EslMessage.Body`** — added public `Body` property to expose the raw ESL response body needed for `sofia_contact` result parsing
+- **`SendApiBodyAsync`** — new private helper on `EslClient` that sends an ESL `api` command and returns the response body as a string
+
+**Diagnostic / cleanup**
+
+- Identified and cleared 26 orphaned parked FreeSWITCH channels from prior test sessions (dating back to 2026-06-30) that were choking FreeSWITCH and causing `-ERR DESTINATION OUT OF ORDER` on new originate commands; cleared with `hupall NORMAL_CLEARING`
+
+**End-to-end test confirmed working**
+
+- Originate → screen pop → agent picks up → script pops with correct flow name in tab → softphone shows "On call" timer
 
 ---
 

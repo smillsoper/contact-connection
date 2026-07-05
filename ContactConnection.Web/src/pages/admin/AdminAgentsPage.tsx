@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import AdminShell from '../../components/admin/AdminShell'
 import { listAdminAgents, resetAgentPassword, updateAgent, inviteUsers, type AgentRecord, type InviteResult } from '../../api/adminAgents'
 import { rolesApi, type Role } from '../../api/roles'
+import { TIMEZONE_GROUPS } from '../../utils/timezones'
 
 export default function AdminAgentsPage() {
   const [agents, setAgents] = useState<AgentRecord[]>([])
@@ -113,6 +114,18 @@ export default function AdminAgentsPage() {
     }
   }
 
+  async function handleTimezoneChange(agent: AgentRecord, timezone: string) {
+    setUpdatingId(agent.id)
+    try {
+      const updated = await updateAgent(agent.id, { timezone: timezone || null })
+      setAgents((prev) => prev.map((a) => a.id === agent.id ? updated : a))
+    } catch {
+      // swallow
+    } finally {
+      setUpdatingId(null)
+    }
+  }
+
   return (
     <AdminShell>
       <div className="p-6 max-w-5xl">
@@ -206,6 +219,7 @@ export default function AdminAgentsPage() {
                   <th className="px-4 py-3 font-medium">Name</th>
                   <th className="px-4 py-3 font-medium">Email</th>
                   <th className="px-4 py-3 font-medium">Role</th>
+                  <th className="px-4 py-3 font-medium">Timezone</th>
                   <th className="px-4 py-3 font-medium">Status</th>
                   <th className="px-4 py-3 font-medium">Last login</th>
                   <th className="px-4 py-3 font-medium"></th>
@@ -232,6 +246,23 @@ export default function AdminAgentsPage() {
                           <option value="">{agent.roleName ?? agent.role} (legacy)</option>
                           {roles.map(r => (
                             <option key={r.id} value={r.id}>{r.name}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-4 py-3">
+                        <select
+                          value={agent.timezone ?? ''}
+                          onChange={e => handleTimezoneChange(agent, e.target.value)}
+                          disabled={updatingId === agent.id}
+                          className="bg-gray-800 border border-gray-600 text-gray-200 text-xs rounded px-2 py-1 disabled:opacity-50"
+                        >
+                          <option value="">Tenant default</option>
+                          {TIMEZONE_GROUPS.map(grp => (
+                            <optgroup key={grp.group} label={grp.group}>
+                              {grp.options.map(tz => (
+                                <option key={tz.value} value={tz.value}>{tz.label}</option>
+                              ))}
+                            </optgroup>
                           ))}
                         </select>
                       </td>
@@ -274,7 +305,7 @@ export default function AdminAgentsPage() {
                     {/* Inline reset password row */}
                     {resetId === agent.id && (
                       <tr key={`${agent.id}-reset`} className="border-b border-gray-800 bg-gray-800/30">
-                        <td colSpan={6} className="px-4 py-3">
+                        <td colSpan={7} className="px-4 py-3">
                           <div className="flex items-center gap-3">
                             <input
                               type="password"

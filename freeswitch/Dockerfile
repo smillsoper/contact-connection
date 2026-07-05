@@ -32,8 +32,10 @@ https://freeswitch.signalwire.com/repo/deb/debian-release/ bookworm main" \
        freeswitch-mod-opus \
        freeswitch-mod-tone-stream \
        freeswitch-mod-sndfile \
+       freeswitch-mod-shout \
        freeswitch-mod-native-file \
        freeswitch-mod-local-stream \
+       freeswitch-mod-loopback \
        freeswitch-sounds-en-us-callie \
        freeswitch-music-default \
     && rm -rf /var/lib/apt/lists/* /etc/apt/auth.conf

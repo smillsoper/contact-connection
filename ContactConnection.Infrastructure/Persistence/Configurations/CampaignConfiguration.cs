@@ -19,6 +19,7 @@ public class CampaignConfiguration : IEntityTypeConfiguration<Campaign>
         builder.Property(c => c.Status).HasColumnName("status").HasMaxLength(20).IsRequired();
         builder.Property(c => c.Description).HasColumnName("description").HasMaxLength(500);
         builder.Property(c => c.FlowId).HasColumnName("flow_id");
+        builder.Property(c => c.InboundFlowId).HasColumnName("inbound_flow_id");
         builder.Property(c => c.OutboundFlowId).HasColumnName("outbound_flow_id");
         builder.Property(c => c.Direction).HasColumnName("direction").HasMaxLength(20).IsRequired();
         builder.Property(c => c.DialMode).HasColumnName("dial_mode").HasMaxLength(20).IsRequired();

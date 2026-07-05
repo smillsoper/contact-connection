@@ -16,6 +16,7 @@ export interface FlowNodeState {
   nodeId: string
   nodeType: 'script' | 'input' | 'email' | 'phone' | 'address' | 'branch' | 'set_variable' | 'api_call' | 'end' | 'section' | 'execute_flow' | 'transition_to_flow'
   label: string
+  flowName?: string
   content?: string
   inputType?: 'text' | 'select' | 'checkbox'
   required?: boolean

@@ -18,6 +18,8 @@ public class CampaignExternalNumberConfiguration : IEntityTypeConfiguration<Camp
         builder.Property(n => n.Number).HasColumnName("number").HasMaxLength(30).IsRequired();
         builder.Property(n => n.DisplayOrder).HasColumnName("display_order");
         builder.Property(n => n.IsActive).HasColumnName("is_active");
+        builder.Property(n => n.FlowId).HasColumnName("flow_id");
+        builder.Property(n => n.TelephonyFlowId).HasColumnName("telephony_flow_id");
         builder.Property(n => n.CreatedAt).HasColumnName("created_at");
 
         builder.HasOne(n => n.Campaign)

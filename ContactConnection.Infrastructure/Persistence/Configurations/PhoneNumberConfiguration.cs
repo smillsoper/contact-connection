@@ -17,6 +17,8 @@ public class PhoneNumberConfiguration : IEntityTypeConfiguration<PhoneNumber>
         builder.Property(p => p.Number).HasColumnName("number").HasMaxLength(20).IsRequired();
         builder.Property(p => p.Label).HasColumnName("label").HasMaxLength(100);
         builder.Property(p => p.IsActive).HasColumnName("is_active");
+        builder.Property(p => p.FlowId).HasColumnName("flow_id");
+        builder.Property(p => p.TelephonyFlowId).HasColumnName("telephony_flow_id");
         builder.Property(p => p.CreatedAt).HasColumnName("created_at");
         builder.Property(p => p.UpdatedAt).HasColumnName("updated_at");
 

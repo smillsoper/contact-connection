@@ -5,6 +5,7 @@ export type TelephonyNodeType =
   | 'tf_answer'
   | 'tf_hangup'
   | 'tf_route_to_queue'
+  | 'tf_play'
   | 'tf_time_of_day'
   | 'tf_branch'
   | 'tf_end'
@@ -14,6 +15,10 @@ export type TelephonyNodeType =
   | 'tf_set_caller_id'
   | 'tf_cancel_dial'
   | 'tf_script_pop'
+  // Signal / media actions
+  | 'tf_dtmf'
+  // Agent-selected event branch actions
+  | 'tf_whisper'
   // Event listener nodes — independent entry points that fire on lifecycle events
   | 'tf_on_agent_selected'
   | 'tf_on_agent_answer'
@@ -36,6 +41,17 @@ export interface TelNodeData extends Record<string, unknown> {
   campaignId?: string
   // tf_route_to_queue
   agentExtension?: string
+  // tf_play
+  audioSource?: 'file' | 'tts'
+  audioFileId?: string
+  ttsText?: string
+  ttsVoice?: string
+  durationSeconds?: number
+  startOffsetSeconds?: number
+  rememberPosition?: boolean
+  autoRestart?: boolean
+  periodicAnnouncements?: Array<{ fileId: string }>
+  periodicAnnouncementIntervalSeconds?: number
   // tf_time_of_day
   timezone?: string
   windows?: TimeWindow[]
@@ -55,6 +71,13 @@ export interface TelNodeData extends Record<string, unknown> {
   cancelMessage?: string
   // tf_script_pop
   flowId?: string
+  // tf_dtmf
+  digits?: string
+  durationMs?: number
+  interDigitGapMs?: number
+  waitForCompletion?: boolean
+  // tf_whisper
+  // (audioFileId reused from tf_play)
   // tf_on_custom_event
   eventName?: string
 }
@@ -132,6 +155,12 @@ export const TELEPHONY_NODE_META: Record<
     description: 'Push the call to the agent queue',
     handles: 'single',
   },
+  tf_play: {
+    label: 'Play',
+    color: '#0f766e',
+    description: 'Play an audio file or TTS on the call channel',
+    handles: 'multi',
+  },
   tf_time_of_day: {
     label: 'Time of Day',
     color: '#92400e',
@@ -186,6 +215,18 @@ export const TELEPHONY_NODE_META: Record<
     description: "Auto-open the CRM script flow on the answering agent's screen",
     handles: 'single',
   },
+  tf_dtmf: {
+    label: 'Send DTMF',
+    color: '#ca8a04',
+    description: 'Send a sequence of DTMF tones on the current call channel',
+    handles: 'single',
+  },
+  tf_whisper: {
+    label: 'Whisper',
+    color: '#7c3aed',
+    description: "Play audio on the agent's ear only before bridging the caller",
+    handles: 'single',
+  },
   // ── Event listener nodes ──────────────────────────────────────────────────
   tf_on_agent_selected: {
     label: 'Agent Selected',
@@ -227,6 +268,20 @@ export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
       return { label: 'Hang Up' }
     case 'tf_route_to_queue':
       return { label: 'Route to Queue', agentExtension: '' }
+    case 'tf_play':
+      return {
+        label: 'Play Audio',
+        audioSource: 'file',
+        audioFileId: '',
+        ttsText: '',
+        ttsVoice: 'kal',
+        durationSeconds: 0,
+        startOffsetSeconds: 0,
+        rememberPosition: false,
+        autoRestart: false,
+        periodicAnnouncements: [],
+        periodicAnnouncementIntervalSeconds: 30,
+      }
     case 'tf_time_of_day':
       return {
         label: 'Time of Day',
@@ -253,6 +308,10 @@ export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
       return { label: 'Cancel Dial', cancelMessage: 'This transfer number is only available during business hours.' }
     case 'tf_script_pop':
       return { label: 'Script Pop', flowId: '' }
+    case 'tf_dtmf':
+      return { label: 'Send DTMF', digits: '', durationMs: 100, interDigitGapMs: 50, waitForCompletion: true }
+    case 'tf_whisper':
+      return { label: 'Whisper', audioFileId: '' }
     case 'tf_on_agent_selected':
       return { label: 'Agent Selected' }
     case 'tf_on_agent_answer':

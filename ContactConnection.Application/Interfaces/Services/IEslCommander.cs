@@ -11,4 +11,14 @@ public interface IEslCommander
     Task HangupChannelAsync(string uuid, CancellationToken ct = default);
     Task BridgeToAgentAsync(string uuid, string extension, string domain, string callerNumber, CancellationToken ct = default);
     Task SetChannelVarAsync(string uuid, string name, string value, CancellationToken ct = default);
+    /// <summary>uuid_break to stop any current playback on a channel without hanging it up.</summary>
+    Task BreakChannelAsync(string uuid, CancellationToken ct = default);
+    /// <summary>uuid_broadcast to play media on one leg of a parked/bridged channel.</summary>
+    Task BroadcastAsync(string uuid, string mediaArg, CancellationToken ct = default);
+    /// <summary>uuid_bridge to connect two already-established parked channels.</summary>
+    Task BridgeChannelsAsync(string uuid1, string uuid2, CancellationToken ct = default);
+    /// <summary>Originate a call to an agent extension with auto-answer and park the channel. Returns (uuid, null) on success, (null, errorDetail) on failure.</summary>
+    Task<(string? Uuid, string? Error)> OriginateAndParkAsync(string extension, string domain, string callerNumber, CancellationToken ct = default);
+    /// <summary>Send DTMF tones on the specified channel. digits may include 0-9 * # A-D w W; @durationMs sets per-digit tone length.</summary>
+    Task SendDtmfAsync(string uuid, string digits, int durationMs, CancellationToken ct = default);
 }

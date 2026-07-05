@@ -23,6 +23,8 @@ public class Agent
 
     public string? SipExtension { get; private set; }   // e.g. "1001" — assigned at creation, fixed for life
     public string? SipA1Hash { get; private set; }      // MD5("{ext}:{realm}:{password}") — refreshed every login
+    /// <summary>IANA timezone ID (e.g. "America/Chicago"). Null means use the tenant's timezone.</summary>
+    public string? Timezone { get; private set; }
 
     // Required by EF Core
     private Agent() { }
@@ -72,6 +74,8 @@ public class Agent
         SipExtension = extension;
         SipA1Hash = a1hash;
     }
+
+    public void SetTimezone(string? ianaTimezoneId) => Timezone = ianaTimezoneId;
 
     public string FullName => $"{FirstName} {LastName}".Trim();
 }

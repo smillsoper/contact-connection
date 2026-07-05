@@ -91,6 +91,9 @@ public class FlowNodeState
     /// <summary>For branch nodes: the condition text (informational for supervisor view).</summary>
     public string? Condition { get; init; }
 
+    /// <summary>Name of the CRM flow this session belongs to — used by the agent UI to label the tab.</summary>
+    public string? FlowName { get; set; }
+
     /// <summary>True when the flow has reached an end node.</summary>
     public bool IsTerminal { get; init; }
 

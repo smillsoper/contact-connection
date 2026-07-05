@@ -10,12 +10,16 @@ public static class PhoneNumbersEndpoints
     {
         var group = app.MapGroup("/api/v1/phone-numbers").RequireAuthorization();
 
-        group.MapPost("",                     Create);
-        group.MapGet("",                      GetByCampaign);
-        group.MapGet("{id:guid}",             GetById);
-        group.MapPatch("{id:guid}",           Update);
-        group.MapPost("{id:guid}/activate",   Activate);
-        group.MapPost("{id:guid}/deactivate", Deactivate);
+        group.MapPost("",                        Create);
+        group.MapGet("",                         GetByCampaign);
+        group.MapGet("{id:guid}",                GetById);
+        group.MapPatch("{id:guid}",              Update);
+        group.MapPut("{id:guid}/flow",              SetFlow);
+        group.MapDelete("{id:guid}/flow",           RemoveFlow);
+        group.MapPut("{id:guid}/telephony-flow",    SetTelephonyFlow);
+        group.MapDelete("{id:guid}/telephony-flow", RemoveTelephonyFlow);
+        group.MapPost("{id:guid}/activate",         Activate);
+        group.MapPost("{id:guid}/deactivate",    Deactivate);
 
         return app;
     }
@@ -109,6 +113,60 @@ public static class PhoneNumbersEndpoints
         return Results.Ok(ToResponse(pn));
     }
 
+    // ── PUT /api/v1/phone-numbers/{id}/flow ─────────────────────────────────
+
+    private static async Task<IResult> SetFlow(
+        Guid id, SetPhoneNumberFlowRequest req,
+        IPhoneNumberRepository repo, TenantContext ctx, CancellationToken ct)
+    {
+        if (!ctx.HasTenant) return Results.Unauthorized();
+        var pn = await repo.GetByIdAsync(id, ct);
+        if (pn is null) return Results.NotFound();
+        pn.AssignFlow(req.FlowId);
+        await repo.SaveChangesAsync(ct);
+        return Results.Ok(ToResponse(pn));
+    }
+
+    // ── DELETE /api/v1/phone-numbers/{id}/flow ──────────────────────────────
+
+    private static async Task<IResult> RemoveFlow(
+        Guid id, IPhoneNumberRepository repo, TenantContext ctx, CancellationToken ct)
+    {
+        if (!ctx.HasTenant) return Results.Unauthorized();
+        var pn = await repo.GetByIdAsync(id, ct);
+        if (pn is null) return Results.NotFound();
+        pn.RemoveFlow();
+        await repo.SaveChangesAsync(ct);
+        return Results.Ok(ToResponse(pn));
+    }
+
+    // ── PUT /api/v1/phone-numbers/{id}/telephony-flow ───────────────────────
+
+    private static async Task<IResult> SetTelephonyFlow(
+        Guid id, SetPhoneNumberFlowRequest req,
+        IPhoneNumberRepository repo, TenantContext ctx, CancellationToken ct)
+    {
+        if (!ctx.HasTenant) return Results.Unauthorized();
+        var pn = await repo.GetByIdAsync(id, ct);
+        if (pn is null) return Results.NotFound();
+        pn.AssignTelephonyFlow(req.FlowId);
+        await repo.SaveChangesAsync(ct);
+        return Results.Ok(ToResponse(pn));
+    }
+
+    // ── DELETE /api/v1/phone-numbers/{id}/telephony-flow ────────────────────
+
+    private static async Task<IResult> RemoveTelephonyFlow(
+        Guid id, IPhoneNumberRepository repo, TenantContext ctx, CancellationToken ct)
+    {
+        if (!ctx.HasTenant) return Results.Unauthorized();
+        var pn = await repo.GetByIdAsync(id, ct);
+        if (pn is null) return Results.NotFound();
+        pn.RemoveTelephonyFlow();
+        await repo.SaveChangesAsync(ct);
+        return Results.Ok(ToResponse(pn));
+    }
+
     // ── POST /api/v1/phone-numbers/{id}/activate ────────────────────────────
 
     private static async Task<IResult> Activate(
@@ -155,7 +213,7 @@ public static class PhoneNumbersEndpoints
 
     internal static object ToResponse(PhoneNumber pn) => new
     {
-        pn.Id, pn.TenantId, pn.CampaignId, pn.Number, pn.Label, pn.IsActive,
+        pn.Id, pn.TenantId, pn.CampaignId, pn.Number, pn.Label, pn.IsActive, pn.FlowId, pn.TelephonyFlowId,
         Campaign = pn.Campaign is null ? null : new { pn.Campaign.Id, pn.Campaign.Name },
         pn.CreatedAt, pn.UpdatedAt
     };
@@ -163,3 +221,4 @@ public static class PhoneNumbersEndpoints
 
 public record CreatePhoneNumberRequest(Guid CampaignId, string Number, string? Label = null);
 public record UpdatePhoneNumberRequest(string? Label = null, Guid? CampaignId = null);
+public record SetPhoneNumberFlowRequest(Guid FlowId);

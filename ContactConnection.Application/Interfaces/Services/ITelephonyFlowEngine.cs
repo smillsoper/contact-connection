@@ -5,6 +5,12 @@ public interface ITelephonyFlowEngine
     Task ExecuteAsync(TelephonyFlowContext context, CancellationToken ct = default);
 
     /// <summary>
+    /// Resumes flow execution from a specific node, using the live session's variable state.
+    /// Used by PLAYBACK_STOP handling to continue after audio ends.
+    /// </summary>
+    Task ResumeFromNodeAsync(string channelUuid, string nodeId, IEslCommander esl, CancellationToken ct = default);
+
+    /// <summary>
     /// Fires a named lifecycle event, executing the matching event-listener branch in the
     /// telephony flow that is live for this channel. Returns the CRM flow session if a
     /// tf_script_pop node fired during the branch.
