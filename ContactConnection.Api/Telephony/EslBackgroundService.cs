@@ -26,19 +26,22 @@ public sealed class EslBackgroundService : BackgroundService
     private readonly IConfiguration _config;
     private readonly ILogger<EslBackgroundService> _logger;
     private readonly ITelephonyCallSessionStore _sessionStore;
+    private readonly IAgentStateStore _stateStore;
 
     public EslBackgroundService(
         IHubContext<FlowHub, IFlowHubClient> hub,
         IServiceScopeFactory scopeFactory,
         IConfiguration config,
         ILogger<EslBackgroundService> logger,
-        ITelephonyCallSessionStore sessionStore)
+        ITelephonyCallSessionStore sessionStore,
+        IAgentStateStore stateStore)
     {
         _hub          = hub;
         _scopeFactory = scopeFactory;
         _config       = config;
         _logger       = logger;
         _sessionStore = sessionStore;
+        _stateStore   = stateStore;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -96,12 +99,8 @@ public sealed class EslBackgroundService : BackgroundService
                     await HandleChannelBridgeAsync(vars, esl, ct);
                     break;
                 case "CHANNEL_UNBRIDGE":
-                {
-                    var uuid  = vars.GetValueOrDefault("Unique-ID") ?? "";
-                    var cause = vars.GetValueOrDefault("Hangup-Cause") ?? "";
-                    _logger.LogInformation("CHANNEL_UNBRIDGE {Uuid} cause={Cause}", uuid, cause);
+                    await HandleChannelUnbridgeAsync(vars, esl, ct);
                     break;
-                }
             }
         }
     }
@@ -202,8 +201,9 @@ public sealed class EslBackgroundService : BackgroundService
             agentId: null,
             contactIdExternal: channelUuid);
 
-        // Stamp the campaign so the CallRecord knows where it belongs
+        // Stamp the campaign and dialed number so the CallRecord knows where it belongs
         record.SetCampaign(routing.CampaignId);
+        record.SetDnis(routing.Number);
 
         db.CallRecords.Add(record);
         await db.SaveChangesAsync(ct);
@@ -251,20 +251,28 @@ public sealed class EslBackgroundService : BackgroundService
             await db.SaveChangesAsync(ct);
         }
 
-        // If the flow queued the call, broadcast screen pop to eligible agents
+        // If the flow queued the call, broadcast screen pop to agents who were already available
+        // at routing time and record them in _notified_agents so the QueuePollingService
+        // doesn't send duplicate notifications on the next tick.
         if (ctx.Vars.TryGetValue("_queued", out _) && ctx.Vars.TryGetValue("_eligible_agents", out var agentList))
         {
             var agentIds = agentList.Split(',', StringSplitOptions.RemoveEmptyEntries);
             _logger.LogInformation(
-                "CHANNEL_PARK DID {Uuid}: notifying {Count} agent(s): [{Agents}]",
+                "CHANNEL_PARK DID {Uuid}: notifying {Count} immediately-available agent(s): [{Agents}]",
                 channelUuid, agentIds.Length, agentList);
+            var notified = new List<string>();
             foreach (var agentIdStr in agentIds)
             {
                 if (!Guid.TryParse(agentIdStr.Trim(), out var agentId)) continue;
                 await _hub.Clients
                     .Group($"agent:{agentId}")
                     .ReceiveIncomingCall(record.Id.ToString(), callerNumber, callerName, destinationNumber, ctx.CampaignId.ToString());
+                notified.Add(agentId.ToString());
             }
+            // Set per-agent ring keys so the QueuePollingService doesn't duplicate within 30s
+            foreach (var notifiedId in notified)
+                await _sessionStore.SetKeyAsync(
+                    $"queue_ring:{channelUuid}:{notifiedId}", "1", TimeSpan.FromSeconds(30), ct);
         }
         else
         {
@@ -337,9 +345,14 @@ public sealed class EslBackgroundService : BackgroundService
         var session = await _sessionStore.GetAsync(channelUuid, ct);
         if (session is not null)
         {
+            // Read assigned agent before deleting session
+            var assignedAgentIdStr = session.Vars.GetValueOrDefault("_assigned_agent_id");
+
             using var scope         = _scopeFactory.CreateScope();
             var telephonyEngine     = scope.ServiceProvider.GetRequiredService<ITelephonyFlowEngine>();
             var dbFactory           = scope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
+            var traceRegistry       = scope.ServiceProvider.GetRequiredService<ICallTraceSubscriptionRegistry>();
+            var traceNotifier       = scope.ServiceProvider.GetRequiredService<ICallTraceNotifier>();
 
             // Fire the call_disconnected event so the designer branch can run post-call actions
             await telephonyEngine.FireEventAsync(
@@ -358,10 +371,69 @@ public sealed class EslBackgroundService : BackgroundService
                 _logger.LogInformation(
                     "CHANNEL_HANGUP {Uuid} cause={Cause} → CallRecord {RecordId} completed",
                     channelUuid, cause, record.Id);
+
+                // Let any trace popups watching this call know it ended, so they can close its tab
+                var watchingSubscriptionIds = await traceRegistry.GetSubscriptionsForCallAsync(record.Id, ct);
+                foreach (var subscriptionId in watchingSubscriptionIds)
+                {
+                    await traceRegistry.MarkCallEndedAsync(subscriptionId, record.Id, ct);
+                    await traceNotifier.NotifyCallEndedAsync(subscriptionId, record.Id, ct);
+                }
             }
 
             // Delete session — call is over
             await _sessionStore.DeleteAsync(channelUuid, ct);
+
+            // Restore agent state: ACW → available (if ACW > 0) or unavailable immediately (ACW = 0)
+            if (assignedAgentIdStr is not null && Guid.TryParse(assignedAgentIdStr, out var assignedAgentId))
+            {
+                var acwSeconds = 0;
+                if (session.CampaignId != Guid.Empty)
+                {
+                    var campaign = await db.Campaigns
+                        .FirstOrDefaultAsync(c => c.Id == session.CampaignId, ct);
+                    acwSeconds = campaign?.AfterCallWorkSeconds ?? 0;
+                }
+
+                if (acwSeconds > 0)
+                {
+                    var acwEndsAt = DateTimeOffset.UtcNow.AddSeconds(acwSeconds);
+                    await _stateStore.SetAsync(session.TenantId, assignedAgentId,
+                        new AgentStateEntry(AgentStateCodes.Acw, "After Call Work", null, DateTimeOffset.UtcNow), ct);
+                    await _hub.Clients.Group($"agent:{assignedAgentId}")
+                        .ReceiveAgentStateChange(AgentStateCodes.Acw, "After Call Work", acwEndsAt.ToString("O"));
+                    _logger.LogInformation(
+                        "CHANNEL_HANGUP {Uuid}: agent {AgentId} → ACW for {Seconds}s", channelUuid, assignedAgentId, acwSeconds);
+
+                    // Fire-and-forget: after ACW expires, auto-transition to available
+                    // Only transitions if the agent hasn't manually changed state during ACW.
+                    var tenantId    = session.TenantId;
+                    var hub         = _hub;
+                    var stateStore  = _stateStore;
+                    _ = Task.Run(async () =>
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(acwSeconds));
+                        var current = await stateStore.GetAsync(tenantId, assignedAgentId);
+                        if (current?.Code == AgentStateCodes.Acw)
+                        {
+                            await stateStore.SetAsync(tenantId, assignedAgentId,
+                                new AgentStateEntry(AgentStateCodes.Available, "Available", null, DateTimeOffset.UtcNow));
+                            await hub.Clients.Group($"agent:{assignedAgentId}")
+                                .ReceiveAgentStateChange(AgentStateCodes.Available, "Available", null);
+                        }
+                    });
+                }
+                else
+                {
+                    await _stateStore.SetAsync(session.TenantId, assignedAgentId,
+                        new AgentStateEntry(AgentStateCodes.Unavailable, "Unavailable", null, DateTimeOffset.UtcNow), ct);
+                    await _hub.Clients.Group($"agent:{assignedAgentId}")
+                        .ReceiveAgentStateChange(AgentStateCodes.Unavailable, "Unavailable", null);
+                    _logger.LogInformation(
+                        "CHANNEL_HANGUP {Uuid}: agent {AgentId} → unavailable (ACW=0)", channelUuid, assignedAgentId);
+                }
+            }
+
             return;
         }
 
@@ -389,6 +461,9 @@ public sealed class EslBackgroundService : BackgroundService
         {
             bridgeSession.Vars.Remove("_play_media_arg");
             bridgeSession.Vars.Remove("_play_loop");
+            // Immediately cut the audio; without this FreeSWITCH finishes the current
+            // file before the bridge audio starts coming through.
+            await esl.BreakChannelAsync(uuid, ct);
         }
 
         // Whisper path: _pending_agent_id was stored by AnswerQueuedCall before firing agent_selected.
@@ -440,6 +515,27 @@ public sealed class EslBackgroundService : BackgroundService
         else
         {
             await _sessionStore.SaveAsync(bridgeSession, ct);
+        }
+    }
+
+    /// <summary>
+    /// CHANNEL_UNBRIDGE fires when a bridge between two channels is torn down.
+    /// If the caller's channel still has a live session, hang it up so the call ends cleanly
+    /// rather than leaving the caller's FreeSWITCH channel alive (which would cause QueuePollingService
+    /// to re-deliver the call indefinitely).
+    /// </summary>
+    private async Task HandleChannelUnbridgeAsync(
+        Dictionary<string, string> vars, EslClient esl, CancellationToken ct)
+    {
+        var uuid  = vars.GetValueOrDefault("Unique-ID") ?? "";
+        var cause = vars.GetValueOrDefault("Hangup-Cause") ?? "";
+        _logger.LogInformation("CHANNEL_UNBRIDGE {Uuid} cause={Cause}", uuid, cause);
+
+        var session = await _sessionStore.GetAsync(uuid, ct);
+        if (session is not null)
+        {
+            _logger.LogInformation("CHANNEL_UNBRIDGE {Uuid}: caller channel still active — hanging up", uuid);
+            await esl.HangupChannelAsync(uuid, ct);
         }
     }
 

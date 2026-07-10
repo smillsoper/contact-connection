@@ -7,8 +7,19 @@ import { api } from '../api/client'
 import { getClientTransferNumbers, type ClientTransferNumber } from '../api/telephony'
 import { flowsApi } from '../api/flows'
 import { useFlowSessionsStore } from '../stores/flowSessionsStore'
+import { useAgentStateStore } from '../stores/agentStateStore'
 
-const SIP_WS_URL = import.meta.env.VITE_SIP_WS_URL as string ?? 'ws://localhost:7080'
+// Local dev: connect directly to FreeSWITCH (no cert required, no tunnel overhead).
+// External: VITE_SIP_WS_URL must be set to the production WSS endpoint (e.g. the
+// Cloudflare tunnel hostname that routes to FreeSWITCH port 7080).
+function getSipWsUrl(): string {
+  const { hostname } = window.location
+  if (hostname === 'localhost' || hostname === '127.0.0.1') return 'ws://localhost:7080'
+  if (import.meta.env.VITE_SIP_WS_URL) return import.meta.env.VITE_SIP_WS_URL as string
+  const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
+  return `${scheme}://${hostname}/sip-ws`
+}
+const SIP_WS_URL = getSipWsUrl()
 
 const REG_COLOR: Record<SipRegistrationStatus, string> = {
   idle:        'bg-gray-500',
@@ -67,6 +78,37 @@ const PlayIcon = ({ className }: { className?: string }) => (
 export default function SoftphonePanel() {
   const { sipExtension, sipPassword, registrationStatus, setRegistrationStatus } = useSipStore()
   const tenantSubdomain = useAuthStore((s) => s.tenantSubdomain)
+
+  // ── Agent state ───────────────────────────────────────────────────────────
+  type AgentStateCode = 'unavailable' | 'available' | 'unavailable_break' | 'unavailable_lunch' | 'on_call' | string
+  type CustomCode = { id: string; name: string }
+
+  const { agentStateCode: agentState, agentStateExpiresAt, setAgentStateCode } = useAgentStateStore()
+  const [stateOpen, setStateOpen]   = useState(false)
+  const [customCodes, setCustomCodes] = useState<CustomCode[]>([])
+  const [acwCountdown, setAcwCountdown] = useState<number | null>(null)
+
+  useEffect(() => {
+    api.get<CustomCode[]>('/api/v1/unavailable-codes').then(setCustomCodes).catch(() => {})
+  }, [])
+
+  // ACW countdown timer — ticks every second while in ACW with an expiry
+  useEffect(() => {
+    if (agentState !== 'acw' || !agentStateExpiresAt) { setAcwCountdown(null); return }
+    const update = () =>
+      setAcwCountdown(Math.max(0, Math.ceil((agentStateExpiresAt.getTime() - Date.now()) / 1000)))
+    update()
+    const id = setInterval(update, 1000)
+    return () => clearInterval(id)
+  }, [agentState, agentStateExpiresAt])
+
+  async function applyState(code: AgentStateCode, customCodeId?: string, customLabel?: string) {
+    try {
+      await api.put('/api/v1/agent-state', { code, customCodeId: customCodeId ?? null, customLabel: customLabel ?? null })
+      setAgentStateCode(code)
+    } catch {}
+    setStateOpen(false)
+  }
   const {
     callStatus, callerNumber, destinationNumber, isMuted, isOnHold,
     callStartedAt, campaignId, callRecordId,
@@ -125,6 +167,13 @@ export default function SoftphonePanel() {
     if (!sipExtension || !sipPassword || !tenantSubdomain) return
 
     const socket = new JsSIP.WebSocketInterface(SIP_WS_URL)
+    // Cloudflare terminates TLS before FreeSWITCH, so FreeSWITCH receives a
+    // plain WS connection on port 7080 regardless of the wss:// URL the browser
+    // uses. Override via_transport so Via: SIP/2.0/WS matches the ws-binding
+    // transport FreeSWITCH validates against.
+    if (SIP_WS_URL.startsWith('wss://')) {
+      Object.defineProperty(socket, 'via_transport', { get: () => 'WS', configurable: true })
+    }
     const ua = new JsSIP.UA({
       sockets:          [socket],
       uri:              `sip:${sipExtension}@${tenantSubdomain}`,
@@ -134,7 +183,16 @@ export default function SoftphonePanel() {
       session_timers:   false,
     })
 
-    ua.on('registered',         () => setRegistrationStatus('registered'))
+    // Track first registration so re-REGISTERs (every 300s) don't reset state.
+    let firstRegistration = true
+    ua.on('registered', () => {
+      setRegistrationStatus('registered')
+      if (firstRegistration) {
+        firstRegistration = false
+        setAgentStateCode('unavailable')
+        api.put('/api/v1/agent-state', { code: 'unavailable', customCodeId: null, customLabel: null }).catch(() => {})
+      }
+    })
     ua.on('unregistered',       () => setRegistrationStatus('idle'))
     ua.on('registrationFailed', () => setRegistrationStatus('failed'))
 
@@ -261,7 +319,7 @@ export default function SoftphonePanel() {
       try {
         const calledNumber = session.local_identity?.uri?.user ?? null
         const rec = await api.post<{ id: string; campaignId?: string }>('/api/v1/call-records/inbound', {
-          callerNumber, callerName, channelUuid: null, calledNumber,
+          callerNumber, callerName: null, channelUuid: null, calledNumber,
         })
         setCallRecordId(rec.id)
         if (rec.campaignId) setCampaignId(rec.campaignId)
@@ -521,6 +579,74 @@ export default function SoftphonePanel() {
           <p className="text-white font-mono text-lg tracking-widest">{sipExtension}</p>
         </div>
       )}
+
+      {/* Agent state dropdown */}
+      {registrationStatus === 'registered' && callStatus === 'idle' && (() => {
+        const STATE_META: Record<string, { label: string; dot: string; text: string }> = {
+          unavailable:       { label: 'Unavailable',        dot: 'bg-gray-500',   text: 'text-gray-400' },
+          available:         { label: 'Available',          dot: 'bg-green-500',  text: 'text-green-400' },
+          unavailable_break: { label: 'Unavailable - Break', dot: 'bg-amber-700', text: 'text-amber-600' },
+          unavailable_lunch: { label: 'Unavailable - Lunch', dot: 'bg-amber-700', text: 'text-amber-600' },
+          on_call:           { label: 'On Call',             dot: 'bg-blue-500',  text: 'text-blue-400'  },
+          acw:               { label: 'After Call Work',     dot: 'bg-purple-500', text: 'text-purple-400' },
+        }
+        const current = STATE_META[agentState] ?? { label: customCodes.find(c => c.id === agentState)?.name ?? 'Unavailable', dot: 'bg-orange-500', text: 'text-orange-400' }
+        const currentLabel = agentState === 'acw' && acwCountdown !== null
+          ? `${current.label} (${acwCountdown}s)`
+          : current.label
+
+        return (
+          <div className="relative">
+            <button
+              onClick={() => setStateOpen((v) => !v)}
+              className="w-full flex items-center gap-2 bg-gray-800 hover:bg-gray-700 rounded-lg px-3 py-2 transition-colors"
+            >
+              <span className={`w-2 h-2 rounded-full shrink-0 ${current.dot}`} />
+              <span className={`text-xs font-medium flex-1 text-left ${current.text}`}>{currentLabel}</span>
+              <svg className={`w-3 h-3 text-gray-500 transition-transform ${stateOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {stateOpen && (
+              <div className="absolute left-0 right-0 top-full mt-1 bg-gray-800 border border-gray-700 rounded-lg overflow-hidden z-20 shadow-xl">
+                {/* Built-in selectable states */}
+                {[
+                  { code: 'available',         label: 'Available',          dot: 'bg-green-500',  text: 'text-green-400' },
+                  { code: 'unavailable_break', label: 'Unavailable - Break', dot: 'bg-amber-700', text: 'text-amber-600' },
+                  { code: 'unavailable_lunch', label: 'Unavailable - Lunch', dot: 'bg-amber-700', text: 'text-amber-600' },
+                ].map((opt) => (
+                  <button
+                    key={opt.code}
+                    onClick={() => applyState(opt.code)}
+                    className={`w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-gray-700 transition-colors text-left ${agentState === opt.code ? 'bg-gray-700/60' : ''}`}
+                  >
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${opt.dot}`} />
+                    <span className={opt.text}>{opt.label}</span>
+                  </button>
+                ))}
+
+                {/* Custom codes for this role */}
+                {customCodes.length > 0 && (
+                  <>
+                    <div className="border-t border-gray-700 mx-2 my-0.5" />
+                    {customCodes.map((c) => (
+                      <button
+                        key={c.id}
+                        onClick={() => applyState(c.id, c.id, c.name)}
+                        className={`w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-gray-700 transition-colors text-left ${agentState === c.id ? 'bg-gray-700/60' : ''}`}
+                      >
+                        <span className="w-2 h-2 rounded-full shrink-0 bg-orange-500" />
+                        <span className="text-orange-400">{c.name}</span>
+                      </button>
+                    ))}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {/* ── QUEUED (screen pop — call parked on FreeSWITCH, waiting for agent to pick up) ── */}
       {callStatus === 'queued' && (

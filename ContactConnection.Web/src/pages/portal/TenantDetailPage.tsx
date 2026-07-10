@@ -72,7 +72,7 @@ export default function TenantDetailPage() {
           setAgentsLoading(true)
           listTenantAgents(id)
             .then(setAgents)
-            .catch(() => {})
+            .catch((e: Error) => setError(`Failed to load agents: ${e.message}`))
             .finally(() => setAgentsLoading(false))
         }
       })
@@ -293,10 +293,10 @@ export default function TenantDetailPage() {
                     <div className="flex items-center justify-between py-1.5">
                       <div className="flex items-center gap-3">
                         <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${
-                          agent.role === 'admin' ? 'bg-indigo-900/50 text-indigo-300' :
-                          agent.role === 'supervisor' ? 'bg-sky-900/50 text-sky-300' :
+                          agent.role === 'admin' || agent.roleName?.toLowerCase().includes('admin') ? 'bg-indigo-900/50 text-indigo-300' :
+                          agent.role === 'supervisor' || agent.roleName?.toLowerCase().includes('supervisor') ? 'bg-sky-900/50 text-sky-300' :
                           'bg-gray-700/60 text-gray-300'
-                        }`}>{agent.role}</span>
+                        }`}>{agent.roleName ?? agent.role}</span>
                         <span className="text-white text-sm">{agent.firstName} {agent.lastName}</span>
                         <span className="text-gray-400 text-sm">{agent.email}</span>
                         {!agent.isActive && (

@@ -15,18 +15,27 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
     private readonly ITenantDbContextFactory _factory;
     private readonly ITelephonyCallSessionStore _sessionStore;
     private readonly IReadOnlyDictionary<string, ITelephonyNodeHandler> _handlers;
+    private readonly ICallTraceRecorder _traceRecorder;
+    private readonly ICallTraceSubscriptionRegistry _traceRegistry;
+    private readonly ICallTraceNotifier _traceNotifier;
     private readonly ILogger<TelephonyFlowEngine> _logger;
 
     public TelephonyFlowEngine(
         ITenantDbContextFactory factory,
         ITelephonyCallSessionStore sessionStore,
         IEnumerable<ITelephonyNodeHandler> handlers,
+        ICallTraceRecorder traceRecorder,
+        ICallTraceSubscriptionRegistry traceRegistry,
+        ICallTraceNotifier traceNotifier,
         ILogger<TelephonyFlowEngine> logger)
     {
-        _factory      = factory;
-        _sessionStore = sessionStore;
-        _handlers     = handlers.ToDictionary(h => h.NodeType, StringComparer.OrdinalIgnoreCase);
-        _logger       = logger;
+        _factory        = factory;
+        _sessionStore   = sessionStore;
+        _handlers       = handlers.ToDictionary(h => h.NodeType, StringComparer.OrdinalIgnoreCase);
+        _traceRecorder  = traceRecorder;
+        _traceRegistry  = traceRegistry;
+        _traceNotifier  = traceNotifier;
+        _logger         = logger;
     }
 
     // ── Initial execution (CHANNEL_PARK) ─────────────────────────────────────
@@ -62,6 +71,21 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
 
         if (!TryParseDefinition(flow, out _, out var nodes, out var entryNodeId))
             return;
+
+        // Trace matching only ever considers calls that start after a trace subscription was
+        // created — no attempt to backfill calls already in progress.
+        var matchedSubscriptionIds = await _traceRegistry.MatchNewCallAsync(
+            ctx.TenantId, ctx.CampaignId, flow.Id, ctx.DestinationNumber, ctx.CallerNumber, ct);
+        foreach (var subscriptionId in matchedSubscriptionIds)
+        {
+            var capReached = await _traceRegistry.AttachCallAsync(subscriptionId, ctx.CallRecordId, ct);
+            await _traceNotifier.NotifyCallMatchedAsync(subscriptionId, ctx.CallRecordId, ct);
+            if (capReached)
+            {
+                await _traceRegistry.StopTraceAsync(subscriptionId, "call-limit-reached", ct);
+                await _traceNotifier.NotifyTraceStoppedAsync(subscriptionId, "call-limit-reached", ct);
+            }
+        }
 
         // Scan the flow for event listener nodes and build the event handler map
         var eventHandlers = ScanEventHandlers(nodes!);
@@ -304,6 +328,7 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
                 _logger.LogWarning("TelephonyFlowEngine [{Uuid}]: {Reason}", ctx.ChannelUuid, terminationReason);
                 trace.Steps.Add(new TelephonyFlowTraceStep
                     { NodeId = currentNodeId, NodeType = "unknown", At = DateTimeOffset.UtcNow, Error = terminationReason });
+                await RecordStepAsync(ctx, flowId, currentNodeId, "unknown", null, null, null, terminationReason, ct);
                 break;
             }
 
@@ -314,6 +339,7 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
                 _logger.LogWarning("TelephonyFlowEngine [{Uuid}]: {Reason}", ctx.ChannelUuid, terminationReason);
                 trace.Steps.Add(new TelephonyFlowTraceStep
                     { NodeId = currentNodeId, NodeType = "unknown", At = DateTimeOffset.UtcNow, Error = terminationReason });
+                await RecordStepAsync(ctx, flowId, currentNodeId, "unknown", null, null, null, terminationReason, ct);
                 break;
             }
 
@@ -323,6 +349,7 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
                 _logger.LogWarning("TelephonyFlowEngine [{Uuid}]: {Reason}", ctx.ChannelUuid, terminationReason);
                 trace.Steps.Add(new TelephonyFlowTraceStep
                     { NodeId = currentNodeId, NodeType = nodeType, At = DateTimeOffset.UtcNow, Error = terminationReason });
+                await RecordStepAsync(ctx, flowId, currentNodeId, nodeType, null, null, null, terminationReason, ct);
                 break;
             }
 
@@ -343,6 +370,7 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
                     ctx.ChannelUuid, currentNodeId, nodeType);
                 trace.Steps.Add(new TelephonyFlowTraceStep
                     { NodeId = currentNodeId, NodeType = nodeType, At = DateTimeOffset.UtcNow, Error = ex.Message });
+                await RecordStepAsync(ctx, flowId, currentNodeId, nodeType, null, null, null, ex.Message, ct);
                 break;
             }
 
@@ -358,6 +386,7 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
                 TransitionTaken = result.TransitionTaken,
                 NextNodeId      = result.NextNodeId,
             });
+            await RecordStepAsync(ctx, flowId, currentNodeId, nodeType, result.TransitionTaken, result.NextNodeId, null, null, ct);
 
             currentNodeId = result.NextNodeId ?? string.Empty;
         }
@@ -375,6 +404,14 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
             "TelephonyFlowEngine [{Uuid}]: segment complete — {StepCount} step(s), reason={Reason}",
             ctx.ChannelUuid, trace.Steps.Count, terminationReason);
     }
+
+    private Task RecordStepAsync(
+        TelephonyFlowContext ctx, Guid flowId, string nodeId, string nodeType,
+        string? transitionTaken, string? nextNodeId, string? detail, string? exitReason, CancellationToken ct) =>
+        _traceRecorder.RecordStepAsync(
+            ctx.TenantId, ctx.TenantSchemaName, ctx.CallRecordId, TraceEngine.Telephony, nodeId, nodeType,
+            label: null, detail, transitionTaken, nextNodeId, exitReason,
+            ctx.CampaignId, flowId, ctx.DestinationNumber, ctx.CallerNumber, ct);
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 

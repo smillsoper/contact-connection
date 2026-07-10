@@ -78,6 +78,65 @@
 | 66 | 2026-07-03 | 7:37 AM CDT | 9:06 AM CDT | 89 min | ~4402 min |
 | 67 | 2026-07-03 | 9:09 AM CDT | 10:34 AM CDT | 85 min | ~4487 min |
 | 68 | 2026-07-05 | 8:27 AM CDT | 10:22 AM CDT | 115 min | ~4602 min |
+| 69 | 2026-07-07 / 2026-07-08 | 3:00 PM CDT (7/7) | 7:25 AM CDT (7/8) | 985 min | ~5587 min |
+| 70 | 2026-07-09 | 4:03 PM CDT | 5:16 PM CDT | 73 min | ~5660 min |
+
+---
+
+## Session 70
+
+**Date:** 2026-07-09
+**Start:** 4:03 PM CDT
+**End:** 5:16 PM CDT
+**Duration:** 73 minutes
+
+### Accomplished
+
+**Call Trace feature — real-time, filterable call flow visualization (CXOne-style)**
+
+- New end-to-end trace spanning both flow engines, unified by the existing shared `CallRecordId`: the telephony pre-answer engine (IVR/routing) and the CRM agent-facing script engine now both write to one continuous timeline per call.
+- **Domain/Infrastructure:** `CallTraceEvent` entity + `call_trace_events` table (migration `AddCallTraceEvents`, applied to both `tenant_test_tenant` and `tenant_test_contact_center` schemas); `CallRecord.Dnis` column added and populated in `EslBackgroundService.HandleDidCallAsync`.
+- **Single recording hook:** `ICallTraceRecorder.RecordStepAsync` — one call site added to `TelephonyFlowEngine.ExecuteFromNodeAsync` (fixes the pre-existing cross-segment trace fragmentation as a side effect) and one to `FlowEngine.AdvanceInternalAsync` (makes step recording automatic for every CRM node type, not just the two handlers that previously called `AppendHistory`).
+- **Live matching + push:** `RedisCallTraceSubscriptionRegistry` (Redis-backed, not in-memory, so it's consistent across API instances) matches new calls against active trace filters (campaign/flow/DNIS/ANI) the moment a telephony flow starts — never backfills in-progress calls. New `CallTraceHub` + `CallTraceNotifier` push `ReceiveCallMatched` / `ReceiveTraceStep` / `ReceiveCallEnded` / `ReceiveTraceStopped` to the popup(s) watching. Added `Microsoft.AspNetCore.SignalR.StackExchangeRedis` backplane so this works across multiple API instances.
+- **Hard runaway backstop:** `CallTraceExpiryBackgroundService` ticks every second and force-stops any trace exceeding its capture cap (max 500 calls / max 60 minutes), enforced server-side regardless of what the UI requests.
+- **REST:** `POST /api/v1/call-traces` (start, returns clamped effective cap), `POST /{id}/stop`, `GET /{callRecordId}` (durable historical timeline), `GET /search` (browse past matching calls).
+- **Frontend:** `callTraceStore` (Zustand) manages multiple simultaneous non-blocking floating trace popups, each with its own per-call tab strip (per user's follow-up requirement) rather than one interleaved stream; `useCallTraceHub` shares one SignalR connection across all open popups. "Trace" entry points added to the Dashboard (blank filters), Campaigns tab (preset campaign), Flows list (preset flow, telephony flows only), and Phone Numbers tab (preset DNIS) — always shows the filter form, never auto-starts.
+
+**Bugs found and fixed via live verification (originated real test calls through FreeSWITCH):**
+- `CallTraceExpiryBackgroundService` (singleton) was injecting scoped `ICallTraceNotifier` directly — invalid DI lifetime; fixed by resolving it per-tick via `IServiceScopeFactory`.
+- New migration had only been applied to one of the two tenant schemas — each tenant has its own Postgres schema and migration history, so a new migration must be applied per-tenant (existing `POST /api/v1/portal/maintenance/migrate-tenants` endpoint exists for this going forward).
+- `CallTraceEventRepository` initially used the HTTP-request-scoped `TenantContext` pattern, which is never populated when the telephony engine runs from the ESL background service (no HTTP request) — threw `No tenant resolved for this request`. Fixed by threading an explicit tenant schema name through `ICallTraceRecorder`/`ICallTraceEventRepository`, matching the pattern `TelephonyFlowEngine` itself already uses.
+- Verified end-to-end: a real originated call produced a `CallRecord` with `Dnis` populated and 5 ordered `call_trace_events` rows (block-list check → answer → time-of-day branch → play → hangup).
+
+---
+
+## Session 69
+
+**Date:** 2026-07-07 – 2026-07-08
+**Start:** 3:00 PM CDT (July 7)
+**End:** 7:25 AM CDT (July 8)
+**Duration:** 985 minutes
+
+### Accomplished
+
+**Queue delivery loop — root cause fix**
+
+- **`_queued` never cleared on pickup** — `QueuePollingService` re-delivered the same call every 30 seconds (ring key TTL) because `session.Vars["_queued"]` was never removed when an agent answered. Fixed: `session.Vars.Remove("_queued")` added to `AnswerQueuedCall` immediately on successful originate in both the whisper and simple bridge paths.
+
+- **Caller channel persisted after agent disconnect** — when the agent's JsSIP session ended, `CHANNEL_UNBRIDGE` fired but was ignored; the caller's FreeSWITCH channel stayed alive with no `CHANNEL_HANGUP`, so the session was never deleted from Redis and `_queued` would loop indefinitely. Fixed: new `HandleChannelUnbridgeAsync` method in `EslBackgroundService` looks up the caller's session by `Unique-ID` and calls `uuid_hangup` if a session is found, triggering a clean `CHANNEL_HANGUP` that deletes the session.
+
+**Agent state lifecycle (on_call → ACW → available)**
+
+- `AgentStateCodes.OnCall = "on_call"` and `AgentStateCodes.Acw = "acw"` added to `IAgentStateStore`.
+- `ReceiveAgentStateChange(string code, string label, string? expiresAtIso)` added to `IFlowHubClient` / `FlowHub`.
+- `AnswerQueuedCall`: on successful pickup, sets Redis agent state to `on_call`, pushes `ReceiveAgentStateChange` to the agent's SignalR group, and stores `_assigned_agent_id` in the caller's session for use at hangup time.
+- `HandleChannelHangupAsync`: before deleting the session, reads `_assigned_agent_id`; looks up campaign `AfterCallWorkSeconds` from the tenant DB. If ACW > 0: sets state to `acw`, pushes `ReceiveAgentStateChange` with ISO expiry timestamp, then fire-and-forgets a `Task.Delay` that transitions to `available` after the duration (only if state is still `acw` when it fires, so manual overrides during ACW are respected). If ACW = 0: sets state to `unavailable`.
+
+**Frontend — agent state store + ACW countdown**
+
+- `agentStateStore.ts` — new Zustand store (`agentStateCode`, `agentStateExpiresAt: Date | null`, `setAgentStateCode(code, expiresAt?)`); replaces the local `useState` in `SoftphonePanel`.
+- `FlowPanel.tsx` — `receiveAgentStateChange` SignalR listener parses the ISO expiry string and calls `setAgentStateCode(code, expiresAt)`.
+- `SoftphonePanel.tsx` — reads `agentStateCode` and `agentStateExpiresAt` from the shared store; adds `on_call` (blue dot) and `acw` (purple dot) to `STATE_META`; live ACW countdown ticks every second and appends remaining seconds to the state button label (e.g. "After Call Work (28s)").
 
 ---
 

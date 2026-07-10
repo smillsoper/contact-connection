@@ -131,6 +131,10 @@ public sealed class EslClient : IAsyncDisposable, IEslCommander
     public Task BreakChannelAsync(string uuid, CancellationToken ct = default) =>
         SendApiAsync($"uuid_break {uuid} all", ct);
 
+    /// <summary>Send any raw ESL api command and return the response body. For test/diagnostic use.</summary>
+    public Task<string?> RunCommandAsync(string command, CancellationToken ct = default) =>
+        SendApiBodyAsync(command, ct);
+
     public Task BroadcastAsync(string uuid, string mediaArg, CancellationToken ct = default) =>
         SendApiAsync($"uuid_broadcast {uuid} {mediaArg} aleg", ct);
 
@@ -147,14 +151,14 @@ public sealed class EslClient : IAsyncDisposable, IEslCommander
         if (string.IsNullOrEmpty(contact) || contact.StartsWith("-ERR"))
             return (null, $"sofia_contact {extension}@{domain} → {contact ?? "(null)"}");
 
-        var vars = $"{{sip_auto_answer=true,sip_h_Alert-Info=answer-after=0," +
+        var vars = $"{{originate_timeout=30,sip_auto_answer=true,sip_h_Alert-Info=answer-after=0," +
                    $"effective_caller_id_number={callerNumber},effective_caller_id_name={callerNumber}," +
                    $"cc_whisper=true}}";
         var response = await SendApiBodyAsync($"originate {vars}{contact} &park()", ct);
 
         return response?.StartsWith("+OK") == true
             ? (response["+OK".Length..].Trim(), null)
-            : (null, $"originate → {response ?? "(null)"}");
+            : (null, $"sofia_contact={contact} originate → {response ?? "(null)"}");
     }
 
     public ValueTask DisposeAsync()

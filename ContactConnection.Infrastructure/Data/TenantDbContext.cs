@@ -45,6 +45,8 @@ public class TenantDbContext : DbContext
     public DbSet<CampaignExternalNumber> CampaignExternalNumbers => Set<CampaignExternalNumber>();
     public DbSet<BlockListEntry> BlockListEntries => Set<BlockListEntry>();
     public DbSet<AudioFile> AudioFiles => Set<AudioFile>();
+    public DbSet<CustomUnavailableCode> CustomUnavailableCodes => Set<CustomUnavailableCode>();
+    public DbSet<CallTraceEvent> CallTraceEvents => Set<CallTraceEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -78,6 +80,8 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new CampaignExternalNumberConfiguration());
         modelBuilder.ApplyConfiguration(new BlockListConfiguration());
         modelBuilder.ApplyConfiguration(new AudioFileConfiguration());
+        modelBuilder.ApplyConfiguration(new CustomUnavailableCodeConfiguration());
+        modelBuilder.ApplyConfiguration(new CallTraceEventConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 

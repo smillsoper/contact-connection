@@ -13,14 +13,17 @@ import {
 } from '../../api/telephony'
 import { listAdminAgents, type AgentRecord } from '../../api/adminAgents'
 import { flowsApi, type FlowSummary } from '../../api/flows'
+import { api } from '../../api/client'
+import { openCallTrace } from '../../components/calltrace/openCallTrace'
 
-type Tab = 'clients' | 'campaigns' | 'phone-numbers' | 'agent-groups'
+type Tab = 'clients' | 'campaigns' | 'phone-numbers' | 'agent-groups' | 'test-call'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'clients',       label: 'Clients' },
   { id: 'campaigns',     label: 'Campaigns' },
   { id: 'phone-numbers', label: 'Phone Numbers' },
   { id: 'agent-groups',  label: 'Agent Groups' },
+  { id: 'test-call',     label: 'Test Call' },
 ]
 
 const STATUS_COLORS: Record<string, string> = {
@@ -372,6 +375,12 @@ function CampaignsTab() {
                         <button onClick={() => handleStatusChange(c, 'deactivate')} className="text-gray-500 hover:text-gray-300 text-xs font-medium">Deactivate</button>
                       )}
                       <button
+                        onClick={() => openCallTrace({ campaignId: c.id })}
+                        className="text-gray-400 hover:text-gray-200 text-xs font-medium border border-gray-700 hover:border-gray-500 rounded px-2.5 py-1 transition-colors"
+                      >
+                        Trace
+                      </button>
+                      <button
                         onClick={() => navigate(`/admin/campaigns/${c.id}`)}
                         className="text-indigo-400 hover:text-indigo-300 text-xs font-medium border border-indigo-900 hover:border-indigo-700 rounded px-2.5 py-1 transition-colors"
                       >
@@ -608,12 +617,20 @@ function PhoneNumbersTab() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => handleToggle(n)}
-                      className="text-indigo-400 hover:text-indigo-300 text-xs font-medium"
-                    >
-                      {n.isActive ? 'Deactivate' : 'Activate'}
-                    </button>
+                    <div className="flex items-center justify-end gap-3">
+                      <button
+                        onClick={() => openCallTrace({ dnis: n.number })}
+                        className="text-gray-400 hover:text-gray-200 text-xs font-medium"
+                      >
+                        Trace
+                      </button>
+                      <button
+                        onClick={() => handleToggle(n)}
+                        className="text-indigo-400 hover:text-indigo-300 text-xs font-medium"
+                      >
+                        {n.isActive ? 'Deactivate' : 'Activate'}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -875,6 +892,144 @@ function AgentGroupsTab() {
   )
 }
 
+// ── Test Call Tab ─────────────────────────────────────────────────────────────
+
+function TestCallTab() {
+  const [ani, setAni]         = useState('5416704541')
+  const [did, setDid]         = useState('18001234567')
+  const [sipHost, setSipHost] = useState('172.19.0.5')
+  const [sipPort, setSipPort] = useState('5060')
+  const [busy, setBusy]       = useState(false)
+  const [result, setResult]   = useState<{ success: boolean; result: string; command: string } | null>(null)
+  const [error, setError]     = useState<string | null>(null)
+
+  const command = `originate {origination_caller_id_number=${ani}}sofia/internal/${did}@${sipHost}:${sipPort} &park()`
+
+  async function handleOriginate() {
+    setBusy(true)
+    setResult(null)
+    setError(null)
+    try {
+      const data = await api.post<{ success: boolean; result: string; command: string }>(
+        '/api/v1/telephony/originate-test',
+        { callerIdNumber: ani, destinationNumber: did, sipHost, sipPort },
+      )
+      setResult(data)
+    } catch (e) {
+      // api.post throws on non-2xx — parse the body out of the error message
+      const msg = e instanceof Error ? e.message : 'Request failed.'
+      // Try to extract FreeSWITCH response from the error text
+      const jsonMatch = msg.match(/\{.+\}/)
+      if (jsonMatch) {
+        try {
+          const data = JSON.parse(jsonMatch[0]) as { success: boolean; result: string; command: string }
+          setResult(data)
+          return
+        } catch {}
+      }
+      setError(msg)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="max-w-2xl">
+      <p className="text-gray-500 text-sm mb-6">
+        Simulate an inbound call by originating a test leg through FreeSWITCH. The call will park and
+        flow through the inbound telephony flow configured for the destination DID.
+      </p>
+
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-gray-400 text-xs font-medium mb-1.5">Caller ANI (from)</label>
+            <input
+              value={ani}
+              onChange={(e) => setAni(e.target.value)}
+              placeholder="5416704541"
+              className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+            />
+          </div>
+          <div>
+            <label className="block text-gray-400 text-xs font-medium mb-1.5">Destination DID (to)</label>
+            <input
+              value={did}
+              onChange={(e) => setDid(e.target.value)}
+              placeholder="18001234567"
+              className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+            />
+          </div>
+          <div>
+            <label className="block text-gray-400 text-xs font-medium mb-1.5">FreeSWITCH SIP Host</label>
+            <input
+              value={sipHost}
+              onChange={(e) => setSipHost(e.target.value)}
+              placeholder="172.19.0.5"
+              className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+            />
+          </div>
+          <div>
+            <label className="block text-gray-400 text-xs font-medium mb-1.5">SIP Port</label>
+            <input
+              value={sipPort}
+              onChange={(e) => setSipPort(e.target.value)}
+              placeholder="5060"
+              className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+            />
+          </div>
+        </div>
+
+        {/* Command preview */}
+        <div>
+          <label className="block text-gray-500 text-xs font-medium mb-1.5">Command preview</label>
+          <div className="bg-gray-950 rounded-lg px-3 py-2.5 text-xs font-mono text-gray-300 break-all border border-gray-800">
+            {command}
+          </div>
+        </div>
+
+        <button
+          onClick={handleOriginate}
+          disabled={busy || !ani.trim() || !did.trim() || !sipHost.trim()}
+          className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg px-5 py-2.5 text-sm font-medium transition-colors"
+        >
+          {busy ? 'Originating…' : 'Originate Call'}
+        </button>
+      </div>
+
+      {/* Result */}
+      {(result || error) && (
+        <div className={`mt-4 bg-gray-900 border rounded-xl p-5 space-y-3 ${result?.success ? 'border-emerald-800' : 'border-red-900'}`}>
+          <div className="flex items-center gap-2">
+            <span className={`text-sm font-semibold ${result?.success ? 'text-emerald-400' : 'text-red-400'}`}>
+              {result?.success ? '✓ Originated successfully' : '✗ Origination failed'}
+            </span>
+          </div>
+          {result?.result && (
+            <div>
+              <p className="text-gray-500 text-xs mb-1">FreeSWITCH response</p>
+              <div className="bg-gray-950 rounded-lg px-3 py-2 text-xs font-mono text-gray-200 border border-gray-800">
+                {result.result}
+              </div>
+            </div>
+          )}
+          {result?.command && (
+            <div>
+              <p className="text-gray-500 text-xs mb-1">Command sent</p>
+              <div className="bg-gray-950 rounded-lg px-3 py-2 text-xs font-mono text-gray-400 break-all border border-gray-800">
+                {result.command}
+              </div>
+            </div>
+          )}
+          {error && !result && (
+            <p className="text-red-400 text-sm">{error}</p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function TelephonyPage() {
@@ -911,6 +1066,7 @@ export default function TelephonyPage() {
         {tab === 'campaigns'     && <CampaignsTab />}
         {tab === 'phone-numbers' && <PhoneNumbersTab />}
         {tab === 'agent-groups'  && <AgentGroupsTab />}
+        {tab === 'test-call'     && <TestCallTab />}
       </div>
     </AdminShell>
   )

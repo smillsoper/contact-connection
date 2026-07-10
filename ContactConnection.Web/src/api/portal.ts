@@ -155,6 +155,7 @@ export interface TenantAgentRecord {
   lastName: string
   email: string
   role: string
+  roleName: string | null
   isActive: boolean
   lastLoginAt: string | null
 }

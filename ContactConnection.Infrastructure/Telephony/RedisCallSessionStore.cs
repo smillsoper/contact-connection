@@ -39,6 +39,21 @@ public class RedisCallSessionStore : ITelephonyCallSessionStore
         await db.KeyDeleteAsync(Key(channelUuid));
     }
 
+    public async Task<IReadOnlyList<TelephonyCallSession>> GetAllAsync(CancellationToken ct = default)
+    {
+        var db     = _redis.GetDatabase();
+        var server = _redis.GetServer(_redis.GetEndPoints().First());
+        var result = new List<TelephonyCallSession>();
+        await foreach (var key in server.KeysAsync(pattern: "telephony:session:*"))
+        {
+            var json = await db.StringGetAsync(key);
+            if (json.IsNullOrEmpty) continue;
+            var session = JsonSerializer.Deserialize<TelephonyCallSession>((string)json!, JsonOpts);
+            if (session is not null) result.Add(session);
+        }
+        return result;
+    }
+
     public async Task SetKeyAsync(string key, string value, TimeSpan ttl, CancellationToken ct = default)
     {
         var db = _redis.GetDatabase();

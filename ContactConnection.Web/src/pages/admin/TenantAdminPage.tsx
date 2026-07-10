@@ -1,11 +1,13 @@
 import { Link } from 'react-router-dom'
 import AdminShell from '../../components/admin/AdminShell'
 import { useAuthStore } from '../../stores/authStore'
+import { openCallTrace } from '../../components/calltrace/openCallTrace'
 
 interface NavCard {
   title: string
   desc: string
-  path: string
+  path?: string
+  onClick?: () => void
   live: boolean
 }
 
@@ -34,6 +36,7 @@ const NAV_SECTIONS: NavSection[] = [
     cards: [
       { title: 'Flows', desc: 'Build and publish call flows for your contact center.', path: '/flows', live: true },
       { title: 'Agent Portal', desc: 'Open the agent workspace — softphone, live flow, and chat.', path: '/agent', live: true },
+      { title: 'Call Trace', desc: 'Watch calls flow through telephony and script nodes in real time.', onClick: () => openCallTrace(), live: true },
     ],
   },
   {
@@ -96,9 +99,9 @@ export default function TenantAdminPage() {
                     </div>
                   )
 
-                  return card.live
-                    ? <Link key={card.title} to={card.path} className="block">{inner}</Link>
-                    : <div key={card.title}>{inner}</div>
+                  if (!card.live) return <div key={card.title}>{inner}</div>
+                  if (card.onClick) return <button key={card.title} onClick={card.onClick} className="block text-left w-full">{inner}</button>
+                  return <Link key={card.title} to={card.path!} className="block">{inner}</Link>
                 })}
               </div>
             </div>

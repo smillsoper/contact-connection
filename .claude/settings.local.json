@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(docker exec -i hubion-postgres-1 psql -U hubion -d hubion_master -c ' *)",
-      "PowerShell(docker exec cc_freeswitch tail -n 40 /var/log/freeswitch/freeswitch.log 2>&1)"
+      "PowerShell(docker exec cc_freeswitch tail -n 40 /var/log/freeswitch/freeswitch.log 2>&1)",
+      "PowerShell(Get-Process -Name \"ContactConnection.Api\" -ErrorAction SilentlyContinue)",
+      "PowerShell(Stop-Process -Force)"
     ]
   }
 }

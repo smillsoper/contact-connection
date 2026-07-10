@@ -29,6 +29,7 @@ public class FlowEngine : IFlowEngine
     private readonly IDatabase _redis;
     private readonly TenantContext _tenantContext;
     private readonly IFlowNotifier _notifier;
+    private readonly ICallTraceRecorder _traceRecorder;
     private readonly Dictionary<string, INodeHandler> _handlers;
     private readonly ILogger<FlowEngine> _logger;
 
@@ -45,6 +46,7 @@ public class FlowEngine : IFlowEngine
         IConnectionMultiplexer redis,
         TenantContext tenantContext,
         IFlowNotifier notifier,
+        ICallTraceRecorder traceRecorder,
         IEnumerable<INodeHandler> handlers,
         ILogger<FlowEngine> logger)
     {
@@ -54,6 +56,7 @@ public class FlowEngine : IFlowEngine
         _redis         = redis.GetDatabase();
         _tenantContext = tenantContext;
         _notifier      = notifier;
+        _traceRecorder = traceRecorder;
         _handlers      = handlers.ToDictionary(h => h.NodeType, StringComparer.OrdinalIgnoreCase);
         _logger        = logger;
     }
@@ -220,6 +223,13 @@ public class FlowEngine : IFlowEngine
 
             var result = await handler.ExecuteAsync(node, ctx, agentInput, transition, ct);
 
+            var detail = !string.IsNullOrWhiteSpace(result.State.Content) ? Truncate(result.State.Content) : result.State.Condition;
+            await _traceRecorder.RecordStepAsync(
+                ctx.TenantId, _tenantContext.Current!.SchemaName, ctx.CallRecordId, TraceEngine.Crm, nodeId, nodeType,
+                result.State.Label, detail, transitionTaken: transition, result.NextNodeId,
+                exitReason: result.State.IsTerminal ? "terminal" : null,
+                campaignId: null, ctx.FlowId, dnis: null, ani: null, ct);
+
             // Terminal node or node waiting for input — return state, attaching any preceding script content
             if (result.NextNodeId is null || result.State.IsTerminal)
             {
@@ -354,6 +364,9 @@ public class FlowEngine : IFlowEngine
 
     private static JsonObject? GetNode(JsonObject definition, string nodeId) =>
         definition["nodes"]?[nodeId]?.AsObject();
+
+    private static string Truncate(string content, int maxLength = 200) =>
+        content.Length <= maxLength ? content : content[..maxLength] + "…";
 
     private static string RedisKey(Guid sessionId) => $"flow:session:{sessionId}";
 

@@ -15,7 +15,32 @@ public static class TelephonyEndpoints
     {
         var group = app.MapGroup("/api/v1/telephony").RequireAuthorization();
         group.MapPost("answer-queued-call", AnswerQueuedCall);
+        group.MapPost("originate-test",     OriginateTest);
         return app;
+    }
+
+    private static async Task<IResult> OriginateTest(
+        OriginateTestRequest req,
+        IConfiguration config,
+        CancellationToken ct)
+    {
+        var host    = config["FreeSWITCH:Host"]        ?? "127.0.0.1";
+        var port    = int.Parse(config["FreeSWITCH:EslPort"]     ?? "8021");
+        var pass    = config["FreeSWITCH:EslPassword"] ?? "ClueCon";
+        var sipHost = req.SipHost ?? config["FreeSWITCH:SipHost"] ?? host;
+        var sipPort = req.SipPort ?? config["FreeSWITCH:SipPort"] ?? "5060";
+
+        var command = $"originate {{origination_caller_id_number={req.CallerIdNumber}}}" +
+                      $"sofia/internal/{req.DestinationNumber}@{sipHost}:{sipPort} &park()";
+
+        await using var esl = new EslClient();
+        await esl.ConnectAsync(host, port, pass, ct);
+        var result = await esl.RunCommandAsync(command, ct);
+
+        var success = result?.StartsWith("+OK") == true;
+        return success
+            ? Results.Ok(new { success = true, result, command })
+            : Results.BadRequest(new { success = false, result, command });
     }
 
     /// <summary>
@@ -41,14 +66,17 @@ public static class TelephonyEndpoints
         ITelephonyCallSessionStore sessionStore,
         IFlowEngine flowEngine,
         IHubContext<FlowHub, IFlowHubClient> hub,
+        IAgentStateStore stateStore,
         IConfiguration config,
         CancellationToken ct)
     {
         var agentIdStr      = http.User.FindFirst("sub")?.Value;
+        var tenantIdStr     = http.User.FindFirst("tenant_id")?.Value;
         var tenantSchema    = http.User.FindFirst("tenant_schema")?.Value;
         var tenantSubdomain = http.User.FindFirst("tenant_subdomain")?.Value;
 
         if (!Guid.TryParse(agentIdStr, out var agentId) ||
+            !Guid.TryParse(tenantIdStr, out var tenantId) ||
             string.IsNullOrEmpty(tenantSchema) ||
             string.IsNullOrEmpty(tenantSubdomain))
             return Results.Unauthorized();
@@ -91,13 +119,28 @@ public static class TelephonyEndpoints
                 agent.SipExtension, tenantSubdomain, record.CallerId ?? "Unknown", ct);
 
             if (agentUuid is null)
-                return Results.Problem($"Could not connect to agent: {originateError}");
+            {
+                // Undo the interaction — bridge never happened, call stays in queue
+                db.CallInteractions.Remove(interaction);
+                await db.SaveChangesAsync(ct);
+                return Results.Problem(
+                    detail: "Your softphone could not be reached. Make sure the softphone is registered and try again.",
+                    statusCode: 400);
+            }
 
-            // Store agent UUID + pending IDs so the CHANNEL_BRIDGE handler can fire agent_answer
-            session!.Vars["_agent_uuid"]            = agentUuid;
+            // Dequeue — prevents QueuePollingService from re-delivering this call
+            session!.Vars.Remove("_queued");
+            // _assigned_agent_id persists through bridge for hangup cleanup
+            session.Vars["_assigned_agent_id"]       = agentId.ToString();
+            session.Vars["_agent_uuid"]              = agentUuid;
             session.Vars["_pending_agent_id"]        = agentId.ToString();
             session.Vars["_pending_interaction_id"]  = interaction.Id.ToString();
             await sessionStore.SaveAsync(session, ct);
+
+            // Mark agent as on-call so QueuePollingService skips them + UI updates
+            await stateStore.SetAsync(tenantId, agentId,
+                new AgentStateEntry(AgentStateCodes.OnCall, "On Call", null, DateTimeOffset.UtcNow), ct);
+            await hub.Clients.Group($"agent:{agentId}").ReceiveAgentStateChange(AgentStateCodes.OnCall, "On Call", null);
 
             // Store reverse mapping so PLAYBACK_STOP on the agent channel can find the caller session
             await sessionStore.SetKeyAsync($"whisper:{agentUuid}", callerUuid, TimeSpan.FromMinutes(10), ct);
@@ -130,10 +173,16 @@ public static class TelephonyEndpoints
             // Simple path: store pending IDs so CHANNEL_BRIDGE fires agent_answer (same as whisper path)
             if (session is not null)
             {
-                session.Vars["_pending_agent_id"]       = agentId.ToString();
-                session.Vars["_pending_interaction_id"] = interaction.Id.ToString();
+                session.Vars.Remove("_queued");
+                session.Vars["_assigned_agent_id"]       = agentId.ToString();
+                session.Vars["_pending_agent_id"]        = agentId.ToString();
+                session.Vars["_pending_interaction_id"]  = interaction.Id.ToString();
                 await sessionStore.SaveAsync(session, ct);
             }
+
+            await stateStore.SetAsync(tenantId, agentId,
+                new AgentStateEntry(AgentStateCodes.OnCall, "On Call", null, DateTimeOffset.UtcNow), ct);
+            await hub.Clients.Group($"agent:{agentId}").ReceiveAgentStateChange(AgentStateCodes.OnCall, "On Call", null);
 
             await esl.BridgeToAgentAsync(callerUuid, agent.SipExtension, tenantSubdomain, record.CallerId ?? "Unknown", ct);
 
@@ -144,3 +193,8 @@ public static class TelephonyEndpoints
 
 public record AnswerQueuedCallRequest(Guid CallRecordId);
 public record AnswerQueuedCallResponse(object FlowSession);
+public record OriginateTestRequest(
+    string CallerIdNumber,
+    string DestinationNumber,
+    string? SipHost = null,
+    string? SipPort = null);

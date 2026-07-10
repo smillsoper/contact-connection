@@ -24,6 +24,7 @@ export type TelephonyNodeType =
   | 'tf_on_agent_answer'
   | 'tf_on_call_disconnected'
   | 'tf_on_custom_event'
+  | 'tf_event_wait'
 
 export interface TelVariableAssignment {
   key: string
@@ -252,6 +253,12 @@ export const TELEPHONY_NODE_META: Record<
     description: 'Fires when a named custom event is emitted (e.g. from a script flow)',
     handles: 'source-only',
   },
+  tf_event_wait: {
+    label: 'Wait for Event',
+    color: '#6d28d9',
+    description: 'Pauses flow execution until a named event fires',
+    handles: 'single',
+  },
 }
 
 export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
@@ -320,5 +327,7 @@ export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
       return { label: 'Call Disconnected' }
     case 'tf_on_custom_event':
       return { label: 'Custom Event', eventName: '' }
+    case 'tf_event_wait':
+      return { label: 'Wait for Event', eventName: 'agent_answer' }
   }
 }

@@ -3,6 +3,7 @@ import * as signalR from '@microsoft/signalr'
 import { useAuthStore } from '../stores/authStore'
 import { useCallStore } from '../stores/callStore'
 import { useFlowSessionsStore, type FlowSessionEntry } from '../stores/flowSessionsStore'
+import { useAgentStateStore } from '../stores/agentStateStore'
 import { flowsApi, type AddressValidationResult, type ZipLookupResult, type AutocompleteSuggestion, type AutocompleteSelectionResult } from '../api/flows'
 import type { FlowNodeState } from '../types/flow'
 import NodeDisplay from './NodeDisplay'
@@ -264,6 +265,7 @@ export default function FlowPanel() {
   const { token, tenantSubdomain } = useAuthStore()
   const { setQueued, callRecordId } = useCallStore()
   const { sessions, activeSessionId, addSession, removeSession, setActiveSession } = useFlowSessionsStore()
+  const setAgentStateCode = useAgentStateStore((s) => s.setAgentStateCode)
   const [hub, setHub] = useState<signalR.HubConnection | null>(null)
 
   // Manual flow selector (shown when no sessions are active)
@@ -303,6 +305,12 @@ export default function FlowPanel() {
           initialNode: node,
         })
       } catch { /* ignore malformed payload */ }
+    })
+
+    // Server-side agent state change (on_call at pickup, acw on hangup, available after acw)
+    connection.on('receiveAgentStateChange', (code: string, _label: string, expiresAtIso: string | null) => {
+      const expiresAt = expiresAtIso ? new Date(expiresAtIso) : null
+      setAgentStateCode(code, expiresAt)
     })
 
     connection.start()

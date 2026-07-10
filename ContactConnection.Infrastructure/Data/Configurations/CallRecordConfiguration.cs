@@ -33,6 +33,7 @@ public class CallRecordConfiguration : IEntityTypeConfiguration<CallRecord>
 
         // Caller identity
         builder.Property(r => r.CallerId).HasColumnName("caller_id").HasMaxLength(30);
+        builder.Property(r => r.Dnis).HasColumnName("dnis").HasMaxLength(32);
         builder.Property(r => r.AccountNumber).HasColumnName("account_number").HasMaxLength(50);
         builder.Property(r => r.FirstName).HasColumnName("first_name").HasMaxLength(100);
         builder.Property(r => r.LastName).HasColumnName("last_name").HasMaxLength(100);

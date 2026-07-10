@@ -10,8 +10,13 @@ public class RouteToQueueNodeHandler : ITelephonyNodeHandler
     public string NodeType => "tf_route_to_queue";
 
     private readonly ITenantDbContextFactory _factory;
+    private readonly IAgentStateStore _stateStore;
 
-    public RouteToQueueNodeHandler(ITenantDbContextFactory factory) => _factory = factory;
+    public RouteToQueueNodeHandler(ITenantDbContextFactory factory, IAgentStateStore stateStore)
+    {
+        _factory    = factory;
+        _stateStore = stateStore;
+    }
 
     public async Task<TelephonyNodeResult> ExecuteAsync(
         JsonObject node, TelephonyFlowContext ctx, CancellationToken ct = default)
@@ -51,10 +56,21 @@ public class RouteToQueueNodeHandler : ITelephonyNodeHandler
             agentIds.AddRange(groupAgentIds);
         }
 
+        // Filter to agents who are currently in Available state.
+        // Agents who have never set a state (null) default to Unavailable at login,
+        // so they are excluded until they explicitly go Available.
+        var availableAgentIds = new List<Guid>();
+        foreach (var agentId in agentIds.Distinct())
+        {
+            var state = await _stateStore.GetAsync(ctx.TenantId, agentId, ct);
+            if (state?.Code == AgentStateCodes.Available)
+                availableAgentIds.Add(agentId);
+        }
+
         // Store the eligible agent IDs so the caller's CHANNEL_HANGUP can clean up,
         // and so the screen pop is targeted.
         ctx.Vars["_queued"] = "true";
-        ctx.Vars["_eligible_agents"] = string.Join(",", agentIds.Distinct());
+        ctx.Vars["_eligible_agents"] = string.Join(",", availableAgentIds);
 
         // Allow chaining — e.g. RouteToQueue → Play (hold music) — by reading the default transition.
         // Returns null if no transition is defined (old behavior, call stays parked silently).

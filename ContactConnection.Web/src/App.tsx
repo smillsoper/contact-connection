@@ -28,6 +28,7 @@ import CampaignDetailPage from './pages/admin/CampaignDetailPage'
 import PortalApiDefinitionsPage from './pages/portal/PortalApiDefinitionsPage'
 import PortalApiDefinitionDetailPage from './pages/portal/PortalApiDefinitionDetailPage'
 import PortalCredentialsPage from './pages/portal/PortalCredentialsPage'
+import CallTraceWindowsPortal from './components/calltrace/CallTraceWindowsPortal'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -45,12 +46,8 @@ const ADMIN_PERMISSIONS = ['agents.view', 'agents.manage', 'roles.manage', 'flow
 
 function RequireAdminAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
-  const role = useAuthStore((s) => s.role)
   const permissions = useAuthStore((s) => s.permissions)
   if (!token) return <Navigate to="/login" replace />
-  // Legacy built-in roles
-  if (role === 'admin' || role === 'supervisor') return <>{children}</>
-  // Custom role with any admin-level permission
   if (ADMIN_PERMISSIONS.some(p => permissions.includes(p))) return <>{children}</>
   return <Navigate to="/agent" replace />
 }
@@ -58,6 +55,7 @@ function RequireAdminAuth({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <BrowserRouter>
+      <CallTraceWindowsPortal />
       <Routes>
         {/* ── Agent routes ── */}
         <Route path="/login" element={isAdminSubdomain ? <PortalLoginPage /> : <LoginPage />} />

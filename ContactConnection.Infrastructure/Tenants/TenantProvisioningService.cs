@@ -97,6 +97,7 @@ public class TenantProvisioningService : ITenantProvisioningService
             {
                 await using var tenantCtx = _tenantDbContextFactory.Create(tenant.SchemaName);
                 await tenantCtx.Database.MigrateAsync(ct);
+                await SeedBuiltInRolesAsync(tenantCtx, tenant.Id, ct);
                 migrated++;
             }
             catch (Exception ex)

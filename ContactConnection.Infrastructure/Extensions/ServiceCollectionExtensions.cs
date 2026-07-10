@@ -4,6 +4,7 @@ using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
 using ContactConnection.Infrastructure.Auth;
+using ContactConnection.Infrastructure.CallTrace;
 using ContactConnection.Infrastructure.Commerce;
 using ContactConnection.Infrastructure.Credentials;
 using ContactConnection.Infrastructure.CustomFields;
@@ -159,6 +160,16 @@ public static class ServiceCollectionExtensions
         // Block list + roles repositories (scoped — for API endpoints with HTTP context)
         services.AddScoped<IBlockListRepository, BlockListRepository>();
         services.AddScoped<IRoleRepository, RoleRepository>();
+        services.AddScoped<ICustomUnavailableCodeRepository, CustomUnavailableCodeRepository>();
+
+        // Agent state store — Redis-backed, singleton (stateless Redis ops)
+        services.AddSingleton<IAgentStateStore, AgentStateStore>();
+
+        // Call trace — persistence (scoped, EF) + subscription matching (singleton, Redis-backed
+        // so state is consistent across API instances)
+        services.AddScoped<ICallTraceEventRepository, CallTraceEventRepository>();
+        services.AddScoped<ICallTraceRecorder, CallTraceRecorder>();
+        services.AddSingleton<ICallTraceSubscriptionRegistry, RedisCallTraceSubscriptionRegistry>();
 
         // Email
         services.AddSingleton<IEmailService, ResendEmailService>();

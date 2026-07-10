@@ -64,4 +64,7 @@ public interface IFlowHubClient
 
     /// <summary>Script pop delivered after whisper bridge — pushes CRM flow session JSON to the agent.</summary>
     Task ReceiveScriptPop(string sessionJson);
+
+    /// <summary>Server-side agent state change (e.g. on_call set at pickup, acw on hangup, available after acw).</summary>
+    Task ReceiveAgentStateChange(string code, string label, string? expiresAtIso);
 }

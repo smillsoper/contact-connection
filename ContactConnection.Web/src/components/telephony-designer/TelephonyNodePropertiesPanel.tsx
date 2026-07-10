@@ -1122,8 +1122,6 @@ function PlayNodeEditor({
           announcements={(data.periodicAnnouncements as Array<{ fileId: string }>) ?? []}
           intervalSeconds={(data.periodicAnnouncementIntervalSeconds as number) ?? 30}
           audioFiles={audioFiles}
-          inputCls={inputCls}
-          labelCls={labelCls}
           onChange={(announcements, intervalSeconds) =>
             onChange({ periodicAnnouncements: announcements, periodicAnnouncementIntervalSeconds: intervalSeconds })
           }
@@ -1152,15 +1150,11 @@ function PeriodicAnnouncementEditor({
   announcements,
   intervalSeconds,
   audioFiles,
-  inputCls,
-  labelCls,
   onChange,
 }: {
   announcements: Array<{ fileId: string }>
   intervalSeconds: number
   audioFiles: AudioFileRecord[]
-  inputCls: string
-  labelCls: string
   onChange: (announcements: Array<{ fileId: string }>, intervalSeconds: number) => void
 }) {
   const setItem = (i: number, fileId: string) => {

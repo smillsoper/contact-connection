@@ -5,6 +5,7 @@ using ContactConnection.Api.Hubs;
 using ContactConnection.Api.Middleware;
 using ContactConnection.Api.Telephony;
 using ContactConnection.Application.Interfaces.Services;
+using ContactConnection.Domain.Entities;
 using ContactConnection.Infrastructure.Extensions;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
@@ -19,12 +20,22 @@ builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
-// SignalR — must be registered before IFlowNotifier which depends on IHubContext
-builder.Services.AddSignalR();
+// SignalR — must be registered before IFlowNotifier which depends on IHubContext.
+// Redis backplane so CallTraceHub group broadcasts reach clients regardless of which
+// API instance handles a given call (matching state lives in Redis separately).
+builder.Services.AddSignalR()
+    .AddStackExchangeRedis(builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379");
 builder.Services.AddScoped<IFlowNotifier, FlowNotifier>();
+builder.Services.AddScoped<ICallTraceNotifier, CallTraceNotifier>();
 
 // ESL background service — connects to FreeSWITCH and handles CHANNEL_PARK / CHANNEL_HANGUP
 builder.Services.AddHostedService<EslBackgroundService>();
+
+// Queue poller — every 1 second, notifies newly-available agents of parked calls
+builder.Services.AddHostedService<QueuePollingService>();
+
+// Call trace expiry sweeper — every 1 second, stops traces that hit their duration cap
+builder.Services.AddHostedService<ContactConnection.Api.CallTrace.CallTraceExpiryBackgroundService>();
 
 // JWT Bearer authentication
 var signingKey = builder.Configuration["Jwt:SigningKey"]
@@ -67,12 +78,20 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("PlatformAdmin", policy =>
         policy.RequireClaim("role", "platform_admin"));
     options.AddPolicy("TenantAdmin", policy =>
-        policy.RequireClaim("role", "admin", "supervisor"));
+        policy.RequireAssertion(ctx =>
+        {
+            var perms = (ctx.User.FindFirst("permissions")?.Value ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries);
+            return perms.Any(p => p is
+                Permission.AgentsManage   or Permission.RolesManage    or
+                Permission.FlowsManage    or Permission.TelephonyManage or
+                Permission.IntegrationsManage);
+        }));
     options.AddPolicy("AgentsView", policy =>
         policy.RequireAssertion(ctx =>
-            ctx.User.HasClaim("role", "admin") ||
-            ctx.User.HasClaim("role", "supervisor") ||
-            (ctx.User.FindFirst("permissions")?.Value ?? "").Split(',').Contains("agents.view")));
+            (ctx.User.FindFirst("permissions")?.Value ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Contains(Permission.AgentsView)));
     options.AddPolicy("MfaPending", policy =>
         policy.RequireClaim("role", "mfa_pending"));
 });
@@ -109,7 +128,9 @@ app.MapAgentGroupsEndpoints();
 app.MapBlockListEndpoints();
 app.MapRolesEndpoints();
 app.MapTelephonyEndpoints();
+app.MapAgentStateEndpoints();
 app.MapAudioFilesEndpoints();
+app.MapCallTracesEndpoints();
 
 // Tenant admin portal
 app.MapAdminAgentsEndpoints();
@@ -133,7 +154,8 @@ app.MapTenantAdminInviteEndpoints();
 // FreeSWITCH internal endpoints (no bearer auth — internal network only)
 app.MapFreeSwitchDirectoryEndpoints();
 
-// SignalR hub
+// SignalR hubs
 app.MapHub<FlowHub>("/hubs/flow");
+app.MapHub<CallTraceHub>("/hubs/call-trace");
 
 app.Run();

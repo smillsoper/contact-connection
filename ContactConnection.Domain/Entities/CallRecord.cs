@@ -24,6 +24,7 @@ public class CallRecord
 
     // Caller identity — relational, queried frequently
     public string? CallerId { get; private set; }        // ANI / inbound phone number
+    public string? Dnis { get; private set; }             // dialed number (telephony calls only)
     public string? AccountNumber { get; private set; }
     public string? FirstName { get; private set; }
     public string? LastName { get; private set; }
@@ -204,6 +205,12 @@ public class CallRecord
     public void SetAddresses(CallAddresses addresses)
     {
         Addresses = addresses;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void SetDnis(string dnis)
+    {
+        Dnis = dnis;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 

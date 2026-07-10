@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { flowsApi, type FlowSummary } from '../api/flows'
+import { openCallTrace } from '../components/calltrace/openCallTrace'
 
 function designerPath(flow: FlowSummary): string {
   return flow.flow_type === 'telephony'
@@ -366,6 +367,14 @@ export default function FlowsPage() {
                         >
                           Edit
                         </button>
+                        {flow.flow_type === 'telephony' && (
+                          <button
+                            onClick={() => openCallTrace({ flowId: flow.id })}
+                            className="text-xs text-gray-400 hover:text-gray-200 border border-gray-700 hover:border-gray-500 rounded px-2.5 py-1 transition-colors"
+                          >
+                            Trace
+                          </button>
+                        )}
                         <button
                           onClick={() => handleExport(flow)}
                           disabled={exportingId === flow.id}

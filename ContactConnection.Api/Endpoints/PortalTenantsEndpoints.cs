@@ -293,6 +293,7 @@ public static class PortalTenantsEndpoints
             a.LastName,
             a.Email,
             a.Role,
+            RoleName = a.CustomRole?.Name,
             a.IsActive,
             a.LastLoginAt,
         }));

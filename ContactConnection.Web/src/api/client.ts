@@ -19,7 +19,15 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   if (!res.ok) {
     const body = await res.text()
-    throw new Error(`${res.status} ${res.statusText}: ${body}`)
+    // Try to extract a human-readable message from ProblemDetails or {error} bodies
+    let message = `${res.status}: ${body}`
+    try {
+      const parsed = JSON.parse(body)
+      if (parsed.detail)   message = parsed.detail
+      else if (parsed.error) message = parsed.error
+      else if (parsed.title) message = parsed.title
+    } catch { /* use raw body */ }
+    throw new Error(message)
   }
 
   if (res.status === 204) return undefined as T

@@ -37,9 +37,12 @@
     <param name="disable-register"    value="false"/>
     <param name="watchdog-enabled"    value="false"/>
 
-    <!-- Plain WebSocket — local dev (localhost is a secure context; no cert required) -->
-    <!-- WSS (port 7443) requires a real TLS cert; enable in production with tls-cert-dir -->
+    <!-- Plain WebSocket for local dev (no cert required) -->
     <param name="ws-binding"          value=":7080"/>
+    <!-- Secure WebSocket for external clients (Cloudflare tunnel terminates public TLS;
+         cloudflared connects here with TLS verify disabled, so self-signed cert is fine) -->
+    <param name="wss-binding"         value=":7443"/>
+    <param name="tls-cert-dir"        value="/etc/freeswitch/tls"/>
 
     <!-- Accept ICE candidates from private/RFC1918 IPs (browser on same LAN or Docker host) -->
     <!-- Default wan.auto rejects RFC1918 addresses; any_v4.auto accepts all IPv4 candidates -->

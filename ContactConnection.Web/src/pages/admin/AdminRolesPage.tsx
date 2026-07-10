@@ -1,6 +1,93 @@
 import { useEffect, useState } from 'react'
 import AdminShell from '../../components/admin/AdminShell'
 import { rolesApi, PERMISSION_GROUPS, PERMISSION_LABELS, LANDING_PAGE_LABELS, type Role } from '../../api/roles'
+import { api } from '../../api/client'
+
+interface UnavailableCode { id: string; name: string; roles: string[]; isActive: boolean }
+
+function UnavailableCodesSection({ role }: { role: Role }) {
+  const [codes, setCodes]       = useState<UnavailableCode[]>([])
+  const [newName, setNewName]   = useState('')
+  const [adding, setAdding]     = useState(false)
+  const [loading, setLoading]   = useState(true)
+
+  useEffect(() => {
+    api.get<UnavailableCode[]>(`/api/v1/unavailable-codes/role/${role.id}`)
+      .then(setCodes)
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [role.id])
+
+  async function handleAdd() {
+    if (!newName.trim()) return
+    setAdding(true)
+    try {
+      const created = await api.post<UnavailableCode>('/api/v1/unavailable-codes', {
+        name: newName.trim(),
+        roles: [role.id],
+        isActive: true,
+      })
+      setCodes((prev) => [...prev, created])
+      setNewName('')
+    } catch {}
+    finally { setAdding(false) }
+  }
+
+  async function handleDelete(id: string) {
+    try {
+      await api.delete(`/api/v1/unavailable-codes/${id}`)
+      setCodes((prev) => prev.filter((c) => c.id !== id))
+    } catch {}
+  }
+
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-300 mb-3">Unavailable Codes</label>
+      <p className="text-xs text-gray-500 mb-3">
+        Custom unavailable reasons shown in the softphone state dropdown for agents with this role.
+      </p>
+
+      {loading ? (
+        <p className="text-xs text-gray-500">Loading…</p>
+      ) : (
+        <div className="space-y-1.5 mb-3">
+          {codes.length === 0 && (
+            <p className="text-xs text-gray-600 italic">No custom codes for this role yet.</p>
+          )}
+          {codes.map((c) => (
+            <div key={c.id} className="flex items-center gap-2 bg-gray-800/60 rounded-lg px-3 py-1.5">
+              <span className="w-2 h-2 rounded-full bg-orange-500 shrink-0" />
+              <span className="text-sm text-orange-300 flex-1">{c.name}</span>
+              <button
+                onClick={() => handleDelete(c.id)}
+                className="text-gray-600 hover:text-red-400 text-xs transition-colors"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex items-center gap-2">
+        <input
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+          placeholder="New code name…"
+          className="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-white text-sm outline-none focus:ring-1 focus:ring-orange-500"
+        />
+        <button
+          onClick={handleAdd}
+          disabled={adding || !newName.trim()}
+          className="px-3 py-1.5 bg-orange-600/80 hover:bg-orange-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
+        >
+          {adding ? '…' : 'Add'}
+        </button>
+      </div>
+    </div>
+  )
+}
 
 const LANDING_PAGE_KEYS = Object.keys(LANDING_PAGE_LABELS)
 
@@ -125,6 +212,9 @@ function RoleEditorModal({
               })}
             </div>
           </div>
+
+          {/* Unavailable codes */}
+          {role && <UnavailableCodesSection role={role} />}
 
           {error && <p className="text-red-400 text-sm">{error}</p>}
         </div>

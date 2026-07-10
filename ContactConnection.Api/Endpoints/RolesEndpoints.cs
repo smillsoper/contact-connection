@@ -72,9 +72,10 @@ public static class RolesEndpoints
 
         var role = await roles.GetByIdAsync(id, ct);
         if (role is null) return Results.NotFound();
-        if (role.IsBuiltIn) return Results.BadRequest(new { error = "Built-in roles cannot be modified." });
 
-        role.Update(request.Name.Trim(), request.Permissions, request.DefaultLandingPage);
+        // Built-in roles: allow permission + landing page changes, but keep the original name.
+        var name = role.IsBuiltIn ? role.Name : request.Name.Trim();
+        role.Update(name, request.Permissions, request.DefaultLandingPage);
         await roles.SaveChangesAsync(ct);
         return Results.Ok(ToResponse(role));
     }

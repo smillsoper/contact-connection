@@ -22,4 +22,5 @@ export const msalInitialized = msalInstance.initialize()
 
 export const portalLoginRequest = {
   scopes: ['openid', 'profile', 'email'],
+  prompt: 'select_account',
 }
