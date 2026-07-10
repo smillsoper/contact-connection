@@ -1,43 +1,56 @@
 import { useEffect, useRef } from 'react'
-import { callTracesApi } from '../../api/callTraces'
-import { useCallTraceStore, type TraceWindow } from '../../stores/callTraceStore'
+import type { CallTraceStep, CaptureMode } from '../../api/callTraces'
 
-interface Props {
-  window: TraceWindow
+export interface CallTab {
+  callRecordId: string
+  steps: CallTraceStep[]
+  ended: boolean
 }
 
-export default function CallTraceRunningView({ window: win }: Props) {
-  const setActiveCall = useCallTraceStore((s) => s.setActiveCall)
-  const scrollRef = useRef<HTMLDivElement>(null)
+interface Props {
+  calls: CallTab[]
+  activeCallRecordId?: string
+  onSelectCall: (callRecordId: string) => void
+  status: 'running' | 'stopped'
+  stopReason?: string
+  effectiveCaptureMode?: CaptureMode
+  effectiveCaptureValue?: number
+  onStop: () => void
+}
 
-  const activeCall = win.calls.find((c) => c.callRecordId === win.activeCallRecordId) ?? win.calls[0]
+export default function CallTraceRunningView({
+  calls, activeCallRecordId, onSelectCall, status, stopReason,
+  effectiveCaptureMode, effectiveCaptureValue, onStop,
+}: Props) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const activeCall = calls.find((c) => c.callRecordId === activeCallRecordId) ?? calls[0]
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
   }, [activeCall?.steps.length])
 
-  const progressLabel = win.effectiveCaptureMode === 'duration'
-    ? `up to ${win.effectiveCaptureValue} min`
-    : `${win.calls.length}/${win.effectiveCaptureValue} calls captured`
+  const progressLabel = effectiveCaptureMode === 'duration'
+    ? `up to ${effectiveCaptureValue} min`
+    : `${calls.length}/${effectiveCaptureValue ?? '?'} calls captured`
 
   return (
     <div className="flex flex-col h-full">
-      {/* Status banner */}
+      {/* Status banner — "stopped" only means no NEW calls will be matched; calls
+          already captured keep streaming steps until they end. */}
       <div className="px-4 py-2 border-b border-gray-800 flex items-center justify-between shrink-0">
         <span className="text-xs text-gray-400">
-          {win.status === 'running' ? `Tracing — ${progressLabel}` : `Stopped — ${describeStopReason(win.stopReason)}`}
+          {status === 'running'
+            ? `Tracing — ${progressLabel}`
+            : `Not accepting new calls — ${describeStopReason(stopReason)}`}
         </span>
-        {win.status === 'running' && (
-          <button
-            onClick={() => win.subscriptionId && callTracesApi.stop(win.subscriptionId).catch(() => {})}
-            className="text-xs text-red-400 hover:text-red-300"
-          >
+        {status === 'running' && (
+          <button onClick={onStop} className="text-xs text-red-400 hover:text-red-300">
             Stop Trace
           </button>
         )}
       </div>
 
-      {win.calls.length === 0 ? (
+      {calls.length === 0 ? (
         <div className="flex-1 flex items-center justify-center text-gray-500 text-sm p-6 text-center">
           Waiting for a matching call to start…
         </div>
@@ -45,10 +58,10 @@ export default function CallTraceRunningView({ window: win }: Props) {
         <>
           {/* Tab strip — one tab per matched call */}
           <div className="flex items-center gap-1 px-2 pt-2 border-b border-gray-800 overflow-x-auto shrink-0">
-            {win.calls.map((c, i) => (
+            {calls.map((c, i) => (
               <button
                 key={c.callRecordId}
-                onClick={() => setActiveCall(win.id, c.callRecordId)}
+                onClick={() => onSelectCall(c.callRecordId)}
                 className={`px-3 py-1.5 text-xs font-medium rounded-t-lg border-b-2 -mb-px whitespace-nowrap transition-colors ${
                   activeCall?.callRecordId === c.callRecordId
                     ? 'border-indigo-500 text-white bg-gray-800/60'

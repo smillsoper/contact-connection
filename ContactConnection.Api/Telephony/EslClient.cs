@@ -1,6 +1,7 @@
 using System.Net.Sockets;
 using System.Text;
 using ContactConnection.Application.Interfaces.Services;
+using Microsoft.Extensions.Logging;
 
 namespace ContactConnection.Api.Telephony;
 
@@ -9,7 +10,7 @@ namespace ContactConnection.Api.Telephony;
 /// Handles auth handshake, event subscription, and line-by-line event reading.
 /// Also implements IEslCommander so it can be injected into telephony node handlers.
 /// </summary>
-public sealed class EslClient : IAsyncDisposable, IEslCommander
+public sealed class EslClient(ILogger<EslClient>? logger = null) : IAsyncDisposable, IEslCommander
 {
     private TcpClient? _tcp;
     private StreamReader? _reader;
@@ -85,7 +86,13 @@ public sealed class EslClient : IAsyncDisposable, IEslCommander
     {
         await _writer!.WriteLineAsync($"api {command}");
         await _writer.WriteLineAsync();
-        await ReadMessageAsync(ct);  // consume the api/response
+        var reply = await ReadMessageAsync(ct);
+
+        // "api" replies carry the result in the body, not a header — "-ERR ..." on failure.
+        // Previously discarded unconditionally, which let a wrong command name (uuid_hangup,
+        // not registered in this FreeSWITCH build — only uuid_kill is) fail completely silently.
+        if (reply?.Body?.StartsWith("-ERR", StringComparison.Ordinal) == true)
+            logger?.LogWarning("ESL api command failed: '{Command}' → {Response}", command, reply.Body.Trim());
     }
 
     public Task KillChannelAsync(string uuid, int causeCode, CancellationToken ct = default) =>
@@ -94,8 +101,12 @@ public sealed class EslClient : IAsyncDisposable, IEslCommander
     public Task AnswerChannelAsync(string uuid, CancellationToken ct = default) =>
         SendApiAsync($"uuid_answer {uuid}", ct);
 
+    /// <summary>
+    /// uuid_kill, not uuid_hangup — uuid_hangup is not a registered mod_commands API in this
+    /// FreeSWITCH build ("Command not found!"), which silently left channels connected.
+    /// </summary>
     public Task HangupChannelAsync(string uuid, CancellationToken ct = default) =>
-        SendApiAsync($"uuid_hangup {uuid} NORMAL_CLEARING", ct);
+        SendApiAsync($"uuid_kill {uuid} NORMAL_CLEARING", ct);
 
     // Transfer the parked inbound channel to the agent's registered WebRTC endpoint.
     // Resolves the agent's actual SIP contact via sofia_contact (registration lookup),

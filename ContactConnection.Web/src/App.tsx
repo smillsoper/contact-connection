@@ -28,7 +28,7 @@ import CampaignDetailPage from './pages/admin/CampaignDetailPage'
 import PortalApiDefinitionsPage from './pages/portal/PortalApiDefinitionsPage'
 import PortalApiDefinitionDetailPage from './pages/portal/PortalApiDefinitionDetailPage'
 import PortalCredentialsPage from './pages/portal/PortalCredentialsPage'
-import CallTraceWindowsPortal from './components/calltrace/CallTraceWindowsPortal'
+import CallTraceWindowPage from './pages/CallTraceWindowPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -55,7 +55,6 @@ function RequireAdminAuth({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <BrowserRouter>
-      <CallTraceWindowsPortal />
       <Routes>
         {/* ── Agent routes ── */}
         <Route path="/login" element={isAdminSubdomain ? <PortalLoginPage /> : <LoginPage />} />
@@ -106,6 +105,14 @@ export default function App() {
           element={
             <RequireAuth>
               <TelephonyDesignerPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/call-trace-window"
+          element={
+            <RequireAuth>
+              <CallTraceWindowPage />
             </RequireAuth>
           }
         />

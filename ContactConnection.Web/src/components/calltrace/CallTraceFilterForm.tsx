@@ -2,20 +2,18 @@ import { useEffect, useState } from 'react'
 import SearchableSelect from '../SearchableSelect'
 import { listCampaigns, type Campaign } from '../../api/telephony'
 import { flowsApi, type FlowSummary } from '../../api/flows'
-import { callTracesApi, type CaptureMode } from '../../api/callTraces'
-import { useCallTraceStore, type TracePresetFilters } from '../../stores/callTraceStore'
+import { callTracesApi, type CaptureMode, type StartTraceResult } from '../../api/callTraces'
+import type { TracePresetFilters } from './openCallTrace'
 
 const MAX_CAPTURE_COUNT = 500
 const MAX_CAPTURE_DURATION_MINUTES = 60
 
 interface Props {
-  windowId: string
   preset: TracePresetFilters
+  onStarted: (result: StartTraceResult) => void
 }
 
-export default function CallTraceFilterForm({ windowId, preset }: Props) {
-  const setRunning = useCallTraceStore((s) => s.setRunning)
-
+export default function CallTraceFilterForm({ preset, onStarted }: Props) {
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [flows, setFlows] = useState<FlowSummary[]>([])
   const [campaignId, setCampaignId] = useState(preset.campaignId ?? '')
@@ -49,7 +47,7 @@ export default function CallTraceFilterForm({ windowId, preset }: Props) {
         captureMode,
         captureValue,
       })
-      setRunning(windowId, result.subscriptionId, result.effectiveCaptureMode, result.effectiveCaptureValue)
+      onStarted(result)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to start trace.')
     } finally {

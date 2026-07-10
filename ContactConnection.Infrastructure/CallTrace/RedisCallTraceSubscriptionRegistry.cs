@@ -120,17 +120,22 @@ public class RedisCallTraceSubscriptionRegistry(IConnectionMultiplexer redis) : 
             || matchedCount >= CallTraceLimits.MaxCaptureCount;
     }
 
+    /// <summary>
+    /// Deliberately does NOT filter by subscription Status. A subscription that just hit its
+    /// capture cap is marked "stopped" so it stops matching NEW calls, but the calls it already
+    /// captured (including the one that triggered the cap) must keep streaming steps until they
+    /// end — otherwise the very last call captured would show zero steps. Membership in
+    /// calltrace:call:{callRecordId} (set at match time, cleared at call-end) is what actually
+    /// governs step routing.
+    /// </summary>
     public async Task<IReadOnlyList<Guid>> GetSubscriptionsForCallAsync(Guid callRecordId, CancellationToken ct = default)
     {
         var members = await _db.SetMembersAsync(CallSubsKey(callRecordId));
         var result = new List<Guid>();
 
         foreach (var member in members)
-        {
-            if (!Guid.TryParse(member.ToString(), out var subscriptionId)) continue;
-            var status = await _db.HashGetAsync(SubKey(subscriptionId), "Status");
-            if (status == StatusActive) result.Add(subscriptionId);
-        }
+            if (Guid.TryParse(member.ToString(), out var subscriptionId))
+                result.Add(subscriptionId);
 
         return result;
     }

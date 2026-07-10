@@ -80,6 +80,34 @@
 | 68 | 2026-07-05 | 8:27 AM CDT | 10:22 AM CDT | 115 min | ~4602 min |
 | 69 | 2026-07-07 / 2026-07-08 | 3:00 PM CDT (7/7) | 7:25 AM CDT (7/8) | 985 min | ~5587 min |
 | 70 | 2026-07-09 | 4:03 PM CDT | 5:16 PM CDT | 73 min | ~5660 min |
+| 71 | 2026-07-10 | 4:55 AM CDT | 5:14 AM CDT | 19 min | ~5679 min |
+
+---
+
+## Session 71
+
+**Date:** 2026-07-10
+**Start:** 4:55 AM CDT
+**End:** 5:14 AM CDT
+**Duration:** 19 minutes
+
+### Accomplished
+
+**Call Trace popup — genuine separate window, not an in-page modal**
+
+- Replaced the Zustand-store/portal floating-panel implementation with a real `window.open()` popup: new `/call-trace-window` route (`CallTraceWindowPage.tsx`) renders a fully self-contained page with its own SignalR connection and local state. Same-origin, so it shares `localStorage` (auth token) with the opener — no state needs to be passed except preset filters via the URL query string. Each "Trace" click opens a uniquely-named, cascaded, movable, resizable window, so it survives navigating the rest of the app and several can be open at once.
+- Removed `callTraceStore.ts`, `useCallTraceHub.ts`, `CallTraceWindow.tsx`, `CallTraceWindowsPortal.tsx`; `CallTraceFilterForm`/`CallTraceRunningView` reworked to take plain props/callbacks instead of the removed store.
+
+**Bug fix — capture cap cut off the very call it was capturing**
+
+- `RedisCallTraceSubscriptionRegistry.GetSubscriptionsForCallAsync` filtered by the subscription's overall Status, but reaching the capture cap (e.g. "capture 1 call") marks a subscription `stopped` the instant it matches — so the call that triggered the cap got zero steps delivered, exactly matching the reported "tab popped in but showed no steps." Fixed: step routing now depends only on membership in the per-call watch-set (cleared at hangup), not the subscription's active/stopped flag — "stopped" now correctly means "not accepting new calls" while already-captured calls keep streaming to completion. Verified via a direct Redis simulation of the capture-1 scenario.
+
+**Critical fix — telephony hangup node wasn't actually hanging up calls**
+
+- Root cause found via the new trace UI: calls reaching `tf_hangup` lingered in FreeSWITCH indefinitely. `EslClient.HangupChannelAsync` issued `uuid_hangup`, which is not a registered API command in this FreeSWITCH build (`show api` confirms only `uuid_kill` exists) — every hangup attempt returned `-ERR ... Command not found!`, silently discarded with no error handling. This also silently broke the Session 69 CHANNEL_UNBRIDGE cleanup fix, which used the same method.
+- Fixed `HangupChannelAsync` to use `uuid_kill` (matching the already-correct `KillChannelAsync`). Added error-response logging to `EslClient.SendApiAsync` so a failed ESL command now logs a warning instead of failing silently.
+- Verified live: originated a test call through the after-hours → play → hangup path — `show channels` dropped to 0 immediately, and the `call_disconnected` event chain (previously unreachable) fired correctly afterward.
+- Cleared stale lingering test channels from FreeSWITCH as part of verification.
 
 ---
 

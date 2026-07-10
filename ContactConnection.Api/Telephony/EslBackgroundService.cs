@@ -25,6 +25,7 @@ public sealed class EslBackgroundService : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConfiguration _config;
     private readonly ILogger<EslBackgroundService> _logger;
+    private readonly ILogger<EslClient> _eslClientLogger;
     private readonly ITelephonyCallSessionStore _sessionStore;
     private readonly IAgentStateStore _stateStore;
 
@@ -33,15 +34,17 @@ public sealed class EslBackgroundService : BackgroundService
         IServiceScopeFactory scopeFactory,
         IConfiguration config,
         ILogger<EslBackgroundService> logger,
+        ILogger<EslClient> eslClientLogger,
         ITelephonyCallSessionStore sessionStore,
         IAgentStateStore stateStore)
     {
-        _hub          = hub;
-        _scopeFactory = scopeFactory;
-        _config       = config;
-        _logger       = logger;
-        _sessionStore = sessionStore;
-        _stateStore   = stateStore;
+        _hub             = hub;
+        _scopeFactory    = scopeFactory;
+        _config          = config;
+        _logger          = logger;
+        _eslClientLogger = eslClientLogger;
+        _sessionStore    = sessionStore;
+        _stateStore      = stateStore;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -67,7 +70,7 @@ public sealed class EslBackgroundService : BackgroundService
         var port = int.Parse(_config["FreeSWITCH:EslPort"] ?? "8021");
         var pass = _config["FreeSWITCH:EslPassword"] ?? "ClueCon";
 
-        await using var esl = new EslClient();
+        await using var esl = new EslClient(_eslClientLogger);
         await esl.ConnectAsync(host, port, pass, ct);
         await esl.SubscribeAsync("CHANNEL_PARK CHANNEL_HANGUP CHANNEL_HANGUP_COMPLETE CHANNEL_BRIDGE CHANNEL_UNBRIDGE PLAYBACK_STOP", ct);
 
