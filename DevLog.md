@@ -81,6 +81,45 @@
 | 69 | 2026-07-07 / 2026-07-08 | 3:00 PM CDT (7/7) | 7:25 AM CDT (7/8) | 985 min | ~5587 min |
 | 70 | 2026-07-09 | 4:03 PM CDT | 5:16 PM CDT | 73 min | ~5660 min |
 | 71 | 2026-07-10 | 4:55 AM CDT | 5:14 AM CDT | 19 min | ~5679 min |
+| 72 | 2026-07-12 | 7:31 AM CDT | 9:10 AM CDT | 99 min | ~5778 min |
+
+---
+
+## Session 72
+
+**Date:** 2026-07-12
+**Start:** 7:31 AM CDT
+**End:** 9:10 AM CDT
+**Duration:** 99 minutes
+
+### Accomplished
+
+**Call Trace — found and fixed a duplicate-CallRecord bug via live testing**
+
+- User reported: tracing a call already in queue plus a second originated test call, then disconnecting the first call also disconnected the second (still-queued, unanswered) call.
+- Root cause: `EslBackgroundService.HandleChannelParkAsync`'s check meant to skip the outbound "A-leg" FreeSWITCH creates during `fs_cli originate ... &park()` self-dial testing checked `vars.GetValueOrDefault("Channel-Call-Direction") == "outbound"` — but the actual FreeSWITCH event header is `Call-Direction`, not `Channel-Call-Direction`. This check had never matched anything, so the outbound leg was never actually skipped — every self-dial test call produced two independent `CallRecord`s (one per leg), each running its own full telephony flow/queue entry, explaining the paired records and near-simultaneous disconnects seen in testing.
+- Fixed the header name. Verified via FreeSWITCH log (`park()` executing on both legs before the fix) and confirmed via a live overlap test with two distinct ANIs that exactly one `CallRecord` is now created per call.
+- Confirmed this is a test-methodology artifact specific to the self-dial loopback trick — real production DIDs only ever have one channel, so this never affected real calls.
+
+**Data integrity check on two fully-traced test calls (at user's request)**
+
+- Confirmed both calls now produce exactly one `CallRecord` each, both correctly answered, full telephony+CRM trace present (50 steps on the longer call).
+- Flagged (not fixed, user already had this on their own list): captured CRM input data (name, address, phone, email, offer selection) lives only in `flow_sessions.variable_store` — never gets projected onto `CallRecord`'s relational fields or `Addresses`/`CustomFields` JSONB envelopes, and `call_interactions` rows never get marked complete/disposition even when their flow session completes, so `CallRecord.overall_status` stays `"incomplete"` permanently.
+
+**Call Trace — per-step expandable state snapshot**
+
+- Added `CallTraceEvent.StateSnapshot` (new `state_snapshot` JSONB column, migration `AddCallTraceStateSnapshot`, applied to both tenant schemas) capturing the full call/flow state at the end of each step: telephony steps get `vars` + all SIP headers (`ChannelVars`) + caller/destination/channel identity; CRM steps get `flowVars`/`inputs`/`apiResults`/current section/locked fields.
+- Redaction hook (`CallTraceSnapshot.FindSensitiveKeys`) keyed off a `"sensitive": true` flag on flow nodes — no node type has this flag yet (user is planning to add one to input-capturing nodes), so nothing is redacted today, but the moment that flag exists on a node, its captured values automatically show `[REDACTED]` in every future trace with no further trace-side changes needed.
+- Frontend: each step row in `CallTraceRunningView.tsx` is now expandable, rendering the parsed snapshot as a nested key/value tree — including auto-parsing values that are themselves JSON strings (e.g. a captured address/phone/email object) rather than showing an escaped blob.
+- Verified live: snapshot correctly showed `vars` evolving step-by-step and the full SIP header set on a real test call.
+
+**CRM flow engine — call_record/caller/agent/tenant variable namespaces were almost entirely unpopulated**
+
+- User found `{{caller.phone}}` wasn't resolving in a `set_variable` node. Root cause: `FlowEngine.BuildContext()` seeded `CallRecord = []` and `Caller = []` with a comment admitting these were stubbed pending future wiring — only `agent.id`/`tenant.id` had a value; every other field the designer's variable picker advertises (all of `call_record.*`, all of `caller.*`, most of `agent.*`/`tenant.*`) silently resolved to nothing.
+- User chose the full-pass fix. Added `PopulateCallContextAsync` to `FlowEngine.StartAsync`, wiring: `call_record.*` (id, status, call_source, record_type, phone_number, dnis, account_number, campaign_id, disposition via current interaction, call_started_at, call_ended_at, handle_time_seconds); `caller.*` (name, first_name, last_name, phone from `CallRecord.CallerId`/ANI, email, account_number, billing_address/shipping_address formatted as single-line strings); extended `agent.*` with extension/role; extended `tenant.*` with name/subdomain/timezone/plan_tier.
+- Added `dnis` to `call_record` in the designer's variable picker (`VariablePanel.tsx`) per user's follow-up ask for destination-number access.
+- `call_record.list_id` and `call_record.notes` have no backing field anywhere in the schema — left unresolved, flagged to user rather than guessing at new columns.
+- Verified live: a `set_variable` node correctly resolved `{{caller.phone}}` to the caller's ANI and stored it in `flow.billing_phone.value`.
 
 ---
 

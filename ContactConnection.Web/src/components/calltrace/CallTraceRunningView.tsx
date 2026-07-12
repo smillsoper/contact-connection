@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CallTraceStep, CaptureMode } from '../../api/callTraces'
 
 export interface CallTab {
@@ -24,6 +24,16 @@ export default function CallTraceRunningView({
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const activeCall = calls.find((c) => c.callRecordId === activeCallRecordId) ?? calls[0]
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set())
+
+  function toggleExpanded(key: string) {
+    setExpandedKeys((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
@@ -79,37 +89,129 @@ export default function CallTraceRunningView({
             {activeCall?.steps.length === 0 && (
               <p className="text-gray-500 text-xs">No steps yet…</p>
             )}
-            {activeCall?.steps.map((step, i) => (
-              <div key={i} className="bg-gray-800/50 border border-gray-800 rounded-lg px-3 py-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className={`inline-flex items-center text-xs font-medium px-1.5 py-0.5 rounded ${
-                    step.engine === 'telephony'
-                      ? 'text-violet-300 bg-violet-900/30'
-                      : 'text-sky-300 bg-sky-900/30'
-                  }`}>
-                    {step.nodeType}
-                  </span>
-                  <span className="text-gray-600 text-xs font-mono">
-                    {new Date(step.enteredAt).toLocaleTimeString()}
-                  </span>
+            {activeCall?.steps.map((step, i) => {
+              const key = `${activeCall.callRecordId}:${i}`
+              const expanded = expandedKeys.has(key)
+              const canExpand = !!step.stateSnapshot
+              return (
+                <div key={i} className="bg-gray-800/50 border border-gray-800 rounded-lg px-3 py-2">
+                  <button
+                    type="button"
+                    onClick={() => canExpand && toggleExpanded(key)}
+                    className={`w-full text-left ${canExpand ? 'cursor-pointer' : 'cursor-default'}`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-1.5">
+                        {canExpand && (
+                          <svg className={`w-3 h-3 text-gray-500 shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                          </svg>
+                        )}
+                        <span className={`inline-flex items-center text-xs font-medium px-1.5 py-0.5 rounded ${
+                          step.engine === 'telephony'
+                            ? 'text-violet-300 bg-violet-900/30'
+                            : 'text-sky-300 bg-sky-900/30'
+                        }`}>
+                          {step.nodeType}
+                        </span>
+                      </span>
+                      <span className="text-gray-600 text-xs font-mono">
+                        {new Date(step.enteredAt).toLocaleTimeString()}
+                      </span>
+                    </div>
+                    {step.label && <p className="text-gray-200 text-sm mt-1">{step.label}</p>}
+                    {step.detail && <p className="text-gray-400 text-xs mt-0.5">{step.detail}</p>}
+                    {(step.transitionTaken || step.exitReason || step.nextNodeId) && (
+                      <p className="text-gray-500 text-xs mt-1">
+                        exit: {step.transitionTaken ?? '—'}
+                        {step.nextNodeId && <> → {step.nextNodeId}</>}
+                        {step.exitReason && <> ({step.exitReason})</>}
+                      </p>
+                    )}
+                  </button>
+                  {expanded && step.stateSnapshot && (
+                    <StateSnapshotView json={step.stateSnapshot} />
+                  )}
                 </div>
-                {step.label && <p className="text-gray-200 text-sm mt-1">{step.label}</p>}
-                {step.detail && <p className="text-gray-400 text-xs mt-0.5">{step.detail}</p>}
-                {(step.transitionTaken || step.exitReason || step.nextNodeId) && (
-                  <p className="text-gray-500 text-xs mt-1">
-                    exit: {step.transitionTaken ?? '—'}
-                    {step.nextNodeId && <> → {step.nextNodeId}</>}
-                    {step.exitReason && <> ({step.exitReason})</>}
-                  </p>
-                )}
-              </div>
-            ))}
+              )
+            })}
             {activeCall?.ended && (
               <p className="text-gray-600 text-xs italic pt-1">Call ended.</p>
             )}
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+// Renders the per-step state snapshot (flow variables, SIP headers, section state, etc.).
+// Several variable values are themselves JSON strings (e.g. an address or phone captured by
+// a composite input node) — those get parsed and rendered as nested objects too, rather than
+// showing an escaped JSON blob.
+function StateSnapshotView({ json }: { json: string }) {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(json)
+  } catch {
+    return <pre className="mt-2 pt-2 border-t border-gray-700/50 text-xs text-gray-400 whitespace-pre-wrap break-all">{json}</pre>
+  }
+  return (
+    <div className="mt-2 pt-2 border-t border-gray-700/50">
+      <JsonNode value={parsed} />
+    </div>
+  )
+}
+
+function tryParseNestedJson(value: string): unknown {
+  const trimmed = value.trim()
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return undefined
+  try { return JSON.parse(trimmed) } catch { return undefined }
+}
+
+function JsonNode({ value, depth = 0 }: { value: unknown; depth?: number }) {
+  if (value === null || value === undefined) {
+    return <span className="text-gray-600 italic">null</span>
+  }
+
+  if (typeof value === 'string') {
+    const nested = tryParseNestedJson(value)
+    if (nested !== undefined) return <JsonNode value={nested} depth={depth} />
+    return value === ''
+      ? <span className="text-gray-600 italic">(empty)</span>
+      : <span className="text-gray-300 break-all">{value}</span>
+  }
+
+  if (typeof value === 'boolean' || typeof value === 'number') {
+    return <span className="text-amber-300">{String(value)}</span>
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) return <span className="text-gray-600 italic">[]</span>
+    return (
+      <div className="space-y-0.5">
+        {value.map((item, i) => (
+          <div key={i} className="flex gap-1.5">
+            <span className="text-gray-600">–</span>
+            <JsonNode value={item} depth={depth + 1} />
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>)
+  if (entries.length === 0) return <span className="text-gray-600 italic">{'{}'}</span>
+  return (
+    <div className={depth > 0 ? 'pl-3 border-l border-gray-800 space-y-1' : 'space-y-1'}>
+      {entries.map(([k, v]) => (
+        <div key={k} className="text-xs">
+          <span className="text-gray-500 font-mono">{k}:</span>{' '}
+          {typeof v === 'object' && v !== null
+            ? <div className="mt-0.5"><JsonNode value={v} depth={depth + 1} /></div>
+            : <JsonNode value={v} depth={depth + 1} />}
+        </div>
+      ))}
     </div>
   )
 }

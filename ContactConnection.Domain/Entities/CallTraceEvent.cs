@@ -21,6 +21,13 @@ public class CallTraceEvent
     public string? ExitReason { get; private set; }
     public string? NextNodeId { get; private set; }
 
+    /// <summary>
+    /// JSON snapshot of the call's variable/context state at the end of this step (flow
+    /// variables, SIP headers, section state, etc.) — sensitive values are redacted before
+    /// this is built, not at read time. Null is valid (e.g. rows recorded before this existed).
+    /// </summary>
+    public string? StateSnapshot { get; private set; }
+
     // Denormalized onto the first row for a call — lets historical search avoid a CallRecord join
     public Guid? CampaignId { get; private set; }
     public Guid? FlowId { get; private set; }
@@ -46,7 +53,8 @@ public class CallTraceEvent
         Guid? campaignId,
         Guid? flowId,
         string? dnis,
-        string? ani)
+        string? ani,
+        string? stateSnapshot)
     {
         return new CallTraceEvent
         {
@@ -67,6 +75,7 @@ public class CallTraceEvent
             FlowId = flowId,
             Dnis = dnis,
             Ani = ani,
+            StateSnapshot = stateSnapshot,
             CreatedAt = DateTimeOffset.UtcNow,
         };
     }

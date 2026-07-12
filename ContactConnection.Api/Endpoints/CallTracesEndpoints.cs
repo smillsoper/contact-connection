@@ -120,6 +120,7 @@ public static class CallTracesEndpoints
         e.TransitionTaken,
         e.ExitReason,
         e.NextNodeId,
+        e.StateSnapshot,
     };
 }
 

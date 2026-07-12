@@ -56,4 +56,8 @@ public class CallTraceStepDto
     public string? TransitionTaken { get; init; }
     public string? ExitReason { get; init; }
     public string? NextNodeId { get; init; }
+
+    /// <summary>JSON snapshot of call/flow variable state at the end of this step — sensitive
+    /// values already redacted server-side before this was built.</summary>
+    public string? StateSnapshot { get; init; }
 }

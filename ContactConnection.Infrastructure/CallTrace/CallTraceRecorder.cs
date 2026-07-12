@@ -35,6 +35,7 @@ public class CallTraceRecorder(
         Guid? flowId,
         string? dnis,
         string? ani,
+        string? stateSnapshot,
         CancellationToken ct = default)
     {
         var sequence = (int)await _redis.StringIncrementAsync($"calltrace:seq:{callRecordId}");
@@ -43,7 +44,7 @@ public class CallTraceRecorder(
 
         var trace = CallTraceEvent.Create(
             tenantId, callRecordId, sequence, engine, nodeId, nodeType, label, detail,
-            transitionTaken, nextNodeId, exitReason, campaignId, flowId, dnis, ani);
+            transitionTaken, nextNodeId, exitReason, campaignId, flowId, dnis, ani, stateSnapshot);
 
         await repository.AddAsync(trace, tenantSchemaName, ct);
 
@@ -63,6 +64,7 @@ public class CallTraceRecorder(
             TransitionTaken = transitionTaken,
             ExitReason = exitReason,
             NextNodeId = nextNodeId,
+            StateSnapshot = stateSnapshot,
         };
 
         foreach (var subscriptionId in subscriptionIds)

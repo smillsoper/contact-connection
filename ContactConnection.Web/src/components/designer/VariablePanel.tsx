@@ -13,7 +13,7 @@ const STATIC_NAMESPACES: StaticNamespace[] = [
     ns: 'call_record',
     fields: [
       { key: 'id' }, { key: 'status' }, { key: 'call_source' }, { key: 'record_type' },
-      { key: 'phone_number' }, { key: 'account_number' }, { key: 'list_id' },
+      { key: 'phone_number' }, { key: 'dnis' }, { key: 'account_number' }, { key: 'list_id' },
       { key: 'campaign_id' }, { key: 'disposition' }, { key: 'notes' },
       { key: 'call_started_at' }, { key: 'call_ended_at' }, { key: 'handle_time_seconds' },
     ],

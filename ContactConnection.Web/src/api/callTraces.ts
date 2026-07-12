@@ -29,6 +29,7 @@ export interface CallTraceStep {
   transitionTaken: string | null
   exitReason: string | null
   nextNodeId: string | null
+  stateSnapshot: string | null
 }
 
 export interface CallTraceCallSummary {

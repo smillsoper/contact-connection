@@ -4,6 +4,8 @@ using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
 using ContactConnection.Domain.Entities;
+using ContactConnection.Domain.ValueObjects;
+using ContactConnection.Infrastructure.CallTrace;
 using ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
@@ -26,6 +28,7 @@ public class FlowEngine : IFlowEngine
     private readonly IFlowRepository _flows;
     private readonly IFlowSessionRepository _sessions;
     private readonly IAgentRepository _agents;
+    private readonly ICallRecordRepository _callRecords;
     private readonly IDatabase _redis;
     private readonly TenantContext _tenantContext;
     private readonly IFlowNotifier _notifier;
@@ -43,6 +46,7 @@ public class FlowEngine : IFlowEngine
         IFlowRepository flows,
         IFlowSessionRepository sessions,
         IAgentRepository agents,
+        ICallRecordRepository callRecords,
         IConnectionMultiplexer redis,
         TenantContext tenantContext,
         IFlowNotifier notifier,
@@ -53,6 +57,7 @@ public class FlowEngine : IFlowEngine
         _flows         = flows;
         _sessions      = sessions;
         _agents        = agents;
+        _callRecords   = callRecords;
         _redis         = redis.GetDatabase();
         _tenantContext = tenantContext;
         _notifier      = notifier;
@@ -98,7 +103,23 @@ public class FlowEngine : IFlowEngine
             ctx.Agent["last_name"]  = agent.LastName;
             ctx.Agent["full_name"]  = agent.FullName;
             ctx.Agent["email"]      = agent.Email;
+            ctx.Agent["extension"]  = agent.SipExtension ?? string.Empty;
+            ctx.Agent["role"]       = agent.Role;
         }
+
+        // Populate tenant context so {{tenant.*}} tags resolve correctly
+        if (_tenantContext.Current is { } tenant)
+        {
+            ctx.Tenant["id"]        = tenant.Id.ToString();
+            ctx.Tenant["name"]      = tenant.Name;
+            ctx.Tenant["subdomain"] = tenant.Subdomain;
+            ctx.Tenant["timezone"]  = tenant.Timezone;
+            ctx.Tenant["plan_tier"] = tenant.PlanTier;
+        }
+
+        // Populate call_record/caller context from the call record so {{call_record.*}} and
+        // {{caller.*}} tags resolve correctly — previously always empty (never wired up).
+        await PopulateCallContextAsync(ctx, request.CallRecordId, request.InteractionId, ct);
 
         var state = await AdvanceInternalAsync(ctx, entryNodeId, agentInput: null, transition: "default", isStart: true, ct);
         state.FlowName = flow.Name;
@@ -224,11 +245,13 @@ public class FlowEngine : IFlowEngine
             var result = await handler.ExecuteAsync(node, ctx, agentInput, transition, ct);
 
             var detail = !string.IsNullOrWhiteSpace(result.State.Content) ? Truncate(result.State.Content) : result.State.Condition;
+            var sensitiveKeys = CallTraceSnapshot.FindSensitiveKeys(ctx.FlowDefinition);
+            var snapshot = CallTraceSnapshot.BuildCrmSnapshot(ctx, sensitiveKeys);
             await _traceRecorder.RecordStepAsync(
                 ctx.TenantId, _tenantContext.Current!.SchemaName, ctx.CallRecordId, TraceEngine.Crm, nodeId, nodeType,
                 result.State.Label, detail, transitionTaken: transition, result.NextNodeId,
                 exitReason: result.State.IsTerminal ? "terminal" : null,
-                campaignId: null, ctx.FlowId, dnis: null, ani: null, ct);
+                campaignId: null, ctx.FlowId, dnis: null, ani: null, snapshot, ct);
 
             // Terminal node or node waiting for input — return state, attaching any preceding script content
             if (result.NextNodeId is null || result.State.IsTerminal)
@@ -301,14 +324,71 @@ public class FlowEngine : IFlowEngine
             TenantId       = session.TenantId,
             CurrentNodeId  = session.CurrentNodeId,
             FlowDefinition = definition,
-            // Caller/agent/tenant data populated from call record at session start.
-            // In production these come from the call record lookup — stubbed here
-            // until FreeSWITCH screen pop populates CallDetail fields.
+            // call_record/caller/agent/tenant are filled in by the caller right after this
+            // returns (PopulateCallContextAsync + the agent/tenant lookups in StartAsync) —
+            // just seed the one field callers need before those lookups run.
             CallRecord = [],
             Caller     = [],
             Agent      = new() { ["id"] = request.AgentId.ToString() },
             Tenant     = new() { ["id"] = request.TenantId.ToString() }
         };
+    }
+
+    /// <summary>
+    /// Populates {{call_record.*}} and {{caller.*}} tags from the call record (and its current
+    /// interaction, for disposition). Some designer-advertised fields have no backing data yet
+    /// (call_record.list_id, call_record.notes) and are left unset — the resolver returns the
+    /// tag unresolved rather than erroring, so this degrades gracefully as those are added later.
+    /// </summary>
+    private async Task PopulateCallContextAsync(
+        FlowExecutionContext ctx, Guid callRecordId, Guid interactionId, CancellationToken ct)
+    {
+        var record = await _callRecords.GetByIdWithInteractionsAsync(callRecordId, ct);
+        if (record is null) return;
+
+        ctx.CallRecord["id"] = record.Id.ToString();
+        ctx.CallRecord["status"] = record.OverallStatus;
+        ctx.CallRecord["call_source"] = record.Source;
+        ctx.CallRecord["record_type"] = record.RecordType;
+        ctx.CallRecord["phone_number"] = record.Phone ?? string.Empty;
+        ctx.CallRecord["dnis"] = record.Dnis ?? string.Empty;
+        ctx.CallRecord["account_number"] = record.AccountNumber ?? string.Empty;
+        ctx.CallRecord["campaign_id"] = record.CampaignId.ToString();
+        ctx.CallRecord["call_started_at"] = record.CallStartAt?.ToString("O") ?? string.Empty;
+        ctx.CallRecord["call_ended_at"] = record.CallEndAt?.ToString("O") ?? string.Empty;
+        ctx.CallRecord["handle_time_seconds"] = record.HandleTimeSeconds?.ToString() ?? string.Empty;
+
+        var interaction = record.Interactions.FirstOrDefault(i => i.Id == interactionId);
+        ctx.CallRecord["disposition"] = interaction?.Disposition ?? string.Empty;
+
+        var fullName = string.Join(" ", new[] { record.FirstName, record.LastName }
+            .Where(n => !string.IsNullOrWhiteSpace(n)));
+        ctx.Caller["name"] = fullName;
+        ctx.Caller["first_name"] = record.FirstName ?? string.Empty;
+        ctx.Caller["last_name"] = record.LastName ?? string.Empty;
+        // The ANI is always available for a real inbound call; CallerId is that source of
+        // truth for "the number the caller is calling from" — distinct from CallRecord.Phone,
+        // which is a general contact-phone field an agent may capture/correct later.
+        ctx.Caller["phone"] = record.CallerId ?? string.Empty;
+        ctx.Caller["email"] = record.Email ?? string.Empty;
+        ctx.Caller["account_number"] = record.AccountNumber ?? string.Empty;
+        ctx.Caller["billing_address"] = FormatAddress(record.Addresses?.Billing);
+        ctx.Caller["shipping_address"] = FormatAddress(record.Addresses?.Shipping);
+    }
+
+    private static string FormatAddress(AddressData? address)
+    {
+        if (address is null) return string.Empty;
+
+        var street = string.Join(" ", new[] { address.Prefix, address.Street }
+            .Where(s => !string.IsNullOrWhiteSpace(s)));
+        var unit = string.Join(" ", new[] { address.UnitPrefix, address.Unit }
+            .Where(s => !string.IsNullOrWhiteSpace(s)));
+        var zip = string.IsNullOrWhiteSpace(address.Zip4) ? address.Zip : $"{address.Zip}-{address.Zip4}";
+
+        var parts = new[] { street, unit, address.City, address.State, zip, address.Country }
+            .Where(s => !string.IsNullOrWhiteSpace(s));
+        return string.Join(", ", parts);
     }
 
     private async Task SaveToRedis(FlowExecutionContext ctx, CancellationToken ct)

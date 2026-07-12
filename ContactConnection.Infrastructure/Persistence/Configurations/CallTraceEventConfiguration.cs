@@ -24,6 +24,7 @@ public class CallTraceEventConfiguration : IEntityTypeConfiguration<CallTraceEve
         b.Property(x => x.TransitionTaken).HasColumnName("transition_taken").HasMaxLength(200);
         b.Property(x => x.ExitReason).HasColumnName("exit_reason").HasMaxLength(500);
         b.Property(x => x.NextNodeId).HasColumnName("next_node_id").HasMaxLength(200);
+        b.Property(x => x.StateSnapshot).HasColumnName("state_snapshot").HasColumnType("jsonb");
         b.Property(x => x.CampaignId).HasColumnName("campaign_id");
         b.Property(x => x.FlowId).HasColumnName("flow_id");
         b.Property(x => x.Dnis).HasColumnName("dnis").HasMaxLength(32);

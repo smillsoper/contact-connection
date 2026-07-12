@@ -23,5 +23,6 @@ public interface ICallTraceRecorder
         Guid? flowId,
         string? dnis,
         string? ani,
+        string? stateSnapshot,
         CancellationToken ct = default);
 }

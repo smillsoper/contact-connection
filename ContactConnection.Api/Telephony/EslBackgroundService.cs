@@ -124,7 +124,11 @@ public sealed class EslBackgroundService : BackgroundService
         // fires CHANNEL_PARK for both the originate A-leg (outbound) and the loopback B-leg
         // (inbound). Only the inbound B-leg is the real caller; the A-leg must not be
         // processed as a second duplicate call.
-        if (vars.GetValueOrDefault("Channel-Call-Direction") == "outbound") return;
+        // NOTE: the actual event header is "Call-Direction", not "Channel-Call-Direction" —
+        // the previous check never matched anything, so this never actually skipped the A-leg,
+        // producing a duplicate CallRecord (queued, screen-popped, and answerable independently)
+        // for every self-dial test call.
+        if (vars.GetValueOrDefault("Call-Direction") == "outbound") return;
 
         var callerNumber = vars.GetValueOrDefault("Caller-Caller-ID-Number") ?? "";
         var callerName   = vars.GetValueOrDefault("Caller-Caller-ID-Name") ?? "";

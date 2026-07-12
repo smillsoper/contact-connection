@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Domain.Entities;
+using ContactConnection.Infrastructure.CallTrace;
 using ContactConnection.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -407,11 +408,16 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
 
     private Task RecordStepAsync(
         TelephonyFlowContext ctx, Guid flowId, string nodeId, string nodeType,
-        string? transitionTaken, string? nextNodeId, string? detail, string? exitReason, CancellationToken ct) =>
-        _traceRecorder.RecordStepAsync(
+        string? transitionTaken, string? nextNodeId, string? detail, string? exitReason, CancellationToken ct)
+    {
+        var snapshot = CallTraceSnapshot.BuildTelephonySnapshot(
+            ctx.Vars, ctx.ChannelVars, ctx.CallerNumber, ctx.DestinationNumber, ctx.ChannelUuid);
+
+        return _traceRecorder.RecordStepAsync(
             ctx.TenantId, ctx.TenantSchemaName, ctx.CallRecordId, TraceEngine.Telephony, nodeId, nodeType,
             label: null, detail, transitionTaken, nextNodeId, exitReason,
-            ctx.CampaignId, flowId, ctx.DestinationNumber, ctx.CallerNumber, ct);
+            ctx.CampaignId, flowId, ctx.DestinationNumber, ctx.CallerNumber, snapshot, ct);
+    }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
