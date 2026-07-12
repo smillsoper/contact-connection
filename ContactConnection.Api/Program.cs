@@ -114,6 +114,16 @@ builder.Services.AddAuthorization(options =>
             (ctx.User.FindFirst("permissions")?.Value ?? "")
                 .Split(',', StringSplitOptions.RemoveEmptyEntries)
                 .Contains(Permission.AgentsView)));
+    options.AddPolicy("BlocklistView", policy =>
+        policy.RequireAssertion(ctx =>
+            (ctx.User.FindFirst("permissions")?.Value ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Contains(Permission.BlocklistView)));
+    options.AddPolicy("BlocklistManage", policy =>
+        policy.RequireAssertion(ctx =>
+            (ctx.User.FindFirst("permissions")?.Value ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Contains(Permission.BlocklistManage)));
     options.AddPolicy("MfaPending", policy =>
         policy.RequireClaim("role", "mfa_pending"));
 });

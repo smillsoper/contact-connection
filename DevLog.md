@@ -83,6 +83,49 @@
 | 71 | 2026-07-10 | 4:55 AM CDT | 5:14 AM CDT | 19 min | ~5679 min |
 | 72 | 2026-07-12 | 7:31 AM CDT | 9:10 AM CDT | 99 min | ~5778 min |
 | 73 | 2026-07-12 | 9:12 AM CDT | 10:20 AM CDT | 68 min | ~5846 min |
+| 74 | 2026-07-12 | 10:40 AM CDT | 11:42 AM CDT | 62 min | ~5908 min |
+
+---
+
+## Session 74
+
+**Date:** 2026-07-12
+**Start:** 10:40 AM CDT
+**End:** 11:42 AM CDT
+**Duration:** 62 minutes
+
+### Accomplished
+
+**Block List management UI**
+
+- Telephony's `tf_check_block_list` node (checks caller ANI or a flow variable against a per-tenant block list) has existed for several sessions with full backend CRUD, but no UI existed to search/add/remove blocked numbers — the only way in was directly against the API.
+- Added two new granular permissions, `blocklist.view` and `blocklist.manage` (`Permission` static class + `Permission.All`, `ContactConnection.Domain/Entities/Role.cs`), per the user's explicit choice to let tenants assign block-list access to custom roles independently of general `TenantAdmin` status — not reusing `telephony.manage` and not gating behind the blanket `TenantAdmin` policy.
+- `Program.cs` — new `"BlocklistView"`/`"BlocklistManage"` authorization policies (same `RequireAssertion` pattern as `"AgentsView"`).
+- `BlockListEndpoints.cs` — replaced the previous blanket `.RequireAuthorization()` (any logged-in agent, no permission check at all) with per-route policies: GET → `BlocklistView`; POST/PUT/DELETE → `BlocklistManage`.
+- Frontend: `roles.ts` (`PERMISSION_LABELS`/`PERMISSION_GROUPS`) and `App.tsx` (`ADMIN_PERMISSIONS`) updated so the new permissions show up in the custom-role editor and grant dashboard access; new `api/blockList.ts` client; new `AdminBlockListPage.tsx` (search, add form, table with active/expired badges, remove action — all gated by `hasPermission('blocklist.manage')` for view-only users); new `/admin/block-list` route + nav card on the dashboard's Telephony section.
+- Verified: `dotnet build`/`dotnet test` (65/65 passing) clean, `tsc --noEmit` clean, live smoke-test confirmed the endpoint now correctly 401s without a token.
+
+**Bug fix: block-list exact match failed on phone number format mismatch**
+
+- User added `+15416704541` to the block list, then test-called with ANI `5416704541` (no country code) — call was not blocked.
+- `CheckBlockListNodeHandler` used a raw `Ordinal` string equality/prefix check with no normalization. Fixed by normalizing both sides (strip to digits, drop a leading US country-code `1` if 11 digits) before comparing — mirrors the same trick already used for destination-number/DID matching in `EslBackgroundService.cs`. Verified live: the same test number now correctly blocks.
+
+**Bug fix: `tf_end` NullReferenceException on pre-answer rejected calls**
+
+- After the block-list fix confirmed working, the Call Trace showed `tf_end` throwing `Object reference not set to an instance of an object` on a call that got rejected via `tf_reject` before being answered.
+- Root cause: `TelEndNodeHandler`'s "never answered/queued" branch called `ctx.Esl!.HangupChannelAsync(...)` unconditionally, but when `tf_end` is reached via the post-hangup `call_disconnected` event branch (fired from `EslBackgroundService.HandleChannelHangupAsync` after the channel is already gone), `ctx.Esl` is genuinely null — no live ESL connection is passed into that event context. Fixed by adding the same `ctx.Esl is not null` guard the whisper-bridge branch already had. Verified live: clean `exit: end` with no error.
+
+**Bug fix: built-in "Music (Built-In)" audio options referenced nonexistent files**
+
+- User wired a `tf_play` node to loop MOH ("Classical — Danza Española 1") with periodic announcements after a one-shot queue intro; the intro played but the MOH node produced dead air with no error (`tf_play` traced as `exit: playing`, i.e. FreeSWITCH accepted the `uuid_broadcast` command with no complaint).
+- Root cause: `ContactConnection.Web/src/api/audioFiles.ts`'s `BUILTIN_AUDIO_GROUPS` "Music (Built-In)" list referenced three files (`danza-espanola-op-37-h-142-1/2/3.wav`) that don't exist anywhere in the FreeSWITCH container's actual bundled music pack (`docker exec cc_freeswitch ls /usr/share/freeswitch/sounds/music/8000/` shows 4 entirely different filenames). `PlayNodeHandler.ResolveFileArgAsync` never validates a `__builtin:` path exists on disk, so it silently handed FreeSWITCH a dead path — no error surfaces anywhere in the app.
+- Fixed the dropdown to reference the 4 real bundled files. User will need to reselect the audio source on the affected node and re-save/republish the flow (the flow's saved JSON still has the old broken path).
+
+**Investigated but deferred: queued call re-offered to agent after they hung up**
+
+- User self-dial-tested a DID directly from their own agent softphone. After answering their own queued call via screen pop and later hanging up, ACW ran and then the same call was re-offered to them again.
+- Working theory (not yet fixed, user deferred to a future session): dialing a DID from an agent's own registered softphone extension parks that same channel directly (`freeswitch/conf/dialplan/default.xml`'s `did-inbound-test` extension) rather than creating a separate leg the way a real carrier-side inbound call would. When the agent then answers their own queued call, `AnswerQueuedCall`'s simple path (`TelephonyEndpoints.cs`) originates a *second*, brand-new SIP leg back to the same extension to bridge it in. `SoftphonePanel.tsx`'s `sessionRef.current` is unconditionally overwritten by whichever JsSIP session arrives most recently, so it loses its handle on the original parked leg once the bridge leg's auto-answered INVITE arrives — hanging up in the softphone UI only terminates the newer bridge leg, not necessarily the original `TelephonyCallSession`-tracked channel that `QueuePollingService` polls for `_queued == "true"`.
+- Recommended the user retest via the Telephony admin page's "Test Call" ESL origination (which creates a genuinely separate channel, matching real carrier-inbound topology) with a *different* agent answering, to confirm whether this is a real production bug or purely a self-dial-testing artifact before spending time on a fix.
 
 ---
 

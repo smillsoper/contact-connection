@@ -22,10 +22,12 @@ public class TelEndNodeHandler : ITelephonyNodeHandler
             }
             ctx.Vars.Remove("_agent_uuid");
         }
-        else if (!ctx.Vars.TryGetValue("_answered", out _) && !ctx.Vars.TryGetValue("_queued", out _))
+        else if (ctx.Esl is not null && !ctx.Vars.TryGetValue("_answered", out _) && !ctx.Vars.TryGetValue("_queued", out _))
         {
-            // Call was never answered or queued — reject cleanly.
-            await ctx.Esl!.HangupChannelAsync(ctx.ChannelUuid, ct);
+            // Call was never answered or queued — reject cleanly. No-op if the channel is
+            // already gone (e.g. reached via the call_disconnected event branch, which runs
+            // after CHANNEL_HANGUP and has no live ESL connection to command).
+            await ctx.Esl.HangupChannelAsync(ctx.ChannelUuid, ct);
         }
 
         return new TelephonyNodeResult(null, "end");

@@ -29,6 +29,7 @@ const NAV_SECTIONS: NavSection[] = [
     cards: [
       { title: 'Clients / Telephony', desc: 'DIDs, campaigns, clients, and agent groups.', path: '/admin/telephony', live: true },
       { title: 'SIP Gateways', desc: 'Configure carrier gateways and SIP trunks.', path: '/admin/sip-gateways', live: true },
+      { title: 'Block List', desc: 'Manage blocked phone numbers checked by telephony call flows.', path: '/admin/block-list', live: true },
     ],
   },
   {

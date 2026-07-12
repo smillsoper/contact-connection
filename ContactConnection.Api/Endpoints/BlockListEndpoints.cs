@@ -8,12 +8,12 @@ public static class BlockListEndpoints
 {
     public static IEndpointRouteBuilder MapBlockListEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/v1/block-list").RequireAuthorization();
+        var group = app.MapGroup("/api/v1/block-list");
 
-        group.MapPost("",              Add);
-        group.MapGet("",               GetAll);
-        group.MapPut("{id:guid}",      Update);
-        group.MapDelete("{id:guid}",   Remove);
+        group.MapPost("",              Add).RequireAuthorization("BlocklistManage");
+        group.MapGet("",               GetAll).RequireAuthorization("BlocklistView");
+        group.MapPut("{id:guid}",      Update).RequireAuthorization("BlocklistManage");
+        group.MapDelete("{id:guid}",   Remove).RequireAuthorization("BlocklistManage");
 
         return app;
     }

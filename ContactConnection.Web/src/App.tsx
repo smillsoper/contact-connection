@@ -24,6 +24,7 @@ import AdminApiDefinitionDetailPage from './pages/admin/AdminApiDefinitionDetail
 import AdminCredentialsPage from './pages/admin/AdminCredentialsPage'
 import TelephonyPage from './pages/admin/TelephonyPage'
 import SipGatewaysPage from './pages/admin/SipGatewaysPage'
+import AdminBlockListPage from './pages/admin/AdminBlockListPage'
 import CampaignDetailPage from './pages/admin/CampaignDetailPage'
 import PortalApiDefinitionsPage from './pages/portal/PortalApiDefinitionsPage'
 import PortalApiDefinitionDetailPage from './pages/portal/PortalApiDefinitionDetailPage'
@@ -42,7 +43,7 @@ function RequirePortalAuth({ children }: { children: React.ReactNode }) {
   return token ? <>{children}</> : <Navigate to={isAdminSubdomain ? '/login' : '/portal/login'} replace />
 }
 
-const ADMIN_PERMISSIONS = ['agents.view', 'agents.manage', 'roles.manage', 'flows.view', 'flows.manage', 'telephony.view', 'telephony.manage', 'integrations.view', 'integrations.manage', 'reports.view', 'supervisor.monitor']
+const ADMIN_PERMISSIONS = ['agents.view', 'agents.manage', 'roles.manage', 'flows.view', 'flows.manage', 'telephony.view', 'telephony.manage', 'integrations.view', 'integrations.manage', 'reports.view', 'supervisor.monitor', 'blocklist.view', 'blocklist.manage']
 
 function RequireAdminAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -236,6 +237,14 @@ export default function App() {
           element={
             <RequireAdminAuth>
               <SipGatewaysPage />
+            </RequireAdminAuth>
+          }
+        />
+        <Route
+          path="/admin/block-list"
+          element={
+            <RequireAdminAuth>
+              <AdminBlockListPage />
             </RequireAdminAuth>
           }
         />

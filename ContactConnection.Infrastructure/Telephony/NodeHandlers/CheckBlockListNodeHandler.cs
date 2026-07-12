@@ -31,15 +31,28 @@ public class CheckBlockListNodeHandler : ITelephonyNodeHandler
             ? varVal
             : ctx.CallerNumber;
 
+        var normalizedCheck = NormalizeNumber(numberToCheck);
         var blocked = entries.Any(e =>
             e.MatchType == BlockListMatchType.Exact
-                ? e.PhoneNumber == numberToCheck
-                : numberToCheck.StartsWith(e.PhoneNumber, StringComparison.Ordinal));
+                ? NormalizeNumber(e.PhoneNumber) == normalizedCheck
+                : normalizedCheck.StartsWith(NormalizeNumber(e.PhoneNumber), StringComparison.Ordinal));
 
         var transition = blocked ? "blocked" : "not_blocked";
         var nextNodeId = node["transitions"]?[transition]?.GetValue<string>()
                       ?? node["transitions"]?["default"]?.GetValue<string>();
 
         return new TelephonyNodeResult(nextNodeId, transition);
+    }
+
+    /// <summary>
+    /// Reduces a phone number to bare digits and drops a leading US country code
+    /// ("1" + 10 digits) so entries and ANI can be entered/stored in whatever form
+    /// (e.g. "+15551234567", "15551234567", "5551234567") and still compare equal —
+    /// mirrors the destination-number normalization in EslBackgroundService's DID routing.
+    /// </summary>
+    private static string NormalizeNumber(string number)
+    {
+        var digits = new string(number.Where(char.IsDigit).ToArray());
+        return digits.Length == 11 && digits[0] == '1' ? digits[1..] : digits;
     }
 }

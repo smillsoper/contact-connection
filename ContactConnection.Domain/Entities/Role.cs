@@ -71,6 +71,9 @@ public static class Permission
     public const string ReportsView   = "reports.view";
     public const string ReportsManage = "reports.manage";
 
+    public const string BlocklistView   = "blocklist.view";
+    public const string BlocklistManage = "blocklist.manage";
+
     public static readonly IReadOnlyList<string> All = [
         AgentsView, AgentsManage, RolesManage,
         FlowsView, FlowsManage, FlowsPublish,
@@ -78,7 +81,8 @@ public static class Permission
         CallsView, CallsExport,
         IntegrationsView, IntegrationsManage,
         SupervisorMonitor, SupervisorOverride,
-        ReportsView, ReportsManage
+        ReportsView, ReportsManage,
+        BlocklistView, BlocklistManage
     ];
 
     // Permissions derived from legacy AgentRole strings (for agents without a custom RoleId)

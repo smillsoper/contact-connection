@@ -37,6 +37,8 @@ export const PERMISSION_LABELS: Record<string, string> = {
   'supervisor.override':   'Override Commitments',
   'reports.view':          'View Reports',
   'reports.manage':        'Manage Reports',
+  'blocklist.view':        'View Block List',
+  'blocklist.manage':      'Manage Block List',
 }
 
 export const PERMISSION_GROUPS: Record<string, string[]> = {
@@ -48,6 +50,7 @@ export const PERMISSION_GROUPS: Record<string, string[]> = {
   Integrations: ['integrations.view', 'integrations.manage'],
   Supervisor:  ['supervisor.monitor', 'supervisor.override'],
   Reports:     ['reports.view', 'reports.manage'],
+  Blocklist:   ['blocklist.view', 'blocklist.manage'],
 }
 
 export const LANDING_PAGE_LABELS: Record<string, string> = {

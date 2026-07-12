@@ -41,9 +41,10 @@ export const BUILTIN_AUDIO_GROUPS: { group: string; options: { value: string; la
   {
     group: 'Music (Built-In)',
     options: [
-      { value: '__builtin:/usr/share/freeswitch/sounds/music/8000/danza-espanola-op-37-h-142-1.wav', label: 'Classical — Danza Española 1' },
-      { value: '__builtin:/usr/share/freeswitch/sounds/music/8000/danza-espanola-op-37-h-142-2.wav', label: 'Classical — Danza Española 2' },
-      { value: '__builtin:/usr/share/freeswitch/sounds/music/8000/danza-espanola-op-37-h-142-3.wav', label: 'Classical — Danza Española 3' },
+      { value: '__builtin:/usr/share/freeswitch/sounds/music/8000/danza-espanola-op-37-h-142-xii-arabesca.wav', label: 'Classical — Danza Española (Arabesca)' },
+      { value: '__builtin:/usr/share/freeswitch/sounds/music/8000/partita-no-3-in-e-major-bwv-1006-1-preludio.wav', label: 'Classical — Bach Partita No. 3 (Preludio)' },
+      { value: '__builtin:/usr/share/freeswitch/sounds/music/8000/ponce-preludio-in-e-major.wav', label: 'Classical — Ponce Preludio in E Major' },
+      { value: '__builtin:/usr/share/freeswitch/sounds/music/8000/suite-espanola-op-47-leyenda.wav', label: 'Classical — Suite Española (Leyenda)' },
     ],
   },
 ]
