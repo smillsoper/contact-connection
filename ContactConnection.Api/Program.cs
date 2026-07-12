@@ -1,6 +1,5 @@
 using System.Text;
 using System.Text.Json.Serialization;
-using Azure.Identity;
 using ContactConnection.Api.Endpoints;
 using ContactConnection.Api.Hubs;
 using ContactConnection.Api.Middleware;
@@ -25,7 +24,7 @@ if (!string.IsNullOrWhiteSpace(vaultUri))
 {
     try
     {
-        builder.Configuration.AddAzureKeyVault(new Uri(vaultUri), new DefaultAzureCredential());
+        builder.Configuration.AddAzureKeyVault(new Uri(vaultUri), AzureCredentialFactory.Resolve(builder.Configuration));
     }
     catch (Exception ex)
     {

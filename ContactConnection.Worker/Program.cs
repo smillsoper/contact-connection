@@ -1,4 +1,3 @@
-using Azure.Identity;
 using ContactConnection.Infrastructure.Extensions;
 using ContactConnection.Worker;
 
@@ -13,7 +12,7 @@ if (!string.IsNullOrWhiteSpace(vaultUri))
 {
     try
     {
-        builder.Configuration.AddAzureKeyVault(new Uri(vaultUri), new DefaultAzureCredential());
+        builder.Configuration.AddAzureKeyVault(new Uri(vaultUri), AzureCredentialFactory.Resolve(builder.Configuration));
     }
     catch (Exception ex)
     {
