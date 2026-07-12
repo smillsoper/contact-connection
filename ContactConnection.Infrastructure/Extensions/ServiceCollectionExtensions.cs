@@ -185,18 +185,14 @@ public static class ServiceCollectionExtensions
             ConnectionMultiplexer.Connect(redisConnection));
 
         // Azure Key Vault — credential store for API authentication secrets.
-        // Uses ClientSecretCredential with the same app registration as portal auth.
-        // For production on Azure, swap ClientSecretCredential for ManagedIdentityCredential.
+        // DefaultAzureCredential: in Azure, authenticates via the Managed Identity assigned
+        // to the App Service/Container App (no secret needed at all); locally, falls back to
+        // an az-login/Visual Studio/VS Code Azure account session if KeyVault:VaultUri is
+        // ever set for local testing. Same credential Program.cs uses for AddAzureKeyVault.
         var vaultUri = configuration["KeyVault:VaultUri"];
         if (!string.IsNullOrWhiteSpace(vaultUri))
         {
-            var azureCredential = new ClientSecretCredential(
-                configuration["EntraId:TenantId"]
-                    ?? throw new InvalidOperationException("EntraId:TenantId is not configured."),
-                configuration["EntraId:ClientId"]
-                    ?? throw new InvalidOperationException("EntraId:ClientId is not configured."),
-                configuration["EntraId:ClientSecret"]
-                    ?? throw new InvalidOperationException("EntraId:ClientSecret is not configured."));
+            var azureCredential = new DefaultAzureCredential();
 
             services.AddSingleton<SecretClient>(_ =>
                 new SecretClient(new Uri(vaultUri), azureCredential));

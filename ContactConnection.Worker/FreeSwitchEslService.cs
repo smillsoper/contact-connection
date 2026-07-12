@@ -55,7 +55,9 @@ public sealed class FreeSwitchEslService : BackgroundService
         var section = config.GetSection("FreeSwitchEsl");
         _host               = section["Host"]               ?? "localhost";
         _port               = section.GetValue<int>("Port", 8021);
-        _password           = section["Password"]           ?? "ClueCon";
+        // Shared with ContactConnection.Api's FreeSWITCH:EslPassword — same underlying
+        // credential, one Key Vault secret (FreeSWITCH--EslPassword) covers both.
+        _password           = config["FreeSWITCH:EslPassword"] ?? "ClueCon";
         _reconnectDelaySecs = section.GetValue<int>("ReconnectDelaySeconds", 5);
     }
 

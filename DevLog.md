@@ -82,6 +82,38 @@
 | 70 | 2026-07-09 | 4:03 PM CDT | 5:16 PM CDT | 73 min | ~5660 min |
 | 71 | 2026-07-10 | 4:55 AM CDT | 5:14 AM CDT | 19 min | ~5679 min |
 | 72 | 2026-07-12 | 7:31 AM CDT | 9:10 AM CDT | 99 min | ~5778 min |
+| 73 | 2026-07-12 | 9:12 AM CDT | 10:20 AM CDT | 68 min | ~5846 min |
+
+---
+
+## Session 73
+
+**Date:** 2026-07-12
+**Start:** 9:12 AM CDT
+**End:** 10:20 AM CDT
+**Duration:** 68 minutes
+
+### Accomplished
+
+**Migrated app secrets to Azure Key Vault**
+
+- Before this session, only the tenant/portal integration credential store (`ITenantCredentialStore`/`IPortalCredentialStore`, `portal--*`/`tenant--*` secret naming) used Key Vault — none of the app's own infrastructure secrets (JWT signing key, DB/Redis connection strings, Resend API key, FreeSWITCH ESL password, SignalWire PAT) did.
+- Added the Azure Key Vault configuration provider (`AddAzureKeyVault`) to both `ContactConnection.Api/Program.cs` and `ContactConnection.Worker/Program.cs`, conditional on `KeyVault:VaultUri` being set — every existing `configuration[...]`/`GetConnectionString(...)` call anywhere in the app now transparently reads from Key Vault when configured, with no other call sites changed. Secret naming convention: `Section--Key` in Key Vault → `Section:Key` in `IConfiguration`.
+- Swapped the Key Vault bootstrap credential from `ClientSecretCredential` to `DefaultAzureCredential` (resolves a TODO already in the code) — Managed Identity in Azure with zero secrets, `az login`/VS/VS Code account locally. `EntraId:ClientSecret` is no longer read anywhere in the codebase (confirmed via grep) — retired entirely rather than moved.
+- Standardized the FreeSWITCH ESL password to one config path (`FreeSWITCH:EslPassword`) shared by both Api and Worker (Worker previously read a different key, `FreeSwitchEsl:Password`, for the identical value) — one Key Vault secret now covers both instead of two duplicates.
+- Added `scripts/fetch-docker-secrets.ps1` + CLAUDE.md documentation for the SignalWire PAT, which is a Docker build-time value the config provider can't reach (never bound to .NET `IConfiguration`).
+- Documented the full secret-name-to-config-path table in CLAUDE.md for whoever populates Key Vault at deploy time.
+
+**Caught and fixed a real regression via live testing**
+
+- `KeyVault:VaultUri` turned out to already be set in this machine's local User Secrets (leftover from earlier credential-store work) pointing at a real vault, with a stale/expired Visual Studio Azure sign-in. Unlike the old lazy `SecretClient` DI factory (never touched Key Vault unless a request explicitly used the credential store), `AddAzureKeyVault` connects *eagerly* the moment it's added to `ConfigurationManager` — this crashed the API outright on first real test.
+- Fixed by wrapping the `AddAzureKeyVault` call in both `Program.cs` files in a try/catch that logs a clear warning and falls back to existing configuration sources on failure, rather than crashing. Re-verified: API now starts normally with the same broken credential state.
+
+**Secret rotation (in response to an exposure during this session)**
+
+- Accidentally ran `dotnet user-secrets list` myself instead of directing the user to run it in their own terminal, printing live secret values (`Resend:ApiKey`, `Jwt:SigningKey`, `EntraId:ClientSecret`, `ConnectionStrings:DefaultConnection`) into the conversation. Flagged immediately.
+- User rotated all three genuinely sensitive ones: Resend API key (in Resend's dashboard, then Key Vault, then local User Secrets), the Entra app registration client secret (in Azure AD — confirmed no code references it anymore post-migration, so rotation alone was sufficient), and the JWT signing key (regenerated locally via a PowerShell one-liner run in the user's own terminal, never shown to me — required a .NET Framework-compatible rewrite of the `RandomNumberGenerator` call for Windows PowerShell 5.1, since the one-line static `GetBytes(int)` convenience method is .NET 6+ only). `ConnectionStrings:DefaultConnection` assessed as low-risk (local Docker Postgres, `localhost`-only) and left as-is by choice.
+- User confirmed Key Vault now holds `SignalWirePAT`, `Resend--ApiKey`, plus the pre-existing `portal--*` integration credentials (Google Places, USPS, zipcodesdotcom) from the prior credential-store feature — confirming that feature's Key Vault access has been working correctly. `Jwt--SigningKey`, `ConnectionStrings--DefaultConnection`/`--Redis`, and `FreeSWITCH--EslPassword` deliberately deferred until real production values exist.
 
 ---
 

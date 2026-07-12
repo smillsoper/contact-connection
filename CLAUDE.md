@@ -383,7 +383,7 @@ chat_mentions        — id, message_id, mentioned_agent_id, is_read, created_at
 - **Single Record of Truth** — one `call_records` row is authoritative for everything on a call
 - **Separate PostgreSQL schema per tenant** — `tenant_{subdomain}` schema; `public` for platform tables
 - **search_path routing** — `TenantDbContext` uses unqualified table names; `Search Path=tenant_{schema},public` on the connection routes to the right schema at runtime
-- **Secrets** — Azure Key Vault (prod), .NET User Secrets (local). Never in config files or source.
+- **Secrets** — Azure Key Vault (prod), .NET User Secrets (local). Never in config files or source. Setting `KeyVault:VaultUri` makes the Api and Worker read every app secret from Key Vault automatically via the Azure Key Vault configuration provider (`AddAzureKeyVault` in each `Program.cs`) — no code changes needed at any call site. Auth to Key Vault itself uses `DefaultAzureCredential` (Managed Identity in Azure, `az login` locally) — no bootstrap secret required. Local dev with `KeyVault:VaultUri` unset (the default) is completely unaffected and keeps using User Secrets.
 - **All timestamps `timestamptz`** — UTC in DB, ISO 8601 on wire, IANA timezone at display
 - **JSONB for flexible/unqueried fields** — typed columns for WHERE/GROUP BY/ORDER BY/aggregates
 - **Commitment events = lock registry** — appended to call record; record state IS lock state
@@ -405,3 +405,24 @@ dotnet ef database update --context ContactConnectionDbContext --project Contact
 
 pgAdmin: http://localhost:5050
 MailHog: http://localhost:8025
+
+---
+
+### Secrets in Azure Key Vault (production)
+
+Set `KeyVault:VaultUri` (an App Service/Container App setting — not a secret, just the vault's URI) and grant the app's Managed Identity a Key Vault RBAC role (`Key Vault Secrets User`). Create these secrets — the `--` becomes `:` when the app reads them via `IConfiguration`:
+
+| Key Vault secret name | Config path | Used by |
+|---|---|---|
+| `Jwt--SigningKey` | `Jwt:SigningKey` | Api |
+| `ConnectionStrings--DefaultConnection` | `ConnectionStrings:DefaultConnection` | Api, Worker |
+| `ConnectionStrings--Redis` | `ConnectionStrings:Redis` | Api, Worker |
+| `Resend--ApiKey` | `Resend:ApiKey` | Api |
+| `FreeSWITCH--EslPassword` | `FreeSWITCH:EslPassword` | Api, Worker |
+
+The SignalWire PAT (used only as a Docker build arg for the FreeSWITCH image, never read by .NET config) isn't reachable via the config provider — store it in Key Vault as a plain secret named `SignalWirePAT` and pull it into the local `.env` before building:
+
+```powershell
+./scripts/fetch-docker-secrets.ps1 -VaultName <your-vault-name>
+docker compose build freeswitch
+```

@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json.Serialization;
+using Azure.Identity;
 using ContactConnection.Api.Endpoints;
 using ContactConnection.Api.Hubs;
 using ContactConnection.Api.Middleware;
@@ -11,6 +12,28 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Azure Key Vault — when configured, secrets named "Section--Key" here become
+// configuration["Section:Key"] automatically, so every existing configuration[...]/
+// GetConnectionString(...) call below and in AddInfrastructure keeps working unchanged.
+// No-op locally where KeyVault:VaultUri isn't set — local dev keeps using User Secrets.
+// ConfigurationManager connects eagerly the moment a source is added (unlike the old
+// lazy DI-factory SecretClient registration), so a stale/unreachable credential must not
+// crash startup — fall back to whatever's already in User Secrets/appsettings/env instead.
+var vaultUri = builder.Configuration["KeyVault:VaultUri"];
+if (!string.IsNullOrWhiteSpace(vaultUri))
+{
+    try
+    {
+        builder.Configuration.AddAzureKeyVault(new Uri(vaultUri), new DefaultAzureCredential());
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine(
+            $"WARNING: KeyVault:VaultUri is set ({vaultUri}) but Key Vault could not be reached — " +
+            $"continuing without it, using existing configuration sources instead. Error: {ex.Message}");
+    }
+}
 
 builder.Services.AddOpenApi();
 builder.Services.AddInfrastructure(builder.Configuration);
