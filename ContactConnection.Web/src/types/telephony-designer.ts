@@ -15,6 +15,7 @@ export type TelephonyNodeType =
   | 'tf_set_caller_id'
   | 'tf_cancel_dial'
   | 'tf_script_pop'
+  | 'tf_general_api_call'
   // Signal / media actions
   | 'tf_dtmf'
   // Agent-selected event branch actions
@@ -72,6 +73,13 @@ export interface TelNodeData extends Record<string, unknown> {
   cancelMessage?: string
   // tf_script_pop
   flowId?: string
+  // tf_general_api_call
+  apiEndpointId?: string
+  apiDefinitionScope?: 'tenant' | 'portal'
+  apiDefinitionName?: string
+  apiEndpointName?: string
+  outputVariable?: string
+  timeoutSeconds?: number
   // tf_dtmf
   digits?: string
   durationMs?: number
@@ -216,6 +224,12 @@ export const TELEPHONY_NODE_META: Record<
     description: "Auto-open the CRM script flow on the answering agent's screen",
     handles: 'single',
   },
+  tf_general_api_call: {
+    label: 'API Call',
+    color: '#6366f1',
+    description: 'Call a saved General API Definition',
+    handles: 'single',
+  },
   tf_dtmf: {
     label: 'Send DTMF',
     color: '#ca8a04',
@@ -315,6 +329,8 @@ export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
       return { label: 'Cancel Dial', cancelMessage: 'This transfer number is only available during business hours.' }
     case 'tf_script_pop':
       return { label: 'Script Pop', flowId: '' }
+    case 'tf_general_api_call':
+      return { label: 'New API Call', apiEndpointId: '', apiDefinitionScope: 'tenant', apiDefinitionName: '', apiEndpointName: '', outputVariable: '', timeoutSeconds: 30 }
     case 'tf_dtmf':
       return { label: 'Send DTMF', digits: '', durationMs: 100, interDigitGapMs: 50, waitForCompletion: true }
     case 'tf_whisper':

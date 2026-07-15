@@ -14,6 +14,7 @@ const API_CATEGORIES = [
   { value: 'order',       label: 'Order' },
   { value: 'fulfillment', label: 'Fulfillment' },
   { value: 'media',       label: 'Media' },
+  { value: 'general',     label: 'General' },
 ]
 
 const API_CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
@@ -63,6 +64,7 @@ const API_CATEGORY_BADGE_COLORS: Record<string, string> = {
   order:       'bg-emerald-900/50 text-emerald-300',
   fulfillment: 'bg-amber-900/50 text-amber-300',
   media:       'bg-violet-900/50 text-violet-300',
+  general:     'bg-indigo-900/50 text-indigo-300',
 }
 
 const API_SUB_TYPE_BADGE_COLORS: Record<string, string> = {
@@ -401,6 +403,25 @@ function jsonToKv(json: string): KVRow[] {
   } catch {
     return [{ key: '', value: '' }]
   }
+}
+
+// Finds every {{...}} tag across a set of template strings (path, query param/header values,
+// body template) and returns the unique, trimmed tag contents — used to build the General API
+// Test tab's prompt-for-each-variable form, since general endpoints aren't scoped to any single
+// fixed namespace the way address/order/fulfillment/media sub-types are.
+function extractVarTags(sources: (string | undefined)[]): string[] {
+  const tagPattern = /\{\{([^}]+)\}\}/g
+  const found = new Set<string>()
+  for (const src of sources) {
+    if (!src) continue
+    let m: RegExpExecArray | null
+    while ((m = tagPattern.exec(src)) !== null) found.add(m[1].trim())
+  }
+  return Array.from(found).sort()
+}
+
+function substituteVarTags(template: string, values: Record<string, string>): string {
+  return template.replace(/\{\{([^}]+)\}\}/g, (_match, tag: string) => values[tag.trim()] ?? '')
 }
 
 const HEADER_SUGGESTIONS = [
@@ -1605,6 +1626,34 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
     }
   }
 
+  // General API endpoints aren't scoped to a fixed namespace, so their {{...}} tags are
+  // resolved client-side against per-tag test values (gathered by extractVarTags) before the
+  // request is sent — the server-side namespace+testData substitution used by the other
+  // categories doesn't apply here.
+  async function runGeneralEndpointTest() {
+    setTestRunning(true)
+    setTestResult(null)
+    try {
+      const values = endpointForm.testData
+      const resolvedParams = endpointForm.params.map((r) => ({ ...r, value: substituteVarTags(r.value, values) }))
+      const resolvedHeaders = endpointForm.headers.map((r) => ({ ...r, value: substituteVarTags(r.value, values) }))
+      const result = await api.testEndpoint(definitionId, {
+        path: substituteVarTags(endpointForm.path, values),
+        httpMethod: endpointForm.httpMethod || undefined,
+        queryParams: kvToJson(resolvedParams),
+        headers: kvToJson(resolvedHeaders),
+        requestBodyTemplate: substituteVarTags(endpointForm.requestBodyTemplate, values) || undefined,
+        namespace: 'general',
+        testData: {},
+      })
+      setTestResult(result)
+    } catch (e: unknown) {
+      setTestResult({ success: false, statusCode: null, body: null, responseHeaders: null, resolvedUrl: null, error: (e as Error).message })
+    } finally {
+      setTestRunning(false)
+    }
+  }
+
   async function runAndCaptureFromPayload(outcomeId: string) {
     if (!endpointSourceContext) return
     setTestRunning(true)
@@ -1762,15 +1811,16 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
   }
 
   async function handleEndpointSave() {
-    if (!endpointForm.apiSubType.trim() || !endpointForm.name.trim() || !endpointForm.path.trim()) {
-      setEndpointFormError('Sub-type, name, and path are required.')
+    const subTypeRequired = def?.apiCategory !== 'general'
+    if ((subTypeRequired && !endpointForm.apiSubType.trim()) || !endpointForm.name.trim() || !endpointForm.path.trim()) {
+      setEndpointFormError(subTypeRequired ? 'Sub-type, name, and path are required.' : 'Name and path are required.')
       return
     }
     setEndpointSaving(true)
     setEndpointFormError(null)
     try {
       const data: EndpointFormData = {
-        apiSubType: endpointForm.apiSubType,
+        apiSubType: subTypeRequired ? endpointForm.apiSubType : '',
         name: endpointForm.name.trim(),
         path: endpointForm.path.trim(),
         httpMethod: endpointForm.httpMethod.trim() || undefined,
@@ -1938,15 +1988,19 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <span className="text-white font-medium">{ep.name}</span>
-                        {ep.isPreferred && (
+                        {ep.isPreferred && def.apiCategory !== 'general' && (
                           <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-900/50 text-emerald-400 font-medium">Preferred</span>
                         )}
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`text-xs px-2 py-0.5 rounded font-medium ${API_SUB_TYPE_BADGE_COLORS[ep.apiSubType] ?? 'bg-gray-800 text-gray-400'}`}>
-                        {API_SUB_TYPE_LABELS[ep.apiSubType] ?? ep.apiSubType}
-                      </span>
+                      {ep.apiSubType ? (
+                        <span className={`text-xs px-2 py-0.5 rounded font-medium ${API_SUB_TYPE_BADGE_COLORS[ep.apiSubType] ?? 'bg-gray-800 text-gray-400'}`}>
+                          {API_SUB_TYPE_LABELS[ep.apiSubType] ?? ep.apiSubType}
+                        </span>
+                      ) : (
+                        <span className="text-gray-600 text-xs">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <span className="bg-gray-800 text-gray-300 text-xs px-2 py-0.5 rounded font-mono">
@@ -1956,7 +2010,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                     <td className="px-4 py-3 font-mono text-gray-300 text-xs">{ep.path}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-3">
-                        {!ep.isPreferred && (
+                        {!ep.isPreferred && def.apiCategory !== 'general' && (
                           <button
                             onClick={() => handleSetPreferred(ep.id)}
                             className="text-emerald-500 hover:text-emerald-400 text-xs font-medium transition-colors"
@@ -2116,7 +2170,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
           </datalist>
 
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-            <div className={`bg-gray-900 border border-gray-700 rounded-2xl w-full shadow-2xl flex flex-col max-h-[90vh] ${endpointSourceContext ? (endpointTab === 'response' ? 'max-w-5xl' : 'max-w-4xl') : 'max-w-2xl'}`}>
+            <div className={`bg-gray-900 border border-gray-700 rounded-2xl w-full shadow-2xl flex flex-col max-h-[90vh] ${endpointSourceContext ? (endpointTab === 'response' ? 'max-w-5xl' : 'max-w-4xl') : def.apiCategory === 'general' ? 'max-w-3xl' : 'max-w-2xl'}`}>
               <div className="px-6 pt-6 pb-4 border-b border-gray-800 shrink-0">
                 <h2 className="text-white text-lg font-semibold">
                   {endpointModal === 'edit' ? 'Edit Endpoint' : 'Add Endpoint'}
@@ -2126,7 +2180,9 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
               <div className="px-6 border-b border-gray-700 shrink-0 flex">
                 {(endpointSourceContext
                   ? ['general', 'params', 'headers', 'body', 'test', 'payload', 'response'] as const
-                  : ['general', 'params', 'headers', 'body'] as const
+                  : def.apiCategory === 'general'
+                    ? ['general', 'params', 'headers', 'body', 'test'] as const
+                    : ['general', 'params', 'headers', 'body'] as const
                 ).map((tab) => {
                   const counts: Record<string, number> = {
                     general: 0,
@@ -2139,7 +2195,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                       ? (endpointForm.responseMapping.autocompleteConfig ? 1 : 0)
                       : endpointForm.responseMapping.outcomes.length,
                   }
-                  const labels: Record<string, string> = { general: 'General', params: 'Query Params', headers: 'Headers', body: 'Body', test: 'Source Test', payload: 'Payload Test', response: 'Response Mapping' }
+                  const labels: Record<string, string> = { general: 'General', params: 'Query Params', headers: 'Headers', body: 'Body', test: def.apiCategory === 'general' ? 'Test' : 'Source Test', payload: 'Payload Test', response: 'Response Mapping' }
                   const count = counts[tab]
                   const activeColor = tab === 'test' ? 'border-emerald-500 text-emerald-400'
                     : tab === 'response' ? 'border-violet-500 text-violet-400'
@@ -2183,24 +2239,26 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                 {/* General tab */}
                 {endpointTab === 'general' && (
                   <div className="space-y-4">
-                    <div>
-                      <label className="block text-gray-400 text-xs font-medium mb-1.5">API Sub-Type *</label>
-                      <select
-                        value={endpointForm.apiSubType}
-                        onChange={(e) => setEndpointForm((f) => ({ ...f, apiSubType: e.target.value }))}
-                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
-                      >
-                        <option value="">Select a sub-type…</option>
-                        {API_SUB_TYPES.filter(s => s.category === def.apiCategory).map((s) => (
-                          <option key={s.value} value={s.value}>{s.label}</option>
-                        ))}
-                      </select>
-                      {!API_CATEGORIES.some(c => c.value === def.apiCategory) && (
-                        <p className="text-amber-400 text-xs mt-1">
-                          The definition has an invalid API Category — edit the definition and set a valid category first.
-                        </p>
-                      )}
-                    </div>
+                    {def.apiCategory !== 'general' && (
+                      <div>
+                        <label className="block text-gray-400 text-xs font-medium mb-1.5">API Sub-Type *</label>
+                        <select
+                          value={endpointForm.apiSubType}
+                          onChange={(e) => setEndpointForm((f) => ({ ...f, apiSubType: e.target.value }))}
+                          className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
+                        >
+                          <option value="">Select a sub-type…</option>
+                          {API_SUB_TYPES.filter(s => s.category === def.apiCategory).map((s) => (
+                            <option key={s.value} value={s.value}>{s.label}</option>
+                          ))}
+                        </select>
+                        {!API_CATEGORIES.some(c => c.value === def.apiCategory) && (
+                          <p className="text-amber-400 text-xs mt-1">
+                            The definition has an invalid API Category — edit the definition and set a valid category first.
+                          </p>
+                        )}
+                      </div>
+                    )}
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="block text-gray-400 text-xs font-medium mb-1.5">Name *</label>
@@ -2311,6 +2369,88 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                       </p>
                     </div>
                   )}
+
+                  {/* General API Test tab — prompts for a value per {{...}} tag found anywhere
+                      in the path/query params/headers/body, since general endpoints aren't tied
+                      to one fixed namespace like address/order/fulfillment/media sub-types are. */}
+                  {endpointTab === 'test' && def.apiCategory === 'general' && (() => {
+                    const tags = extractVarTags([
+                      endpointForm.path,
+                      ...endpointForm.params.map((r) => r.value),
+                      ...endpointForm.headers.map((r) => r.value),
+                      endpointForm.requestBodyTemplate,
+                    ])
+                    return (
+                      <div className="space-y-3">
+                        {tags.length === 0 ? (
+                          <p className="text-gray-500 text-xs">
+                            No {'{{...}}'} variables found in the path, query params, headers, or body yet.
+                            You can still run the test as-is.
+                          </p>
+                        ) : (
+                          <div className="space-y-2">
+                            <p className="text-gray-500 text-xs">
+                              Enter test values for the dynamic variables used by this endpoint. These are only used for this test run — they are not saved.
+                            </p>
+                            {tags.map((tag) => (
+                              <div key={tag}>
+                                <label className="block text-gray-400 text-xs font-medium mb-1 font-mono">{'{{' + tag + '}}'}</label>
+                                <input
+                                  type="text"
+                                  value={endpointForm.testData[tag] ?? ''}
+                                  onChange={(e) => setEndpointForm((f) => ({ ...f, testData: { ...f.testData, [tag]: e.target.value } }))}
+                                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 font-mono focus:outline-none focus:border-indigo-500"
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Run Test */}
+                        <div className="pt-3 border-t border-gray-800 flex items-center gap-3">
+                          <button
+                            onClick={runGeneralEndpointTest}
+                            disabled={testRunning || !endpointForm.path.trim()}
+                            className="bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                          >
+                            {testRunning ? 'Running…' : 'Run Test'}
+                          </button>
+                          {!endpointForm.path.trim() && (
+                            <span className="text-gray-500 text-xs">Enter a path on the General tab first.</span>
+                          )}
+                        </div>
+
+                        {/* Test result */}
+                        {testResult && (
+                          <div className="space-y-2">
+                            {testResult.resolvedUrl && (
+                              <p className="font-mono text-xs text-gray-500 truncate" title={testResult.resolvedUrl}>
+                                → {testResult.resolvedUrl}
+                              </p>
+                            )}
+                            <div className="flex items-center gap-2">
+                              {testResult.statusCode != null ? (
+                                <span className={`text-sm font-mono font-bold ${testResult.statusCode < 300 ? 'text-emerald-400' : testResult.statusCode < 500 ? 'text-amber-400' : 'text-red-400'}`}>
+                                  {testResult.statusCode}
+                                </span>
+                              ) : null}
+                              <span className={`text-xs font-medium ${testResult.success ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {testResult.success ? 'Success' : 'Failed'}
+                              </span>
+                            </div>
+                            {testResult.error && (
+                              <p className="text-red-400 text-xs bg-red-900/20 rounded-lg px-3 py-2">{testResult.error}</p>
+                            )}
+                            {testResult.body && (
+                              <pre className="bg-gray-950 border border-gray-800 rounded-lg p-3 text-xs text-gray-300 font-mono overflow-x-auto max-h-52 whitespace-pre-wrap break-all">
+                                {testResult.body}
+                              </pre>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })()}
 
                   {/* Source Test tab — autocomplete variant */}
                   {endpointTab === 'test' && endpointForm.apiSubType === 'realtime_address_autocomplete' && (

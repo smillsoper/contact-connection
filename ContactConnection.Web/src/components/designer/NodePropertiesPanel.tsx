@@ -5,7 +5,7 @@ import ScriptContentEditor from './ScriptContentEditor'
 import VariablePanel from './VariablePanel'
 import { computeAncestorVars } from '../../utils/flowGraph'
 import { flowsApi } from '../../api/flows'
-import type { FlowSummary } from '../../api/flows'
+import type { FlowSummary, GeneralApiSummary } from '../../api/flows'
 
 const PRESET_MASKS = [
   { label: 'None', value: '' },
@@ -55,6 +55,13 @@ export default function NodePropertiesPanel({
   useEffect(() => {
     if (type !== 'execute_flow' && type !== 'transition_to_flow') return
     flowsApi.listAll().then(setAvailableFlows).catch(console.error)
+  }, [type])
+
+  // General API Definitions for api_call nodes — fetched lazily
+  const [generalApis, setGeneralApis] = useState<GeneralApiSummary[]>([])
+  useEffect(() => {
+    if (type !== 'api_call') return
+    flowsApi.listGeneralApis().then(setGeneralApis).catch(console.error)
   }, [type])
 
   // Address node — active script tab ('main' | field key)
@@ -777,28 +784,71 @@ export default function NodePropertiesPanel({
         )
       }
 
-      case 'api_call':
+      case 'api_call': {
+        const selectedEndpointId = (data.apiEndpointId as string) ?? ''
+        const tenantApis = generalApis.filter((a) => a.scope === 'tenant')
+        const portalApis = generalApis.filter((a) => a.scope === 'portal')
         return (
           <>
             {field(
-              'method',
-              'Method',
+              'apiEndpointId',
+              'API Endpoint',
               <select
                 className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-sky-500"
-                value={(data.method as string) ?? 'GET'}
-                onChange={(e) => onUpdate(node.id, { method: e.target.value })}
+                value={selectedEndpointId}
+                onChange={(e) => {
+                  const chosen = generalApis.find((a) => a.id === e.target.value)
+                  onUpdate(node.id, {
+                    apiEndpointId: chosen?.id ?? '',
+                    apiDefinitionScope: chosen?.scope ?? 'tenant',
+                    apiDefinitionName: chosen?.definitionName ?? '',
+                    apiEndpointName: chosen?.name ?? '',
+                  })
+                }}
               >
-                {['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((m) => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
+                <option value="">— Select an endpoint —</option>
+                {tenantApis.length > 0 && (
+                  <optgroup label="Your Tenant">
+                    {tenantApis.map((a) => (
+                      <option key={a.id} value={a.id}>{a.definitionName} → {a.name}{a.provider ? ` (${a.provider})` : ''}</option>
+                    ))}
+                  </optgroup>
+                )}
+                {portalApis.length > 0 && (
+                  <optgroup label="Platform">
+                    {portalApis.map((a) => (
+                      <option key={a.id} value={a.id}>{a.definitionName} → {a.name}{a.provider ? ` (${a.provider})` : ''}</option>
+                    ))}
+                  </optgroup>
+                )}
               </select>,
             )}
-            {field('url', 'URL', input('url', 'https://api.example.com/{{flow.id}}'))}
-            {field('headers', 'Headers (JSON)', textarea('headers', 2, '{"Authorization": "Bearer {{flow.token}}"}'))}
-            {field('body', 'Body (JSON)', textarea('body', 3, '{"key": "{{input.node_id}}"}'))}
-            <p className="text-[10px] text-gray-500">Use {'{{namespace.field}}'} in all fields</p>
+            {generalApis.length === 0 && (
+              <p className="text-[10px] text-amber-400">
+                No active General API endpoints found. Create a General API Definition and add an endpoint to it in Admin → API Definitions.
+              </p>
+            )}
+            {field('outputVariable', 'Output Variable', input('outputVariable', 'orderApi'))}
+            {field(
+              'timeoutSeconds',
+              'Timeout (seconds)',
+              <input
+                type="number"
+                min={1}
+                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-sky-500"
+                value={(data.timeoutSeconds as number) ?? 30}
+                onChange={(e) => onUpdate(node.id, { timeoutSeconds: Number(e.target.value) || 30 })}
+              />,
+            )}
+            <p className="text-[10px] text-gray-500 leading-snug">
+              Response is stored as {'{{flow.'}{(data.outputVariable as string) || 'variable'}{'}}'}  — reference
+              pieces of it with {'{{flow.'}{(data.outputVariable as string) || 'variable'}{'.response.field}}'},
+              {' '}{'{{flow.'}{(data.outputVariable as string) || 'variable'}{'.success}}'}, etc. Connect the exit
+              handle to wire up Success / Error / Timeout.
+            </p>
           </>
         )
+      }
 
       case 'end':
         return field('status', 'Status', input('status', 'complete'))

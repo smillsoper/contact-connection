@@ -1,11 +1,11 @@
 import type { NodeProps } from '@xyflow/react'
 import { useEdges, useNodeId } from '@xyflow/react'
-import NodeShell from './NodeShell'
-import type { NodeData } from '../../../types/designer'
+import TelNodeShell from '../TelNodeShell'
+import type { TelNodeData } from '../../../types/telephony-designer'
 
 const EXIT_OPTIONS = ['success', 'error', 'timeout']
 
-export default function ApiCallNode({ data, selected }: NodeProps & { data: NodeData }) {
+export default function GeneralApiCallNode({ data, selected }: NodeProps & { data: TelNodeData }) {
   const nodeId = useNodeId()
   const edges  = useEdges()
 
@@ -22,7 +22,7 @@ export default function ApiCallNode({ data, selected }: NodeProps & { data: Node
   const missingOptions = EXIT_OPTIONS.filter((o) => !wiredOptions.has(o))
 
   return (
-    <NodeShell type="api_call" label={data.label as string} isEntry={data.isEntry as boolean} selected={selected}>
+    <TelNodeShell type="tf_general_api_call" label={data.label as string} isEntry={data.isEntry as boolean} selected={selected}>
       <p className="text-xs text-gray-400 mt-0.5 truncate">
         {apiEndpointName ? `${apiDefinitionName} → ${apiEndpointName}` : '— no endpoint selected'}
       </p>
@@ -38,6 +38,6 @@ export default function ApiCallNode({ data, selected }: NodeProps & { data: Node
           ⚠ {missingOptions.length} option{missingOptions.length > 1 ? 's' : ''} not wired
         </p>
       )}
-    </NodeShell>
+    </TelNodeShell>
   )
 }

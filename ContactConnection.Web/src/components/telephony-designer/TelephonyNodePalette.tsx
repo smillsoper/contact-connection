@@ -15,6 +15,7 @@ const INBOUND_NODES: TelephonyNodeType[] = [
   'tf_set_variable',
   'tf_get_sip_header',
   'tf_set_sip_header',
+  'tf_general_api_call',
   'tf_end',
   // Event listener nodes (independent entry points)
   'tf_on_agent_selected',
@@ -35,6 +36,7 @@ const OUTBOUND_NODES: TelephonyNodeType[] = [
   'tf_set_caller_id',
   'tf_get_sip_header',
   'tf_set_sip_header',
+  'tf_general_api_call',
   'tf_end',
 ]
 
@@ -48,6 +50,7 @@ const OUTBOUND_MANUAL_NODES: TelephonyNodeType[] = [
   'tf_cancel_dial',
   'tf_get_sip_header',
   'tf_set_sip_header',
+  'tf_general_api_call',
   'tf_end',
 ]
 

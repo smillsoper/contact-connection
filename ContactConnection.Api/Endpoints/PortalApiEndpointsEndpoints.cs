@@ -56,11 +56,12 @@ public static class PortalApiEndpointsEndpoints
         var def = await defRepo.GetByIdAsync(definitionId, ct);
         if (def is null) return Results.NotFound();
 
-        if (!ApiSubType.IsValid(request.ApiSubType))
+        if (def.ApiCategory != ApiCategory.General && !ApiSubType.IsValid(request.ApiSubType))
             return Results.BadRequest(new { error = $"Unknown api_sub_type '{request.ApiSubType}'. Valid sub-types: {string.Join(", ", ApiSubType.All)}" });
 
         var endpoint = PortalApiEndpoint.Create(
             definitionId,
+            def.ApiCategory,
             request.ApiSubType,
             request.Name,
             request.Path,
@@ -83,6 +84,7 @@ public static class PortalApiEndpointsEndpoints
         Guid definitionId,
         Guid endpointId,
         UpdateApiEndpointRequest request,
+        IPortalApiDefinitionRepository defRepo,
         IPortalApiEndpointRepository repo,
         CancellationToken ct)
     {
@@ -91,9 +93,11 @@ public static class PortalApiEndpointsEndpoints
 
         if (request.ApiSubType is not null)
         {
-            if (!ApiSubType.IsValid(request.ApiSubType))
+            var def = await defRepo.GetByIdAsync(definitionId, ct);
+            if (def is null) return Results.NotFound();
+            if (def.ApiCategory != ApiCategory.General && !ApiSubType.IsValid(request.ApiSubType))
                 return Results.BadRequest(new { error = $"Unknown api_sub_type '{request.ApiSubType}'." });
-            endpoint.UpdateSubType(request.ApiSubType);
+            endpoint.UpdateSubType(def.ApiCategory, request.ApiSubType);
         }
         endpoint.Update(request.Name, request.Path, request.HttpMethod, request.Description, request.SortOrder);
         if (request.RequestBodyTemplate is not null) endpoint.SetRequestBodyTemplate(request.RequestBodyTemplate);

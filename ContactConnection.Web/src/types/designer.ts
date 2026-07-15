@@ -54,11 +54,11 @@ export interface NodeData extends Record<string, unknown> {
   // set_variable
   assignments?: { variable: string; value: string }[]
   // api_call
-  method?: string
-  url?: string
-  headers?: string
-  body?: string
-  responseMap?: { source: string; target: string }[]
+  apiEndpointId?: string
+  apiDefinitionScope?: 'tenant' | 'portal'
+  apiDefinitionName?: string
+  apiEndpointName?: string
+  timeoutSeconds?: number
   // end
   status?: string
 }
@@ -96,11 +96,11 @@ export interface ContactConnectionNodeDef {
   targetFlowName?: string
   condition?: string
   assignments?: { variable: string; value: string }[]
-  method?: string
-  url?: string
-  headers?: string
-  body?: string
-  responseMap?: { source: string; target: string }[]
+  apiEndpointId?: string
+  apiDefinitionScope?: 'tenant' | 'portal'
+  apiDefinitionName?: string
+  apiEndpointName?: string
+  timeoutSeconds?: number
   status?: string
   _pos?: { x: number; y: number }
   transitions: Record<string, string>
@@ -181,8 +181,8 @@ export const NODE_META: Record<
   api_call: {
     label: 'API Call',
     color: '#6366f1',
-    description: 'Call an external API endpoint',
-    handles: 'dual',
+    description: 'Call a saved General API Definition',
+    handles: 'single',
   },
   end: {
     label: 'End',
@@ -215,7 +215,7 @@ export function defaultNodeData(type: ContactConnectionNodeType): NodeData {
     case 'set_variable':
       return { label: 'Set Variable', assignments: [{ variable: '', value: '' }] }
     case 'api_call':
-      return { label: 'New API Call', method: 'GET', url: '', headers: '', body: '' }
+      return { label: 'New API Call', apiEndpointId: '', apiDefinitionScope: 'tenant', apiDefinitionName: '', apiEndpointName: '', outputVariable: '', timeoutSeconds: 30 }
     case 'end':
       return { label: 'End', status: 'complete' }
   }

@@ -1,54 +1,47 @@
 using System.Text.Json.Nodes;
-using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Infrastructure.Common;
+using ContactConnection.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
 
-namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
+namespace ContactConnection.Infrastructure.Telephony.NodeHandlers;
 
 /// <summary>
-/// Handles "api_call" nodes — invokes a saved endpoint of a "general"-category API Definition
-/// (tenant or portal scoped). A general definition is a connection (base URL, auth, timeout);
-/// its endpoints are the individual callable operations. Wraps the result as { success,
-/// status_code, status_message, response_headers, response, error, timed_out }, and stores it
-/// flattened into flow variables under outputVariable so any piece can be referenced via
-/// {{flow.outputVariable.response.field}}.
+/// Handles "tf_general_api_call" nodes — the telephony-engine equivalent of the CRM engine's
+/// "api_call" node. Invokes a saved endpoint of a "general"-category API Definition (tenant or
+/// portal scoped) — the definition is a connection (base URL, auth, timeout), the endpoint is
+/// the individual callable operation — and stores the { success, status_code, status_message,
+/// response_headers, response, error, timed_out } wrapper flattened into ctx.Vars under
+/// outputVariable.
 ///
-/// Node schema:
-/// {
-///   "type": "api_call",
-///   "label": "Get Stats",
-///   "apiEndpointId": "guid",
-///   "apiDefinitionScope": "tenant" | "portal",
-///   "outputVariable": "statsApi",
-///   "timeoutSeconds": 30,
-///   "transitions": { "success": "node_x", "error": "node_y", "timeout": "node_z" }
-/// }
+/// Runs from a background service (EslBackgroundService), not an HTTP request, so — like
+/// CheckBlockListNodeHandler — it cannot use the tenant repositories/credential store that
+/// depend on ambient TenantContext; it goes straight to ITenantDbContextFactory / the
+/// credential store's explicit-tenant overload instead.
+///
+/// Node schema: identical to the CRM "api_call" node (apiEndpointId, apiDefinitionScope,
+/// outputVariable, timeoutSeconds, transitions: success/error/timeout).
 /// </summary>
-public class ApiCallNodeHandler(
-    IVariableResolver resolver,
-    ITenantApiDefinitionRepository tenantDefinitions,
-    IPortalApiDefinitionRepository portalDefinitions,
-    ITenantApiEndpointRepository tenantEndpoints,
-    IPortalApiEndpointRepository portalEndpoints,
+public class GeneralApiCallNodeHandler(
+    ITenantDbContextFactory tenantDbFactory,
+    ContactConnectionDbContext portalDb,
     ITenantCredentialStore tenantCredentials,
     IPortalCredentialStore portalCredentials,
     IApiDefinitionExecutor executor)
-    : NodeHandlerBase(resolver), INodeHandler
+    : ITelephonyNodeHandler
 {
-    public string NodeType => "api_call";
+    public string NodeType => "tf_general_api_call";
 
     private record CallTarget(
         string HttpMethod, string BaseUrl, string Path, string Headers, string QueryParams,
         string? RequestBodyTemplate, string AuthConfig, int TimeoutSeconds, bool IsActive);
 
-    public async Task<NodeResult> ExecuteAsync(
-        JsonObject node, FlowExecutionContext ctx,
-        string? agentInput, string agentTransition, CancellationToken ct = default)
+    public async Task<TelephonyNodeResult> ExecuteAsync(
+        JsonObject node, TelephonyFlowContext ctx, CancellationToken ct = default)
     {
-        var varCtx = ctx.ToVariableContext();
-        var outputVariable = Str(node, "outputVariable")?.Trim();
-        var scope = Str(node, "apiDefinitionScope") ?? "tenant";
-        var endpointIdStr = Str(node, "apiEndpointId");
+        var outputVariable = node["outputVariable"]?.GetValue<string>()?.Trim();
+        var scope = node["apiDefinitionScope"]?.GetValue<string>() ?? "tenant";
+        var endpointIdStr = node["apiEndpointId"]?.GetValue<string>();
 
         ApiDefinitionExecutionResult result;
         string transitionKey;
@@ -64,7 +57,7 @@ public class ApiCallNodeHandler(
         {
             var target = scope == "portal"
                 ? await LoadPortalAsync(endpointId, ct)
-                : await LoadTenantAsync(endpointId, ct);
+                : await LoadTenantAsync(ctx.TenantSchemaName, endpointId, ct);
 
             if (target is null)
             {
@@ -80,18 +73,18 @@ public class ApiCallNodeHandler(
             }
             else
             {
-                var resolvedBaseUrl = Resolver.Resolve(target.BaseUrl, varCtx);
-                var resolvedPath    = Resolver.Resolve(target.Path, varCtx);
+                var resolvedBaseUrl = TelSetVariableNodeHandler.Resolve(target.BaseUrl, ctx);
+                var resolvedPath    = TelSetVariableNodeHandler.Resolve(target.Path, ctx);
                 var resolvedUrl     = resolvedBaseUrl.TrimEnd('/') + "/" + resolvedPath.TrimStart('/');
                 var resolvedBody    = target.RequestBodyTemplate is { } bodyTemplate
-                    ? Resolver.Resolve(bodyTemplate, varCtx)
+                    ? TelSetVariableNodeHandler.Resolve(bodyTemplate, ctx)
                     : null;
-                var headers     = ResolveHeaders(target.Headers, varCtx);
-                var queryParams = ResolveQueryParams(target.QueryParams, varCtx);
+                var headers     = ResolveHeaders(target.Headers, ctx);
+                var queryParams = ResolveQueryParams(target.QueryParams, ctx);
 
                 Func<string, CancellationToken, Task<string?>> getCredential = scope == "portal"
                     ? portalCredentials.GetAsync
-                    : tenantCredentials.GetAsync;
+                    : (key, c) => tenantCredentials.GetForTenantAsync(ctx.TenantSubdomain, key, c);
 
                 var timeoutOverride = node["timeoutSeconds"] is JsonValue tv && tv.TryGetValue<int>(out var overrideSeconds) && overrideSeconds > 0
                     ? overrideSeconds
@@ -113,23 +106,23 @@ public class ApiCallNodeHandler(
 
         if (!string.IsNullOrEmpty(outputVariable))
         {
-            ctx.FlowVars[outputVariable] = ApiResponseWrapper.BuildJson(result);
+            ctx.Vars[outputVariable] = ApiResponseWrapper.BuildJson(result);
             foreach (var (key, value) in ApiResponseWrapper.BuildFlat(result))
-                ctx.FlowVars[$"{outputVariable}.{key}"] = value;
+                ctx.Vars[$"{outputVariable}.{key}"] = value;
         }
 
-        var next = Transition(node, transitionKey) ?? Transition(node, "default");
-        AppendHistory(ctx, node, input: null, transition: next);
+        var nextNodeId = node["transitions"]?[transitionKey]?.GetValue<string>()
+                       ?? node["transitions"]?["default"]?.GetValue<string>();
 
-        var state = BuildState(ctx, node, resolvedContent: string.Empty);
-        return new NodeResult(state, next);
+        return new TelephonyNodeResult(nextNodeId, transitionKey);
     }
 
-    private async Task<CallTarget?> LoadTenantAsync(Guid endpointId, CancellationToken ct)
+    private async Task<CallTarget?> LoadTenantAsync(string schemaName, Guid endpointId, CancellationToken ct)
     {
-        var endpoint = await tenantEndpoints.GetByIdAsync(endpointId, ct);
+        await using var db = tenantDbFactory.Create(schemaName);
+        var endpoint = await db.TenantApiEndpoints.FirstOrDefaultAsync(e => e.Id == endpointId, ct);
         if (endpoint is null) return null;
-        var def = await tenantDefinitions.GetByIdAsync(endpoint.DefinitionId, ct);
+        var def = await db.TenantApiDefinitions.FirstOrDefaultAsync(d => d.Id == endpoint.DefinitionId, ct);
         if (def is null) return null;
         return new CallTarget(
             endpoint.HttpMethod ?? def.HttpMethod, def.BaseUrl, endpoint.Path, endpoint.Headers, endpoint.QueryParams,
@@ -138,16 +131,16 @@ public class ApiCallNodeHandler(
 
     private async Task<CallTarget?> LoadPortalAsync(Guid endpointId, CancellationToken ct)
     {
-        var endpoint = await portalEndpoints.GetByIdAsync(endpointId, ct);
+        var endpoint = await portalDb.PortalApiEndpoints.FirstOrDefaultAsync(e => e.Id == endpointId, ct);
         if (endpoint is null) return null;
-        var def = await portalDefinitions.GetByIdAsync(endpoint.DefinitionId, ct);
+        var def = await portalDb.PortalApiDefinitions.FirstOrDefaultAsync(d => d.Id == endpoint.DefinitionId, ct);
         if (def is null) return null;
         return new CallTarget(
             endpoint.HttpMethod ?? def.HttpMethod, def.BaseUrl, endpoint.Path, endpoint.Headers, endpoint.QueryParams,
             endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive);
     }
 
-    private Dictionary<string, string> ResolveHeaders(string json, VariableContext varCtx)
+    private static Dictionary<string, string> ResolveHeaders(string json, TelephonyFlowContext ctx)
     {
         var result = new Dictionary<string, string>();
         if (string.IsNullOrWhiteSpace(json)) return result;
@@ -156,7 +149,7 @@ public class ApiCallNodeHandler(
             var obj = JsonNode.Parse(json)?.AsObject();
             if (obj is null) return result;
             foreach (var (key, value) in obj)
-                result[key] = Resolver.Resolve(value?.GetValue<string>() ?? string.Empty, varCtx);
+                result[key] = TelSetVariableNodeHandler.Resolve(value?.GetValue<string>() ?? string.Empty, ctx);
         }
         catch { /* malformed JSON on the endpoint — treat as no headers */ }
         return result;
@@ -167,7 +160,7 @@ public class ApiCallNodeHandler(
     /// (ApiEndpointTestHelper): a query param key listed in "_skipIfEmpty" is omitted from the
     /// request entirely if its resolved value is empty, instead of being sent as "".
     /// </summary>
-    private Dictionary<string, string> ResolveQueryParams(string json, VariableContext varCtx)
+    private static Dictionary<string, string> ResolveQueryParams(string json, TelephonyFlowContext ctx)
     {
         var result = new Dictionary<string, string>();
         if (string.IsNullOrWhiteSpace(json)) return result;
@@ -184,7 +177,7 @@ public class ApiCallNodeHandler(
             foreach (var (key, value) in obj)
             {
                 if (key.StartsWith('_')) continue;
-                var resolved = Resolver.Resolve(value?.GetValue<string>() ?? string.Empty, varCtx);
+                var resolved = TelSetVariableNodeHandler.Resolve(value?.GetValue<string>() ?? string.Empty, ctx);
                 if (skipIfEmpty.Contains(key) && string.IsNullOrEmpty(resolved)) continue;
                 result[key] = resolved;
             }

@@ -24,6 +24,7 @@ const API_CATEGORIES = [
   { value: 'order',       label: 'Order' },
   { value: 'fulfillment', label: 'Fulfillment' },
   { value: 'media',       label: 'Media' },
+  { value: 'general',     label: 'General' },
 ]
 
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
@@ -64,6 +65,7 @@ function apiCategoryBadgeColor(category: string) {
     order:       'bg-emerald-900/50 text-emerald-300',
     fulfillment: 'bg-amber-900/50 text-amber-300',
     media:       'bg-violet-900/50 text-violet-300',
+    general:     'bg-indigo-900/50 text-indigo-300',
   }
   return colors[category] ?? 'bg-gray-800 text-gray-300'
 }

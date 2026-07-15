@@ -84,6 +84,8 @@
 | 72 | 2026-07-12 | 7:31 AM CDT | 9:10 AM CDT | 99 min | ~5778 min |
 | 73 | 2026-07-12 | 9:12 AM CDT | 10:20 AM CDT | 68 min | ~5846 min |
 | 74 | 2026-07-12 | 10:40 AM CDT | 11:42 AM CDT | 62 min | ~5908 min |
+| 75 | 2026-07-13 | 4:53 PM CDT | 5:49 PM CDT | 56 min | ~5964 min |
+| 76 | 2026-07-14 | 4:01 PM CDT | 5:45 PM CDT | 104 min | ~6068 min |
 
 ---
 
@@ -3269,3 +3271,99 @@ Tenant admins could view all agents/admins in their workspace but had no way to 
 ### Next Session
 - Agent user creation (not yet built — tenant admins can only view/manage existing agents)
 - Continue build order: FreeSWITCH + Telephony
+
+---
+
+## Session 75 — General API Type for Flow Engines
+
+**Date:** 2026-07-13
+**Start:** 4:53 PM
+**End:** 5:49 PM
+**Duration:** 56 minutes
+**Cumulative Total:** ~5964 min
+
+### What Was Done
+
+**New `general` API Definition category — direct-call flow node for both flow engines**
+
+The API Definition system (Portal/Tenant, categories `address`/`order`/`fulfillment`/`media`) existed as a CRUD feature but was never wired into either flow engine. Added a 5th category, `general`, and rebuilt the CRM `api_call` node around it end-to-end; added the telephony engine's first-ever API-calling node to match.
+
+Backend — shared execution infrastructure (used by both engines):
+- `ApiCategory.General` added (no migration — string column, app-level validation only)
+- `IApiDefinitionExecutor`/`ApiDefinitionExecutor` (`ContactConnection.Infrastructure/ApiExecution/`) — generic HTTP execution (method/URL/headers/query/body/auth: api_key/bearer/basic/oauth2) against a resolved API Definition, ported from `ApiEndpointTestHelper`'s auth logic; distinguishes timeout from other failures via linked `CancellationTokenSource`
+- `ITenantCredentialStore.GetForTenantAsync(subdomain, key, ct)` — new method letting the telephony background engine read tenant Key Vault secrets without the HTTP-request-scoped `TenantContext` it doesn't have (mirrors why `CheckBlockListNodeHandler` bypasses tenant repos); `KeyVaultCredentialStoreBase` refactored to take an explicit prefix
+- `JsonFlattener` + `ApiResponseWrapper` (`ContactConnection.Infrastructure/Common/`) — build the `{ success, status_code, status_message, response_headers, response, error, timed_out }` wrapper and flatten it into dot-path keys for both engines' flat variable stores (`{var}.response.field`, `{var}.success`, plus a bare `{var}` holding the full JSON blob)
+
+Backend — CRM engine:
+- `ApiCallNodeHandler` fully rewritten — node now holds `apiDefinitionId`/`apiDefinitionScope`/`outputVariable`/`timeoutSeconds` (camelCase, matching newer node conventions) instead of inline method/url/headers/body; resolves the definition via `ITenantApiDefinitionRepository`/`IPortalApiDefinitionRepository`, requires `IsActive`, transitions on `success`/`error`/`timeout`
+- Old inline-HTTP behavior removed entirely (confirmed with user — pre-launch, only TMS in production beta)
+
+Backend — telephony engine (new):
+- `GeneralApiCallNodeHandler` (`tf_general_api_call`) — same schema/semantics as the CRM node, adapted for background-service execution: `ITenantDbContextFactory.Create(schemaName)` for tenant definitions, `ContactConnectionDbContext` directly for portal definitions, `TelSetVariableNodeHandler.Resolve` for `{{...}}` templating, wrapper flattened into `ctx.Vars`
+
+Backend — API endpoints:
+- `GET /api/v1/flows/general-apis` — merges active tenant + portal `general` definitions for the designer dropdowns (any authenticated agent, not gated behind `TenantAdmin`)
+- `category` query filter added to the existing `/admin/api-definitions` and `/portal/api-definitions` list endpoints (both repos already had `GetByCategoryAsync`)
+- "General" added to the Admin/Portal API Definition category pickers + badge colors
+
+Frontend — CRM Flow Designer:
+- `api_call` node: dropdown (optgroup Platform/Your Tenant) + Output Variable + Timeout fields; handle type changed from fixed dual (success/error) to single, with a Success/Error/Timeout picker modal on connect
+- Generalized `FlowDesignerPage.tsx`'s select-input "single handle + option picker modal" mechanism (previously hardcoded to `type === 'input' && fieldType === 'select'`) via a `FIXED_EXIT_OPTIONS` map so `api_call` reuses the same pattern
+
+Frontend — Telephony Designer (new):
+- `tf_general_api_call` node + properties panel case, added to all three node palettes (inbound/outbound/outbound-manual)
+- Ported the picker-modal mechanism into `TelephonyDesignerPage.tsx` from scratch — the telephony designer's existing multi-transition nodes (`tf_branch`, `tf_check_block_list`, `tf_play`, `tf_time_of_day`) all use fixed physical handles, not this pattern, so it didn't exist there before
+
+**Build:** `dotnet build` 0 errors (8 pre-existing warnings, unrelated files not touched this session) ✓. Frontend: `vite build` bundles clean; `tsc -b` fails on one pre-existing, unrelated error in `CallTraceWindowPage.tsx:29` (`useRef<string>()` needs an argument) — confirmed via git this file has no pending diff and wasn't touched this session, so it predates this work and is worth a look separately.
+
+### Next Session
+- End-to-end test of the new `general` API node in both flow engines: create a `general` API Definition, wire it into a test CRM flow and a test telephony flow, confirm Success/Error/Timeout routing and `{{flow.var.response.*}}` resolution against a real endpoint
+- Look at the pre-existing `CallTraceWindowPage.tsx:29` TS error blocking `tsc -b`
+
+---
+
+## Session 76 — General API Testing, Endpoint Redesign, and Two Real Bug Fixes
+
+**Date:** 2026-07-14
+**Start:** 4:01 PM
+**End:** 5:45 PM
+**Duration:** 104 minutes
+**Cumulative Total:** ~6068 min
+
+### What Was Done
+
+User began testing the `general` API node built in Session 75 and reported issues, each of which turned out to have a real fix underneath (not just UI polish):
+
+**"Add Endpoint" modal wrongly required API Sub-Type for `general` — led to a design redesign**
+
+Reported bug: the "Add Endpoint" modal on a `general`-category API Definition blocked saving with "Sub-type, name, and path are required," but `general` has no sub-type vocabulary. Investigating surfaced a bigger gap: `general` definitions were designed (Session 75) to be called *directly* using the definition's own Base URL/Headers/Query Params/Body — but the Admin/Portal UI never actually exposed editors for those fields at the definition level; Headers/Query Params/Body have only ever existed on the **Endpoint** sub-object. So `general` definitions had no working way to configure a real call at all.
+
+Redesigned (confirmed with user) so `general` definitions use Endpoints like every other category — one definition is a *connection* (base URL, auth, timeout), each endpoint is a *callable operation* under it (e.g. "TMS API" → "Get Stats"):
+- `TenantApiEndpoint`/`PortalApiEndpoint.Create`/`UpdateSubType` — now take the parent category and skip sub-type validation/storage (stored as `""`) for `general`
+- `AdminApiEndpointsEndpoints.cs`/`PortalApiEndpointsEndpoints.cs` — Create/Update pass the parent category through
+- `GET /api/v1/flows/general-apis` — rewritten to return endpoints (grouped by parent definition name/provider/scope), not bare definitions
+- `ApiCallNodeHandler` (CRM) / `GeneralApiCallNodeHandler` (telephony) — node schema changed from `apiDefinitionId` to `apiEndpointId`; both now resolve endpoint → parent definition, build the URL as `definition.BaseUrl + endpoint.Path`, and pull method/headers/query/body from the **endpoint** (with the `_skipIfEmpty` query-param convention ported from the existing `ApiEndpointTestHelper`) while auth/timeout still come from the **definition**
+- Frontend node dropdowns (`NodePropertiesPanel.tsx`, `TelephonyNodePropertiesPanel.tsx`) now list endpoints as "Definition → Endpoint"; "Set Preferred" hidden for `general` endpoints (that preferred-for-subtype mechanic doesn't apply when a flow node picks a specific endpoint id directly)
+
+**No way to test a `general` endpoint**
+
+Other categories have a "Source Test" tab driven by a fixed field set per sub-type (address fields, etc.) — meaningless for `general`, which isn't scoped to any one namespace. Added a `general`-only "Test" tab to `ApiDefinitionDetailContent.tsx`: scans the path/query params/headers/body template for every `{{...}}` tag regardless of namespace, prompts for a test value per unique tag found, and substitutes them client-side before calling the existing test-endpoint API (values are session-only, not saved).
+
+**Real bug: Create API Definition silently dropped the auth config**
+
+Reported: auth type/fields entered while creating a new definition were gone after redirect to the detail view (had to re-enter, though credential *values* already in Key Vault were still recognized). Root cause: the frontend's create request always sent `authConfig`, but `CreateApiDefinitionRequest` (`AdminApiDefinitionsEndpoints.cs`) had no `AuthConfig` field — ASP.NET silently dropped the unknown JSON property, so every new definition was created with `{"type":"none"}` no matter what was configured. The Update path already had this field and worked correctly, which is why it "stuck" once edited. Fixed by adding `AuthConfig` to the shared request record and applying it in both Admin and Portal Create handlers.
+
+**Real bug: telephony `tf_branch` conditions using `{{flow.*}}` always evaluated false**
+
+User confirmed the API node worked in a test telephony flow (response correctly stored), but a `tf_branch` node with condition `{{flow.Dexcom_Stats.response.AgentsAvailable}} > 0` always took the `false` exit even though the value was 7. Root cause: `TelBranchNodeHandler` had its own separate, simpler `{{...}}` resolver that did a raw `ctx.Vars` lookup keyed on the **entire** tag text, including the `flow.` prefix — but `ctx.Vars` keys never carry that prefix (every other telephony node resolves through the shared `TelSetVariableNodeHandler.Resolve`, which strips it). So the tag always resolved to `""`, `"" > 0` failed to parse as numbers, and the branch fell through to its `_ => false` default. This bug predates the general-API work and affected *any* telephony branch condition referencing a `{{flow.*}}` variable. Fixed by having `TelBranchNodeHandler` call the shared `TelSetVariableNodeHandler.Resolve` instead of its own broken duplicate. User retested — confirmed the branch now correctly takes `true`.
+
+**Call Trace UI showing every flow variable twice**
+
+A flow variable holding a whole API response (e.g. `Dexcom_Stats`) is stored twice in the same flat vars dictionary by design: once as a bare key holding the whole thing as a JSON string (needed for `{{flow.myVar}}` bare references), and again as dot-path siblings like `myVar.success`, `myVar.response.field` (needed for `{{flow.myVar.response.field}}` lookups). `CallTraceRunningView.tsx`'s `JsonNode` renderer parses the bare key's JSON string into a nice nested tree, but had no way to know the dot-path siblings were redundant, so it also printed each of them as its own flat top-level line. Added `filterFlattenedDuplicates()`: for any object being rendered, if a key's value round-trips as JSON, every sibling key whose name starts with `{thatKey}.` is dropped from display. Applies to both engines' trace views (one shared renderer).
+
+**Housekeeping:** Cleaned up `obj_verify`/`bin_verify` directories left over from an isolated-build-verification workaround in a prior session (dotnet watch was holding the normal `obj/` PDB lock at the time).
+
+**Build:** `dotnet build` 0 errors (same 6 pre-existing unrelated warnings) ✓. `tsc -b` 0 errors ✓ (also fixed the pre-existing `CallTraceWindowPage.tsx:29` error from Session 75 — `@types/react@19.1.4` removed the zero-argument `useRef<T>()` overload; changed to `useRef<string | undefined>(undefined)`, same runtime behavior).
+
+### Next Session
+- Test the general API node in the CRM script flow (telephony side fully confirmed working this session)

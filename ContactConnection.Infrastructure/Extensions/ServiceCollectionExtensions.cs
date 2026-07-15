@@ -3,6 +3,7 @@ using Azure.Security.KeyVault.Secrets;
 using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
+using ContactConnection.Infrastructure.ApiExecution;
 using ContactConnection.Infrastructure.Auth;
 using ContactConnection.Infrastructure.CallTrace;
 using ContactConnection.Infrastructure.Commerce;
@@ -99,6 +100,10 @@ public static class ServiceCollectionExtensions
         // Variable resolver (singleton — stateless, thread-safe regex engine)
         services.AddSingleton<IVariableResolver, VariableResolver>();
 
+        // Executes "general" API Definition calls for both flow engines' api_call nodes
+        // (uses IHttpClientFactory, no per-tenant state — safe as scoped or singleton).
+        services.AddScoped<IApiDefinitionExecutor, ApiDefinitionExecutor>();
+
         // DNS client for email validation (singleton — thread-safe, connection-pooled)
         services.AddSingleton<ILookupClient>(_ => new LookupClient(new LookupClientOptions
         {
@@ -150,6 +155,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ITelephonyNodeHandler, PlayNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, DtmfNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, WhisperNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, GeneralApiCallNodeHandler>();
 
         // Call session store (singleton — Redis operations are inherently stateless)
         services.AddSingleton<ITelephonyCallSessionStore, RedisCallSessionStore>();

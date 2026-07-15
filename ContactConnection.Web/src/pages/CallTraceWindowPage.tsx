@@ -26,7 +26,7 @@ export default function CallTraceWindowPage() {
   const [activeCallRecordId, setActiveCallRecordId] = useState<string>()
 
   const connectionRef = useRef<signalR.HubConnection | null>(null)
-  const subscriptionIdRef = useRef<string>()
+  const subscriptionIdRef = useRef<string | undefined>(undefined)
 
   useEffect(() => { document.title = 'Call Trace' }, [])
 

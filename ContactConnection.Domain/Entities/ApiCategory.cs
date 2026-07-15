@@ -6,6 +6,7 @@ public static class ApiCategory
     public const string Order       = "order";
     public const string Fulfillment = "fulfillment";
     public const string Media       = "media";
+    public const string General     = "general";
 
     private static readonly HashSet<string> _all =
     [
@@ -13,6 +14,7 @@ public static class ApiCategory
         Order,
         Fulfillment,
         Media,
+        General,
     ];
 
     public static bool IsValid(string category) => _all.Contains(category);

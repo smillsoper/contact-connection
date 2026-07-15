@@ -147,6 +147,42 @@ public static class FlowsEndpoints
                 list = list.Where(f => f.FlowType == type).ToList();
             return Results.Ok(list.Select(f => f.ToResponse()));
         });
+
+        // Endpoints of "general"-category API Definitions available to this tenant's flow
+        // designers — merges the tenant's own endpoints with platform-provided ones. Any
+        // authenticated agent can read this (not gated behind TenantAdmin like
+        // /admin/api-definitions) since any agent can build flows. A general definition is a
+        // connection (base URL, auth); its endpoints are the individual callable operations —
+        // that's what the api_call / tf_general_api_call node dropdown picks from.
+        group.MapGet("/general-apis", async (
+            ITenantApiDefinitionRepository tenantDefinitions,
+            IPortalApiDefinitionRepository portalDefinitions,
+            ITenantApiEndpointRepository tenantEndpoints,
+            IPortalApiEndpointRepository portalEndpoints,
+            TenantContext tenantContext,
+            CancellationToken ct) =>
+        {
+            if (tenantContext.Current is null) return Results.Unauthorized();
+
+            var tenantDefs = (await tenantDefinitions.GetByCategoryAsync(ApiCategory.General, ct)).Where(d => d.IsActive);
+            var portalDefs = (await portalDefinitions.GetByCategoryAsync(ApiCategory.General, ct)).Where(d => d.IsActive);
+
+            var result = new List<GeneralApiEndpointSummary>();
+            foreach (var def in tenantDefs)
+            {
+                var eps = await tenantEndpoints.GetByDefinitionAsync(def.Id, ct);
+                result.AddRange(eps.Where(e => e.IsActive).Select(e =>
+                    new GeneralApiEndpointSummary(e.Id, e.Name, def.Id, def.Name, def.Provider, "tenant")));
+            }
+            foreach (var def in portalDefs)
+            {
+                var eps = await portalEndpoints.GetByDefinitionAsync(def.Id, ct);
+                result.AddRange(eps.Where(e => e.IsActive).Select(e =>
+                    new GeneralApiEndpointSummary(e.Id, e.Name, def.Id, def.Name, def.Provider, "portal")));
+            }
+
+            return Results.Ok(result.OrderBy(r => r.Scope).ThenBy(r => r.DefinitionName).ThenBy(r => r.Name));
+        });
     }
 
     private static object ToResponse(this Flow f) => new
@@ -195,3 +231,11 @@ public record UpdateFlowRequest(
     string? Name = null,
     string? FlowDirection = null,
     string? FlowSubType = null);
+
+public record GeneralApiEndpointSummary(
+    Guid Id,
+    string Name,
+    Guid DefinitionId,
+    string DefinitionName,
+    string? Provider,
+    string Scope);

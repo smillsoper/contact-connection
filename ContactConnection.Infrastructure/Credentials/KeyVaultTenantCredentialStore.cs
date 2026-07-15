@@ -22,4 +22,7 @@ internal class KeyVaultTenantCredentialStore : KeyVaultCredentialStoreBase, ITen
     Task ITenantCredentialStore.SetAsync(string keyName, string value, CancellationToken ct) => SetAsync(keyName, value, ct);
     Task ITenantCredentialStore.DeleteAsync(string keyName, CancellationToken ct) => DeleteAsync(keyName, ct);
     Task<IReadOnlyList<CredentialSummary>> ITenantCredentialStore.ListAsync(CancellationToken ct) => ListAsync(ct);
+
+    Task<string?> ITenantCredentialStore.GetForTenantAsync(string tenantSubdomain, string keyName, CancellationToken ct) =>
+        GetAsync($"tenant--{Sanitize(tenantSubdomain)}--", keyName, ct);
 }

@@ -5,7 +5,8 @@ namespace ContactConnection.Infrastructure.Telephony.NodeHandlers;
 
 /// <summary>
 /// Evaluates a simple condition against flow variables.
-/// Condition format: "{{varName}} operator value"
+/// Condition format: "{{flow.varName}} operator value" (or any tag TelSetVariableNodeHandler.Resolve
+/// supports: bare {{varName}}, {{caller.ani}}, {{call.did}}, {{now.*}}).
 /// Operators: ==, !=, >, <, >=, <=, contains
 /// </summary>
 public class TelBranchNodeHandler : ITelephonyNodeHandler
@@ -16,7 +17,7 @@ public class TelBranchNodeHandler : ITelephonyNodeHandler
         JsonObject node, TelephonyFlowContext ctx, CancellationToken ct = default)
     {
         var condition = node["condition"]?.GetValue<string>() ?? "";
-        var result = EvaluateCondition(condition, ctx.Vars);
+        var result = EvaluateCondition(condition, ctx);
         var transition = result ? "true" : "false";
         var nextNodeId = node["transitions"]?[transition]?.GetValue<string>()
                       ?? node["transitions"]?["default"]?.GetValue<string>();
@@ -24,15 +25,16 @@ public class TelBranchNodeHandler : ITelephonyNodeHandler
         return Task.FromResult(new TelephonyNodeResult(nextNodeId, transition));
     }
 
-    private static bool EvaluateCondition(string condition, Dictionary<string, string> vars)
+    private static bool EvaluateCondition(string condition, TelephonyFlowContext ctx)
     {
         if (string.IsNullOrWhiteSpace(condition)) return false;
 
-        // Resolve {{varName}} placeholders
-        var resolved = System.Text.RegularExpressions.Regex.Replace(
-            condition,
-            @"\{\{([^}]+)\}\}",
-            m => vars.TryGetValue(m.Groups[1].Value.Trim(), out var v) ? v : "");
+        // Resolve {{...}} tags using the same resolver every other telephony node uses —
+        // handles {{flow.varname}} (and bare {{varname}}), {{caller.ani}}, {{call.did}},
+        // {{now.*}}. Previously this did its own raw ctx.Vars lookup keyed on the full tag
+        // text (including "flow."), which never matched since ctx.Vars keys never carry that
+        // prefix — every {{flow.*}} condition silently resolved to "" and fell through to false.
+        var resolved = TelSetVariableNodeHandler.Resolve(condition, ctx);
 
         // Split into: left operator right
         string[] ops = [">=", "<=", "!=", "==", ">", "<", "contains"];

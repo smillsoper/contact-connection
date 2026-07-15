@@ -55,6 +55,26 @@ const edgeTypes = {
   editable: EditableEdge,
 }
 
+// Node types with a fixed (non-user-editable) exit-option list, wired via the same single
+// physical handle + picker-modal mechanism as select-type input nodes.
+const FIXED_EXIT_OPTIONS: Partial<Record<ContactConnectionNodeType, string[]>> = {
+  api_call: ['success', 'error', 'timeout'],
+}
+
+// Options for a node that uses the fixed-handle picker (select-type input, or a
+// FIXED_EXIT_OPTIONS node type) — null if the node doesn't use this mechanism at all.
+function pickerOptions(node: Node<NodeData> | undefined): string[] | null {
+  if (!node) return null
+  const fixed = FIXED_EXIT_OPTIONS[node.type as ContactConnectionNodeType]
+  if (fixed) return fixed
+  if (node.type === 'input' && (node.data.fieldType as string) === 'select') {
+    const raw = (node.data.options as string | undefined) ?? ''
+    const opts = raw.split(',').map((o) => o.trim()).filter(Boolean)
+    return opts.length > 0 ? opts : null
+  }
+  return null
+}
+
 // ── Conversion helpers ──────────────────────────────────────────────────────
 
 function toContactConnectionDef(
@@ -135,11 +155,11 @@ function fromContactConnectionDef(def: ContactConnectionFlowDefinition): {
     })
     x += 260
 
-    const isSelectInput = type === 'input' && nodeDef.fieldType === 'select'
+    const isOptionNodeType = (type === 'input' && nodeDef.fieldType === 'select') || FIXED_EXIT_OPTIONS[type] !== undefined
     for (const [handle, targetId] of Object.entries(transitions)) {
       const edgeId = `${id}-${handle}-${targetId}`
-      // Select-input option edges: visual handle = null (→ default), semantic key stored in data.transition
-      const isOptionEdge = isSelectInput && handle !== 'default'
+      // Option-node edges (select-input, api_call, ...): visual handle = null (→ default), semantic key stored in data.transition
+      const isOptionEdge = isOptionNodeType && handle !== 'default'
       edges.push({
         id: edgeId,
         source: id,
@@ -296,15 +316,11 @@ function DesignerCanvas({
     })
   }, [pendingConn, setEdges])
 
-  // Connection — intercept select-type input nodes to show option picker
+  // Connection — intercept fixed-option nodes (select-type input, api_call, ...) to show option picker
   const onConnect = useCallback(
     (params: Connection) => {
       const sourceNode = (nodes as Node<NodeData>[]).find((n) => n.id === params.source)
-      if (
-        sourceNode?.type === 'input' &&
-        (sourceNode.data.fieldType as string) === 'select' &&
-        (sourceNode.data.options as string | undefined)?.trim()
-      ) {
+      if (pickerOptions(sourceNode) !== null) {
         setPendingConn(params)
         return
       }
@@ -597,8 +613,8 @@ function DesignerCanvas({
       {/* Option picker modal — shown when connecting from a select-type input node */}
       {pendingConn && (() => {
         const srcNode = (nodes as Node<NodeData>[]).find((n) => n.id === pendingConn.source)
-        const rawOpts = (srcNode?.data.options as string | undefined) ?? ''
-        const options = rawOpts.split(',').map((o) => o.trim()).filter(Boolean)
+        const options = pickerOptions(srcNode) ?? []
+        const isFixedOptions = srcNode ? FIXED_EXIT_OPTIONS[srcNode.type as ContactConnectionNodeType] !== undefined : false
         const wiredMap = new Map(
           edges
             .filter((e) => e.source === pendingConn.source)
@@ -634,7 +650,7 @@ function DesignerCanvas({
                           : 'text-white bg-gray-800 border-gray-700 hover:bg-emerald-900/50 hover:border-emerald-600'
                         }`}
                     >
-                      <span>{opt}</span>
+                      <span>{isFixedOptions ? opt.charAt(0).toUpperCase() + opt.slice(1) : opt}</span>
                       {isWired && (
                         <span className="ml-2 text-[10px] text-amber-500 font-medium">↺ re-wire</span>
                       )}

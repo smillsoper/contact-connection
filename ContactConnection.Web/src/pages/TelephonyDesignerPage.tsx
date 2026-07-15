@@ -42,6 +42,7 @@ import OnCallDisconnectedNode from '../components/telephony-designer/nodes/OnCal
 import OnCustomEventNode from '../components/telephony-designer/nodes/OnCustomEventNode'
 import DtmfNode from '../components/telephony-designer/nodes/DtmfNode'
 import WhisperNode from '../components/telephony-designer/nodes/WhisperNode'
+import GeneralApiCallNode from '../components/telephony-designer/nodes/GeneralApiCallNode'
 
 import type { TelNodeData, TelephonyNodeType, TelephonyFlowDefinition, TelephonyNodeDef } from '../types/telephony-designer'
 import { defaultTelNodeData, TELEPHONY_NODE_META } from '../types/telephony-designer'
@@ -58,6 +59,14 @@ const HANDLE_DISPLAY_LABELS: Record<string, string> = {
   end_of_stream: 'End Of Play Stream',
   duration_reached: 'Duration Reached',
   tts_finished: 'TTS Finished',
+}
+
+// Node types with a fixed (non-user-editable) exit-option list — wired via a single physical
+// handle + option-picker modal, same UX as the CRM designer's select-input node, rather than the
+// telephony designer's usual fixed-physical-handle-per-transition approach (this node only has
+// one physical handle, so a direct handle-id-as-transition connect won't work).
+const FIXED_EXIT_OPTIONS: Partial<Record<TelephonyNodeType, string[]>> = {
+  tf_general_api_call: ['success', 'error', 'timeout'],
 }
 
 const nodeTypes = {
@@ -79,6 +88,7 @@ const nodeTypes = {
   tf_script_pop: ScriptPopNode,
   tf_dtmf: DtmfNode,
   tf_whisper: WhisperNode,
+  tf_general_api_call: GeneralApiCallNode,
   tf_on_agent_selected: OnAgentSelectedNode,
   tf_on_agent_answer: OnAgentAnswerNode,
   tf_on_call_disconnected: OnCallDisconnectedNode,
@@ -156,10 +166,14 @@ function fromTelDef(def: TelephonyFlowDefinition): {
   }
 
   for (const [id, nodeDef] of Object.entries(def.nodes)) {
+    // Fixed-exit-option nodes (e.g. tf_general_api_call) render one physical "default" handle —
+    // the option name travels as edge data, not as a distinct handle id.
+    const isFixedOptionNode = FIXED_EXIT_OPTIONS[nodeDef.type] !== undefined
     for (const [handle, target] of Object.entries(nodeDef.transitions)) {
       const edgeId = `e-${id}-${target}-${handle}`
       const edgeDef = def._waypoints?.[edgeId]
       const normalizedHandle = normHandle(handle)
+      const visualHandle = isFixedOptionNode ? null : normalizedHandle
       const seen = edges.filter(
         (e) => e.source === id && normHandle(e.sourceHandle) === normalizedHandle && e.target === target
       )
@@ -168,7 +182,7 @@ function fromTelDef(def: TelephonyFlowDefinition): {
         id: edgeId,
         source: id,
         target,
-        sourceHandle: normalizedHandle,
+        sourceHandle: visualHandle,
         label: normalizedHandle
           ? (HANDLE_DISPLAY_LABELS[normalizedHandle] ?? normalizedHandle)
           : undefined,
@@ -199,6 +213,9 @@ function DesignerCanvas() {
   const [status, setStatus] = useState('')
   const idCounter = useRef(0)
 
+  // Option-picker modal for fixed-exit-option nodes (e.g. tf_general_api_call)
+  const [pendingConn, setPendingConn] = useState<Connection | null>(null)
+
   // Load existing flow
   useEffect(() => {
     if (!routeId) return
@@ -216,8 +233,38 @@ function DesignerCanvas() {
     })
   }, [routeId])
 
+  // When an option is picked in the modal, complete the pending edge (single physical "default"
+  // handle; the chosen option travels as edge data, not as a distinct handle id).
+  const onOptionPicked = useCallback((optionValue: string) => {
+    if (!pendingConn) return
+    const conn = pendingConn
+    setPendingConn(null)
+    setEdges((eds) => {
+      const withoutOld = eds.filter((e) => {
+        if (e.source !== conn.source) return true
+        const key = (e.data?.transition as string | undefined) ?? e.sourceHandle
+        return key !== optionValue
+      })
+      const newEdge: Edge = {
+        ...conn,
+        id: `e-${conn.source}-${conn.target}-${optionValue}`,
+        sourceHandle: null,
+        type: 'editable',
+        label: optionValue.charAt(0).toUpperCase() + optionValue.slice(1),
+        data: { waypoints: [], transition: optionValue },
+      }
+      return [...withoutOld, newEdge]
+    })
+  }, [pendingConn, setEdges])
+
   const onConnect = useCallback(
     (connection: Connection) => {
+      const sourceNode = nodes.find((n) => n.id === connection.source)
+      const fixedOptions = sourceNode ? FIXED_EXIT_OPTIONS[sourceNode.type as TelephonyNodeType] : undefined
+      if (fixedOptions) {
+        setPendingConn(connection)
+        return
+      }
       setEdges((eds) => {
         // Enforce one outgoing edge per source handle
         const filtered = eds.filter(
@@ -240,7 +287,7 @@ function DesignerCanvas() {
         )
       })
     },
-    [setEdges],
+    [nodes, setEdges],
   )
 
   const onDrop = useCallback(
@@ -410,6 +457,65 @@ function DesignerCanvas() {
           />
         )}
       </div>
+
+      {/* Option picker modal — shown when connecting from a fixed-exit-option node */}
+      {pendingConn && (() => {
+        const srcNode = nodes.find((n) => n.id === pendingConn.source)
+        const options = (srcNode ? FIXED_EXIT_OPTIONS[srcNode.type as TelephonyNodeType] : undefined) ?? []
+        const wiredMap = new Map(
+          edges
+            .filter((e) => e.source === pendingConn.source)
+            .map((e) => {
+              const key = (e.data?.transition as string | undefined) ?? e.sourceHandle
+              return key ? ([key, e.target] as [string, string]) : null
+            })
+            .filter((x): x is [string, string] => x !== null),
+        )
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm cursor-default"
+            style={{ pointerEvents: 'all' }}
+          >
+            <div className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl w-80 p-5 flex flex-col gap-4">
+              <div>
+                <p className="text-sm font-semibold text-white">Which option leads here?</p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Picking an already-wired option replaces its existing connection.
+                </p>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {options.map((opt) => {
+                  const isWired = wiredMap.has(opt)
+                  return (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => onOptionPicked(opt)}
+                      className={`w-full text-left px-3 py-2 rounded-lg text-sm border transition-colors cursor-pointer
+                        ${isWired
+                          ? 'text-amber-300 bg-amber-950/30 border-amber-800/50 hover:bg-amber-900/40'
+                          : 'text-white bg-gray-800 border-gray-700 hover:bg-emerald-900/50 hover:border-emerald-600'
+                        }`}
+                    >
+                      <span>{opt.charAt(0).toUpperCase() + opt.slice(1)}</span>
+                      {isWired && (
+                        <span className="ml-2 text-[10px] text-amber-500 font-medium">↺ re-wire</span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+              <button
+                type="button"
+                onClick={() => setPendingConn(null)}
+                className="text-xs text-gray-500 hover:text-gray-300 self-center transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

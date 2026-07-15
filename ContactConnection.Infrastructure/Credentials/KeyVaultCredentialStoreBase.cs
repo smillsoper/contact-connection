@@ -20,17 +20,24 @@ internal abstract class KeyVaultCredentialStoreBase
             .ToArray())
             .Trim('-');
 
-    protected string VaultName(string keyName) =>
-        $"{Prefix}{Sanitize(keyName)}"[..Math.Min($"{Prefix}{Sanitize(keyName)}".Length, 127)];
+    protected string VaultName(string keyName) => VaultName(Prefix, keyName);
+
+    private static string VaultName(string prefix, string keyName) =>
+        $"{prefix}{Sanitize(keyName)}"[..Math.Min($"{prefix}{Sanitize(keyName)}".Length, 127)];
 
     protected string StripPrefix(string vaultName) =>
         vaultName.StartsWith(Prefix) ? vaultName[Prefix.Length..] : vaultName;
 
-    public async Task<string?> GetAsync(string keyName, CancellationToken ct = default)
+    public Task<string?> GetAsync(string keyName, CancellationToken ct = default) =>
+        GetAsync(Prefix, keyName, ct);
+
+    /// <summary>Fetches a secret using an explicit prefix instead of the instance's own Prefix —
+    /// used to look up a tenant's credentials without relying on ambient TenantContext.</summary>
+    protected async Task<string?> GetAsync(string prefix, string keyName, CancellationToken ct = default)
     {
         try
         {
-            var response = await _client.GetSecretAsync(VaultName(keyName), cancellationToken: ct);
+            var response = await _client.GetSecretAsync(VaultName(prefix, keyName), cancellationToken: ct);
             return response.Value.Value;
         }
         catch (RequestFailedException ex) when (ex.Status == 404)

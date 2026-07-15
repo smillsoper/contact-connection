@@ -21,8 +21,14 @@ public class TenantApiEndpoint
 
     private TenantApiEndpoint() { }
 
+    /// <summary>
+    /// apiCategory is the parent definition's category — endpoints under a "general" category
+    /// definition have no fixed sub-type vocabulary (ApiSubType is category-specific for
+    /// address/order/fulfillment/media), so sub-type validation and storage are skipped for them.
+    /// </summary>
     public static TenantApiEndpoint Create(
         Guid definitionId,
+        string apiCategory,
         string apiSubType,
         string name,
         string path,
@@ -30,14 +36,15 @@ public class TenantApiEndpoint
         string? description = null,
         int sortOrder = 0)
     {
-        if (!Entities.ApiSubType.IsValid(apiSubType))
+        var isGeneral = apiCategory == Entities.ApiCategory.General;
+        if (!isGeneral && !Entities.ApiSubType.IsValid(apiSubType))
             throw new ArgumentException($"Unknown API sub-type '{apiSubType}'.", nameof(apiSubType));
 
         return new TenantApiEndpoint
         {
             Id = Guid.NewGuid(),
             DefinitionId = definitionId,
-            ApiSubType = apiSubType,
+            ApiSubType = isGeneral ? string.Empty : apiSubType,
             Name = name.Trim(),
             Description = description?.Trim(),
             Path = path.Trim(),
@@ -59,11 +66,12 @@ public class TenantApiEndpoint
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
-    public void UpdateSubType(string apiSubType)
+    public void UpdateSubType(string apiCategory, string apiSubType)
     {
-        if (!Entities.ApiSubType.IsValid(apiSubType))
+        var isGeneral = apiCategory == Entities.ApiCategory.General;
+        if (!isGeneral && !Entities.ApiSubType.IsValid(apiSubType))
             throw new ArgumentException($"Unknown API sub-type '{apiSubType}'.", nameof(apiSubType));
-        ApiSubType = apiSubType;
+        ApiSubType = isGeneral ? string.Empty : apiSubType;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 

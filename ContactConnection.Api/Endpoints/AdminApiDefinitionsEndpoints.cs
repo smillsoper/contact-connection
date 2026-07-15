@@ -27,10 +27,13 @@ public static class AdminApiDefinitionsEndpoints
     private static async Task<IResult> GetAll(
         ITenantApiDefinitionRepository repo,
         TenantContext tenantContext,
+        string? category,
         CancellationToken ct)
     {
         if (!tenantContext.HasTenant) return Results.Unauthorized();
-        var all = await repo.GetAllAsync(ct);
+        var all = category is null
+            ? await repo.GetAllAsync(ct)
+            : await repo.GetByCategoryAsync(category, ct);
         return Results.Ok(all.Select(ToResponse));
     }
 
@@ -57,6 +60,7 @@ public static class AdminApiDefinitionsEndpoints
             return Results.BadRequest(new { error = $"Unknown api_category '{request.ApiCategory}'. Valid categories: {string.Join(", ", ApiCategory.All)}" });
 
         var def = TenantApiDefinition.Create(request.ApiCategory, request.Name, request.HttpMethod, request.BaseUrl, request.Description, request.Provider, request.TimeoutSeconds ?? 30);
+        if (request.AuthConfig is not null) def.SetAuthConfig(request.AuthConfig);
         await repo.AddAsync(def, ct);
         await repo.SaveChangesAsync(ct);
 
@@ -158,7 +162,8 @@ public record CreateApiDefinitionRequest(
     string BaseUrl,
     string? Description,
     string? Provider,
-    int? TimeoutSeconds);
+    int? TimeoutSeconds,
+    string? AuthConfig);
 
 public record UpdateApiDefinitionRequest(
     string Name,

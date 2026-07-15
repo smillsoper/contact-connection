@@ -169,6 +169,27 @@ function tryParseNestedJson(value: string): unknown {
   try { return JSON.parse(trimmed) } catch { return undefined }
 }
 
+// Flow variables that hold a whole API-call response (e.g. {{flow.myVar}}) are stored twice in
+// the same flat vars object: once as a bare key holding the whole thing as a JSON string (which
+// renders below as a nested tree), and again as dot-path siblings like "myVar.success",
+// "myVar.response.field" (so {{flow.myVar.response.field}} template lookups work). Once the
+// bare key's tree is shown, those dot-path siblings are pure noise — drop them.
+function filterFlattenedDuplicates(obj: Record<string, unknown>): Record<string, unknown> {
+  const jsonObjectKeys = new Set<string>()
+  for (const [key, value] of Object.entries(obj)) {
+    if (typeof value === 'string' && tryParseNestedJson(value) !== undefined) jsonObjectKeys.add(key)
+  }
+  if (jsonObjectKeys.size === 0) return obj
+
+  const filtered: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(obj)) {
+    const dotIndex = key.indexOf('.')
+    if (dotIndex > 0 && jsonObjectKeys.has(key.slice(0, dotIndex))) continue
+    filtered[key] = value
+  }
+  return filtered
+}
+
 function JsonNode({ value, depth = 0 }: { value: unknown; depth?: number }) {
   if (value === null || value === undefined) {
     return <span className="text-gray-600 italic">null</span>
@@ -200,7 +221,7 @@ function JsonNode({ value, depth = 0 }: { value: unknown; depth?: number }) {
     )
   }
 
-  const entries = Object.entries(value as Record<string, unknown>)
+  const entries = Object.entries(filterFlattenedDuplicates(value as Record<string, unknown>))
   if (entries.length === 0) return <span className="text-gray-600 italic">{'{}'}</span>
   return (
     <div className={depth > 0 ? 'pl-3 border-l border-gray-800 space-y-1' : 'space-y-1'}>

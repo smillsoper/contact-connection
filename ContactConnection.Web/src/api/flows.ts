@@ -51,6 +51,17 @@ export interface ZipLookupResult {
   message: string | null
 }
 
+// One callable endpoint under a "general"-category API Definition (the definition is the
+// connection — base URL/auth; the endpoint is the operation, e.g. "Get Stats").
+export interface GeneralApiSummary {
+  id: string
+  name: string
+  definitionId: string
+  definitionName: string
+  provider: string | null
+  scope: 'tenant' | 'portal'
+}
+
 export const flowsApi = {
   // Agent panel — published flows only
   list: () => api.get<FlowSummary[]>('/api/v1/flows'),
@@ -60,6 +71,10 @@ export const flowsApi = {
 
   // Filtered by flow type (crm or telephony)
   listAllByType: (type: string) => api.get<FlowSummary[]>(`/api/v1/flows/all?type=${type}`),
+
+  // "general"-category API Definitions available to this tenant's flow designers (tenant's own
+  // + platform-provided), for the api_call / tf_general_api_call node dropdowns
+  listGeneralApis: () => api.get<GeneralApiSummary[]>('/api/v1/flows/general-apis'),
 
   startSession: (req: StartSessionRequest) =>
     api.post<FlowNodeState>('/api/v1/flow-sessions', req),

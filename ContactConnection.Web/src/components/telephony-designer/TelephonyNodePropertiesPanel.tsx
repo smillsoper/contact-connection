@@ -4,6 +4,7 @@ import type { TelNodeData, TelephonyNodeType, TimeWindow, TelVariableAssignment 
 import { TELEPHONY_NODE_META } from '../../types/telephony-designer'
 import { TIMEZONE_GROUPS } from '../../utils/timezones'
 import { audioFilesApi, BUILTIN_AUDIO_GROUPS, BUILTIN_AUDIO_OPTIONS, type AudioFileRecord } from '../../api/audioFiles'
+import { flowsApi, type GeneralApiSummary } from '../../api/flows'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -45,6 +46,13 @@ export default function TelephonyNodePropertiesPanel({
   const isEventNode = meta.handles === 'source-only'
 
   const set = (field: string, value: unknown) => onChange(node.id, { [field]: value })
+
+  // General API Definitions for tf_general_api_call nodes — fetched lazily
+  const [generalApis, setGeneralApis] = useState<GeneralApiSummary[]>([])
+  useEffect(() => {
+    if (type !== 'tf_general_api_call') return
+    flowsApi.listGeneralApis().then(setGeneralApis).catch(console.error)
+  }, [type])
 
   return (
     <div className="w-72 bg-gray-900 border-l border-gray-700 flex flex-col p-4 gap-3 overflow-y-auto shrink-0 text-sm">
@@ -288,6 +296,77 @@ export default function TelephonyNodePropertiesPanel({
           </p>
         </div>
       )}
+
+      {type === 'tf_general_api_call' && (() => {
+        const selectedEndpointId = (data.apiEndpointId as string) ?? ''
+        const tenantApis = generalApis.filter((a) => a.scope === 'tenant')
+        const portalApis = generalApis.filter((a) => a.scope === 'portal')
+        return (
+          <div className="flex flex-col gap-2">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">API Endpoint</label>
+              <select
+                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-blue-500"
+                value={selectedEndpointId}
+                onChange={(e) => {
+                  const chosen = generalApis.find((a) => a.id === e.target.value)
+                  onChange(node.id, {
+                    apiEndpointId: chosen?.id ?? '',
+                    apiDefinitionScope: chosen?.scope ?? 'tenant',
+                    apiDefinitionName: chosen?.definitionName ?? '',
+                    apiEndpointName: chosen?.name ?? '',
+                  })
+                }}
+              >
+                <option value="">— Select an endpoint —</option>
+                {tenantApis.length > 0 && (
+                  <optgroup label="Your Tenant">
+                    {tenantApis.map((a) => (
+                      <option key={a.id} value={a.id}>{a.definitionName} → {a.name}{a.provider ? ` (${a.provider})` : ''}</option>
+                    ))}
+                  </optgroup>
+                )}
+                {portalApis.length > 0 && (
+                  <optgroup label="Platform">
+                    {portalApis.map((a) => (
+                      <option key={a.id} value={a.id}>{a.definitionName} → {a.name}{a.provider ? ` (${a.provider})` : ''}</option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+              {generalApis.length === 0 && (
+                <p className="text-[10px] text-amber-400 mt-1">
+                  No active General API endpoints found. Create a General API Definition and add an endpoint to it in Admin → API Definitions.
+                </p>
+              )}
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Output Variable</label>
+              <input
+                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-blue-500"
+                placeholder="orderApi"
+                value={(data.outputVariable as string) ?? ''}
+                onChange={(e) => set('outputVariable', e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Timeout (seconds)</label>
+              <input
+                type="number"
+                min={1}
+                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-blue-500"
+                value={(data.timeoutSeconds as number) ?? 30}
+                onChange={(e) => set('timeoutSeconds', Number(e.target.value) || 30)}
+              />
+            </div>
+            <p className="text-xs text-gray-500 leading-snug">
+              Response is stored as {'{{flow.'}{(data.outputVariable as string) || 'variable'}{'}}'} — reference
+              pieces of it with {'{{flow.'}{(data.outputVariable as string) || 'variable'}{'.response.field}}'}.
+              Connect the exit handle to wire up Success / Error / Timeout.
+            </p>
+          </div>
+        )
+      })()}
 
       {/* Entry / Delete footer */}
       <div className="flex gap-2 pt-2 border-t border-gray-700 mt-auto">

@@ -13,6 +13,7 @@ internal class NullCredentialStore : IPortalCredentialStore, ITenantCredentialSt
 
     Task<string?> IPortalCredentialStore.GetAsync(string keyName, CancellationToken ct) => NullString;
     Task<string?> ITenantCredentialStore.GetAsync(string keyName, CancellationToken ct) => NullString;
+    Task<string?> ITenantCredentialStore.GetForTenantAsync(string tenantSubdomain, string keyName, CancellationToken ct) => NullString;
 
     Task<IReadOnlyList<CredentialSummary>> IPortalCredentialStore.ListAsync(CancellationToken ct) =>
         Task.FromResult(EmptyList);
