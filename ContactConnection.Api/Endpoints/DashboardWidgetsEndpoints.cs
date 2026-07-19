@@ -1,6 +1,7 @@
 using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
+using ContactConnection.Domain.Entities;
 
 namespace ContactConnection.Api.Endpoints;
 
@@ -82,6 +83,78 @@ public static class DashboardWidgetsEndpoints
                     since       = state?.SetAt,
                 });
             }
+
+            return Results.Ok(result);
+        });
+
+        // Real-time count of active (non-terminal) calls per campaign, bucketed into the
+        // same 4 visual states CCXOne uses: PreQueue / InQueue / WithAgent / PostAgent.
+        // "routing" (agent selected, bridge not yet confirmed) folds into WithAgent — it's a
+        // brief transient state and keeping a 5th bucket just for it isn't worth the extra
+        // legend entry. Only campaigns with at least one active call are returned — this is a
+        // "what's happening right now" widget, not a campaign roster.
+        group.MapGet("/call-state-by-campaign", async (
+            Guid? campaignId,
+            Guid? clientId,
+            ICampaignRepository campaigns,
+            ICallStateHistoryRepository callStateHistory,
+            TenantContext tenantContext,
+            CancellationToken ct) =>
+        {
+            if (tenantContext.Current is null) return Results.Unauthorized();
+            var tenant = tenantContext.Current;
+
+            List<Campaign> scopedCampaigns;
+            if (campaignId.HasValue)
+            {
+                var c = await campaigns.GetByIdAsync(campaignId.Value, ct);
+                scopedCampaigns = c is not null ? [c] : [];
+            }
+            else
+            {
+                scopedCampaigns = await campaigns.GetAllAsync(clientId, ct);
+            }
+
+            var campaignIds = scopedCampaigns.Select(c => c.Id).ToList();
+            var counts = await callStateHistory.GetActiveStateCountsAsync(tenant.SchemaName, campaignIds, ct);
+            var countsByCampaign = counts.ToLookup(row => row.CampaignId);
+
+            var result = scopedCampaigns
+                .OrderBy(c => c.Name)
+                .Select(c =>
+                {
+                    var buckets = new Dictionary<string, int>
+                    {
+                        ["pre_queue"] = 0,
+                        ["in_queue"] = 0,
+                        ["with_agent"] = 0,
+                        ["post_agent"] = 0,
+                    };
+                    foreach (var row in countsByCampaign[c.Id])
+                    {
+                        var bucket = row.State switch
+                        {
+                            CallHistoryState.PreQueue => "pre_queue",
+                            CallHistoryState.InQueue => "in_queue",
+                            CallHistoryState.Routing or CallHistoryState.Active => "with_agent",
+                            CallHistoryState.PostAgent => "post_agent",
+                            _ => null,
+                        };
+                        if (bucket is not null) buckets[bucket] += row.Count;
+                    }
+
+                    return new
+                    {
+                        campaign_id   = c.Id,
+                        campaign_name = c.Name,
+                        pre_queue     = buckets["pre_queue"],
+                        in_queue      = buckets["in_queue"],
+                        with_agent    = buckets["with_agent"],
+                        post_agent    = buckets["post_agent"],
+                    };
+                })
+                .Where(r => r.pre_queue + r.in_queue + r.with_agent + r.post_agent > 0)
+                .ToList();
 
             return Results.Ok(result);
         });

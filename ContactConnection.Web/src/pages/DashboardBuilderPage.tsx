@@ -7,7 +7,7 @@ import 'react-resizable/css/styles.css'
 import { useAuthStore } from '../stores/authStore'
 import { dashboardsApi } from '../api/dashboards'
 import {
-  WIDGET_META, WIDGET_TYPES, newWidgetId,
+  WIDGET_META, WIDGET_TYPES, WIDGET_FILTER_FIELDS, newWidgetId,
   type DashboardWidgetInstance, type DashboardWidgetType, type WidgetFilterConfig,
 } from '../types/dashboard'
 import WidgetShell from '../components/dashboard/WidgetShell'
@@ -15,14 +15,19 @@ import WidgetIcon from '../components/dashboard/WidgetIcon'
 import WidgetConfigModal from '../components/dashboard/WidgetConfigModal'
 import AgentStateCounterWidget from '../components/dashboard/widgets/AgentStateCounterWidget'
 import AgentListWidget from '../components/dashboard/widgets/AgentListWidget'
-import { DashboardLiveContext, type AgentStateEvent } from '../components/dashboard/DashboardLiveContext'
+import CallStateByCampaignWidget from '../components/dashboard/widgets/CallStateByCampaignWidget'
+import {
+  DashboardLiveContext, DashboardCallStateLiveContext,
+  type AgentStateEvent, type CallStateEvent,
+} from '../components/dashboard/DashboardLiveContext'
 
 const GridLayoutWithWidth = WidthProvider(GridLayout)
 
 function renderWidget(type: DashboardWidgetType, config: WidgetFilterConfig) {
   switch (type) {
-    case 'agent_state_counter': return <AgentStateCounterWidget config={config} />
-    case 'agent_list':          return <AgentListWidget config={config} />
+    case 'agent_state_counter':      return <AgentStateCounterWidget config={config} />
+    case 'agent_list':                return <AgentListWidget config={config} />
+    case 'call_state_by_campaign':    return <CallStateByCampaignWidget config={config} />
   }
 }
 
@@ -51,6 +56,7 @@ export default function DashboardBuilderPage() {
   const [error, setError] = useState<string | null>(null)
   const [configuringId, setConfiguringId] = useState<string | null>(null)
   const [liveEvent, setLiveEvent] = useState<AgentStateEvent | null>(null)
+  const [liveCallEvent, setLiveCallEvent] = useState<CallStateEvent | null>(null)
 
   const draggingTypeRef = useRef<DashboardWidgetType | null>(null)
 
@@ -88,6 +94,10 @@ export default function DashboardBuilderPage() {
 
     connection.on('receiveAgentStateSnapshot', (agentId: string, stateCode: string, label: string, sinceIso: string) => {
       setLiveEvent({ agentId, code: stateCode, label, since: sinceIso })
+    })
+
+    connection.on('receiveCallStateSnapshot', (campaignId: string, state: string) => {
+      setLiveCallEvent({ campaignId, state })
     })
 
     connection.start()
@@ -239,6 +249,7 @@ export default function DashboardBuilderPage() {
           <div className="flex items-center justify-center h-40 text-gray-500 text-sm">Loading…</div>
         ) : (
           <DashboardLiveContext.Provider value={liveEvent}>
+          <DashboardCallStateLiveContext.Provider value={liveCallEvent}>
             <GridLayoutWithWidth
               className="layout"
               layout={layout}
@@ -269,6 +280,7 @@ export default function DashboardBuilderPage() {
                 Drag a widget from the palette above to get started.
               </div>
             )}
+          </DashboardCallStateLiveContext.Provider>
           </DashboardLiveContext.Provider>
         )}
       </div>
@@ -276,6 +288,7 @@ export default function DashboardBuilderPage() {
       {configuringWidget && (
         <WidgetConfigModal
           title={`Configure — ${WIDGET_META[configuringWidget.widgetType].label}`}
+          fields={WIDGET_FILTER_FIELDS[configuringWidget.widgetType]}
           initial={configuringWidget.config}
           onSave={(config) => handleConfigSave(configuringWidget.id, config)}
           onClose={() => setConfiguringId(null)}

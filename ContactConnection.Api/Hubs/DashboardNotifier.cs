@@ -14,4 +14,9 @@ public class DashboardNotifier(IHubContext<FlowHub, IFlowHubClient> hubContext) 
         Guid tenantId, Guid agentId, string stateCode, string label, DateTimeOffset since, CancellationToken ct = default) =>
         hubContext.Clients.Group($"supervisor:{tenantId}")
             .ReceiveAgentStateSnapshot(agentId.ToString(), stateCode, label, since.ToString("O"));
+
+    public Task NotifyCallStateChangedAsync(
+        Guid tenantId, Guid campaignId, string state, CancellationToken ct = default) =>
+        hubContext.Clients.Group($"supervisor:{tenantId}")
+            .ReceiveCallStateSnapshot(campaignId.ToString(), state);
 }

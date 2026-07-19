@@ -70,4 +70,7 @@ public interface IFlowHubClient
 
     /// <summary>Broadcast to supervisor dashboards — any agent's state changed (not just the receiving agent's own).</summary>
     Task ReceiveAgentStateSnapshot(string agentId, string stateCode, string label, string sinceIso);
+
+    /// <summary>Broadcast to supervisor dashboards — a call in this campaign changed queue/routing state.</summary>
+    Task ReceiveCallStateSnapshot(string campaignId, string state);
 }

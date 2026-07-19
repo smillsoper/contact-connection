@@ -14,6 +14,15 @@ export interface AgentListRow {
   since: string | null
 }
 
+export interface CampaignStateCountRow {
+  campaign_id: string
+  campaign_name: string
+  pre_queue: number
+  in_queue: number
+  with_agent: number
+  post_agent: number
+}
+
 function buildQuery(params: WidgetFilterConfig): string {
   const parts: string[] = []
   if (params.campaignId) parts.push(`campaignId=${params.campaignId}`)
@@ -29,4 +38,7 @@ export const dashboardWidgetsApi = {
 
   agentList: (params: WidgetFilterConfig) =>
     api.get<AgentListRow[]>(`/api/v1/dashboard-widgets/agent-list${buildQuery(params)}`),
+
+  callStateByCampaign: (params: WidgetFilterConfig) =>
+    api.get<CampaignStateCountRow[]>(`/api/v1/dashboard-widgets/call-state-by-campaign${buildQuery(params)}`),
 }

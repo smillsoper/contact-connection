@@ -88,6 +88,7 @@
 | 76 | 2026-07-14 | 4:01 PM CDT | 5:45 PM CDT | 104 min | ~6068 min |
 | 77 | 2026-07-16 | 4:12 PM CDT | 5:40 PM CDT | 88 min | ~6156 min |
 | 78 | 2026-07-19 | 7:18 AM CDT | 9:48 AM CDT | 150 min | ~6306 min |
+| 79 | 2026-07-19 | 9:56 AM CDT | 10:28 AM CDT | 32 min | ~6338 min |
 
 ---
 
@@ -3466,3 +3467,33 @@ User showed CCXOne's legacy reporting-dashboard UI as the reference (horizontal 
 - Expand the dashboard widget catalog: Contact States by Skill, Queue Counter, Service Level (all map directly onto `call_state_history`), plus a Skill Summary / historical-KPI style widget
 - Consider wiring `post_agent` once a transfer/consult telephony-flow node exists that can explicitly signal "agent left, caller still live"
 - Revisit whether `IAgentStateStore.GetAsync` should be batched (currently one Redis round-trip per agent per widget request) once widget-heavy dashboards with large rosters are in use
+
+---
+
+## Session 79 — Third Dashboard Widget: Call State by Campaign
+
+**Date:** 2026-07-19
+**Start:** 9:56 AM CDT
+**End:** 10:28 AM CDT
+**Duration:** 32 minutes
+**Cumulative Total:** ~6338 min
+
+### What Was Done
+
+Added the third dashboard widget, "Call State by Campaign" — a real-time stacked bar chart showing active-call counts per campaign, bucketed into PreQueue/InQueue/WithAgent/PostAgent (matching the CCXOne reference the user showed at the start of the dashboard work; `routing` folds into WithAgent since it's too brief a state to warrant its own legend entry). Config only exposes Client/Campaign filters (no Agent Group or Logged-in-only, since those don't apply to calls) — required generalizing `WidgetConfigModal` to take a per-widget-type `fields` visibility map (`WIDGET_FILTER_FIELDS`) rather than always showing all four filter fields.
+
+Backend: new `ICallStateHistoryRepository.GetActiveStateCountsAsync` (latest history row per call, restricted to non-terminal states, grouped by campaign+state) backing `GET /api/v1/dashboard-widgets/call-state-by-campaign`. Live updates reuse the same push architecture as the first two widgets — `CallStateHistoryRecorder` now also broadcasts `ReceiveCallStateSnapshot` to the `supervisor:{tenantId}` group (new `IDashboardNotifier.NotifyCallStateChangedAsync`), consumed via a second `DashboardCallStateLiveContext` alongside the existing agent-state one.
+
+**Real bug found and fixed:** the widget threw `500: ... 'EmptyProjectionMember' was not present in the dictionary` the moment it was dropped on the canvas. Root cause: `GetActiveStateCountsAsync`'s LINQ (`GroupBy(CallRecordId).Select(g => g.OrderByDescending(Sequence).First())` to get each call's latest state, then a second group-by for the campaign+state counts) is a "top-1-per-group" pattern EF Core's query translator cannot express — a known EF Core limitation, not something that surfaces until the query actually executes. Fixed by rewriting that one method as raw SQL via the underlying Npgsql connection, using Postgres's `DISTINCT ON` (validated directly against the real database with `docker exec cc_postgres psql` both before and after the fix).
+
+**Refinements from live user feedback:**
+- Widget now only returns campaigns with at least one active call (was showing every campaign in scope, including idle ones with an empty bar) — per the user, this is a "what's happening right now" widget, not a campaign roster.
+- Moved the chart legend from bottom to top (recharts `verticalAlign="top"`) and added a custom wrapping X-axis tick renderer (`WrappedAngledTick`, word-wraps a campaign name onto up to 2 angled lines with ellipsis truncation) — the rotated single-line labels were running into the legend below, and long campaign names were getting cut off at the widget's bottom edge.
+
+Confirmed working end-to-end via a live test call, watched across two open dashboard tabs: Agent State Counter, Agent List, and the new Call State by Campaign widget all updated within a second of each real state transition, no per-widget polling delay. User specifically praised this as a meaningful improvement over InContact's dashboard, which polls each widget on its own independent timer and lags 3-7 seconds behind real time — saved as a feedback memory to keep every future widget on the same live-push architecture rather than defaulting to polling.
+
+**Build:** `dotnet build` 0 errors (same pre-existing unrelated warnings) ✓. `tsc -b` 0 errors ✓.
+
+### Next Session
+- Continue expanding the dashboard widget catalog: Queue Counter, Service Level, Contact List, Skill Summary
+- Consider wiring `post_agent` once a transfer/consult telephony-flow node exists that can explicitly signal "agent left, caller still live"

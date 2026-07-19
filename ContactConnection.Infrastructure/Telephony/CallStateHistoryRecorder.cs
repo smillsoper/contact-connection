@@ -7,6 +7,7 @@ namespace ContactConnection.Infrastructure.Telephony;
 
 public class CallStateHistoryRecorder(
     ICallStateHistoryRepository repository,
+    IDashboardNotifier dashboardNotifier,
     IConnectionMultiplexer redis) : ICallStateHistoryRecorder
 {
     private readonly IDatabase _redis = redis.GetDatabase();
@@ -31,5 +32,7 @@ public class CallStateHistoryRecorder(
             tenantId, callRecordId, sequence, state, campaignId, agentId, detail, abandonType, abandonLength);
 
         await repository.AddAsync(entry, tenantSchemaName, ct);
+
+        await dashboardNotifier.NotifyCallStateChangedAsync(tenantId, campaignId, state, ct);
     }
 }
