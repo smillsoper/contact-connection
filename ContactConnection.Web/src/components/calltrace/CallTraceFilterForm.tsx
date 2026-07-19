@@ -2,15 +2,14 @@ import { useEffect, useState } from 'react'
 import SearchableSelect from '../SearchableSelect'
 import { listCampaigns, type Campaign } from '../../api/telephony'
 import { flowsApi, type FlowSummary } from '../../api/flows'
-import { callTracesApi, type CaptureMode, type StartTraceResult } from '../../api/callTraces'
-import type { TracePresetFilters } from './openCallTrace'
+import { callTracesApi, type CaptureMode, type StartTraceFilters, type StartTraceResult } from '../../api/callTraces'
 
 const MAX_CAPTURE_COUNT = 500
 const MAX_CAPTURE_DURATION_MINUTES = 60
 
 interface Props {
-  preset: TracePresetFilters
-  onStarted: (result: StartTraceResult) => void
+  preset: Partial<StartTraceFilters>
+  onStarted: (result: StartTraceResult, filters: StartTraceFilters) => void
 }
 
 export default function CallTraceFilterForm({ preset, onStarted }: Props) {
@@ -19,9 +18,9 @@ export default function CallTraceFilterForm({ preset, onStarted }: Props) {
   const [campaignId, setCampaignId] = useState(preset.campaignId ?? '')
   const [flowId, setFlowId] = useState(preset.flowId ?? '')
   const [dnis, setDnis] = useState(preset.dnis ?? '')
-  const [ani, setAni] = useState('')
-  const [captureMode, setCaptureMode] = useState<CaptureMode>('count')
-  const [captureValue, setCaptureValue] = useState(10)
+  const [ani, setAni] = useState(preset.ani ?? '')
+  const [captureMode, setCaptureMode] = useState<CaptureMode>(preset.captureMode ?? 'count')
+  const [captureValue, setCaptureValue] = useState(preset.captureValue ?? 10)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -39,15 +38,16 @@ export default function CallTraceFilterForm({ preset, onStarted }: Props) {
     setStarting(true)
     setError(null)
     try {
-      const result = await callTracesApi.start({
+      const filters: StartTraceFilters = {
         campaignId: campaignId || undefined,
         flowId: flowId || undefined,
         dnis: dnis || undefined,
         ani: ani || undefined,
         captureMode,
         captureValue,
-      })
-      onStarted(result)
+      }
+      const result = await callTracesApi.start(filters)
+      onStarted(result, filters)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to start trace.')
     } finally {

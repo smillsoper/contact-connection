@@ -86,6 +86,8 @@
 | 74 | 2026-07-12 | 10:40 AM CDT | 11:42 AM CDT | 62 min | ~5908 min |
 | 75 | 2026-07-13 | 4:53 PM CDT | 5:49 PM CDT | 56 min | ~5964 min |
 | 76 | 2026-07-14 | 4:01 PM CDT | 5:45 PM CDT | 104 min | ~6068 min |
+| 77 | 2026-07-16 | 4:12 PM CDT | 5:40 PM CDT | 88 min | ~6156 min |
+| 78 | 2026-07-19 | 7:18 AM CDT | 9:48 AM CDT | 150 min | ~6306 min |
 
 ---
 
@@ -3367,3 +3369,100 @@ A flow variable holding a whole API response (e.g. `Dexcom_Stats`) is stored twi
 
 ### Next Session
 - Test the general API node in the CRM script flow (telephony side fully confirmed working this session)
+
+---
+
+## Session 77 — CRM Engine Bug Fixes, Designer Node-ID Bug, Telephony Hangup Investigation
+
+**Date:** 2026-07-16
+**Start:** 4:12 PM
+**End:** 5:40 PM
+**Duration:** 88 minutes
+**Cumulative Total:** ~6156 min
+
+### What Was Done
+
+User tested the general API node in the CRM script flow (confirmed working) and surfaced three more real bugs while doing so, plus started a telephony hangup investigation that's continuing next session.
+
+**Real bug: CRM `script` nodes never stopped for the agent to read them**
+
+`FlowEngine.AdvanceInternalAsync` had a special case that always auto-advanced through `script` nodes, accumulating their content into a `ScriptContext` field attached to whatever node stopped next (input, or the terminal `end` node) — so a `script → end` chain (e.g. "please hold while I transfer you") ran to completion in one round trip with the agent never seeing the message as its own screen. The frontend already had a "Continue" button built for standalone script nodes (`NodeDisplay.tsx`), confirming this was the intended behavior, just never reachable. Root cause of why a naive fix wasn't enough: `AdvanceAsync` always passes `isStart:false`, so the loop's other stop mechanism is dead weight for normal mid-flow continuations — traced through fresh-start, mid-flow, chained-script, and script-into-input cases by hand before landing on tracking a new `isFirstNodeThisIteration` flag (distinct from `isStart`) that lets a script stop when reached by auto-advancing from an earlier node in the same call, and advance past itself when the call was invoked directly against it (the agent's own Continue click). Confirmed by user: script nodes now stop correctly, including `script → end`.
+
+Behavior change (confirmed with user before implementing): standalone script nodes now *always* stop, including when immediately followed by an input node — the old script→input auto-merge (one combined screen) is gone. Session 24's inline script field on input/email/phone/address nodes is the supported way to get a combined screen going forward.
+
+Follow-up bug from the same fix: the script node's own "Continue" click re-invokes its handler a second time purely to look up the next node id (deterministic, nothing user-visible happens) — but the trace recorder logged that resume pass as its own step, so the same script appeared twice in the Call Trace even though the agent only saw it once. Fixed by skipping trace recording specifically for that resume pass, guarded so the *first* display of a script that happens to be a flow's entry node still gets logged.
+
+**Real bug: CRM `api_call` node fired the live API twice**
+
+Same root cause class, opposite direction: `api_call` wasn't in `FlowEngine.AutoAdvanceTypes`, so when a `section → set_variable → api_call` chain ran as the very first thing after a flow session started (`isStart` stays `true` the whole way through a StartAsync-triggered chain), the loop stopped at `api_call` and displayed it with a Continue button. Clicking Continue re-invoked the node's handler from scratch — actually re-calling the live external API a second time, with two different real responses several minutes apart in the trace. Unlike `script`, `api_call` should never stop; fixed by adding it to `AutoAdvanceTypes` so it's always transparent, matching `branch`/`set_variable`.
+
+**Real bug: Flow Designer node-drop id collision silently clobbered existing nodes**
+
+User had noticed (and initially assumed was their own mistake) that dragging a new "Play" node onto the telephony designer canvas kept moving an *existing* Play node to the drop location instead, clearing its properties, repeating for each existing Play node in sequence until it started working normally again. Root cause: `TelephonyDesignerPage.tsx`'s `onDrop` generated new node ids as `` `${type}_${++idCounter.current}` ``, where `idCounter` is a `useRef(0)` that resets on every page load. Reopening the designer on a flow that already has `tf_play_1`, `tf_play_2`, `tf_play_3`... and dropping new Play nodes regenerates those same ids — React Flow keys nodes by id, so the "new" node's fresh blank data silently overwrote the existing node sharing that id, while its edges (unaffected, since they reference the same id) stayed attached, exactly matching what was observed. Fixed to use `` `${type}_${Date.now()}` ``, matching the CRM designer's existing (collision-safe, timestamp-based) id scheme; removed the now-unused `idCounter` ref. Note: this doesn't undo the damage already done — the play nodes clobbered before the fix genuinely lost their audio file selections; user already re-configured them.
+
+**Feature: "New Trace" button in the Call Trace popup**
+
+Previously had to close and reopen the whole popup window to start a new trace. Added a "New Trace" button (visible while running or stopped) that stops the current subscription server-side if still active, clears captured calls, and drops back to the filter form pre-populated with the same filters (including ANI/capture mode/value, which weren't carried over before either — only campaign/flow/DNIS were).
+
+**Telephony hangup investigation (root cause not yet found — continues next session)**
+
+User reported that after clicking the softphone's hangup button, the `tf_on_call_disconnected` event never fired and the agent stayed stuck in "On Call" instead of transitioning through ACW. Investigation so far:
+- Confirmed via `docker exec cc_freeswitch fs_cli -x "show channels"` that all channel legs from the test call were still fully alive in FreeSWITCH after clicking hangup (not partially torn down — completely untouched, including the caller leg still actively playing hold music). Killed them (`uuid_kill`) each time to keep the test environment clean; also found and deleted two stale `telephony:session:*` Redis keys left over from *earlier* (pre-fix) stuck test calls — killing a FreeSWITCH channel does not clean up the app's own Redis session bookkeeping, since that only happens inside `EslBackgroundService.HandleChannelHangupAsync`'s event-driven path.
+- Confirmed the flow used the "simple" bridge path in `TelephonyEndpoints.AnswerQueuedCall` (`esl.BridgeToAgentAsync`), which originates a new outbound SIP leg back to the agent's own extension — the self-dial-testing pattern already flagged (and deferred) in Session 74's notes about `SoftphonePanel.tsx`'s `sessionRef.current` tracking.
+- The client-side softphone resets to idle immediately on hangup regardless of outcome — `handleHangUp()` never waited on or checked the result of `session.terminate()` — so "the UI went back to idle" was never actually evidence that the hangup succeeded.
+- Decided to add diagnostic logging rather than guess further: `EslBackgroundService`'s main event loop now logs every subscribed ESL event with uuid/call-direction/other-leg-uuid/cause; `HandleChannelHangupAsync` now logs which branch it took (matched session vs. tenant-scan fallback) and the tenant-scan's outcome either way; `SoftphonePanel.tsx` now logs session creation, hangup-click session state, whether `terminate()` throws, and whether/when `ended`/`failed` ever actually fires. All marked `TEMP diagnostic logging` for easy removal once root-caused.
+- Next session: run a fresh test call, hang up, and read through the correlated frontend console + backend terminal logs to see exactly where the hangup signal gets lost — or whether it's sent at all.
+
+**Build:** `dotnet build` 0 errors (same pre-existing unrelated warnings) ✓. `tsc -b` 0 errors ✓.
+
+### Next Session
+- Run a test call, hang up, and read the new diagnostic logs (browser console + API terminal) to root-cause the telephony hangup issue
+- Remove the TEMP diagnostic logging once fixed
+
+---
+
+## Session 78 — Telephony Hangup Root-Cause + Fix, and Real-Time Supervisor Dashboard Builder (v1)
+
+**Date:** 2026-07-19
+**Start:** 7:18 AM CDT
+**End:** 9:48 AM CDT
+**Duration:** 150 minutes
+**Cumulative Total:** ~6306 min
+
+### What Was Done
+
+**Telephony hangup bug — root-caused and fixed (continued from Session 77)**
+
+Read through the diagnostic log captured from a fresh test call. The smoking gun: `CHANNEL_HANGUP {uuid} cause=NORMAL_CLEARING sessionMatch=False` paired with the same event's own `otherLegUuid` field pointing at the real Redis session key. Root cause: `HandleChannelHangupAsync` and `HandleChannelUnbridgeAsync` in `EslBackgroundService.cs` only ever looked up the live call session by the event's own `Unique-ID` — never falling back to `Other-Leg-Unique-ID`/`Bridge-B-Unique-ID` — so a hangup event firing for the agent's own bridge leg (rather than the caller/parked leg the session is actually keyed under) missed the session lookup entirely: no `call_disconnected` event, no agent-state restore, no session cleanup, softphone stuck on "On Call" forever.
+
+Fix: added a shared `ResolveSessionAsync` helper (event's own uuid first, then the other-leg fallback) used by both handlers; `HandleChannelHangupAsync` now uses `session.ChannelUuid` (not the raw event uuid) for the `call_disconnected` fire, the CallRecord lookup, and the Redis delete, plus a safety-net explicit hangup of the session-keyed channel when it differs from the leg that triggered the event. Confirmed fixed by the user with a live test call: softphone correctly transitioned On Call → ACW → Available, and the Call Trace showed `tf_on_call_disconnected` firing and reaching its end node. Removed all the TEMP diagnostic logging (both `EslBackgroundService.cs` and `SoftphonePanel.tsx`) added in Session 77 once confirmed root-caused.
+
+**New feature: real-time supervisor dashboard system (v1) — backend state history + drag-and-drop builder + two live widgets**
+
+User showed CCXOne's legacy reporting-dashboard UI as the reference (horizontal per-campaign contact-state graph, double-click-to-monitor active calls) and asked for an equivalent, tenant-buildable dashboard system. Agreed to build backend-first (tables/migrations, then wiring) before any UI, then prototype exactly two widgets (Agent State Counter, Agent List) to prove the full pipeline before expanding the catalog. Chose SignalR push (not polling) for live updates and `react-grid-layout` for the drag/resize/auto-reflow grid.
+
+*Backend — state history substrate:*
+- New append-only tables (mirroring the existing `call_trace_events` pattern — no `exited_at` column; duration is always "next row's `entered_at` minus this one's," or `now()` for the latest row): `agent_state_history` (state_code, label, entered_at) and `call_state_history` (state, campaign_id, agent_id, sequence, abandon_type, abandon_length, entered_at).
+- `Campaign.ShortAbandonThresholdSeconds` (new column, default 10s) — classifies an in-queue abandon as short vs. long.
+- Call state model (defined precisely with the user): `pre_queue → in_queue → routing → active → post_agent → completed`, or an `abandoned` branch (`pre_queue`/`in_queue`/`callback_abandon` sub-types; `callback_abandon` reserved for a not-yet-built callback feature). Wired real write points: `pre_queue` at CallRecord creation, `in_queue` in `RouteToQueueNodeHandler` (also stashes the queue-entry timestamp for abandon-duration math), `routing` when an agent is assigned in `AnswerQueuedCall`, `active` on `CHANNEL_BRIDGE`, and `completed`/`abandoned` (with short/long classification) on hangup based on whether the call ever reached an agent. `post_agent` deliberately left unwired — no transfer-flow logic exists yet to reliably distinguish "agent left, caller still live" from a normal hangup.
+- `AgentStateStore.SetAsync` now persists every transition to `agent_state_history` and pushes a `supervisor:{tenantId}` SignalR broadcast (new `IDashboardNotifier`/`DashboardNotifier`, reusing `FlowHub`'s previously-unused supervisor group) — a single choke point, so all ~5 existing call sites got history/live-push for free with just a signature change (added a required `tenantSchemaName` param).
+- New `AgentStateCodes.LoggedOut` state, set explicitly on sign-out (`AgentShell.tsx handleLogout`, fire-and-forget before the auth token is cleared) — added per user request so dashboard widgets can filter to "logged in only" and so future reporting can show logout timestamps/durations.
+- New `Dashboard` entity (tenant schema, JSON widget-layout blob) + CRUD endpoints, and `dashboard-widgets` read endpoints (`agent-state-counter`, `agent-list`) accepting campaign/client/group + `loggedInOnly` filters.
+
+*Frontend — drag-and-drop builder + two widgets:*
+- `DashboardsPage.tsx` (list) + `DashboardBuilderPage.tsx` (builder), installed `react-grid-layout` (v2, used via its `/legacy` subpath for the classic v1 drag/drop/resize API) and `recharts`.
+- Widget palette with distinct per-widget SVG icons (donut-ring for Agent State Counter, list-with-dots for Agent List), drag-from-palette-to-canvas, per-widget config modal (Client/Campaign/Agent Group filter via the existing `SearchableSelect`, plus a "Logged in only" checkbox).
+- `AgentStateCounterWidget` (recharts donut, responsive to widget resize via `ResponsiveContainer`'s `onResize`) and `AgentListWidget` (sortable columns — click a header to sort ascending, click again to toggle descending; rows with no time value always sort last regardless of direction).
+- Live updates via a `DashboardLiveContext` fed by a single SignalR connection per builder page (joins `supervisor:{tenantId}`, listens for `receiveAgentStateSnapshot`); the list widget patches the matching row in place, the counter widget debounces a re-fetch.
+- Verified end-to-end live in the browser with the user across several rounds: drag-and-drop placement, save/reload persistence, live cross-tab state updates, logged-out filtering, responsive chart resizing, and column sorting all confirmed working.
+
+*Bugs found and fixed during the build:*
+- Both widgets' data-fetch `useCallback` was missing `config.loggedInOnly` from its dependency array, so toggling that filter alone silently didn't refetch — fixed by adding it to both dependency lists.
+- After fixing the filter, discovered dragging/resizing didn't work at all (cursor showed "move" but nothing happened) — browser console showed `Uncaught ReferenceError: process is not defined` inside `react-grid-layout`'s bundled `react-draggable` dependency, which references `process.env.NODE_ENV` directly (a leftover CommonJS/webpack convention Vite doesn't polyfill). Fixed with a `define: { 'process.env.NODE_ENV': ... }` entry in `vite.config.ts`.
+
+**Build:** `dotnet build` 0 errors (same pre-existing unrelated warnings) ✓. `tsc -b` 0 errors ✓. `dotnet test` 65/65 passing ✓ (checked before the dashboard work began).
+
+### Next Session
+- Expand the dashboard widget catalog: Contact States by Skill, Queue Counter, Service Level (all map directly onto `call_state_history`), plus a Skill Summary / historical-KPI style widget
+- Consider wiring `post_agent` once a transfer/consult telephony-flow node exists that can explicitly signal "agent left, caller still live"
+- Revisit whether `IAgentStateStore.GetAsync` should be batched (currently one Redis round-trip per agent per widget request) once widget-heavy dashboards with large rosters are in use

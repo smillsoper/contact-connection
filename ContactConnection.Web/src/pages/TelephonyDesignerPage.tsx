@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   ReactFlow,
@@ -211,7 +211,6 @@ function DesignerCanvas() {
   const [flowSubType, setFlowSubType] = useState<string>('')
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [status, setStatus] = useState('')
-  const idCounter = useRef(0)
 
   // Option-picker modal for fixed-exit-option nodes (e.g. tf_general_api_call)
   const [pendingConn, setPendingConn] = useState<Connection | null>(null)
@@ -296,7 +295,13 @@ function DesignerCanvas() {
       const type = e.dataTransfer.getData('application/tel-node-type') as TelephonyNodeType
       if (!type) return
       const position = screenToFlowPosition({ x: e.clientX, y: e.clientY })
-      const id = `${type}_${++idCounter.current}`
+      // Date.now()-based, not a per-session counter (which resets to 0 on every page load and
+      // collides with same-typed nodes already in a loaded flow — e.g. re-dropping a "Play" node
+      // after reopening the designer would regenerate "tf_play_1", clobbering the existing node
+      // of that id: React Flow keys nodes by id, so the drop's fresh blank data silently
+      // overwrote the old node's properties while its edges — unaffected, since they reference
+      // the same id — stayed attached, making it look like the old node "moved" to the drop spot).
+      const id = `${type}_${Date.now()}`
       const isEventNode = EVENT_LISTENER_TYPES.includes(type)
       setNodes((nds) => {
         const noEntry = !nds.some((n) => n.data.isEntry)

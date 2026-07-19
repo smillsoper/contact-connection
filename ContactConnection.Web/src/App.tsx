@@ -30,6 +30,8 @@ import PortalApiDefinitionsPage from './pages/portal/PortalApiDefinitionsPage'
 import PortalApiDefinitionDetailPage from './pages/portal/PortalApiDefinitionDetailPage'
 import PortalCredentialsPage from './pages/portal/PortalCredentialsPage'
 import CallTraceWindowPage from './pages/CallTraceWindowPage'
+import DashboardsPage from './pages/DashboardsPage'
+import DashboardBuilderPage from './pages/DashboardBuilderPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -114,6 +116,30 @@ export default function App() {
           element={
             <RequireAuth>
               <CallTraceWindowPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/dashboards"
+          element={
+            <RequireAuth>
+              <DashboardsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/dashboard-builder"
+          element={
+            <RequireAuth>
+              <DashboardBuilderPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/dashboard-builder/:id"
+          element={
+            <RequireAuth>
+              <DashboardBuilderPage />
             </RequireAuth>
           }
         />

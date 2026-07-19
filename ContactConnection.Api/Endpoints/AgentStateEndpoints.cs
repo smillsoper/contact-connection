@@ -48,17 +48,22 @@ public static class AgentStateEndpoints
         if (!TryGetAgentClaims(http, out var tenantId, out var agentId))
             return Results.Unauthorized();
 
+        var tenantSchema = http.User.FindFirst("tenant_schema")?.Value;
+        if (string.IsNullOrEmpty(tenantSchema))
+            return Results.Unauthorized();
+
         var label = req.Code switch
         {
             AgentStateCodes.Available        => "Available",
             AgentStateCodes.UnavailableBreak => "Unavailable - Break",
             AgentStateCodes.UnavailableLunch => "Unavailable - Lunch",
             AgentStateCodes.Unavailable      => "Unavailable",
+            AgentStateCodes.LoggedOut        => "Logged Out",
             _                                => req.CustomLabel ?? "Unavailable",
         };
 
         var entry = new AgentStateEntry(req.Code, label, req.CustomCodeId, DateTimeOffset.UtcNow);
-        await store.SetAsync(tenantId, agentId, entry, ct);
+        await store.SetAsync(tenantId, agentId, tenantSchema, entry, ct);
         return Results.Ok(entry);
     }
 

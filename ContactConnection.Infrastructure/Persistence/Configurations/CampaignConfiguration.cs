@@ -29,6 +29,7 @@ public class CampaignConfiguration : IEntityTypeConfiguration<Campaign>
         builder.Property(c => c.MaxQueueSize).HasColumnName("max_queue_size");
         builder.Property(c => c.QueueTimeoutSeconds).HasColumnName("queue_timeout_seconds");
         builder.Property(c => c.ServiceLevelThresholdSeconds).HasColumnName("service_level_threshold_seconds");
+        builder.Property(c => c.ShortAbandonThresholdSeconds).HasColumnName("short_abandon_threshold_seconds");
         builder.Property(c => c.QueueAccelerationEnabled).HasColumnName("queue_acceleration_enabled");
         builder.Property(c => c.QueueAccelerationIntervalSeconds).HasColumnName("queue_acceleration_interval_seconds");
         builder.Property(c => c.QueueAccelerationPriorityBoost).HasColumnName("queue_acceleration_priority_boost");

@@ -36,6 +36,10 @@ public class Campaign
     public int QueueTimeoutSeconds { get; private set; } = 300;
     public int ServiceLevelThresholdSeconds { get; private set; } = 30;
 
+    // Calls that hang up while in_queue within this many seconds are a "short" abandon;
+    // beyond it, a "long" abandon. Drives abandon-length classification in call state history.
+    public int ShortAbandonThresholdSeconds { get; private set; } = 10;
+
     // Queue acceleration: raise waiting caller's effective priority every N seconds
     public bool QueueAccelerationEnabled { get; private set; }
     public int QueueAccelerationIntervalSeconds { get; private set; } = 60;
@@ -94,6 +98,7 @@ public class Campaign
         int maxQueueSize,
         int queueTimeoutSeconds,
         int serviceLevelThresholdSeconds,
+        int shortAbandonThresholdSeconds,
         bool queueAccelerationEnabled,
         int queueAccelerationIntervalSeconds,
         int queueAccelerationPriorityBoost)
@@ -108,6 +113,7 @@ public class Campaign
         MaxQueueSize                         = Math.Max(1, maxQueueSize);
         QueueTimeoutSeconds                  = Math.Max(0, queueTimeoutSeconds);
         ServiceLevelThresholdSeconds         = Math.Max(0, serviceLevelThresholdSeconds);
+        ShortAbandonThresholdSeconds         = Math.Max(0, shortAbandonThresholdSeconds);
         QueueAccelerationEnabled             = queueAccelerationEnabled;
         QueueAccelerationIntervalSeconds     = Math.Max(1, queueAccelerationIntervalSeconds);
         QueueAccelerationPriorityBoost       = Math.Max(1, queueAccelerationPriorityBoost);

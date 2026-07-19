@@ -93,7 +93,7 @@ public sealed class EslBackgroundService : BackgroundService
                     break;
                 case "CHANNEL_HANGUP":
                 case "CHANNEL_HANGUP_COMPLETE":
-                    await HandleChannelHangupAsync(vars, ct);
+                    await HandleChannelHangupAsync(vars, esl, ct);
                     break;
                 case "PLAYBACK_STOP":
                     await HandlePlaybackStopAsync(vars, esl, ct);
@@ -152,6 +152,7 @@ public sealed class EslBackgroundService : BackgroundService
         var platformDb       = scope.ServiceProvider.GetRequiredService<ContactConnectionDbContext>();
         var dbFactory        = scope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
         var telephonyEngine  = scope.ServiceProvider.GetRequiredService<ITelephonyFlowEngine>();
+        var callStateRecorder = scope.ServiceProvider.GetRequiredService<ICallStateHistoryRecorder>();
 
         // ── DID routing: check if destination matches a provisioned phone number ──
         // Normalize: strip leading + so "+18005551234" matches "18005551234" or "8005551234"
@@ -167,7 +168,7 @@ public sealed class EslBackgroundService : BackgroundService
         {
             await HandleDidCallAsync(
                 routing, callerNumber, callerName, channelUuid, destination, vars,
-                esl, telephonyEngine, platformDb, dbFactory, ct);
+                esl, telephonyEngine, platformDb, dbFactory, callStateRecorder, ct);
             return;
         }
 
@@ -191,6 +192,7 @@ public sealed class EslBackgroundService : BackgroundService
         ITelephonyFlowEngine telephonyEngine,
         ContactConnectionDbContext platformDb,
         ITenantDbContextFactory dbFactory,
+        ICallStateHistoryRecorder callStateRecorder,
         CancellationToken ct)
     {
         var tenant = await platformDb.Tenants.FirstOrDefaultAsync(t => t.Id == routing.TenantId, ct);
@@ -214,6 +216,10 @@ public sealed class EslBackgroundService : BackgroundService
 
         db.CallRecords.Add(record);
         await db.SaveChangesAsync(ct);
+
+        await callStateRecorder.RecordAsync(
+            tenant.Id, tenant.SchemaName, record.Id,
+            CallHistoryState.PreQueue, routing.CampaignId, agentId: null, detail: null, ct: ct);
 
         _logger.LogInformation(
             "CHANNEL_PARK DID {Uuid}: tenant={Tenant} campaign={Campaign} → CallRecord {RecordId}",
@@ -337,21 +343,44 @@ public sealed class EslBackgroundService : BackgroundService
     }
 
     /// <summary>
+    /// Resolves the live call session for a hangup/unbridge event. FreeSWITCH reports these
+    /// events against whichever leg triggered them — for a bridged call that can be either the
+    /// original caller/parked leg (which the session is keyed under, set at CHANNEL_PARK) or the
+    /// agent's own bridge leg (e.g. the agent clicking Hang Up sends a real BYE for THEIR leg,
+    /// not the caller's). Falls back to the event's Other-Leg-Unique-ID/Bridge-B-Unique-ID before
+    /// giving up, so an agent-leg hangup still finds the caller-keyed session.
+    /// </summary>
+    private async Task<TelephonyCallSession?> ResolveSessionAsync(
+        string uuid, Dictionary<string, string> vars, CancellationToken ct)
+    {
+        var session = await _sessionStore.GetAsync(uuid, ct);
+        if (session is not null) return session;
+
+        var otherLegUuid = vars.GetValueOrDefault("Other-Leg-Unique-ID") ?? vars.GetValueOrDefault("Bridge-B-Unique-ID");
+        return string.IsNullOrEmpty(otherLegUuid) ? null : await _sessionStore.GetAsync(otherLegUuid, ct);
+    }
+
+    /// <summary>
     /// Channel hung up — fire the call_disconnected event branch (if configured), mark the
     /// CallRecord complete, and delete the live call session from Redis.
     /// </summary>
-    private async Task HandleChannelHangupAsync(Dictionary<string, string> vars, CancellationToken ct)
+    private async Task HandleChannelHangupAsync(Dictionary<string, string> vars, EslClient esl, CancellationToken ct)
     {
         var channelUuid = vars.GetValueOrDefault("Unique-ID");
         if (string.IsNullOrEmpty(channelUuid)) return;
 
         var cause = vars.GetValueOrDefault("Hangup-Cause") ?? "unknown";
-        _logger.LogDebug("CHANNEL_HANGUP {Uuid} cause={Cause}", channelUuid, cause);
 
-        // Check if there is a live session for this call (DID calls always have one)
-        var session = await _sessionStore.GetAsync(channelUuid, ct);
+        // Check if there is a live session for this call (DID calls always have one) — the
+        // session may be keyed under this event's own uuid or its bridge partner's (see
+        // ResolveSessionAsync). session.ChannelUuid (not the raw event uuid) is the correct key
+        // for all session-store/CallRecord lookups below once a session is found.
+        var session = await ResolveSessionAsync(channelUuid, vars, ct);
+
         if (session is not null)
         {
+            var sessionUuid = session.ChannelUuid;
+
             // Read assigned agent before deleting session
             var assignedAgentIdStr = session.Vars.GetValueOrDefault("_assigned_agent_id");
 
@@ -360,17 +389,19 @@ public sealed class EslBackgroundService : BackgroundService
             var dbFactory           = scope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
             var traceRegistry       = scope.ServiceProvider.GetRequiredService<ICallTraceSubscriptionRegistry>();
             var traceNotifier       = scope.ServiceProvider.GetRequiredService<ICallTraceNotifier>();
+            var callStateRecorder   = scope.ServiceProvider.GetRequiredService<ICallStateHistoryRecorder>();
 
             // Fire the call_disconnected event so the designer branch can run post-call actions
             await telephonyEngine.FireEventAsync(
-                channelUuid, "call_disconnected",
+                sessionUuid, "call_disconnected",
                 new FireEventContext { AdditionalVars = new() { ["hangup_cause"] = cause } },
                 ct);
 
             // Mark the call record complete
             await using var db = dbFactory.Create(session.TenantSchemaName);
             var record = await db.CallRecords.FirstOrDefaultAsync(
-                r => r.ContactIdExternal == channelUuid, ct);
+                r => r.ContactIdExternal == sessionUuid, ct);
+            Campaign? campaign = null;
             if (record is not null)
             {
                 record.Complete();
@@ -378,6 +409,39 @@ public sealed class EslBackgroundService : BackgroundService
                 _logger.LogInformation(
                     "CHANNEL_HANGUP {Uuid} cause={Cause} → CallRecord {RecordId} completed",
                     channelUuid, cause, record.Id);
+
+                if (session.CampaignId != Guid.Empty)
+                    campaign = await db.Campaigns.FirstOrDefaultAsync(c => c.Id == session.CampaignId, ct);
+
+                // Classify the call's queue-lifecycle outcome for the state history log
+                if (assignedAgentIdStr is not null && Guid.TryParse(assignedAgentIdStr, out var completedAgentId))
+                {
+                    await callStateRecorder.RecordAsync(
+                        session.TenantId, session.TenantSchemaName, record.Id,
+                        CallHistoryState.Completed, session.CampaignId, completedAgentId, cause, ct: ct);
+                }
+                else if (session.Vars.ContainsKey("_queued"))
+                {
+                    var abandonLength = CallAbandonLength.Long;
+                    if (session.Vars.TryGetValue("_in_queue_at", out var inQueueAtStr) &&
+                        DateTimeOffset.TryParse(inQueueAtStr, out var inQueueAt))
+                    {
+                        var waitedSeconds = (DateTimeOffset.UtcNow - inQueueAt).TotalSeconds;
+                        var threshold = campaign?.ShortAbandonThresholdSeconds ?? 10;
+                        abandonLength = waitedSeconds <= threshold ? CallAbandonLength.Short : CallAbandonLength.Long;
+                    }
+                    await callStateRecorder.RecordAsync(
+                        session.TenantId, session.TenantSchemaName, record.Id,
+                        CallHistoryState.Abandoned, session.CampaignId, agentId: null, detail: cause,
+                        abandonType: CallAbandonType.InQueue, abandonLength: abandonLength, ct: ct);
+                }
+                else
+                {
+                    await callStateRecorder.RecordAsync(
+                        session.TenantId, session.TenantSchemaName, record.Id,
+                        CallHistoryState.Abandoned, session.CampaignId, agentId: null, detail: cause,
+                        abandonType: CallAbandonType.PreQueue, ct: ct);
+                }
 
                 // Let any trace popups watching this call know it ended, so they can close its tab
                 var watchingSubscriptionIds = await traceRegistry.GetSubscriptionsForCallAsync(record.Id, ct);
@@ -389,23 +453,34 @@ public sealed class EslBackgroundService : BackgroundService
             }
 
             // Delete session — call is over
-            await _sessionStore.DeleteAsync(channelUuid, ct);
+            await _sessionStore.DeleteAsync(sessionUuid, ct);
+
+            // Safety net: the hangup event fired for one leg (possibly the agent's bridge leg,
+            // not the session-keyed caller leg) — don't rely on FreeSWITCH cascading the hangup
+            // to the other leg automatically (observed lingering caller legs when it didn't).
+            if (!string.Equals(channelUuid, sessionUuid, StringComparison.Ordinal))
+            {
+                try
+                {
+                    await esl.HangupChannelAsync(sessionUuid, ct);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex,
+                        "CHANNEL_HANGUP {Uuid}: safety-net hangup of {SessionUuid} failed (likely already gone)",
+                        channelUuid, sessionUuid);
+                }
+            }
 
             // Restore agent state: ACW → available (if ACW > 0) or unavailable immediately (ACW = 0)
             if (assignedAgentIdStr is not null && Guid.TryParse(assignedAgentIdStr, out var assignedAgentId))
             {
-                var acwSeconds = 0;
-                if (session.CampaignId != Guid.Empty)
-                {
-                    var campaign = await db.Campaigns
-                        .FirstOrDefaultAsync(c => c.Id == session.CampaignId, ct);
-                    acwSeconds = campaign?.AfterCallWorkSeconds ?? 0;
-                }
+                var acwSeconds = campaign?.AfterCallWorkSeconds ?? 0;
 
                 if (acwSeconds > 0)
                 {
                     var acwEndsAt = DateTimeOffset.UtcNow.AddSeconds(acwSeconds);
-                    await _stateStore.SetAsync(session.TenantId, assignedAgentId,
+                    await _stateStore.SetAsync(session.TenantId, assignedAgentId, session.TenantSchemaName,
                         new AgentStateEntry(AgentStateCodes.Acw, "After Call Work", null, DateTimeOffset.UtcNow), ct);
                     await _hub.Clients.Group($"agent:{assignedAgentId}")
                         .ReceiveAgentStateChange(AgentStateCodes.Acw, "After Call Work", acwEndsAt.ToString("O"));
@@ -414,16 +489,17 @@ public sealed class EslBackgroundService : BackgroundService
 
                     // Fire-and-forget: after ACW expires, auto-transition to available
                     // Only transitions if the agent hasn't manually changed state during ACW.
-                    var tenantId    = session.TenantId;
-                    var hub         = _hub;
-                    var stateStore  = _stateStore;
+                    var tenantId         = session.TenantId;
+                    var tenantSchemaName = session.TenantSchemaName;
+                    var hub              = _hub;
+                    var stateStore       = _stateStore;
                     _ = Task.Run(async () =>
                     {
                         await Task.Delay(TimeSpan.FromSeconds(acwSeconds));
                         var current = await stateStore.GetAsync(tenantId, assignedAgentId);
                         if (current?.Code == AgentStateCodes.Acw)
                         {
-                            await stateStore.SetAsync(tenantId, assignedAgentId,
+                            await stateStore.SetAsync(tenantId, assignedAgentId, tenantSchemaName,
                                 new AgentStateEntry(AgentStateCodes.Available, "Available", null, DateTimeOffset.UtcNow));
                             await hub.Clients.Group($"agent:{assignedAgentId}")
                                 .ReceiveAgentStateChange(AgentStateCodes.Available, "Available", null);
@@ -432,7 +508,7 @@ public sealed class EslBackgroundService : BackgroundService
                 }
                 else
                 {
-                    await _stateStore.SetAsync(session.TenantId, assignedAgentId,
+                    await _stateStore.SetAsync(session.TenantId, assignedAgentId, session.TenantSchemaName,
                         new AgentStateEntry(AgentStateCodes.Unavailable, "Unavailable", null, DateTimeOffset.UtcNow), ct);
                     await _hub.Clients.Group($"agent:{assignedAgentId}")
                         .ReceiveAgentStateChange(AgentStateCodes.Unavailable, "Unavailable", null);
@@ -462,6 +538,18 @@ public sealed class EslBackgroundService : BackgroundService
 
         var bridgeSession = await _sessionStore.GetAsync(uuid, ct);
         if (bridgeSession is null) return;
+
+        // Call is now bridged to an agent — record the "active" transition
+        {
+            using var recorderScope = _scopeFactory.CreateScope();
+            var callStateRecorder   = recorderScope.ServiceProvider.GetRequiredService<ICallStateHistoryRecorder>();
+            Guid? bridgedAgentId = Guid.TryParse(
+                bridgeSession.Vars.GetValueOrDefault("_assigned_agent_id"), out var bridgedAgentIdParsed)
+                ? bridgedAgentIdParsed : null;
+            await callStateRecorder.RecordAsync(
+                bridgeSession.TenantId, bridgeSession.TenantSchemaName, bridgeSession.CallRecordId,
+                CallHistoryState.Active, bridgeSession.CampaignId, bridgedAgentId, detail: null, ct: ct);
+        }
 
         // Stop any active play loop — the call is now bridged
         if (bridgeSession.Vars.ContainsKey("_play_media_arg"))
@@ -538,11 +626,15 @@ public sealed class EslBackgroundService : BackgroundService
         var cause = vars.GetValueOrDefault("Hangup-Cause") ?? "";
         _logger.LogInformation("CHANNEL_UNBRIDGE {Uuid} cause={Cause}", uuid, cause);
 
-        var session = await _sessionStore.GetAsync(uuid, ct);
+        // Resolve via the session's own key OR its bridge partner's — this event can fire with
+        // either leg's uuid, and the session is only ever keyed under the caller/parked leg's.
+        var session = await ResolveSessionAsync(uuid, vars, ct);
         if (session is not null)
         {
-            _logger.LogInformation("CHANNEL_UNBRIDGE {Uuid}: caller channel still active — hanging up", uuid);
-            await esl.HangupChannelAsync(uuid, ct);
+            _logger.LogInformation(
+                "CHANNEL_UNBRIDGE {Uuid}: caller channel still active (sessionKeyUuid={SessionKeyUuid}) — hanging up",
+                uuid, session.ChannelUuid);
+            await esl.HangupChannelAsync(session.ChannelUuid, ct);
         }
     }
 
@@ -760,8 +852,9 @@ public sealed class EslBackgroundService : BackgroundService
             record.Complete();
             await db.SaveChangesAsync(ct);
             _logger.LogInformation(
-                "CHANNEL_HANGUP {Uuid} cause={Cause} → CallRecord {RecordId} completed (tenant scan)",
-                channelUuid, cause, record.Id);
+                "CHANNEL_HANGUP {Uuid} cause={Cause} → CallRecord {RecordId} completed (tenant scan, tenant={Tenant}) — " +
+                "no call_disconnected event fired, no agent-state restore, no session cleanup for this uuid",
+                channelUuid, cause, record.Id, tenant.Subdomain);
             return;
         }
     }

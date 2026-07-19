@@ -4,6 +4,7 @@ import { useAuthStore } from '../stores/authStore'
 import { useSipStore } from '../stores/sipStore'
 import { useSessionTimeout } from '../hooks/useSessionTimeout'
 import { authApi } from '../api/auth'
+import { api } from '../api/client'
 import SessionTimeoutModal from './SessionTimeoutModal'
 import SoftphonePanel from './SoftphonePanel'
 import FlowPanel from './FlowPanel'
@@ -32,6 +33,9 @@ export default function AgentShell() {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleLogout = useCallback(() => {
+    // Fire-and-forget — must fire before clearAuth() wipes the token used for this request.
+    // Feeds agent_state_history so future reporting can show logout timestamps/durations.
+    api.put('/api/v1/agent-state', { code: 'logged_out', customCodeId: null, customLabel: null }).catch(() => {})
     clearAuth()
     clearSip()
     navigate('/login', { replace: true })
@@ -58,6 +62,12 @@ export default function AgentShell() {
             className="text-xs text-gray-400 hover:text-indigo-300 transition-colors"
           >
             Flows
+          </button>
+          <button
+            onClick={() => navigate('/dashboards')}
+            className="text-xs text-gray-400 hover:text-indigo-300 transition-colors"
+          >
+            Dashboards
           </button>
           <button
             onClick={handleLogout}

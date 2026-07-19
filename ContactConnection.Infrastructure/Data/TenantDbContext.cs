@@ -47,6 +47,9 @@ public class TenantDbContext : DbContext
     public DbSet<AudioFile> AudioFiles => Set<AudioFile>();
     public DbSet<CustomUnavailableCode> CustomUnavailableCodes => Set<CustomUnavailableCode>();
     public DbSet<CallTraceEvent> CallTraceEvents => Set<CallTraceEvent>();
+    public DbSet<AgentStateHistoryEntry> AgentStateHistory => Set<AgentStateHistoryEntry>();
+    public DbSet<CallStateHistoryEntry> CallStateHistory => Set<CallStateHistoryEntry>();
+    public DbSet<Dashboard> Dashboards => Set<Dashboard>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -82,6 +85,9 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new AudioFileConfiguration());
         modelBuilder.ApplyConfiguration(new CustomUnavailableCodeConfiguration());
         modelBuilder.ApplyConfiguration(new CallTraceEventConfiguration());
+        modelBuilder.ApplyConfiguration(new AgentStateHistoryConfiguration());
+        modelBuilder.ApplyConfiguration(new CallStateHistoryConfiguration());
+        modelBuilder.ApplyConfiguration(new DashboardConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 

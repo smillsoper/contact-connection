@@ -51,6 +51,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICallRecordRepository, CallRecordRepository>();
         services.AddScoped<IAgentRepository, AgentRepository>();
         services.AddScoped<IFlowRepository, FlowRepository>();
+        services.AddScoped<IDashboardRepository, DashboardRepository>();
         services.AddScoped<IFlowSessionRepository, FlowSessionRepository>();
         services.AddScoped<IProductRepository, ProductRepository>();
         services.AddScoped<IProductCategoryRepository, ProductCategoryRepository>();
@@ -168,7 +169,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IRoleRepository, RoleRepository>();
         services.AddScoped<ICustomUnavailableCodeRepository, CustomUnavailableCodeRepository>();
 
-        // Agent state store — Redis-backed, singleton (stateless Redis ops)
+        // Agent state store — Redis-backed, singleton (stateless Redis ops). It also persists
+        // every transition to agent_state_history, so its repository must be singleton too
+        // (a singleton cannot depend on a scoped service).
+        services.AddSingleton<IAgentStateHistoryRepository, AgentStateHistoryRepository>();
         services.AddSingleton<IAgentStateStore, AgentStateStore>();
 
         // Call trace — persistence (scoped, EF) + subscription matching (singleton, Redis-backed
@@ -176,6 +180,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICallTraceEventRepository, CallTraceEventRepository>();
         services.AddScoped<ICallTraceRecorder, CallTraceRecorder>();
         services.AddSingleton<ICallTraceSubscriptionRegistry, RedisCallTraceSubscriptionRegistry>();
+
+        // Call queue/routing state history — mirrors the call trace registration above
+        services.AddScoped<ICallStateHistoryRepository, CallStateHistoryRepository>();
+        services.AddScoped<ICallStateHistoryRecorder, CallStateHistoryRecorder>();
 
         // Email
         services.AddSingleton<IEmailService, ResendEmailService>();

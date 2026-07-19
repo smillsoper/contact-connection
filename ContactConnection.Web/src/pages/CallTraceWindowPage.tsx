@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as signalR from '@microsoft/signalr'
 import { useAuthStore } from '../stores/authStore'
-import { callTracesApi, type CaptureMode, type CallTraceStep } from '../api/callTraces'
+import { callTracesApi, type CaptureMode, type CallTraceStep, type StartTraceFilters } from '../api/callTraces'
 import CallTraceFilterForm from '../components/calltrace/CallTraceFilterForm'
 import CallTraceRunningView, { type CallTab } from '../components/calltrace/CallTraceRunningView'
 import type { TracePresetFilters } from '../components/calltrace/openCallTrace'
@@ -24,6 +24,9 @@ export default function CallTraceWindowPage() {
   const [stopReason, setStopReason] = useState<string>()
   const [calls, setCalls] = useState<CallTab[]>([])
   const [activeCallRecordId, setActiveCallRecordId] = useState<string>()
+  // Filters from the most recently started trace — pre-populates the form when the agent
+  // clicks "New Trace" instead of closing and reopening the whole popup window.
+  const [lastFilters, setLastFilters] = useState<StartTraceFilters | undefined>()
 
   const connectionRef = useRef<signalR.HubConnection | null>(null)
   const subscriptionIdRef = useRef<string | undefined>(undefined)
@@ -81,11 +84,15 @@ export default function CallTraceWindowPage() {
     return () => { connection.stop() }
   }, [token, tenantSubdomain])
 
-  async function handleStarted(result: { subscriptionId: string; effectiveCaptureMode: CaptureMode; effectiveCaptureValue: number }) {
+  async function handleStarted(
+    result: { subscriptionId: string; effectiveCaptureMode: CaptureMode; effectiveCaptureValue: number },
+    filters: StartTraceFilters,
+  ) {
     subscriptionIdRef.current = result.subscriptionId
     setSubscriptionId(result.subscriptionId)
     setEffectiveCaptureMode(result.effectiveCaptureMode)
     setEffectiveCaptureValue(result.effectiveCaptureValue)
+    setLastFilters(filters)
     setStatus('running')
     try {
       await connectionRef.current?.invoke('JoinTrace', result.subscriptionId)
@@ -99,6 +106,22 @@ export default function CallTraceWindowPage() {
     try { await callTracesApi.stop(subscriptionId) } catch { /* server-side sweep will still stop it */ }
   }
 
+  // Resets the popup back to the filter form (pre-populated with the trace that just ran)
+  // instead of making the agent close and reopen the whole window to start a new trace.
+  async function handleNewTrace() {
+    if (subscriptionId && status === 'running') {
+      try { await callTracesApi.stop(subscriptionId) } catch { /* best effort — server-side sweep will still stop it */ }
+    }
+    subscriptionIdRef.current = undefined
+    setSubscriptionId(undefined)
+    setEffectiveCaptureMode(undefined)
+    setEffectiveCaptureValue(undefined)
+    setStopReason(undefined)
+    setCalls([])
+    setActiveCallRecordId(undefined)
+    setStatus('configuring')
+  }
+
   return (
     <div className="h-screen bg-gray-950 flex flex-col overflow-hidden">
       <div className="flex items-center px-4 py-2.5 border-b border-gray-800 shrink-0">
@@ -106,7 +129,7 @@ export default function CallTraceWindowPage() {
       </div>
       <div className="flex-1 min-h-0 overflow-hidden">
         {status === 'configuring' ? (
-          <CallTraceFilterForm preset={preset} onStarted={handleStarted} />
+          <CallTraceFilterForm preset={lastFilters ?? preset} onStarted={handleStarted} />
         ) : (
           <CallTraceRunningView
             calls={calls}
@@ -117,6 +140,7 @@ export default function CallTraceWindowPage() {
             effectiveCaptureMode={effectiveCaptureMode}
             effectiveCaptureValue={effectiveCaptureValue}
             onStop={handleStop}
+            onNewTrace={handleNewTrace}
           />
         )}
       </div>

@@ -16,11 +16,12 @@ interface Props {
   effectiveCaptureMode?: CaptureMode
   effectiveCaptureValue?: number
   onStop: () => void
+  onNewTrace: () => void
 }
 
 export default function CallTraceRunningView({
   calls, activeCallRecordId, onSelectCall, status, stopReason,
-  effectiveCaptureMode, effectiveCaptureValue, onStop,
+  effectiveCaptureMode, effectiveCaptureValue, onStop, onNewTrace,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const activeCall = calls.find((c) => c.callRecordId === activeCallRecordId) ?? calls[0]
@@ -53,11 +54,16 @@ export default function CallTraceRunningView({
             ? `Tracing — ${progressLabel}`
             : `Not accepting new calls — ${describeStopReason(stopReason)}`}
         </span>
-        {status === 'running' && (
-          <button onClick={onStop} className="text-xs text-red-400 hover:text-red-300">
-            Stop Trace
+        <div className="flex items-center gap-3 shrink-0">
+          {status === 'running' && (
+            <button onClick={onStop} className="text-xs text-red-400 hover:text-red-300">
+              Stop Trace
+            </button>
+          )}
+          <button onClick={onNewTrace} className="text-xs text-indigo-400 hover:text-indigo-300">
+            New Trace
           </button>
-        )}
+        </div>
       </div>
 
       {calls.length === 0 ? (

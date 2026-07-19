@@ -36,9 +36,14 @@ public class FlowEngine : IFlowEngine
     private readonly Dictionary<string, INodeHandler> _handlers;
     private readonly ILogger<FlowEngine> _logger;
 
-    // Transparent node types — engine auto-advances without waiting for agent input
+    // Transparent node types — engine auto-advances without waiting for agent input.
+    // api_call MUST be here: it has no natural "waiting for input" signal (like script), so
+    // without this it falls through to the isStart-based stop/advance fallback below — which,
+    // for a chain reached at true flow start (isStart stays true the whole way through), stops
+    // and displays it with a Continue button. Clicking Continue then re-invokes ExecuteAsync on
+    // the same node from scratch, calling the live API a second time with real side effects.
     private static readonly HashSet<string> AutoAdvanceTypes =
-        ["branch", "set_variable", "section", "execute_flow", "transition_to_flow"];
+        ["branch", "set_variable", "section", "execute_flow", "transition_to_flow", "api_call"];
 
     private static readonly TimeSpan SessionTtl = TimeSpan.FromHours(12);
 
@@ -228,10 +233,19 @@ public class FlowEngine : IFlowEngine
     {
         const int MaxAutoAdvance = 50; // safety cap — prevents infinite loops in bad flow definitions
         var steps = 0;
-        string? scriptContext = null; // accumulated script content to attach to the next stopping node
+
+        // Tracks whether the node about to be processed is the exact one this call was invoked
+        // for (isStart:true entry/jump-target, or the node id AdvanceAsync's caller just acted
+        // on) versus one reached transparently by auto-advancing within this same call. AdvanceAsync
+        // always passes isStart:false, so — unlike isStart — this stays meaningful past the very
+        // first iteration and is what lets a "script" node stop when reached mid-chain (see below).
+        var isFirstNode = true;
 
         while (true)
         {
+            var isFirstNodeThisIteration = isFirstNode;
+            isFirstNode = false;
+
             ctx.CurrentNodeId = nodeId;
             var node = GetNode(ctx.FlowDefinition, nodeId)
                 ?? throw new InvalidOperationException($"Node '{nodeId}' not found in flow definition.");
@@ -244,16 +258,27 @@ public class FlowEngine : IFlowEngine
 
             var result = await handler.ExecuteAsync(node, ctx, agentInput, transition, ct);
 
-            var detail = !string.IsNullOrWhiteSpace(result.State.Content) ? Truncate(result.State.Content) : result.State.Condition;
-            var sensitiveKeys = CallTraceSnapshot.FindSensitiveKeys(ctx.FlowDefinition);
-            var snapshot = CallTraceSnapshot.BuildCrmSnapshot(ctx, sensitiveKeys);
-            await _traceRecorder.RecordStepAsync(
-                ctx.TenantId, _tenantContext.Current!.SchemaName, ctx.CallRecordId, TraceEngine.Crm, nodeId, nodeType,
-                result.State.Label, detail, transitionTaken: transition, result.NextNodeId,
-                exitReason: result.State.IsTerminal ? "terminal" : null,
-                campaignId: null, ctx.FlowId, dnis: null, ani: null, snapshot, ct);
+            // A "script" node's Continue click re-invokes its handler purely to look up the next
+            // node id (deterministic — same content/transition as the first pass) — nothing new
+            // happened for the agent or the flow, so recording this as its own trace step would
+            // just show the same script twice. The pass that actually stopped and displayed it
+            // already got its own step below. Excludes isStart: if the node this call was invoked
+            // for IS a script (e.g. it's the flow's entry node), this pass is the one that stops
+            // and shows it — that display still needs to be recorded.
+            var isScriptAcknowledgement = nodeType == "script" && isFirstNodeThisIteration && !isStart;
+            if (!isScriptAcknowledgement)
+            {
+                var detail = !string.IsNullOrWhiteSpace(result.State.Content) ? Truncate(result.State.Content) : result.State.Condition;
+                var sensitiveKeys = CallTraceSnapshot.FindSensitiveKeys(ctx.FlowDefinition);
+                var snapshot = CallTraceSnapshot.BuildCrmSnapshot(ctx, sensitiveKeys);
+                await _traceRecorder.RecordStepAsync(
+                    ctx.TenantId, _tenantContext.Current!.SchemaName, ctx.CallRecordId, TraceEngine.Crm, nodeId, nodeType,
+                    result.State.Label, detail, transitionTaken: transition, result.NextNodeId,
+                    exitReason: result.State.IsTerminal ? "terminal" : null,
+                    campaignId: null, ctx.FlowId, dnis: null, ani: null, snapshot, ct);
+            }
 
-            // Terminal node or node waiting for input — return state, attaching any preceding script content
+            // Terminal node or node waiting for input — return state
             if (result.NextNodeId is null || result.State.IsTerminal)
             {
                 // Sub-flow ended — pop call stack and resume parent flow transparently
@@ -262,14 +287,12 @@ public class FlowEngine : IFlowEngine
                     var frame = ctx.CallStack[^1];
                     ctx.CallStack.RemoveAt(ctx.CallStack.Count - 1);
                     ctx.FlowDefinition = JsonNode.Parse(frame.DefinitionJson)?.AsObject() ?? [];
-                    nodeId        = frame.ReturnNodeId;
-                    agentInput    = null;
-                    transition    = "default";
-                    scriptContext = null; // don't bleed sub-flow scripts into parent
+                    nodeId     = frame.ReturnNodeId;
+                    agentInput = null;
+                    transition = "default";
                     continue;
                 }
 
-                result.State.ScriptContext = scriptContext;
                 return result.State;
             }
 
@@ -282,23 +305,18 @@ public class FlowEngine : IFlowEngine
                 continue;
             }
 
-            // Script node — capture its content and advance through it automatically.
-            // The content will be attached to the next node that stops (input/end).
-            if (nodeType == "script")
-            {
-                scriptContext = result.State.Content;
-                nodeId        = result.NextNodeId;
-                agentInput    = null;
-                transition    = "default";
-                continue;
-            }
-
-            // StartAsync / first-display: stop here and show this node to the agent.
-            if (isStart)
-            {
-                result.State.ScriptContext = scriptContext;
+            // "script" nodes have no data to capture and no natural "waiting for input" signal
+            // (they always compute a real next node), so — unlike input/email/phone/address,
+            // which stop themselves by returning NextNodeId:null until answered — the engine has
+            // to decide on their behalf: stop when reached by auto-advancing from an earlier node
+            // in this same call (isFirstNodeThisIteration is false), advance past it when this call
+            // was invoked directly against it (the agent just clicked its Continue button).
+            if (nodeType == "script" && !isFirstNodeThisIteration)
                 return result.State;
-            }
+
+            // StartAsync / jump-target first display: stop here and show this node to the agent.
+            if (isStart)
+                return result.State;
 
             // AdvanceAsync: agent acted on this node — advance past it to the next node.
             nodeId     = result.NextNodeId;

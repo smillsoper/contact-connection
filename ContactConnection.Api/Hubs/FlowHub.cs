@@ -67,4 +67,7 @@ public interface IFlowHubClient
 
     /// <summary>Server-side agent state change (e.g. on_call set at pickup, acw on hangup, available after acw).</summary>
     Task ReceiveAgentStateChange(string code, string label, string? expiresAtIso);
+
+    /// <summary>Broadcast to supervisor dashboards — any agent's state changed (not just the receiving agent's own).</summary>
+    Task ReceiveAgentStateSnapshot(string agentId, string stateCode, string label, string sinceIso);
 }

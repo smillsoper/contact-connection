@@ -101,7 +101,7 @@ public static class CampaignsEndpoints
         campaign.Update(
             req.Name, req.Description,
             req.Direction, req.DialMode, req.Priority, req.AfterCallWorkSeconds, req.CallerIdNumber,
-            req.MaxQueueSize, req.QueueTimeoutSeconds, req.ServiceLevelThresholdSeconds,
+            req.MaxQueueSize, req.QueueTimeoutSeconds, req.ServiceLevelThresholdSeconds, req.ShortAbandonThresholdSeconds,
             req.QueueAccelerationEnabled, req.QueueAccelerationIntervalSeconds, req.QueueAccelerationPriorityBoost);
         await repo.SaveChangesAsync(ct);
         return Results.Ok(ToSummaryResponse(campaign));
@@ -351,7 +351,7 @@ public static class CampaignsEndpoints
     {
         c.Id, c.TenantId, c.ClientId, c.Name, c.Slug, c.Status, c.Description, c.FlowId, c.InboundFlowId, c.OutboundFlowId,
         c.Direction, c.DialMode, c.CallerIdNumber, c.Priority, c.AfterCallWorkSeconds,
-        c.MaxQueueSize, c.QueueTimeoutSeconds, c.ServiceLevelThresholdSeconds,
+        c.MaxQueueSize, c.QueueTimeoutSeconds, c.ServiceLevelThresholdSeconds, c.ShortAbandonThresholdSeconds,
         c.QueueAccelerationEnabled, c.QueueAccelerationIntervalSeconds, c.QueueAccelerationPriorityBoost,
         Client = c.Client is null ? null : new { c.Client.Id, c.Client.Name },
         c.CreatedAt, c.UpdatedAt
@@ -361,7 +361,7 @@ public static class CampaignsEndpoints
     {
         c.Id, c.TenantId, c.ClientId, c.Name, c.Slug, c.Status, c.Description, c.FlowId, c.InboundFlowId, c.OutboundFlowId,
         c.Direction, c.DialMode, c.CallerIdNumber, c.Priority, c.AfterCallWorkSeconds,
-        c.MaxQueueSize, c.QueueTimeoutSeconds, c.ServiceLevelThresholdSeconds,
+        c.MaxQueueSize, c.QueueTimeoutSeconds, c.ServiceLevelThresholdSeconds, c.ShortAbandonThresholdSeconds,
         c.QueueAccelerationEnabled, c.QueueAccelerationIntervalSeconds, c.QueueAccelerationPriorityBoost,
         Client = c.Client is null ? null : new { c.Client.Id, c.Client.Name },
         PhoneNumbers     = c.PhoneNumbers.Select(p => new { p.Id, p.Number, p.Label, p.IsActive, p.FlowId, p.TelephonyFlowId }),
@@ -390,6 +390,7 @@ public record UpdateCampaignRequest(
     int MaxQueueSize = 50,
     int QueueTimeoutSeconds = 300,
     int ServiceLevelThresholdSeconds = 30,
+    int ShortAbandonThresholdSeconds = 10,
     bool QueueAccelerationEnabled = false,
     int QueueAccelerationIntervalSeconds = 60,
     int QueueAccelerationPriorityBoost = 1);

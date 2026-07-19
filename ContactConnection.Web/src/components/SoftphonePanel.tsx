@@ -364,7 +364,10 @@ export default function SoftphonePanel() {
       transferSessionRef.current = null
       if (consultAudioRef.current) consultAudioRef.current.srcObject = null
     }
-    sessionRef.current?.terminate()
+
+    const primary = sessionRef.current
+    try { primary?.terminate() } catch {}
+
     sessionRef.current = null
     reset()
   }

@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using ContactConnection.Application.Interfaces.Services;
+using ContactConnection.Domain.Entities;
 using ContactConnection.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,11 +12,14 @@ public class RouteToQueueNodeHandler : ITelephonyNodeHandler
 
     private readonly ITenantDbContextFactory _factory;
     private readonly IAgentStateStore _stateStore;
+    private readonly ICallStateHistoryRecorder _callStateRecorder;
 
-    public RouteToQueueNodeHandler(ITenantDbContextFactory factory, IAgentStateStore stateStore)
+    public RouteToQueueNodeHandler(
+        ITenantDbContextFactory factory, IAgentStateStore stateStore, ICallStateHistoryRecorder callStateRecorder)
     {
-        _factory    = factory;
-        _stateStore = stateStore;
+        _factory           = factory;
+        _stateStore        = stateStore;
+        _callStateRecorder = callStateRecorder;
     }
 
     public async Task<TelephonyNodeResult> ExecuteAsync(
@@ -71,6 +75,14 @@ public class RouteToQueueNodeHandler : ITelephonyNodeHandler
         // and so the screen pop is targeted.
         ctx.Vars["_queued"] = "true";
         ctx.Vars["_eligible_agents"] = string.Join(",", availableAgentIds);
+
+        // Stashed so a later abandon at hangup can compute in-queue wait time without a DB round trip.
+        var enteredQueueAt = DateTimeOffset.UtcNow;
+        ctx.Vars["_in_queue_at"] = enteredQueueAt.ToString("O");
+
+        await _callStateRecorder.RecordAsync(
+            ctx.TenantId, ctx.TenantSchemaName, ctx.CallRecordId,
+            CallHistoryState.InQueue, ctx.CampaignId, agentId: null, detail: null, ct: ct);
 
         // Allow chaining — e.g. RouteToQueue → Play (hold music) — by reading the default transition.
         // Returns null if no transition is defined (old behavior, call stays parked silently).

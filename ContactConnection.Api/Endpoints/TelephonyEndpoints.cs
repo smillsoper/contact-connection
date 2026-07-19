@@ -67,6 +67,7 @@ public static class TelephonyEndpoints
         IFlowEngine flowEngine,
         IHubContext<FlowHub, IFlowHubClient> hub,
         IAgentStateStore stateStore,
+        ICallStateHistoryRecorder callStateRecorder,
         IConfiguration config,
         CancellationToken ct)
     {
@@ -100,6 +101,10 @@ public static class TelephonyEndpoints
         var interaction = record.AddInteraction(InteractionType.CustomerService);
         db.CallInteractions.Add(interaction);
         await db.SaveChangesAsync(ct);
+
+        await callStateRecorder.RecordAsync(
+            tenantId, tenantSchema, record.Id,
+            CallHistoryState.Routing, record.CampaignId, agentId, detail: null, ct: ct);
 
         var host = config["FreeSWITCH:Host"] ?? "127.0.0.1";
         var port = int.Parse(config["FreeSWITCH:EslPort"] ?? "8021");
@@ -138,7 +143,7 @@ public static class TelephonyEndpoints
             await sessionStore.SaveAsync(session, ct);
 
             // Mark agent as on-call so QueuePollingService skips them + UI updates
-            await stateStore.SetAsync(tenantId, agentId,
+            await stateStore.SetAsync(tenantId, agentId, tenantSchema,
                 new AgentStateEntry(AgentStateCodes.OnCall, "On Call", null, DateTimeOffset.UtcNow), ct);
             await hub.Clients.Group($"agent:{agentId}").ReceiveAgentStateChange(AgentStateCodes.OnCall, "On Call", null);
 
@@ -180,7 +185,7 @@ public static class TelephonyEndpoints
                 await sessionStore.SaveAsync(session, ct);
             }
 
-            await stateStore.SetAsync(tenantId, agentId,
+            await stateStore.SetAsync(tenantId, agentId, tenantSchema,
                 new AgentStateEntry(AgentStateCodes.OnCall, "On Call", null, DateTimeOffset.UtcNow), ct);
             await hub.Clients.Group($"agent:{agentId}").ReceiveAgentStateChange(AgentStateCodes.OnCall, "On Call", null);
 
