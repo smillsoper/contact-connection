@@ -24,6 +24,11 @@ public static class ApiSubType
     public const string TfnAssignmentDelete = "tfn_assignment_delete";
     public const string CampaignResults     = "campaign_results";
 
+    // Media category (telephony audio) — one sub-type shared by every streaming TTS vendor
+    // (Azure, ElevenLabs, etc.); vendor identity lives on the PortalApiDefinition's Provider
+    // field, not as separate sub-types per vendor. See ITtsStreamProvider.
+    public const string TtsStreaming = "tts_streaming";
+
     private static readonly Dictionary<string, string> _categoryMap = new()
     {
         [AddressValidation]           = ApiCategory.Address,
@@ -40,6 +45,7 @@ public static class ApiSubType
         [TfnAssignmentUpdate]         = ApiCategory.Media,
         [TfnAssignmentDelete]         = ApiCategory.Media,
         [CampaignResults]             = ApiCategory.Media,
+        [TtsStreaming]                = ApiCategory.Media,
     };
 
     public static bool IsValid(string subType) => _categoryMap.ContainsKey(subType);

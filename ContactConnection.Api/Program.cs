@@ -137,6 +137,7 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 
 app.UseHttpsRedirection();
+app.UseWebSockets();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseTenantResolution();
@@ -190,6 +191,7 @@ app.MapTenantAdminInviteEndpoints();
 
 // FreeSWITCH internal endpoints (no bearer auth — internal network only)
 app.MapFreeSwitchDirectoryEndpoints();
+app.MapTtsStreamRelayEndpoints();
 
 // SignalR hubs
 app.MapHub<FlowHub>("/hubs/flow");

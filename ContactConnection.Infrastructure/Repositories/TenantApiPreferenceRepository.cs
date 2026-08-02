@@ -20,16 +20,18 @@ public class TenantApiPreferenceRepository : ITenantApiPreferenceRepository
     public Task<TenantApiPreference?> GetBySubTypeAsync(string apiSubType, CancellationToken ct = default) =>
         Db.TenantApiPreferences.FirstOrDefaultAsync(p => p.ApiSubType == apiSubType, ct);
 
-    public async Task UpsertAsync(string apiSubType, Guid portalApiEndpointId, CancellationToken ct = default)
+    public async Task UpsertAsync(string apiSubType, Guid portalApiEndpointId, string? settingsJson = null, CancellationToken ct = default)
     {
         var existing = await GetBySubTypeAsync(apiSubType, ct);
         if (existing is not null)
         {
             existing.SetEndpoint(portalApiEndpointId);
+            existing.SetSettings(settingsJson);
         }
         else
         {
             var pref = TenantApiPreference.Create(apiSubType, portalApiEndpointId);
+            pref.SetSettings(settingsJson);
             await Db.TenantApiPreferences.AddAsync(pref, ct);
         }
     }

@@ -89,6 +89,7 @@
 | 77 | 2026-07-16 | 4:12 PM CDT | 5:40 PM CDT | 88 min | ~6156 min |
 | 78 | 2026-07-19 | 7:18 AM CDT | 9:48 AM CDT | 150 min | ~6306 min |
 | 79 | 2026-07-19 | 9:56 AM CDT | 10:28 AM CDT | 32 min | ~6338 min |
+| 80 | 2026-08-02 | 7:53 AM PDT | 11:40 AM PDT | 227 min | ~6565 min |
 
 ---
 
@@ -3497,3 +3498,39 @@ Confirmed working end-to-end via a live test call, watched across two open dashb
 ### Next Session
 - Continue expanding the dashboard widget catalog: Queue Counter, Service Level, Contact List, Skill Summary
 - Consider wiring `post_agent` once a transfer/consult telephony-flow node exists that can explicitly signal "agent left, caller still live"
+
+---
+
+## Session 80 — Telephony Security Hardening, TTS Bug Fixes, and Streaming TTS Architecture
+
+**Date:** 2026-08-02
+**Start:** 7:53 AM PDT
+**End:** 11:40 AM PDT
+**Duration:** 227 minutes
+**Cumulative Total:** ~6565 min
+
+### What Was Done
+
+First session back after an extended break. Confirmed the whole local stack (Postgres, Redis, Nginx, MailHog, FreeSWITCH) was healthy and the softphone registered correctly — the apparent "didn't register at boot" mystery was just the SIP UA not connecting until agent login populates credentials in the frontend store, not a real issue.
+
+**ESL security hardening.** While investigating, found FreeSWITCH's Event Socket Library (port 8021 — full admin/API control, including `system` command execution) was bound to `0.0.0.0`, using an ACL (`any_v4.auto`) that allows the entire internet despite a comment claiming Docker-only, and still on the factory-default password `ClueCon` in both `event_socket.conf.xml` and the Api/Worker configs — with the production Key Vault secret for it never having been set. Given the box has a Cloudflare tunnel and the FreeSWITCH log showed live internet SIP-scanner traffic, this was a real, live exposure. Fixed: `docker-compose.yml` now binds 8021 to `127.0.0.1` only; new `esl_trusted` ACL (loopback + the actual Docker bridge subnet, not the internet) in `acl.conf.xml`; rotated to a generated strong password, removed from committed `appsettings.json` in both Api and Worker, set via User Secrets instead. Verified live: old password rejected, new one works, port unreachable from outside loopback.
+
+**TTS bug hunt (`tf_play` streaming voice nodes) — three real, independent bugs found and fixed, each verified against the running container before/after:**
+1. `mod_flite` was never installed — `freeswitch-mod-flite` wasn't in the Dockerfile's package list. Fixed by adding it plus `<load module="mod_flite"/>`.
+2. Play code used `say:en+flite+{voice}+{text}` — `say:` is FreeSWITCH's phrase/number-macro subsystem, not free-text TTS, and threw `Invalid Args` server-side (silently, no error surfaced to the caller — dead air). Correct syntax is the `tts://flite|{voice}|{text}` file-string, confirmed by testing directly against the container via a scratch channel before touching code.
+3. Percent-encoding spaces as `%20` (to work around a separate `uuid_broadcast` argument-parsing issue) got spoken literally as "percent twenty" — the `tts://` parser doesn't URL-decode. Then, once literal spaces were restored, `uuid_broadcast`'s own trailing-argument parser folded the appended leg flag (`aleg`) into the spoken text whenever the path contained spaces — fixed by routing the TTS text through a channel variable (`uuid_setvar` + `${cc_tts_text}` expansion) so the broadcast command line itself stays space-free and leg parsing stays unambiguous.
+
+**Voice quality → streaming TTS architecture.** User asked about better-than-flite voices; walked through offline alternatives (Piper) vs. cloud streaming (Azure/ElevenLabs), landing on cloud streaming via `mod_audio_stream`. Evaluated two forks: `amigniter/mod_audio_stream` (231★, but its playback-into-call feature is a paid commercial add-on capped at 10 channels) vs. `sptmru/freeswitch_mod_audio_stream` (MIT, smaller but genuinely free and bidirectional) — went with the latter.
+
+Building it required a 3-stage Dockerfile: SignalWire's binary package repo ships no `-dev`/headers package at all, and FreeSWITCH's own `configure.ac` has two additional unconditional hard dependencies (`spandsp >= 3.0`, `sofia-sip-ua >= 1.13.17`) that also aren't published anywhere as dev packages — both had to be compiled from source first, just for headers/pkgconfig, before FreeSWITCH's own core could be compiled (modules.conf emptied — no FreeSWITCH modules needed, just `libfreeswitch.so` + headers) to build `mod_audio_stream` against. Verified via `ldd` against the real runtime image (zero unresolved libraries) and a live `load mod_audio_stream` / `uuid_audio_stream` command registration check before integrating into the real Dockerfile.
+
+**Application/domain layer for tenant-selectable TTS providers.** Designed `ITtsStreamProvider` (vendor-agnostic: `IAsyncEnumerable<TtsAudioChunk>`, actual-not-requested sample rate reported per chunk since vendors don't share a rate set) mirroring the existing `ITaxProvider`/`ITaxProviderFactory` pattern, plus `RequiredCredentialFields` and a `TtsCredentialKeys.For(provider, field)` naming helper (`tts_{provider}_{field}`) so tenant credentials never collide between vendors in the flat per-tenant credential store. Implemented `AzureTtsStreamProvider` (official `Microsoft.CognitiveServices.Speech` SDK — verified via assembly reflection that `Synthesizing` fires per-chunk deltas, not cumulative buffers, against Microsoft's own sample code) and `ElevenLabsTtsStreamProvider` (raw `ClientWebSocket` against their documented `stream-input` protocol). Domain: new `ApiSubType.TtsStreaming` under the existing `Media` category (one sub-type for all vendors — `PortalApiDefinition.Provider` already carries vendor identity, confirmed this reuses the existing "General API endpoint redesign" system correctly rather than needing per-vendor sub-types) and a new `TenantApiPreference.SettingsJson` column (migration `AddTenantApiPreferenceSettings`) for tenant-specific non-secret settings (voice id, stability, etc.). Registered Azure/ElevenLabs catalog rows directly via SQL (Portal admin auth requires a real Entra ID login not configured in this dev environment — discovered while trying to do this the intended way through the UI) and fixed a frontend gap the user caught live: the Portal's API Definitions page keeps its own hardcoded sub-type list independent of the backend, needing a matching manual entry.
+
+**The relay component** (`TtsStreamRelayEndpoints.cs`) — the WebSocket server `mod_audio_stream` connects to. Design: `uuid_audio_stream`'s metadata argument carries only a short correlation token (not the request itself, avoiding the same trailing-argument space problem from the flite bugs above, and keeping call text out of FreeSWITCH's command-line logs); the real payload is cached in Redis by whatever issues the ESL command, looked up by the relay on connect, with credentials re-resolved server-side rather than transiting through Redis. Hit a serious live bug during testing: `mod_audio_stream`'s underlying WebSocket library auto-reconnects on any connection close — including ones we initiate — so closing our side alone after synthesis wasn't enough and produced a runaway reconnect storm (1000+ log lines in seconds). Root cause after two iterations: the ESL "stop" command needed to tell FreeSWITCH's module itself to stand down was using the request's own (already-cancelled) `CancellationToken`, silently failing to send. Fixed with `CancellationToken.None` for that cleanup call; verified live — clean teardown, no storm, only ~10 log lines. Also hit `dotnet watch`'s hot-reload silently not applying a `try/finally`-with-async-calls change — confirmed the fix only actually landed after a genuine process restart, not a hot reload.
+
+**Build:** `dotnet build` on every touched project 0 errors throughout (pre-existing unrelated nullable warnings only) ✓.
+
+### Next Session
+- Wire `PlayNodeHandler` to check `TenantApiPreference` for `TtsStreaming` and route through the new relay (stash the Redis-cached request, issue `uuid_audio_stream start` with a correlation token) instead of the flite `tts://` path when a tenant has one configured
+- Subscribe to `mod_audio_stream::*` CUSTOM events in `EslBackgroundService` (mirroring the existing `PLAYBACK_STOP` handling) so the flow engine knows when streaming playback finishes and can advance to the next node
+- Real end-to-end test with actual Azure/ElevenLabs credentials once configured — everything up to the vendor boundary is verified, but no real synthesized audio has been heard yet

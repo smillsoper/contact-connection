@@ -8,5 +8,17 @@
     <list name="webrtc_candidates" default="allow">
       <node type="allow" cidr="0.0.0.0/0"/>
     </list>
+
+    <!--
+      ESL (event socket / admin control channel) inbound ACL.
+      Only the Docker bridge network this compose project creates, plus loopback,
+      may connect — never the public internet. Docker's port-publish NAT rewrites
+      the source of host-originated connections to the bridge gateway address
+      (172.19.0.1), not 127.0.0.1, hence the /16 rather than loopback.auto alone.
+    -->
+    <list name="esl_trusted" default="deny">
+      <node type="allow" cidr="127.0.0.1/32"/>
+      <node type="allow" cidr="172.19.0.0/16"/>
+    </list>
   </network-lists>
 </configuration>

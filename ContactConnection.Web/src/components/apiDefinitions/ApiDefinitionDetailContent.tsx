@@ -36,6 +36,7 @@ const API_SUB_TYPES = [
   { value: 'tfn_assignment_update',         label: 'Update TFN Assignment',          category: 'media' },
   { value: 'tfn_assignment_delete',         label: 'Delete TFN Assignment',          category: 'media' },
   { value: 'campaign_results',              label: 'Campaign Results',               category: 'media' },
+  { value: 'tts_streaming',                 label: 'TTS Streaming',                  category: 'media' },
 ]
 
 const API_SUB_TYPE_LABELS: Record<string, string> = Object.fromEntries(
@@ -82,6 +83,7 @@ const API_SUB_TYPE_BADGE_COLORS: Record<string, string> = {
   tfn_assignment_update:         'bg-fuchsia-900/40 text-fuchsia-300',
   tfn_assignment_delete:         'bg-rose-900/40 text-rose-300',
   campaign_results:              'bg-purple-900/40 text-purple-300',
+  tts_streaming:                 'bg-cyan-900/40 text-cyan-300',
 }
 
 function authBadge(authJson: string) {

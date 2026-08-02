@@ -155,6 +155,12 @@ public sealed class EslClient(ILogger<EslClient>? logger = null) : IAsyncDisposa
     public Task SendDtmfAsync(string uuid, string digits, int durationMs, CancellationToken ct = default) =>
         SendApiAsync($"uuid_send_dtmf {uuid} {digits}@{durationMs}", ct);
 
+    public Task StartAudioStreamAsync(string uuid, string wssUrl, string mixType, string sampleRateLabel, string metadata, CancellationToken ct = default) =>
+        SendApiAsync($"uuid_audio_stream {uuid} start {wssUrl} {mixType} {sampleRateLabel} {metadata}", ct);
+
+    public Task StopAudioStreamAsync(string uuid, CancellationToken ct = default) =>
+        SendApiAsync($"uuid_audio_stream {uuid} stop", ct);
+
     /// <returns>(uuid, null) on success; (null, errorDetail) on failure so callers can log the cause.</returns>
     public async Task<(string? Uuid, string? Error)> OriginateAndParkAsync(string extension, string domain, string callerNumber, CancellationToken ct = default)
     {

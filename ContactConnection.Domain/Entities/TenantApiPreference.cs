@@ -11,6 +11,11 @@ public class TenantApiPreference
     public string ApiSubType { get; private set; } = string.Empty;
     // Cross-schema reference to portal_api_endpoints — no DB FK constraint
     public Guid PortalApiEndpointId { get; private set; }
+    // Tenant-specific parameter overrides for the chosen endpoint — e.g. for TtsStreaming,
+    // the tenant's chosen voice id / style / stability (the "mapping tab" values). Distinct
+    // from credentials (which live in ITenantCredentialStore, never here). Null/"{}" for
+    // sub-types that don't need per-tenant parameterization beyond "which endpoint".
+    public string? SettingsJson { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? UpdatedAt { get; private set; }
 
@@ -33,6 +38,12 @@ public class TenantApiPreference
     public void SetEndpoint(Guid portalApiEndpointId)
     {
         PortalApiEndpointId = portalApiEndpointId;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void SetSettings(string? settingsJson)
+    {
+        SettingsJson = settingsJson;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 }

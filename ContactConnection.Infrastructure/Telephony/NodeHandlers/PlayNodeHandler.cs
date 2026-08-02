@@ -14,7 +14,7 @@ namespace ContactConnection.Infrastructure.Telephony.NodeHandlers;
 /// Audio sources:
 ///   file     — tenant-uploaded file or built-in FreeSWITCH path (prefix "__builtin:")
 ///              Special: "local_stream://moh" and "silence_stream://..." passed through as-is.
-///   tts      — FreeSWITCH say/flite: requires freeswitch-mod-flite in the container.
+///   tts      — FreeSWITCH tts:// file string via flite: requires freeswitch-mod-flite in the container.
 ///
 /// The node fires the media and returns immediately (fire-and-forget).
 /// Loop/continuation state is stored in ctx.Vars and handled by PLAYBACK_STOP
@@ -67,9 +67,21 @@ public class PlayNodeHandler : ITelephonyNodeHandler
                 _logger.LogWarning("PlayNodeHandler [{Uuid}]: TTS text is empty — skipping", ctx.ChannelUuid);
                 return TerminalResult(transitions, "_play_next_tts_finished");
             }
-            // FreeSWITCH flite syntax — requires mod_flite in the container
-            var encodedText = ttsText.Replace(" ", "%20").Replace("\n", " ");
-            mainMediaArg = $"say:en+flite+{ttsVoice}+{encodedText}";
+            // FreeSWITCH TTS file-string syntax (mod_dptools' "tts" file format, backed by
+            // mod_flite) — "say:" is a different subsystem (phrase/number macros) and throws
+            // "Invalid Args" if used for free text. The text segment is NOT URL-decoded by the
+            // parser, so literal spaces are required — percent-encoding them gets read aloud
+            // ("%20" -> "percent twenty") instead of treated as whitespace.
+            //
+            // uuid_broadcast's own arg parser is "<uuid> <path> [aleg|bleg|holdb|both]" — when
+            // <path> itself contains raw spaces, the trailing leg flag we append gets folded
+            // into the path instead of being recognized as the leg selector, so FreeSWITCH
+            // speaks the literal word "aleg". Routing the text through a channel variable keeps
+            // the broadcast command line itself space-free (leg parsing stays unambiguous);
+            // FreeSWITCH expands ${cc_tts_text} back to the full text before flite renders it.
+            var sanitizedText = ttsText.Replace("\n", " ");
+            await ctx.Esl.SetChannelVarAsync(ctx.ChannelUuid, "cc_tts_text", sanitizedText, ct);
+            mainMediaArg = $"tts://flite|{ttsVoice}|${{cc_tts_text}}";
             _logger.LogInformation("PlayNodeHandler [{Uuid}]: TTS via flite voice={Voice}", ctx.ChannelUuid, ttsVoice);
         }
         else

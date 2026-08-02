@@ -21,4 +21,19 @@ public interface IEslCommander
     Task<(string? Uuid, string? Error)> OriginateAndParkAsync(string extension, string domain, string callerNumber, CancellationToken ct = default);
     /// <summary>Send DTMF tones on the specified channel. digits may include 0-9 * # A-D w W; @durationMs sets per-digit tone length.</summary>
     Task SendDtmfAsync(string uuid, string digits, int durationMs, CancellationToken ct = default);
+
+    /// <summary>
+    /// uuid_audio_stream ... start — opens an outbound WebSocket connection from FreeSWITCH to
+    /// wssUrl for streaming TTS playback (mod_audio_stream). metadata should be a short,
+    /// space-free correlation token, not the actual request payload — see TtsStreamRelayRequest.
+    /// </summary>
+    Task StartAudioStreamAsync(string uuid, string wssUrl, string mixType, string sampleRateLabel, string metadata, CancellationToken ct = default);
+
+    /// <summary>
+    /// uuid_audio_stream ... stop — tells mod_audio_stream the stream is done. Required: closing
+    /// the WebSocket from the server side alone is not enough — the module's underlying
+    /// WebSocket library auto-reconnects on any close, so without this call FreeSWITCH retries
+    /// the connection indefinitely after synthesis finishes.
+    /// </summary>
+    Task StopAudioStreamAsync(string uuid, CancellationToken ct = default);
 }

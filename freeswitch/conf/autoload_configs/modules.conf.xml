@@ -20,6 +20,14 @@
     <load module="mod_commands"/>
     <load module="mod_dptools"/>
 
+    <!-- Text-to-speech — flite engine backs the "tts://flite|<voice>|<text>" TTS play nodes -->
+    <load module="mod_flite"/>
+
+    <!-- Bidirectional WebSocket audio streaming — third-party module (MIT), compiled from
+         source in the Dockerfile. Lets a tenant-configured external TTS provider (Azure/
+         ElevenLabs/etc.) stream synthesized audio into a live call without writing a file. -->
+    <load module="mod_audio_stream"/>
+
     <!-- Loopback endpoint — lets you test dialplan with originate loopback/+1234/XML/public -->
     <load module="mod_loopback"/>
 

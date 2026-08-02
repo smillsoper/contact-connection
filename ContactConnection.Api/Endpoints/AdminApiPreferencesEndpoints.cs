@@ -54,7 +54,7 @@ public static class AdminApiPreferencesEndpoints
         if (portalEndpoint.ApiSubType != subType)
             return Results.BadRequest(new { error = $"Portal endpoint sub-type '{portalEndpoint.ApiSubType}' does not match '{subType}'." });
 
-        await prefRepo.UpsertAsync(subType, request.PortalApiEndpointId, ct);
+        await prefRepo.UpsertAsync(subType, request.PortalApiEndpointId, request.SettingsJson, ct);
         await prefRepo.SaveChangesAsync(ct);
 
         var saved = await prefRepo.GetBySubTypeAsync(subType, ct);
@@ -136,7 +136,7 @@ public static class AdminApiPreferencesEndpoints
         return Results.Ok(new
         {
             subType,
-            tenantPreference = tenantPref is null ? null : new { tenantPref.PortalApiEndpointId },
+            tenantPreference = tenantPref is null ? null : new { tenantPref.PortalApiEndpointId, tenantPref.SettingsJson },
             portalEndpoints = portalItems,
             tenantEndpoints = tenantItems,
         });
@@ -147,9 +147,10 @@ public static class AdminApiPreferencesEndpoints
         p.Id,
         p.ApiSubType,
         p.PortalApiEndpointId,
+        p.SettingsJson,
         p.CreatedAt,
         p.UpdatedAt,
     };
 }
 
-public record SetTenantPreferenceRequest(Guid PortalApiEndpointId);
+public record SetTenantPreferenceRequest(Guid PortalApiEndpointId, string? SettingsJson = null);

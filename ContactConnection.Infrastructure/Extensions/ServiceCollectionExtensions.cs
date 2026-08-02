@@ -18,6 +18,7 @@ using ContactConnection.Infrastructure.Repositories;
 using ContactConnection.Infrastructure.Telephony;
 using ContactConnection.Infrastructure.Telephony.NodeHandlers;
 using ContactConnection.Infrastructure.Tenants;
+using ContactConnection.Infrastructure.Tts;
 using DnsClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -97,6 +98,14 @@ public static class ServiceCollectionExtensions
         // Future: services.AddSingleton<ITaxProvider, AvalaraTaxProvider>();
         services.AddSingleton<ITaxProvider, FlatRateTaxProvider>();
         services.AddSingleton<ITaxProviderFactory, TaxProviderFactory>();
+
+        // TTS streaming providers — each ITtsStreamProvider is enumerated by
+        // TtsStreamProviderFactory to build its dispatch table. No default/fallback here
+        // (unlike tax): a tenant with no TtsStreaming preference uses PlayNodeHandler's
+        // built-in flite path instead, never reaching the factory at all.
+        services.AddSingleton<ITtsStreamProvider, AzureTtsStreamProvider>();
+        services.AddSingleton<ITtsStreamProvider, ElevenLabsTtsStreamProvider>();
+        services.AddSingleton<ITtsStreamProviderFactory, TtsStreamProviderFactory>();
 
         // Variable resolver (singleton — stateless, thread-safe regex engine)
         services.AddSingleton<IVariableResolver, VariableResolver>();
