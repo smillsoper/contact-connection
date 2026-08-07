@@ -15,6 +15,7 @@ import {
   setPortalCredential,
   testPortalAuth,
   testPortalEndpoint,
+  getPortalTtsProviders,
 } from '../../api/portal'
 
 const portalApi: DetailApi = {
@@ -31,6 +32,7 @@ const portalApi: DetailApi = {
   setCredential: setPortalCredential,
   testAuth: testPortalAuth,
   testEndpoint: testPortalEndpoint,
+  listTtsProviders: getPortalTtsProviders,
   listPagePath: '/portal/api-definitions',
 }
 

@@ -226,6 +226,12 @@ export async function getPortalApiDefinition(id: string): Promise<ApiDefinitionR
   return portalFetch<ApiDefinitionRecord>(`/api/v1/portal/api-definitions/${id}`)
 }
 
+/** Live-registered ITtsStreamProvider keys (e.g. "azure", "elevenlabs") — the valid Provider
+ *  values for a definition backing a TtsStreaming endpoint. See TtsProviderValidation. */
+export async function getPortalTtsProviders(): Promise<string[]> {
+  return portalFetch<string[]>('/api/v1/portal/tts-providers')
+}
+
 export async function createPortalApiDefinition(data: CreateApiDefinitionData): Promise<ApiDefinitionRecord> {
   return portalFetch<ApiDefinitionRecord>('/api/v1/portal/api-definitions', {
     method: 'POST',

@@ -14,4 +14,13 @@ public interface ITtsStreamProviderFactory
     /// Throws InvalidOperationException if providerKey doesn't match a registered provider.
     /// </summary>
     ITtsStreamProvider Resolve(string providerKey);
+
+    /// <summary>
+    /// All currently registered provider keys (e.g. "azure", "elevenlabs") — the single source
+    /// of truth for validating PortalApiDefinition.Provider against and for the admin UI's
+    /// provider picker (GET /api/v1/portal/tts-providers), so both stay in sync with whatever
+    /// ITtsStreamProvider implementations are actually registered in DI without hand-maintaining
+    /// a second list anywhere.
+    /// </summary>
+    IReadOnlyCollection<string> RegisteredProviderKeys { get; }
 }

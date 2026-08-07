@@ -13,6 +13,8 @@ public class TtsStreamProviderFactory : ITtsStreamProviderFactory
     public TtsStreamProviderFactory(IEnumerable<ITtsStreamProvider> providers) =>
         _providers = providers.ToDictionary(p => p.ProviderKey, StringComparer.OrdinalIgnoreCase);
 
+    public IReadOnlyCollection<string> RegisteredProviderKeys => _providers.Keys;
+
     public ITtsStreamProvider Resolve(string providerKey)
     {
         if (_providers.TryGetValue(providerKey, out var provider))

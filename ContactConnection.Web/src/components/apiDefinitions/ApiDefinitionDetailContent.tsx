@@ -43,6 +43,13 @@ const API_SUB_TYPE_LABELS: Record<string, string> = Object.fromEntries(
   API_SUB_TYPES.map((s) => [s.value, s.label])
 )
 
+// Display labels for known TTS provider keys — falls back to the raw key for anything not
+// listed here (e.g. a newly-added provider before someone gets around to naming it nicely).
+const TTS_PROVIDER_LABELS: Record<string, string> = {
+  azure: 'Azure Speech',
+  elevenlabs: 'ElevenLabs',
+}
+
 const AUTH_TYPE_LABELS: Record<string, string> = {
   none: 'None',
   api_key: 'API Key',
@@ -176,6 +183,9 @@ export interface DetailApi {
   setCredential(keyName: string, value: string): Promise<void>
   testAuth(authConfig: string): Promise<AuthTestResult>
   testEndpoint(definitionId: string, payload: EndpointTestPayload): Promise<EndpointTestResult>
+  /** Live-registered TTS streaming provider keys — Portal only (see TtsProviderValidation).
+   *  Omitted on the tenant Admin side, where this picker doesn't apply. */
+  listTtsProviders?(): Promise<string[]>
   listPagePath: string
 }
 
@@ -1519,6 +1529,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
   const [loadingEndpoints, setLoadingEndpoints] = useState(true)
 
   const [knownCreds, setKnownCreds] = useState<string[]>([])
+  const [ttsProviders, setTtsProviders] = useState<string[]>([])
 
   // Definition edit modal
   const [showDefModal, setShowDefModal] = useState(false)
@@ -1696,6 +1707,9 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
     loadEndpoints()
     api.listCredentials()
       .then(setKnownCreds)
+      .catch(() => {})
+    api.listTtsProviders?.()
+      .then(setTtsProviders)
       .catch(() => {})
   }, [definitionId])
 
@@ -2074,13 +2088,37 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                 </div>
                 <div>
                   <label className="block text-gray-400 text-xs font-medium mb-1.5">Provider</label>
-                  <input
-                    type="text"
-                    value={defForm.provider}
-                    onChange={(e) => setDefForm((f) => f ? { ...f, provider: e.target.value } : f)}
-                    placeholder="USPS, Google Places…"
-                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500"
-                  />
+                  {defForm.apiCategory === 'media' && ttsProviders.length > 0 ? (
+                    <>
+                      <select
+                        value={defForm.provider}
+                        onChange={(e) => setDefForm((f) => f ? { ...f, provider: e.target.value } : f)}
+                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value="">— Select a provider —</option>
+                        {ttsProviders.map((p) => (
+                          <option key={p} value={p}>{TTS_PROVIDER_LABELS[p] ?? p}</option>
+                        ))}
+                        {/* Preserves an existing value that predates the provider registry or
+                            belongs to a non-TTS Media use (e.g. a TFN vendor) — never silently
+                            drop or overwrite data the dropdown doesn't know about. */}
+                        {defForm.provider && !ttsProviders.includes(defForm.provider) && (
+                          <option value={defForm.provider}>{defForm.provider} (current value)</option>
+                        )}
+                      </select>
+                      <p className="text-gray-500 text-xs mt-1">
+                        Determines which streaming TTS backend calls routed through this integration use.
+                      </p>
+                    </>
+                  ) : (
+                    <input
+                      type="text"
+                      value={defForm.provider}
+                      onChange={(e) => setDefForm((f) => f ? { ...f, provider: e.target.value } : f)}
+                      placeholder="USPS, Google Places…"
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                    />
+                  )}
                 </div>
               </div>
               <div>

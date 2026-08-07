@@ -72,7 +72,13 @@ public sealed class EslBackgroundService : BackgroundService
 
         await using var esl = new EslClient(_eslClientLogger);
         await esl.ConnectAsync(host, port, pass, ct);
-        await esl.SubscribeAsync("CHANNEL_PARK CHANNEL_HANGUP CHANNEL_HANGUP_COMPLETE CHANNEL_BRIDGE CHANNEL_UNBRIDGE PLAYBACK_STOP", ct);
+        // CUSTOM mod_audio_stream::* — streaming-TTS relay lifecycle (see HandleCustomEventAsync).
+        // ::connect is diagnostic only; ::disconnect is the streaming-TTS equivalent of
+        // PLAYBACK_STOP (resumes the flow); ::error covers vendor/relay failures so the flow
+        // still advances instead of leaving the caller on a channel that will never resume.
+        await esl.SubscribeAsync(
+            "CHANNEL_PARK CHANNEL_HANGUP CHANNEL_HANGUP_COMPLETE CHANNEL_BRIDGE CHANNEL_UNBRIDGE PLAYBACK_STOP " +
+            "CUSTOM mod_audio_stream::connect mod_audio_stream::disconnect mod_audio_stream::error", ct);
 
         _logger.LogInformation("ESL connected to FreeSWITCH at {Host}:{Port}", host, port);
 
@@ -103,6 +109,9 @@ public sealed class EslBackgroundService : BackgroundService
                     break;
                 case "CHANNEL_UNBRIDGE":
                     await HandleChannelUnbridgeAsync(vars, esl, ct);
+                    break;
+                case "CUSTOM":
+                    await HandleCustomEventAsync(vars, esl, ct);
                     break;
             }
         }
@@ -771,6 +780,49 @@ public sealed class EslBackgroundService : BackgroundService
                 .GetRequiredService<ITelephonyFlowEngine>()
                 .ResumeFromNodeAsync(uuid, nextNode, esl, ct);
         }
+    }
+
+    /// <summary>
+    /// Dispatches FreeSWITCH CUSTOM events by Event-Subclass. Currently only mod_audio_stream's
+    /// family is subscribed (see the "event plain ... CUSTOM ..." line in RunLoopAsync).
+    /// </summary>
+    private async Task HandleCustomEventAsync(
+        Dictionary<string, string> vars, EslClient esl, CancellationToken ct)
+    {
+        switch (vars.GetValueOrDefault("Event-Subclass"))
+        {
+            case "mod_audio_stream::disconnect":
+                await HandleAudioStreamFinishedAsync(vars, esl, "disconnected", ct);
+                break;
+            case "mod_audio_stream::error":
+                await HandleAudioStreamFinishedAsync(vars, esl, "error", ct);
+                break;
+            case "mod_audio_stream::connect":
+                _logger.LogDebug("AudioStreamConnect [{Uuid}]", vars.GetValueOrDefault("Unique-ID"));
+                break;
+        }
+    }
+
+    /// <summary>
+    /// mod_audio_stream::disconnect/::error — the streaming-TTS equivalent of PLAYBACK_STOP.
+    /// The relay always calls "uuid_audio_stream stop" once synthesis ends (success or failure —
+    /// see TtsStreamRelayEndpoints), so disconnect fires on every outcome; error is a secondary,
+    /// diagnostic-only signal for the same underlying event, guarded against a double resume by
+    /// the same "_play_state" check ClearPlayVars leaves behind after the first one lands.
+    /// Resumes the same way as the flite path (FireEndTransitionAsync) — PlayNodeHandler's
+    /// streaming branch stores the same "_play_next_{transition}" session vars either way.
+    /// </summary>
+    private async Task HandleAudioStreamFinishedAsync(
+        Dictionary<string, string> vars, EslClient esl, string reason, CancellationToken ct)
+    {
+        var uuid = vars.GetValueOrDefault("Unique-ID");
+        if (string.IsNullOrEmpty(uuid)) return;
+
+        var session = await _sessionStore.GetAsync(uuid, ct);
+        if (session is null || session.Vars.GetValueOrDefault("_play_state") != "streaming") return;
+
+        _logger.LogInformation("AudioStreamFinished [{Uuid}]: reason={Reason}", uuid, reason);
+        await FireEndTransitionAsync(session, uuid, "tts", esl, ct);
     }
 
     /// <summary>

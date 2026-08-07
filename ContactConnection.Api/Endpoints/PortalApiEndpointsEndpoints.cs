@@ -51,6 +51,7 @@ public static class PortalApiEndpointsEndpoints
         CreateApiEndpointRequest request,
         IPortalApiDefinitionRepository defRepo,
         IPortalApiEndpointRepository repo,
+        ITtsStreamProviderFactory ttsFactory,
         CancellationToken ct)
     {
         var def = await defRepo.GetByIdAsync(definitionId, ct);
@@ -58,6 +59,12 @@ public static class PortalApiEndpointsEndpoints
 
         if (def.ApiCategory != ApiCategory.General && !ApiSubType.IsValid(request.ApiSubType))
             return Results.BadRequest(new { error = $"Unknown api_sub_type '{request.ApiSubType}'. Valid sub-types: {string.Join(", ", ApiSubType.All)}" });
+
+        if (request.ApiSubType == ApiSubType.TtsStreaming)
+        {
+            var error = TtsProviderValidation.Validate(def.Provider, ttsFactory);
+            if (error is not null) return Results.BadRequest(new { error });
+        }
 
         var endpoint = PortalApiEndpoint.Create(
             definitionId,
@@ -86,16 +93,26 @@ public static class PortalApiEndpointsEndpoints
         UpdateApiEndpointRequest request,
         IPortalApiDefinitionRepository defRepo,
         IPortalApiEndpointRepository repo,
+        ITtsStreamProviderFactory ttsFactory,
         CancellationToken ct)
     {
         var endpoint = await repo.GetByIdAsync(endpointId, ct);
         if (endpoint is null || endpoint.DefinitionId != definitionId) return Results.NotFound();
 
+        var effectiveSubType = request.ApiSubType ?? endpoint.ApiSubType;
+        var needsDefinition = request.ApiSubType is not null || effectiveSubType == ApiSubType.TtsStreaming;
+        var def = needsDefinition ? await defRepo.GetByIdAsync(definitionId, ct) : null;
+        if (needsDefinition && def is null) return Results.NotFound();
+
+        if (effectiveSubType == ApiSubType.TtsStreaming)
+        {
+            var error = TtsProviderValidation.Validate(def!.Provider, ttsFactory);
+            if (error is not null) return Results.BadRequest(new { error });
+        }
+
         if (request.ApiSubType is not null)
         {
-            var def = await defRepo.GetByIdAsync(definitionId, ct);
-            if (def is null) return Results.NotFound();
-            if (def.ApiCategory != ApiCategory.General && !ApiSubType.IsValid(request.ApiSubType))
+            if (def!.ApiCategory != ApiCategory.General && !ApiSubType.IsValid(request.ApiSubType))
                 return Results.BadRequest(new { error = $"Unknown api_sub_type '{request.ApiSubType}'." });
             endpoint.UpdateSubType(def.ApiCategory, request.ApiSubType);
         }

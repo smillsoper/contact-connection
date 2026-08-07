@@ -90,6 +90,7 @@
 | 78 | 2026-07-19 | 7:18 AM CDT | 9:48 AM CDT | 150 min | ~6306 min |
 | 79 | 2026-07-19 | 9:56 AM CDT | 10:28 AM CDT | 32 min | ~6338 min |
 | 80 | 2026-08-02 | 7:53 AM PDT | 11:40 AM PDT | 227 min | ~6565 min |
+| 81 | 2026-08-06 | 4:16 PM PDT | 5:25 PM PDT | 69 min | ~6634 min |
 
 ---
 
@@ -3534,3 +3535,32 @@ Building it required a 3-stage Dockerfile: SignalWire's binary package repo ship
 - Wire `PlayNodeHandler` to check `TenantApiPreference` for `TtsStreaming` and route through the new relay (stash the Redis-cached request, issue `uuid_audio_stream start` with a correlation token) instead of the flite `tts://` path when a tenant has one configured
 - Subscribe to `mod_audio_stream::*` CUSTOM events in `EslBackgroundService` (mirroring the existing `PLAYBACK_STOP` handling) so the flow engine knows when streaming playback finishes and can advance to the next node
 - Real end-to-end test with actual Azure/ElevenLabs credentials once configured — everything up to the vendor boundary is verified, but no real synthesized audio has been heard yet
+
+---
+
+## Session 81 — PlayNodeHandler Streaming TTS Wiring, and Tenant-Selectable API Provider Architecture
+
+**Date:** 2026-08-06
+**Start:** 4:16 PM PDT
+**End:** 5:25 PM PDT
+**Duration:** 69 minutes
+**Cumulative Total:** ~6634 min
+
+### What Was Done
+
+**Wired up the streaming TTS path from last session.** `PlayNodeHandler` now checks the tenant's `TenantApiPreference` for `TtsStreaming` (queried directly against `TenantDbContext`, not `ITenantApiPreferenceRepository` — that repository resolves tenant via ambient `TenantContext`, unavailable in this background-service execution path) and routes through the relay (`uuid_audio_stream start` + Redis-cached correlation token) instead of flite when one is configured, falling back to the existing flite path unchanged otherwise. Found and fixed a real pre-existing bug while in there: the empty-TTS-text early return looked up `transitions["_play_next_tts_finished"]` (the session-var name) instead of `transitions["tts_finished"]` (the actual transitions-object key), silently dead-ending the flow. `EslBackgroundService` now subscribes to `CUSTOM mod_audio_stream::connect/disconnect/error` and resumes the flow on disconnect/error via the existing `FireEndTransitionAsync` — the streaming branch stores the same `_play_next_{transition}` session vars as flite, so only the triggering event differs; idempotent against a double-fire (`error` alongside `disconnect`) since `ClearPlayVars` removes `_play_state` after the first resume.
+
+**Full live end-to-end verification** — a real call through test-tenant's actual campaign flow, not another isolated mechanism test. Two setup issues surfaced and got fixed along the way: the test flow's TTS node had a stale `end_of_stream` transition key (leftover from before it was switched from file to TTS audio — the frontend correctly generates `tts_finished` for TTS nodes, this was just old test data, fixed directly in the DB), and the first origination attempts used FreeSWITCH's `null` endpoint, which bypasses dialplan entirely so `Caller-Destination-Number` never gets set — `HandleChannelParkAsync` was silently returning with zero logging. Switched to `loopback/<number>/public`, which correctly routes through the real dialplan. With both fixed, the full trace confirmed every piece working: DID routing → flow engine walks to the TTS play node → `PlayNodeHandler` detects the tenant's ElevenLabs preference and routes to the relay → relay hits the expected missing-credentials failure and calls the ESL stop → `mod_audio_stream::disconnect` fires → `EslBackgroundService` resumes the flow at the correct next node → call cleanly hangs up. No reconnect storm — last session's `CancellationToken.None` fix holds under a real flow execution.
+
+**Tenant credential naming and the platform-vs-tenant provider question (backend, self-hosted).** User flagged (accurately) that a free-text `Provider` field with no UI signal that it doubles as a runtime dispatch key for TTS was a real misconfiguration risk. Added: `ITtsStreamProviderFactory.RegisteredProviderKeys` (single source of truth, reflects whatever's actually registered in DI); `TtsProviderValidation`, wired into all three save paths that could attach/change a Provider backing a `TtsStreaming` endpoint (`PortalApiDefinitionsEndpoints.Update`, `PortalApiEndpointsEndpoints.Create`/`Update`) — rejects a non-registered value with a clear `400` instead of failing silently mid-call later; `GET /api/v1/portal/tts-providers` discovery endpoint. Frontend: the Provider field is now a real `<select>` dropdown (not free text, not even autocomplete suggestions — the user specifically wanted typing eliminated, not just discouraged) when editing a Media-category definition, populated live from that endpoint, with a fallback "(current value)" option so an existing out-of-registry value (a non-TTS Media provider, or a stale entry) never gets silently dropped or overwritten.
+
+**Surfaced a real architectural gap while confirming credential resolution.** User asked how tenants would see/select platform-defined (Portal) APIs and manage their own credentials against them — turned out there's no tenant-facing UI for this at all yet (only the API client wrapper was ever built). Confirmed the credential-resolution mechanism itself is correct (`ITenantCredentialStore` → Key Vault secret name `tenant--{subdomain}--{keyName}`, relay resolves via `TtsCredentialKeys.For(provider, field)`) — but flagged plainly that this has never been live-verified against a real Key Vault: `KeyVault:VaultUri` is empty locally, so DI falls back to `NullCredentialStore` (writes 500 as a no-op), meaning every credential test so far succeeded *because* no credential could ever actually be set, not because resolution was proven end-to-end. Found the actual blocking gap for the tenant's stated requirement ("tenant picks a platform API OR registers and prefers their own, e.g. paying for their own zip-codes.com subscription rather than the platform footing 100+ tenants' worth"): `TenantApiPreference` only has a `PortalApiEndpointId` field — no way to point it at a tenant-owned `TenantApiEndpoint`, even though the existing `GetAvailable` listing endpoint already surfaces tenant-owned options as if they were selectable. Agreed plan for next session: replace the single portal-only FK with a discriminated `Source` (`"portal"`|`"tenant"`) + `EndpointId` pointer; build the tenant-facing API Preferences page (portal options read-only, tenant's own options editable, switch/clear preference); extend the TTS discovery endpoint to include `RequiredCredentialFields` per provider so the credential-entry UI can be a labeled form instead of raw key-name text boxes.
+
+**Build:** full solution `dotnet build` 0 errors, `tsc -b` 0 errors ✓.
+
+### Next Session
+- Replace `TenantApiPreference.PortalApiEndpointId` with a discriminated `Source`/`EndpointId` pointer so a tenant can prefer their own `TenantApiEndpoint`, not just a portal one
+- Build the tenant-facing "API Preferences" page: portal options shown read-only, tenant's own registrations editable, preference selection/clearing
+- Extend `GET /api/v1/portal/tts-providers` (or a tenant-facing equivalent) to include each provider's `RequiredCredentialFields` so credential entry is a labeled form, not raw key-name text boxes
+- Confirm whether tenant-owned `TenantApiDefinition`/`TenantApiEndpoint` registration already has admin UI from an earlier session before building anything new for it
+- Configure a real Key Vault locally (or in a shared dev environment) to finally live-verify tenant credential resolution end-to-end — every test so far has passed only because `NullCredentialStore` no-ops writes, not because a real credential was proven to resolve correctly

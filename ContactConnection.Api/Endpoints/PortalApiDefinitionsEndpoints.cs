@@ -63,6 +63,8 @@ public static class PortalApiDefinitionsEndpoints
         Guid id,
         UpdateApiDefinitionRequest request,
         IPortalApiDefinitionRepository repo,
+        IPortalApiEndpointRepository endpointRepo,
+        ITtsStreamProviderFactory ttsFactory,
         CancellationToken ct)
     {
         var def = await repo.GetByIdAsync(id, ct);
@@ -74,6 +76,20 @@ public static class PortalApiDefinitionsEndpoints
                 return Results.BadRequest(new { error = $"Unknown api_category '{request.ApiCategory}'." });
             def.UpdateCategory(request.ApiCategory);
         }
+
+        // Provider doubles as a runtime dispatch key only for definitions backing a TtsStreaming
+        // endpoint (see TtsProviderValidation) — block a change that would break the mapping
+        // instead of letting it fail silently on the next call.
+        if (request.Provider is not null)
+        {
+            var endpoints = await endpointRepo.GetByDefinitionAsync(id, ct);
+            if (endpoints.Any(e => e.ApiSubType == ApiSubType.TtsStreaming))
+            {
+                var error = TtsProviderValidation.Validate(request.Provider, ttsFactory);
+                if (error is not null) return Results.BadRequest(new { error });
+            }
+        }
+
         def.Update(request.Name, request.HttpMethod, request.BaseUrl, request.Description, request.Provider, request.TimeoutSeconds);
         if (request.Headers is not null) def.SetHeaders(request.Headers);
         if (request.QueryParams is not null) def.SetQueryParams(request.QueryParams);
