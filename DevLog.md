@@ -93,6 +93,7 @@
 | 81 | 2026-08-06 | 4:16 PM PDT | 5:25 PM PDT | 69 min | ~6634 min |
 | 82 | 2026-08-09 | 8:28 AM PDT | 9:12 AM PDT | 44 min | ~6678 min |
 | 83 | 2026-08-09 | 9:18 AM PDT | 9:52 AM PDT | 34 min | ~6712 min |
+| 84 | 2026-08-09 | 10:17 AM PDT | 11:17 AM PDT | 60 min | ~6772 min |
 
 ---
 
@@ -3631,3 +3632,45 @@ Building it required a 3-stage Dockerfile: SignalWire's binary package repo ship
 ### Next Session
 - No specific carry-over from this thread — all three Session 82 deferred items (Key Vault verification, Maintenance page follow-up, constants cleanup) are now closed
 - Return to the platform build-order backlog per CLAUDE.md: Chrome Extension (web automation bridge) is next up, followed by Chat System backend
+
+---
+
+## Session 84 — API Hardening Tier 1: OAuth2 Token Redaction, Circuit Breaker + Retry, and Generic Version History
+
+**Date:** 2026-08-09
+**Start:** 10:17 AM PDT
+**End:** 11:17 AM PDT
+**Duration:** 60 minutes
+**Cumulative Total:** ~6772 min
+
+### What Was Done
+
+Kicked off the `API_HARDENING_CHECKLIST.md` work created at the end of Session 83, working Tier 1 top to bottom.
+
+**Item 5 — oauth2 "Test Auth" raw token exposure — closed.** `AuthTestHelper.TestOAuth2` was returning the vendor's complete, unredacted token response (including the full access token) to the browser. Now redacts the token field and any `refresh_token` via a `JsonNode` rewrite before serializing `rawResponse`; the `tokenPreview` field is also redacted unconditionally now (previously only truncated for tokens >24 chars — short tokens leaked in full).
+
+**Items 1 & 2 — circuit breaker + retry-with-backoff — closed.** User's call on the real design trap here (blind retries risk duplicate order/fulfillment submissions on ambiguous failures): **per-endpoint opt-in**, not blanket retry. New `IsRetrySafe` flag on `TenantApiEndpoint`/`PortalApiEndpoint` (migrated on both DbContexts), surfaced in the Admin/Portal endpoint form as a checkbox — shown only for POST/PATCH (GET/HEAD/PUT/DELETE are always retry-safe by HTTP semantics) — with the duplicate-risk explanation inline. New `VendorResilienceExecutor` (Polly-based): a circuit breaker keyed **per API Definition** so one dead vendor can't trip the breaker for another vendor sharing the same `HttpClient` — opens after ≥4 calls with ≥50% failures in a 30s window, breaks for 30s, fails fast while open instead of eating the full timeout. Retry sits outside the breaker (retry-safety varies per-call, not per-vendor): always retries a pure connection-level failure; retries timeout/5xx only when the method is always-safe or the endpoint's `IsRetrySafe` is set. Wired into both execution paths — `ApiCallNodeHandler`/`GeneralApiCallNodeHandler` (flow-engine node handlers) and `FlowSessionsEndpoints`' live address validation/ZIP/autocomplete resolution via `ApiEndpointTestHelper` (same optional-parameter pattern as Session 83's OAuth2 cache — admin/portal "Test" button stays outside both the breaker and retry, always live). Known gap, logged honestly on the checklist: **zero automated test coverage** on this new logic (retry loop, request cloning, circuit state) — Tier 2 item.
+
+**Item 3 (versioning) + item 4 (audit trail) — expanded and combined, backend complete, frontend not started.** Asked the user to pick between snapshot+rollback vs. full draft/publish (matching Flows); the answer went further — full version history for **all of it**, every version retained forever, revert-by-selecting-a-version, with per-version created-by/edited-by tracking. Built as a genuinely generic, reusable subsystem rather than 5 bespoke implementations:
+- New `EntityVersion` table (tenant schema + `public` schema, same shape, applied via `EntityVersionConfiguration` in both `TenantDbContext`/`ContactConnectionDbContext`) — every write creates a **new row**, nothing is ever mutated or deleted; a partial unique index enforces exactly one active version per entity at the DB level.
+- `IVersionHistoryService` — one interface, two implementations (`TenantVersionHistoryService`/`PortalVersionHistoryService`) resolved via keyed DI (`"tenant"`/`"portal"`), matching this session's and last session's keyed-decorator pattern.
+- Reverting applies the old snapshot back to the live entity **and** records the revert as yet another new version (N+1 carrying version K's content) — never rewinds or discards history.
+- "Created by" and "last edited by" fall out of the version list for free (version 1's actor / the active version's actor) — no extra fields needed on the parent entities.
+- New `ActorResolver` shared helper extracts actor id/name from JWT claims — works for both tenant agent and portal admin tokens since they use identical claim names.
+- Wired into **all 5 entity types**: `Flow` (snapshot = name/definition/flowDirection/flowSubType, reusing its existing JSONB `Definition` field), `TenantApiDefinition`, `TenantApiEndpoint`, `PortalApiDefinition`, `PortalApiEndpoint` — each gets `GET .../versions` and `POST .../versions/{n}/revert` on top of the existing Create/Update endpoints, which now auto-snapshot.
+- **This closes item 3 for the backend but not the frontend** — there's no UI yet to browse history or click revert, across three surfaces (Flow Designer, Admin API Definition/Endpoint detail, Portal API Definition/Endpoint detail). Stopped here deliberately rather than rush it, given session size.
+- **Item 4 is only partially closed** — definition/endpoint changes now have full audit-quality history (who/when/what for every write, nothing ever deleted), but **credential value changes (Set/Delete on `IPortalCredentialStore`/`ITenantCredentialStore`) still have zero audit trail** — not touched this session.
+
+**Build:** full solution `dotnet build` 0 errors, `dotnet test` 65/65 passing, API boots clean with all new keyed DI (including two new `IVersionHistoryService` keys) resolving correctly.
+
+**Migrations applied this session:** `AddIsRetrySafeToApiEndpoints` (both contexts) and `AddEntityVersions` (both contexts) — applied to `tenant_test_tenant` directly and to `tenant_test_contact_center` via the Session 82 Maintenance page (`/portal/maintenance`), verified directly against Postgres both times, not just trusting the UI's self-report.
+
+### Next Session — pick up here
+1. **Build the version history frontend** — this is the actual next task, not a new item. Needs, at minimum:
+   - A reusable "Version History" panel/modal component (list versions newest-first, show active badge, created-by/at, change summary, a "Revert to this version" button with a confirmation step)
+   - Wire it into the Flow Designer page (`FlowDesignerPage.tsx`) for Flows
+   - Wire it into `ApiDefinitionDetailContent.tsx` (shared by Admin + Portal) for both API Definitions and their Endpoints — this one component already serves both scopes, so the panel should too
+   - Backend endpoints are already live: `GET/POST .../versions[/{n}/revert]` on `/api/v1/flows`, `/api/v1/admin/api-definitions[/{id}/endpoints]`, `/api/v1/portal/api-definitions[/{id}/endpoints]`
+2. Once the frontend lands and is live-verified (not just build-clean), mark Tier 1 item 3 fully closed on `API_HARDENING_CHECKLIST.md`
+3. Consider whether to close the credential-audit half of item 4 in the same pass (Set/Delete on the credential stores have no audit trail today) — same `EntityVersion`/`IVersionHistoryService` mechanism could cover this, though credential values are secrets so the "snapshot" would need to store *that a change happened*, not the value itself
+4. Tier 2 awaits after Tier 1 fully closes: test coverage for the whole execution/caching/resilience layer (now more overdue given this session's circuit breaker/retry logic has zero tests), cache-stampede protection, outbound rate limiting, `hmac` auth support, inbound webhooks

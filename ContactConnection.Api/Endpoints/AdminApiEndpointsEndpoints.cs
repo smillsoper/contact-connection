@@ -1,7 +1,9 @@
+using System.Text.Json;
 using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
 using ContactConnection.Domain.Entities;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ContactConnection.Api.Endpoints;
 
@@ -19,6 +21,8 @@ public static class AdminApiEndpointsEndpoints
         group.MapPut("{endpointId:guid}", Update);
         group.MapPost("{endpointId:guid}/set-preferred", SetPreferred);
         group.MapDelete("{endpointId:guid}", Delete);
+        group.MapGet("{endpointId:guid}/versions", ListVersions);
+        group.MapPost("{endpointId:guid}/versions/{versionNumber:int}/revert", Revert);
 
         return app;
     }
@@ -57,10 +61,15 @@ public static class AdminApiEndpointsEndpoints
         ITenantApiDefinitionRepository defRepo,
         ITenantApiEndpointRepository repo,
         ITtsStreamProviderFactory ttsFactory,
+        [FromKeyedServices("tenant")] IVersionHistoryService versions,
         TenantContext tenantContext,
+        HttpContext http,
         CancellationToken ct)
     {
         if (!tenantContext.HasTenant) return Results.Unauthorized();
+        var actor = ActorResolver.Resolve(http.User);
+        if (actor is null) return Results.Unauthorized();
+
         var def = await defRepo.GetByIdAsync(definitionId, ct);
         if (def is null) return Results.NotFound();
 
@@ -87,9 +96,13 @@ public static class AdminApiEndpointsEndpoints
         if (request.QueryParams is not null) endpoint.SetQueryParams(request.QueryParams);
         if (request.Headers is not null) endpoint.SetHeaders(request.Headers);
         if (request.ResponseMapping is not null) endpoint.SetResponseMapping(request.ResponseMapping);
+        if (request.IsRetrySafe is not null) endpoint.SetRetrySafe(request.IsRetrySafe.Value);
 
         await repo.AddAsync(endpoint, ct);
         await repo.SaveChangesAsync(ct);
+        await versions.SnapshotAsync(
+            VersionedEntityType.TenantApiEndpoint, endpoint.Id, BuildSnapshot(endpoint),
+            actor.Value.Id, actor.Value.Name, "Created", ct);
 
         return Results.Created($"/api/v1/admin/api-definitions/{definitionId}/endpoints/{endpoint.Id}", ToResponse(endpoint));
     }
@@ -101,10 +114,15 @@ public static class AdminApiEndpointsEndpoints
         ITenantApiDefinitionRepository defRepo,
         ITenantApiEndpointRepository repo,
         ITtsStreamProviderFactory ttsFactory,
+        [FromKeyedServices("tenant")] IVersionHistoryService versions,
         TenantContext tenantContext,
+        HttpContext http,
         CancellationToken ct)
     {
         if (!tenantContext.HasTenant) return Results.Unauthorized();
+        var actor = ActorResolver.Resolve(http.User);
+        if (actor is null) return Results.Unauthorized();
+
         var endpoint = await repo.GetByIdAsync(endpointId, ct);
         if (endpoint is null || endpoint.DefinitionId != definitionId) return Results.NotFound();
 
@@ -130,9 +148,77 @@ public static class AdminApiEndpointsEndpoints
         if (request.QueryParams is not null) endpoint.SetQueryParams(request.QueryParams);
         if (request.Headers is not null) endpoint.SetHeaders(request.Headers);
         if (request.ResponseMapping is not null) endpoint.SetResponseMapping(request.ResponseMapping);
+        if (request.IsRetrySafe is not null) endpoint.SetRetrySafe(request.IsRetrySafe.Value);
 
         await repo.SaveChangesAsync(ct);
+        await versions.SnapshotAsync(
+            VersionedEntityType.TenantApiEndpoint, endpoint.Id, BuildSnapshot(endpoint),
+            actor.Value.Id, actor.Value.Name, "Updated", ct);
         return Results.Ok(ToResponse(endpoint));
+    }
+
+    private static async Task<IResult> ListVersions(
+        Guid definitionId,
+        Guid endpointId,
+        ITenantApiEndpointRepository repo,
+        [FromKeyedServices("tenant")] IVersionHistoryService versions,
+        TenantContext tenantContext,
+        CancellationToken ct)
+    {
+        if (!tenantContext.HasTenant) return Results.Unauthorized();
+        var endpoint = await repo.GetByIdAsync(endpointId, ct);
+        if (endpoint is null || endpoint.DefinitionId != definitionId) return Results.NotFound();
+        return Results.Ok(await versions.ListVersionsAsync(VersionedEntityType.TenantApiEndpoint, endpointId, ct));
+    }
+
+    private static async Task<IResult> Revert(
+        Guid definitionId,
+        Guid endpointId,
+        int versionNumber,
+        ITenantApiEndpointRepository repo,
+        [FromKeyedServices("tenant")] IVersionHistoryService versions,
+        TenantContext tenantContext,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        if (!tenantContext.HasTenant) return Results.Unauthorized();
+        var actor = ActorResolver.Resolve(http.User);
+        if (actor is null) return Results.Unauthorized();
+
+        var endpoint = await repo.GetByIdAsync(endpointId, ct);
+        if (endpoint is null || endpoint.DefinitionId != definitionId) return Results.NotFound();
+
+        var snapshotJson = await versions.GetSnapshotAsync(VersionedEntityType.TenantApiEndpoint, endpointId, versionNumber, ct);
+        if (snapshotJson is null) return Results.NotFound(new { error = $"Version {versionNumber} not found." });
+
+        var snapshot = JsonSerializer.Deserialize<ApiEndpointSnapshot>(snapshotJson)
+            ?? throw new InvalidOperationException("Stored API endpoint snapshot is corrupt.");
+        ApplySnapshot(endpoint, snapshot);
+
+        await repo.SaveChangesAsync(ct);
+        await versions.SnapshotAsync(
+            VersionedEntityType.TenantApiEndpoint, endpoint.Id, BuildSnapshot(endpoint),
+            actor.Value.Id, actor.Value.Name, $"Reverted to version {versionNumber}", ct);
+        return Results.Ok(ToResponse(endpoint));
+    }
+
+    private static string BuildSnapshot(TenantApiEndpoint e) => JsonSerializer.Serialize(new ApiEndpointSnapshot(
+        e.ApiSubType, e.Name, e.Description, e.Path, e.HttpMethod, e.RequestBodyTemplate,
+        e.QueryParams, e.Headers, e.ResponseMapping, e.SortOrder, e.IsPreferred, e.IsActive, e.IsRetrySafe));
+
+    // ApiSubType is deliberately not reverted — UpdateSubType needs the parent definition's
+    // ApiCategory, which this revert path doesn't load, and sub-type changes post-creation are
+    // rare in practice. Every other field is fully restored.
+    private static void ApplySnapshot(TenantApiEndpoint e, ApiEndpointSnapshot s)
+    {
+        e.Update(s.Name, s.Path, s.HttpMethod, s.Description, s.SortOrder);
+        e.SetRequestBodyTemplate(s.RequestBodyTemplate);
+        e.SetQueryParams(s.QueryParams);
+        e.SetHeaders(s.Headers);
+        e.SetResponseMapping(s.ResponseMapping);
+        e.SetRetrySafe(s.IsRetrySafe);
+        if (s.IsActive) e.Activate(); else e.Deactivate();
+        if (s.IsPreferred) e.SetPreferred(); else e.ClearPreferred();
     }
 
     private static async Task<IResult> SetPreferred(
@@ -205,6 +291,7 @@ public static class AdminApiEndpointsEndpoints
         e.SortOrder,
         e.IsPreferred,
         e.IsActive,
+        e.IsRetrySafe,
         e.CreatedAt,
         e.UpdatedAt,
     };

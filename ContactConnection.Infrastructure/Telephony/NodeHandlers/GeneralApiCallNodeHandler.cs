@@ -33,8 +33,8 @@ public class GeneralApiCallNodeHandler(
     public string NodeType => "tf_general_api_call";
 
     private record CallTarget(
-        string HttpMethod, string BaseUrl, string Path, string Headers, string QueryParams,
-        string? RequestBodyTemplate, string AuthConfig, int TimeoutSeconds, bool IsActive);
+        Guid DefinitionId, string HttpMethod, string BaseUrl, string Path, string Headers, string QueryParams,
+        string? RequestBodyTemplate, string AuthConfig, int TimeoutSeconds, bool IsActive, bool IsRetrySafe);
 
     public async Task<TelephonyNodeResult> ExecuteAsync(
         JsonObject node, TelephonyFlowContext ctx, CancellationToken ct = default)
@@ -98,7 +98,9 @@ public class GeneralApiCallNodeHandler(
                     Body: resolvedBody,
                     AuthConfigJson: target.AuthConfig,
                     TimeoutSeconds: timeoutOverride ?? target.TimeoutSeconds,
-                    GetCredential: getCredential), ct);
+                    GetCredential: getCredential,
+                    DefinitionId: target.DefinitionId,
+                    AllowRetryOnAmbiguousFailure: target.IsRetrySafe), ct);
 
                 transitionKey = result.TimedOut ? "timeout" : (!result.Success ? "error" : "success");
             }
@@ -125,8 +127,8 @@ public class GeneralApiCallNodeHandler(
         var def = await db.TenantApiDefinitions.FirstOrDefaultAsync(d => d.Id == endpoint.DefinitionId, ct);
         if (def is null) return null;
         return new CallTarget(
-            endpoint.HttpMethod ?? def.HttpMethod, def.BaseUrl, endpoint.Path, endpoint.Headers, endpoint.QueryParams,
-            endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive);
+            def.Id, endpoint.HttpMethod ?? def.HttpMethod, def.BaseUrl, endpoint.Path, endpoint.Headers, endpoint.QueryParams,
+            endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive, endpoint.IsRetrySafe);
     }
 
     private async Task<CallTarget?> LoadPortalAsync(Guid endpointId, CancellationToken ct)
@@ -136,8 +138,8 @@ public class GeneralApiCallNodeHandler(
         var def = await portalDb.PortalApiDefinitions.FirstOrDefaultAsync(d => d.Id == endpoint.DefinitionId, ct);
         if (def is null) return null;
         return new CallTarget(
-            endpoint.HttpMethod ?? def.HttpMethod, def.BaseUrl, endpoint.Path, endpoint.Headers, endpoint.QueryParams,
-            endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive);
+            def.Id, endpoint.HttpMethod ?? def.HttpMethod, def.BaseUrl, endpoint.Path, endpoint.Headers, endpoint.QueryParams,
+            endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive, endpoint.IsRetrySafe);
     }
 
     private static Dictionary<string, string> ResolveHeaders(string json, TelephonyFlowContext ctx)

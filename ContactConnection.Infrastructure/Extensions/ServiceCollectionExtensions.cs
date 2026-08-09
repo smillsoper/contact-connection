@@ -19,6 +19,7 @@ using ContactConnection.Infrastructure.Telephony;
 using ContactConnection.Infrastructure.Telephony.NodeHandlers;
 using ContactConnection.Infrastructure.Tenants;
 using ContactConnection.Infrastructure.Tts;
+using ContactConnection.Infrastructure.Versioning;
 using DnsClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -113,6 +114,15 @@ public static class ServiceCollectionExtensions
         // Executes "general" API Definition calls for both flow engines' api_call nodes
         // (uses IHttpClientFactory, no per-tenant state — safe as scoped or singleton).
         services.AddScoped<IApiDefinitionExecutor, ApiDefinitionExecutor>();
+
+        // Singleton — circuit breaker state must persist across calls for the process lifetime,
+        // not be recreated per request/scope. Keyed internally per API Definition.
+        services.AddSingleton<IVendorResilienceExecutor, VendorResilienceExecutor>();
+
+        // Version history — one IVersionHistoryService implementation per scope (tenant/portal
+        // persist to different DbContexts), resolved via keyed DI at each call site.
+        services.AddKeyedScoped<IVersionHistoryService, TenantVersionHistoryService>("tenant");
+        services.AddKeyedScoped<IVersionHistoryService, PortalVersionHistoryService>("portal");
 
         // DNS client for email validation (singleton — thread-safe, connection-pooled)
         services.AddSingleton<ILookupClient>(_ => new LookupClient(new LookupClientOptions

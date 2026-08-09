@@ -11,7 +11,10 @@ namespace ContactConnection.Infrastructure.ApiExecution;
 /// (api_key/bearer/basic/oauth2) the same way ApiEndpointTestHelper does for the admin/portal
 /// "test" endpoints, and normalizes the outcome (success/error/timeout) for flow engine use.
 /// </summary>
-public class ApiDefinitionExecutor(IHttpClientFactory httpClientFactory, IOAuth2TokenCache tokenCache) : IApiDefinitionExecutor
+public class ApiDefinitionExecutor(
+    IHttpClientFactory httpClientFactory,
+    IOAuth2TokenCache tokenCache,
+    IVendorResilienceExecutor resilience) : IApiDefinitionExecutor
 {
     public async Task<ApiDefinitionExecutionResult> ExecuteAsync(
         ApiDefinitionExecutionRequest request, CancellationToken ct = default)
@@ -56,7 +59,15 @@ public class ApiDefinitionExecutor(IHttpClientFactory httpClientFactory, IOAuth2
             }
 
             var http = httpClientFactory.CreateClient("FlowEngine");
-            using var response = await http.SendAsync(httpRequest, linkedCts.Token);
+            // GET/HEAD/PUT/DELETE are always safe to retry on an ambiguous failure by HTTP
+            // semantics; for POST/PATCH, only the endpoint's own IsRetrySafe opt-in
+            // (request.AllowRetryOnAmbiguousFailure) allows it.
+            var alwaysRetrySafeMethod = method == HttpMethod.Get || method == HttpMethod.Head
+                || method == HttpMethod.Put || method == HttpMethod.Delete;
+            using var response = await resilience.SendAsync(
+                request.DefinitionId, httpRequest,
+                alwaysRetrySafeMethod || request.AllowRetryOnAmbiguousFailure,
+                http, linkedCts.Token);
             var responseBody = await response.Content.ReadAsStringAsync(linkedCts.Token);
 
             var responseHeaders = response.Headers

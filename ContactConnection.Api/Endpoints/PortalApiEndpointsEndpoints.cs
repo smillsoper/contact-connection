@@ -1,6 +1,8 @@
+using System.Text.Json;
 using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Domain.Entities;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ContactConnection.Api.Endpoints;
 
@@ -18,6 +20,8 @@ public static class PortalApiEndpointsEndpoints
         group.MapPut("{endpointId:guid}", Update);
         group.MapPost("{endpointId:guid}/set-preferred", SetPreferred);
         group.MapDelete("{endpointId:guid}", Delete);
+        group.MapGet("{endpointId:guid}/versions", ListVersions);
+        group.MapPost("{endpointId:guid}/versions/{versionNumber:int}/revert", Revert);
 
         return app;
     }
@@ -52,8 +56,13 @@ public static class PortalApiEndpointsEndpoints
         IPortalApiDefinitionRepository defRepo,
         IPortalApiEndpointRepository repo,
         ITtsStreamProviderFactory ttsFactory,
+        [FromKeyedServices("portal")] IVersionHistoryService versions,
+        HttpContext http,
         CancellationToken ct)
     {
+        var actor = ActorResolver.Resolve(http.User);
+        if (actor is null) return Results.Unauthorized();
+
         var def = await defRepo.GetByIdAsync(definitionId, ct);
         if (def is null) return Results.NotFound();
 
@@ -80,9 +89,13 @@ public static class PortalApiEndpointsEndpoints
         if (request.QueryParams is not null) endpoint.SetQueryParams(request.QueryParams);
         if (request.Headers is not null) endpoint.SetHeaders(request.Headers);
         if (request.ResponseMapping is not null) endpoint.SetResponseMapping(request.ResponseMapping);
+        if (request.IsRetrySafe is not null) endpoint.SetRetrySafe(request.IsRetrySafe.Value);
 
         await repo.AddAsync(endpoint, ct);
         await repo.SaveChangesAsync(ct);
+        await versions.SnapshotAsync(
+            VersionedEntityType.PortalApiEndpoint, endpoint.Id, BuildSnapshot(endpoint),
+            actor.Value.Id, actor.Value.Name, "Created", ct);
 
         return Results.Created($"/api/v1/portal/api-definitions/{definitionId}/endpoints/{endpoint.Id}", ToResponse(endpoint));
     }
@@ -94,8 +107,13 @@ public static class PortalApiEndpointsEndpoints
         IPortalApiDefinitionRepository defRepo,
         IPortalApiEndpointRepository repo,
         ITtsStreamProviderFactory ttsFactory,
+        [FromKeyedServices("portal")] IVersionHistoryService versions,
+        HttpContext http,
         CancellationToken ct)
     {
+        var actor = ActorResolver.Resolve(http.User);
+        if (actor is null) return Results.Unauthorized();
+
         var endpoint = await repo.GetByIdAsync(endpointId, ct);
         if (endpoint is null || endpoint.DefinitionId != definitionId) return Results.NotFound();
 
@@ -121,9 +139,71 @@ public static class PortalApiEndpointsEndpoints
         if (request.QueryParams is not null) endpoint.SetQueryParams(request.QueryParams);
         if (request.Headers is not null) endpoint.SetHeaders(request.Headers);
         if (request.ResponseMapping is not null) endpoint.SetResponseMapping(request.ResponseMapping);
+        if (request.IsRetrySafe is not null) endpoint.SetRetrySafe(request.IsRetrySafe.Value);
 
         await repo.SaveChangesAsync(ct);
+        await versions.SnapshotAsync(
+            VersionedEntityType.PortalApiEndpoint, endpoint.Id, BuildSnapshot(endpoint),
+            actor.Value.Id, actor.Value.Name, "Updated", ct);
         return Results.Ok(ToResponse(endpoint));
+    }
+
+    private static async Task<IResult> ListVersions(
+        Guid definitionId,
+        Guid endpointId,
+        IPortalApiEndpointRepository repo,
+        [FromKeyedServices("portal")] IVersionHistoryService versions,
+        CancellationToken ct)
+    {
+        var endpoint = await repo.GetByIdAsync(endpointId, ct);
+        if (endpoint is null || endpoint.DefinitionId != definitionId) return Results.NotFound();
+        return Results.Ok(await versions.ListVersionsAsync(VersionedEntityType.PortalApiEndpoint, endpointId, ct));
+    }
+
+    private static async Task<IResult> Revert(
+        Guid definitionId,
+        Guid endpointId,
+        int versionNumber,
+        IPortalApiEndpointRepository repo,
+        [FromKeyedServices("portal")] IVersionHistoryService versions,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        var actor = ActorResolver.Resolve(http.User);
+        if (actor is null) return Results.Unauthorized();
+
+        var endpoint = await repo.GetByIdAsync(endpointId, ct);
+        if (endpoint is null || endpoint.DefinitionId != definitionId) return Results.NotFound();
+
+        var snapshotJson = await versions.GetSnapshotAsync(VersionedEntityType.PortalApiEndpoint, endpointId, versionNumber, ct);
+        if (snapshotJson is null) return Results.NotFound(new { error = $"Version {versionNumber} not found." });
+
+        var snapshot = JsonSerializer.Deserialize<ApiEndpointSnapshot>(snapshotJson)
+            ?? throw new InvalidOperationException("Stored API endpoint snapshot is corrupt.");
+        ApplySnapshot(endpoint, snapshot);
+
+        await repo.SaveChangesAsync(ct);
+        await versions.SnapshotAsync(
+            VersionedEntityType.PortalApiEndpoint, endpoint.Id, BuildSnapshot(endpoint),
+            actor.Value.Id, actor.Value.Name, $"Reverted to version {versionNumber}", ct);
+        return Results.Ok(ToResponse(endpoint));
+    }
+
+    private static string BuildSnapshot(PortalApiEndpoint e) => JsonSerializer.Serialize(new ApiEndpointSnapshot(
+        e.ApiSubType, e.Name, e.Description, e.Path, e.HttpMethod, e.RequestBodyTemplate,
+        e.QueryParams, e.Headers, e.ResponseMapping, e.SortOrder, e.IsPreferred, e.IsActive, e.IsRetrySafe));
+
+    // ApiSubType is deliberately not reverted — see the matching note in AdminApiEndpointsEndpoints.
+    private static void ApplySnapshot(PortalApiEndpoint e, ApiEndpointSnapshot s)
+    {
+        e.Update(s.Name, s.Path, s.HttpMethod, s.Description, s.SortOrder);
+        e.SetRequestBodyTemplate(s.RequestBodyTemplate);
+        e.SetQueryParams(s.QueryParams);
+        e.SetHeaders(s.Headers);
+        e.SetResponseMapping(s.ResponseMapping);
+        e.SetRetrySafe(s.IsRetrySafe);
+        if (s.IsActive) e.Activate(); else e.Deactivate();
+        if (s.IsPreferred) e.SetPreferred(); else e.ClearPreferred();
     }
 
     private static async Task<IResult> SetPreferred(
@@ -191,6 +271,7 @@ public static class PortalApiEndpointsEndpoints
         e.SortOrder,
         e.IsPreferred,
         e.IsActive,
+        e.IsRetrySafe,
         e.CreatedAt,
         e.UpdatedAt,
     };
@@ -206,7 +287,8 @@ public record CreateApiEndpointRequest(
     string? RequestBodyTemplate,
     string? QueryParams,
     string? Headers,
-    string? ResponseMapping);
+    string? ResponseMapping,
+    bool? IsRetrySafe = null);
 
 public record UpdateApiEndpointRequest(
     string Name,
@@ -218,4 +300,5 @@ public record UpdateApiEndpointRequest(
     string? RequestBodyTemplate,
     string? QueryParams,
     string? Headers,
-    string? ResponseMapping);
+    string? ResponseMapping,
+    bool? IsRetrySafe = null);

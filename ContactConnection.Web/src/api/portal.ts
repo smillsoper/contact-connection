@@ -297,6 +297,7 @@ export interface ApiEndpointRecord {
   sortOrder: number
   isPreferred: boolean
   isActive: boolean
+  isRetrySafe: boolean
   createdAt: string
   updatedAt: string | null
 }
@@ -312,6 +313,7 @@ export interface CreateApiEndpointData {
   queryParams?: string
   headers?: string
   responseMapping?: string
+  isRetrySafe?: boolean
 }
 
 export interface UpdateApiEndpointData {
@@ -325,6 +327,7 @@ export interface UpdateApiEndpointData {
   queryParams?: string
   headers?: string
   responseMapping?: string
+  isRetrySafe?: boolean
 }
 
 export async function listPortalApiEndpoints(definitionId: string): Promise<ApiEndpointRecord[]> {

@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace ContactConnection.Api.Endpoints;
 
@@ -39,6 +40,16 @@ internal static class AuthTestHelper
 
     private static string Str(JsonElement el, string prop) =>
         el.TryGetProperty(prop, out var v) ? v.GetString() ?? "" : "";
+
+    /// <summary>Shows just enough of a token to confirm it's the right one during debugging,
+    /// never enough to be usable. Applied unconditionally (not just for long tokens) — a short
+    /// token deserves the same treatment as a long one.</summary>
+    private static string RedactToken(string raw)
+    {
+        if (string.IsNullOrEmpty(raw)) return raw;
+        var visible = Math.Min(6, raw.Length);
+        return raw.Length <= visible ? "***redacted***" : $"{raw[..visible]}…***redacted***";
+    }
 
     private static async Task<IResult> TestCredentialKeys(
         string type,
@@ -154,14 +165,12 @@ internal static class AuthTestHelper
             try
             {
                 var responseEl = JsonDocument.Parse(responseBody).RootElement;
-                prettyResponse = JsonSerializer.Serialize(responseEl,
-                    new JsonSerializerOptions { WriteIndented = true });
 
                 if (responseEl.TryGetProperty(tokenField, out var tokenEl))
                 {
                     tokenFound = true;
                     var raw = tokenEl.GetString() ?? tokenEl.ToString();
-                    tokenPreview = raw.Length > 24 ? $"{raw[..24]}…" : raw;
+                    tokenPreview = RedactToken(raw);
                 }
 
                 if (responseEl.TryGetProperty(tokenTypeField, out var tokenTypeEl))
@@ -174,6 +183,21 @@ internal static class AuthTestHelper
                 {
                     expiresFound = true;
                     expiresValue = expiresEl.ToString();
+                }
+
+                // Redact sensitive token values before echoing the raw response back to the
+                // browser — this previously returned the vendor's complete, unredacted access
+                // token (and any refresh_token) verbatim. Field names/structure stay visible for
+                // debugging; values don't. Non-JSON responses fall through to the unredacted
+                // fallback below since there's no reliable way to locate the token in them.
+                var redactedNode = JsonNode.Parse(responseBody);
+                if (redactedNode is JsonObject redactedObj)
+                {
+                    if (redactedObj.ContainsKey(tokenField))
+                        redactedObj[tokenField] = "***redacted***";
+                    if (tokenField != "refresh_token" && redactedObj.ContainsKey("refresh_token"))
+                        redactedObj["refresh_token"] = "***redacted***";
+                    prettyResponse = redactedObj.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
                 }
             }
             catch { /* non-JSON response — surface rawResponse as-is */ }

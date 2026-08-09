@@ -4,6 +4,8 @@
 
 DevLog.md needs to be updated every session with the session start date and time, session end date and time, session duration, total duration, and what was done for the session.  sessions 1 and 2 were logged without timestamps. These are REQUIRED GOING FORWARD. Ask for the current date and time for logging. Don't assume times or durations. always ask for timestamps and calculate durations.
 
+**API_HARDENING_CHECKLIST.md** — managed, multi-session checklist of gaps in the API Definitions/Endpoints/Preferences/execution system (circuit breaking, retries, definition versioning, audit trail, test coverage, rate limiting, etc.), tiered by priority. Check it at the start of any session touching that system and work top-to-bottom unless redirected; update checkboxes with the closing session number and a summary.
+
 ---
 
 ## Current Project Status

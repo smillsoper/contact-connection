@@ -38,8 +38,8 @@ public class ApiCallNodeHandler(
     public string NodeType => "api_call";
 
     private record CallTarget(
-        string HttpMethod, string BaseUrl, string Path, string Headers, string QueryParams,
-        string? RequestBodyTemplate, string AuthConfig, int TimeoutSeconds, bool IsActive);
+        Guid DefinitionId, string HttpMethod, string BaseUrl, string Path, string Headers, string QueryParams,
+        string? RequestBodyTemplate, string AuthConfig, int TimeoutSeconds, bool IsActive, bool IsRetrySafe);
 
     public async Task<NodeResult> ExecuteAsync(
         JsonObject node, FlowExecutionContext ctx,
@@ -105,7 +105,9 @@ public class ApiCallNodeHandler(
                     Body: resolvedBody,
                     AuthConfigJson: target.AuthConfig,
                     TimeoutSeconds: timeoutOverride ?? target.TimeoutSeconds,
-                    GetCredential: getCredential), ct);
+                    GetCredential: getCredential,
+                    DefinitionId: target.DefinitionId,
+                    AllowRetryOnAmbiguousFailure: target.IsRetrySafe), ct);
 
                 transitionKey = result.TimedOut ? "timeout" : (!result.Success ? "error" : "success");
             }
@@ -132,8 +134,8 @@ public class ApiCallNodeHandler(
         var def = await tenantDefinitions.GetByIdAsync(endpoint.DefinitionId, ct);
         if (def is null) return null;
         return new CallTarget(
-            endpoint.HttpMethod ?? def.HttpMethod, def.BaseUrl, endpoint.Path, endpoint.Headers, endpoint.QueryParams,
-            endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive);
+            def.Id, endpoint.HttpMethod ?? def.HttpMethod, def.BaseUrl, endpoint.Path, endpoint.Headers, endpoint.QueryParams,
+            endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive, endpoint.IsRetrySafe);
     }
 
     private async Task<CallTarget?> LoadPortalAsync(Guid endpointId, CancellationToken ct)
@@ -143,8 +145,8 @@ public class ApiCallNodeHandler(
         var def = await portalDefinitions.GetByIdAsync(endpoint.DefinitionId, ct);
         if (def is null) return null;
         return new CallTarget(
-            endpoint.HttpMethod ?? def.HttpMethod, def.BaseUrl, endpoint.Path, endpoint.Headers, endpoint.QueryParams,
-            endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive);
+            def.Id, endpoint.HttpMethod ?? def.HttpMethod, def.BaseUrl, endpoint.Path, endpoint.Headers, endpoint.QueryParams,
+            endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive, endpoint.IsRetrySafe);
     }
 
     private Dictionary<string, string> ResolveHeaders(string json, VariableContext varCtx)

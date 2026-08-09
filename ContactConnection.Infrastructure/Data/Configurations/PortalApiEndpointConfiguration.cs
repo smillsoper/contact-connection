@@ -25,6 +25,7 @@ public class PortalApiEndpointConfiguration : IEntityTypeConfiguration<PortalApi
         builder.Property(e => e.SortOrder).HasColumnName("sort_order").IsRequired().HasDefaultValue(0);
         builder.Property(e => e.IsPreferred).HasColumnName("is_preferred").IsRequired().HasDefaultValue(false);
         builder.Property(e => e.IsActive).HasColumnName("is_active").IsRequired();
+        builder.Property(e => e.IsRetrySafe).HasColumnName("is_retry_safe").IsRequired().HasDefaultValue(false);
         builder.Property(e => e.CreatedAt).HasColumnName("created_at").IsRequired();
         builder.Property(e => e.UpdatedAt).HasColumnName("updated_at");
 

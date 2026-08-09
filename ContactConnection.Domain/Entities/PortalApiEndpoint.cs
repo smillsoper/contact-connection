@@ -16,6 +16,17 @@ public class PortalApiEndpoint
     public int SortOrder { get; private set; }
     public bool IsPreferred { get; private set; }
     public bool IsActive { get; private set; }
+
+    /// <summary>
+    /// Opt-in override for the resilience engine's default retry policy. GET/HEAD/PUT/DELETE are
+    /// always retry-safe by HTTP semantics regardless of this flag; POST/PATCH are NOT retried on
+    /// an ambiguous failure (timeout, 5xx — we can't tell if the vendor already processed it) by
+    /// default, since retrying a non-idempotent call risks a duplicate order/submission. Set this
+    /// true only when the vendor itself guarantees idempotency for this specific endpoint (e.g.
+    /// their own idempotency-key support) — see API_HARDENING_CHECKLIST.md Tier 1.
+    /// </summary>
+    public bool IsRetrySafe { get; private set; }
+
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? UpdatedAt { get; private set; }
 
@@ -83,4 +94,5 @@ public class PortalApiEndpoint
     public void SetResponseMapping(string mappingJson) { ResponseMapping = mappingJson; UpdatedAt = DateTimeOffset.UtcNow; }
     public void Activate() { IsActive = true; UpdatedAt = DateTimeOffset.UtcNow; }
     public void Deactivate() { IsActive = false; UpdatedAt = DateTimeOffset.UtcNow; }
+    public void SetRetrySafe(bool isRetrySafe) { IsRetrySafe = isRetrySafe; UpdatedAt = DateTimeOffset.UtcNow; }
 }

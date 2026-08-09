@@ -1,6 +1,8 @@
+using System.Text.Json;
 using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Domain.Entities;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ContactConnection.Api.Endpoints;
 
@@ -19,6 +21,8 @@ public static class PortalApiDefinitionsEndpoints
         group.MapPost("{id:guid}/activate", Activate);
         group.MapPost("{id:guid}/deactivate", Deactivate);
         group.MapDelete("{id:guid}", Delete);
+        group.MapGet("{id:guid}/versions", ListVersions);
+        group.MapPost("{id:guid}/versions/{versionNumber:int}/revert", Revert);
 
         return app;
     }
@@ -46,8 +50,13 @@ public static class PortalApiDefinitionsEndpoints
     private static async Task<IResult> Create(
         CreateApiDefinitionRequest request,
         IPortalApiDefinitionRepository repo,
+        [FromKeyedServices("portal")] IVersionHistoryService versions,
+        HttpContext http,
         CancellationToken ct)
     {
+        var actor = ActorResolver.Resolve(http.User);
+        if (actor is null) return Results.Unauthorized();
+
         if (!ApiCategory.IsValid(request.ApiCategory))
             return Results.BadRequest(new { error = $"Unknown api_category '{request.ApiCategory}'. Valid categories: {string.Join(", ", ApiCategory.All)}" });
 
@@ -55,6 +64,9 @@ public static class PortalApiDefinitionsEndpoints
         if (request.AuthConfig is not null) def.SetAuthConfig(request.AuthConfig);
         await repo.AddAsync(def, ct);
         await repo.SaveChangesAsync(ct);
+        await versions.SnapshotAsync(
+            VersionedEntityType.PortalApiDefinition, def.Id, BuildSnapshot(def),
+            actor.Value.Id, actor.Value.Name, "Created", ct);
 
         return Results.Created($"/api/v1/portal/api-definitions/{def.Id}", ToResponse(def));
     }
@@ -65,8 +77,13 @@ public static class PortalApiDefinitionsEndpoints
         IPortalApiDefinitionRepository repo,
         IPortalApiEndpointRepository endpointRepo,
         ITtsStreamProviderFactory ttsFactory,
+        [FromKeyedServices("portal")] IVersionHistoryService versions,
+        HttpContext http,
         CancellationToken ct)
     {
+        var actor = ActorResolver.Resolve(http.User);
+        if (actor is null) return Results.Unauthorized();
+
         var def = await repo.GetByIdAsync(id, ct);
         if (def is null) return Results.NotFound();
 
@@ -98,7 +115,64 @@ public static class PortalApiDefinitionsEndpoints
         if (request.AuthConfig is not null) def.SetAuthConfig(request.AuthConfig);
 
         await repo.SaveChangesAsync(ct);
+        await versions.SnapshotAsync(
+            VersionedEntityType.PortalApiDefinition, def.Id, BuildSnapshot(def),
+            actor.Value.Id, actor.Value.Name, "Updated", ct);
         return Results.Ok(ToResponse(def));
+    }
+
+    private static async Task<IResult> ListVersions(
+        Guid id,
+        IPortalApiDefinitionRepository repo,
+        [FromKeyedServices("portal")] IVersionHistoryService versions,
+        CancellationToken ct)
+    {
+        if (await repo.GetByIdAsync(id, ct) is null) return Results.NotFound();
+        return Results.Ok(await versions.ListVersionsAsync(VersionedEntityType.PortalApiDefinition, id, ct));
+    }
+
+    private static async Task<IResult> Revert(
+        Guid id,
+        int versionNumber,
+        IPortalApiDefinitionRepository repo,
+        [FromKeyedServices("portal")] IVersionHistoryService versions,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        var actor = ActorResolver.Resolve(http.User);
+        if (actor is null) return Results.Unauthorized();
+
+        var def = await repo.GetByIdAsync(id, ct);
+        if (def is null) return Results.NotFound();
+
+        var snapshotJson = await versions.GetSnapshotAsync(VersionedEntityType.PortalApiDefinition, id, versionNumber, ct);
+        if (snapshotJson is null) return Results.NotFound(new { error = $"Version {versionNumber} not found." });
+
+        var snapshot = JsonSerializer.Deserialize<ApiDefinitionSnapshot>(snapshotJson)
+            ?? throw new InvalidOperationException("Stored API definition snapshot is corrupt.");
+        ApplySnapshot(def, snapshot);
+
+        await repo.SaveChangesAsync(ct);
+        await versions.SnapshotAsync(
+            VersionedEntityType.PortalApiDefinition, def.Id, BuildSnapshot(def),
+            actor.Value.Id, actor.Value.Name, $"Reverted to version {versionNumber}", ct);
+        return Results.Ok(ToResponse(def));
+    }
+
+    private static string BuildSnapshot(PortalApiDefinition d) => JsonSerializer.Serialize(new ApiDefinitionSnapshot(
+        d.ApiCategory, d.Provider, d.Name, d.Description, d.HttpMethod, d.BaseUrl, d.TimeoutSeconds,
+        d.Headers, d.QueryParams, d.RequestBodyTemplate, d.ResponseMapping, d.AuthConfig, d.IsActive));
+
+    private static void ApplySnapshot(PortalApiDefinition d, ApiDefinitionSnapshot s)
+    {
+        if (d.ApiCategory != s.ApiCategory) d.UpdateCategory(s.ApiCategory);
+        d.Update(s.Name, s.HttpMethod, s.BaseUrl, s.Description, s.Provider ?? "", s.TimeoutSeconds);
+        d.SetHeaders(s.Headers);
+        d.SetQueryParams(s.QueryParams);
+        d.SetRequestBodyTemplate(s.RequestBodyTemplate);
+        d.SetResponseMapping(s.ResponseMapping);
+        d.SetAuthConfig(s.AuthConfig);
+        if (s.IsActive) d.Activate(); else d.Deactivate();
     }
 
     private static async Task<IResult> Activate(Guid id, IPortalApiDefinitionRepository repo, CancellationToken ct)

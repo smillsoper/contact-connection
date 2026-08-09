@@ -53,6 +53,7 @@ export interface ApiEndpointRecord {
   sortOrder: number
   isPreferred: boolean
   isActive: boolean
+  isRetrySafe: boolean
   createdAt: string
   updatedAt: string | null
 }
@@ -116,6 +117,7 @@ interface EndpointFormData {
   queryParams?: string
   headers?: string
   responseMapping?: string
+  isRetrySafe?: boolean
 }
 
 interface DefFormState {
@@ -290,6 +292,7 @@ interface EndpointForm {
   testData: Record<string, string>
   payloadBody: string
   responseMapping: ResponseMappingConfig
+  isRetrySafe: boolean
 }
 
 const BLANK_KV: KVRow[] = [{ key: '', value: '' }]
@@ -306,6 +309,7 @@ const BLANK_ENDPOINT_FORM: EndpointForm = {
   testData: {},
   payloadBody: '',
   responseMapping: { outcomes: [] },
+  isRetrySafe: false,
 }
 
 function kvToJson(rows: KVRow[]): string {
@@ -1735,6 +1739,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
       testData: {},
       payloadBody: '',
       responseMapping: parseResponseMapping(ep.responseMapping),
+      isRetrySafe: ep.isRetrySafe,
     })
     setEditingEndpointId(ep.id)
     setEndpointFormError(null)
@@ -1761,6 +1766,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
         queryParams: kvToJson(endpointForm.params),
         headers: kvToJson(endpointForm.headers),
         responseMapping: JSON.stringify(endpointForm.responseMapping),
+        isRetrySafe: endpointForm.isRetrySafe,
       }
       if (endpointModal === 'edit' && editingEndpointId) {
         const updated = await api.updateEndpoint(definitionId, editingEndpointId, data)
@@ -2259,6 +2265,30 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                         className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500"
                       />
                     </div>
+                    {(() => {
+                      const effectiveMethod = (endpointForm.httpMethod || def?.httpMethod || 'GET').toUpperCase()
+                      if (effectiveMethod !== 'POST' && effectiveMethod !== 'PATCH') return null
+                      return (
+                        <div className="flex items-start gap-2.5 bg-amber-950/20 border border-amber-900/40 rounded-lg px-3 py-2.5">
+                          <input
+                            type="checkbox"
+                            id="endpoint-retry-safe"
+                            checked={endpointForm.isRetrySafe}
+                            onChange={(e) => setEndpointForm((f) => ({ ...f, isRetrySafe: e.target.checked }))}
+                            className="mt-0.5"
+                          />
+                          <label htmlFor="endpoint-retry-safe" className="cursor-pointer">
+                            <span className="text-gray-300 text-xs font-medium block">Safe to automatically retry on timeout/error</span>
+                            <span className="text-gray-500 text-xs mt-0.5 block">
+                              {effectiveMethod} calls aren't retried automatically by default — a timeout or 5xx
+                              doesn't tell us whether the vendor already processed the request, so retrying risks a
+                              duplicate. Only enable this if the vendor guarantees idempotency for this endpoint
+                              (e.g. their own idempotency-key support).
+                            </span>
+                          </label>
+                        </div>
+                      )
+                    })()}
                   </div>
                 )}
 

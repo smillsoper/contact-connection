@@ -39,10 +39,13 @@ internal static class ApiEndpointTestHelper
     }
 
     /// <summary>Runs the test and returns the raw response (not wrapped in IResult).
-    /// tokenCache is deliberately optional and defaults to null: the admin/portal "Test" button
-    /// call sites omit it so a test click always reflects live config, never a cached oauth2
-    /// token; FlowSessionsEndpoints' live address validation/ZIP/autocomplete resolution passes
-    /// the real cache since that traffic runs on every call, not once per manual click.</summary>
+    /// tokenCache and resilience are deliberately optional and default to null/false: the
+    /// admin/portal "Test" button call sites omit them so a test click always reflects live
+    /// config and a live attempt — never a cached oauth2 token, and never blocked by a tripped
+    /// circuit breaker (an admin actively testing wants to know if a vendor has recovered, not be
+    /// told "can't tell, circuit's open"). FlowSessionsEndpoints' live address validation/ZIP/
+    /// autocomplete resolution passes both, since that traffic runs on every call, not once per
+    /// manual click.</summary>
     public static async Task<RunEndpointTestResponse> RunTestAsync(
         string baseUrl,
         string authConfigJson,
@@ -50,7 +53,10 @@ internal static class ApiEndpointTestHelper
         Func<string, CancellationToken, Task<string?>> getCredential,
         IHttpClientFactory httpFactory,
         CancellationToken ct,
-        IOAuth2TokenCache? tokenCache = null)
+        IOAuth2TokenCache? tokenCache = null,
+        IVendorResilienceExecutor? resilience = null,
+        Guid definitionId = default,
+        bool allowRetryOnAmbiguousFailure = false)
     {
         try
         {
@@ -124,7 +130,23 @@ internal static class ApiEndpointTestHelper
             }
 
             var http = httpFactory.CreateClient("FlowEngine");
-            using var response = await http.SendAsync(request, ct);
+
+            HttpResponseMessage response;
+            if (resilience is not null)
+            {
+                // GET/HEAD/PUT/DELETE are always safe to retry on an ambiguous failure by HTTP
+                // semantics; for POST/PATCH, only the endpoint's own IsRetrySafe opt-in
+                // (allowRetryOnAmbiguousFailure) allows it.
+                var alwaysRetrySafeMethod = method == HttpMethod.Get || method == HttpMethod.Head
+                    || method == HttpMethod.Put || method == HttpMethod.Delete;
+                response = await resilience.SendAsync(
+                    definitionId, request, alwaysRetrySafeMethod || allowRetryOnAmbiguousFailure, http, ct);
+            }
+            else
+            {
+                response = await http.SendAsync(request, ct);
+            }
+            using var _ = response;
             var responseBody = await response.Content.ReadAsStringAsync(ct);
 
             string prettyBody = responseBody;

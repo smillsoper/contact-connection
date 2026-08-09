@@ -1,6 +1,9 @@
+using System.Text.Json;
 using ContactConnection.Application.Interfaces.Repositories;
+using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
 using ContactConnection.Domain.Entities;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ContactConnection.Api.Endpoints;
 
@@ -14,6 +17,7 @@ public static class FlowsEndpoints
         group.MapPost("/", async (
             CreateFlowRequest req,
             IFlowRepository flows,
+            [FromKeyedServices("tenant")] IVersionHistoryService versions,
             TenantContext tenantContext,
             HttpContext http,
             CancellationToken ct) =>
@@ -24,6 +28,9 @@ public static class FlowsEndpoints
             var agentIdClaim = http.User.FindFirst("sub")?.Value;
             if (!Guid.TryParse(agentIdClaim, out var agentId))
                 return Results.Unauthorized();
+
+            var actor = ActorResolver.Resolve(http.User);
+            if (actor is null) return Results.Unauthorized();
 
             if (!FlowType.IsValid(req.FlowType))
                 return Results.BadRequest(new { error = $"Invalid flow_type. Valid values: {string.Join(", ", FlowType.All)}" });
@@ -41,6 +48,9 @@ public static class FlowsEndpoints
 
             await flows.AddAsync(flow, ct);
             await flows.SaveChangesAsync(ct);
+            await versions.SnapshotAsync(
+                VersionedEntityType.Flow, flow.Id, BuildFlowSnapshot(flow),
+                actor.Value.Id, actor.Value.Name, "Created", ct);
 
             return Results.Created($"/api/v1/flows/{flow.Id}", flow.ToResponse());
         });
@@ -66,10 +76,15 @@ public static class FlowsEndpoints
             Guid id,
             UpdateFlowRequest req,
             IFlowRepository flows,
+            [FromKeyedServices("tenant")] IVersionHistoryService versions,
             TenantContext tenantContext,
+            HttpContext http,
             CancellationToken ct) =>
         {
             if (tenantContext.Current is null) return Results.Unauthorized();
+
+            var actor = ActorResolver.Resolve(http.User);
+            if (actor is null) return Results.Unauthorized();
 
             var flow = await flows.GetByIdAsync(id, ct);
             if (flow is null || flow.TenantId != tenantContext.Current.Id)
@@ -80,6 +95,61 @@ public static class FlowsEndpoints
             flow.UpdateDefinition(req.Definition);
             flow.UpdateMetadata(req.FlowDirection, req.FlowSubType);
             await flows.SaveChangesAsync(ct);
+            await versions.SnapshotAsync(
+                VersionedEntityType.Flow, flow.Id, BuildFlowSnapshot(flow),
+                actor.Value.Id, actor.Value.Name, "Updated", ct);
+
+            return Results.Ok(flow.ToDetailResponse());
+        });
+
+        // Version history — newest first
+        group.MapGet("/{id:guid}/versions", async (
+            Guid id,
+            IFlowRepository flows,
+            [FromKeyedServices("tenant")] IVersionHistoryService versions,
+            TenantContext tenantContext,
+            CancellationToken ct) =>
+        {
+            if (tenantContext.Current is null) return Results.Unauthorized();
+            var flow = await flows.GetByIdAsync(id, ct);
+            if (flow is null || flow.TenantId != tenantContext.Current.Id) return Results.NotFound();
+
+            var list = await versions.ListVersionsAsync(VersionedEntityType.Flow, id, ct);
+            return Results.Ok(list);
+        });
+
+        // Revert to an earlier version — applies that version's snapshot to the live flow AND
+        // records the revert as a brand new version (never rewinds/discards history; see
+        // API_HARDENING_CHECKLIST.md Tier 1).
+        group.MapPost("/{id:guid}/versions/{versionNumber:int}/revert", async (
+            Guid id,
+            int versionNumber,
+            IFlowRepository flows,
+            [FromKeyedServices("tenant")] IVersionHistoryService versions,
+            TenantContext tenantContext,
+            HttpContext http,
+            CancellationToken ct) =>
+        {
+            if (tenantContext.Current is null) return Results.Unauthorized();
+            var actor = ActorResolver.Resolve(http.User);
+            if (actor is null) return Results.Unauthorized();
+
+            var flow = await flows.GetByIdAsync(id, ct);
+            if (flow is null || flow.TenantId != tenantContext.Current.Id) return Results.NotFound();
+
+            var snapshotJson = await versions.GetSnapshotAsync(VersionedEntityType.Flow, id, versionNumber, ct);
+            if (snapshotJson is null) return Results.NotFound(new { error = $"Version {versionNumber} not found." });
+
+            var snapshot = JsonSerializer.Deserialize<FlowSnapshot>(snapshotJson)
+                ?? throw new InvalidOperationException("Stored flow snapshot is corrupt.");
+
+            flow.Rename(snapshot.Name);
+            flow.UpdateDefinition(snapshot.Definition);
+            flow.UpdateMetadata(snapshot.FlowDirection, snapshot.FlowSubType);
+            await flows.SaveChangesAsync(ct);
+            await versions.SnapshotAsync(
+                VersionedEntityType.Flow, flow.Id, BuildFlowSnapshot(flow),
+                actor.Value.Id, actor.Value.Name, $"Reverted to version {versionNumber}", ct);
 
             return Results.Ok(flow.ToDetailResponse());
         });
@@ -185,6 +255,9 @@ public static class FlowsEndpoints
         });
     }
 
+    private static string BuildFlowSnapshot(Flow f) => JsonSerializer.Serialize(
+        new FlowSnapshot(f.Name, f.Definition, f.FlowDirection, f.FlowSubType));
+
     private static object ToResponse(this Flow f) => new
     {
         id             = f.Id,
@@ -231,6 +304,8 @@ public record UpdateFlowRequest(
     string? Name = null,
     string? FlowDirection = null,
     string? FlowSubType = null);
+
+public record FlowSnapshot(string Name, string Definition, string? FlowDirection, string? FlowSubType);
 
 public record GeneralApiEndpointSummary(
     Guid Id,

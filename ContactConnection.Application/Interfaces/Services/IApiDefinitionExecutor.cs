@@ -20,7 +20,16 @@ public record ApiDefinitionExecutionRequest(
     string? Body,
     string AuthConfigJson,
     int TimeoutSeconds,
-    Func<string, CancellationToken, Task<string?>> GetCredential);
+    Func<string, CancellationToken, Task<string?>> GetCredential,
+    /// <summary>Identifies the vendor for circuit-breaker keying — see IVendorResilienceExecutor.
+    /// Guid.Empty is accepted (falls back to a single shared circuit) for any caller that hasn't
+    /// been updated to pass a real definition id yet.</summary>
+    Guid DefinitionId = default,
+    /// <summary>True when a timeout/5xx on this specific call is safe to automatically retry —
+    /// always true for GET/HEAD/PUT/DELETE; for POST/PATCH, only when the endpoint's own
+    /// IsRetrySafe flag is set. A pure connection-level failure (request never reached the
+    /// vendor) is retried regardless of this flag. See API_HARDENING_CHECKLIST.md Tier 1.</summary>
+    bool AllowRetryOnAmbiguousFailure = false);
 
 public record ApiDefinitionExecutionResult(
     bool Success,
