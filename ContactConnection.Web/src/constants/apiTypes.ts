@@ -71,3 +71,38 @@ export const TTS_PROVIDER_LABELS: Record<string, string> = {
   azure: 'Azure Speech',
   elevenlabs: 'ElevenLabs',
 }
+
+// Auth type badge — was independently duplicated (labels + colors + the parsing function
+// itself) across AdminApiDefinitionsPage, PortalApiDefinitionsPage, and
+// ApiDefinitionDetailContent. One copy here now; each call site imports authTypeBadge directly
+// instead of re-parsing authConfig JSON itself.
+export const AUTH_TYPE_LABELS: Record<string, string> = {
+  none: 'None',
+  api_key: 'API Key',
+  basic: 'Basic Auth',
+  bearer: 'Bearer Token',
+  oauth2: 'OAuth2',
+  hmac: 'HMAC',
+}
+
+export const AUTH_TYPE_BADGE_COLORS: Record<string, string> = {
+  api_key: 'bg-sky-900/40 text-sky-300',
+  basic: 'bg-gray-700 text-gray-300',
+  bearer: 'bg-indigo-900/40 text-indigo-300',
+  oauth2: 'bg-emerald-900/40 text-emerald-300',
+  hmac: 'bg-amber-900/40 text-amber-300',
+}
+
+/** Parses an authConfig JSON string into a display badge — null for "none" or unparseable. */
+export function authTypeBadge(authConfigJson: string): { label: string; color: string } | null {
+  try {
+    const cfg = JSON.parse(authConfigJson) as { type: string }
+    if (cfg.type === 'none') return null
+    return {
+      label: AUTH_TYPE_LABELS[cfg.type] ?? cfg.type,
+      color: AUTH_TYPE_BADGE_COLORS[cfg.type] ?? 'bg-gray-700 text-gray-300',
+    }
+  } catch {
+    return null
+  }
+}

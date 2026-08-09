@@ -92,6 +92,7 @@
 | 80 | 2026-08-02 | 7:53 AM PDT | 11:40 AM PDT | 227 min | ~6565 min |
 | 81 | 2026-08-06 | 4:16 PM PDT | 5:25 PM PDT | 69 min | ~6634 min |
 | 82 | 2026-08-09 | 8:28 AM PDT | 9:12 AM PDT | 44 min | ~6678 min |
+| 83 | 2026-08-09 | 9:18 AM PDT | 9:52 AM PDT | 34 min | ~6712 min |
 
 ---
 
@@ -3598,3 +3599,35 @@ Building it required a 3-stage Dockerfile: SignalWire's binary package repo ship
 - Live-verify tenant credential resolution against the now-configured real Key Vault (`KeyVault:VaultUri` is populated — worth confirming the app is actually reading from it rather than still silently falling back)
 - Consider extending the Maintenance page with other platform-wide operational tasks as they come up
 - `AdminApiDefinitionsPage.tsx` still has its own local duplicate of the category/sub-type constants — low-priority cleanup, deferred twice now
+
+---
+
+## Session 83 — Credential + OAuth2 Token Caching (Redis), and Auth-Badge Constants Cleanup
+
+**Date:** 2026-08-09
+**Start:** 9:18 AM PDT
+**End:** 9:52 AM PDT
+**Duration:** 34 minutes
+**Cumulative Total:** ~6712 min
+
+### What Was Done
+
+**Corrected Session 82's carried-over Key Vault item.** User pointed out it was already closed — Session 82's live CRM flow test (address validation/ZIP lookup/autocomplete all succeeding through the real vendor APIs) already proved stored tenant keys resolve from Key Vault and get consumed correctly. No further action needed there; superseded by this session's caching work anyway.
+
+**Redis-backed credential caching, per user's request** ("cache credentials — especially oauth2 — Redis can store the token... it's fine to store sensitive keys in memory with a timeout-or-changed revalidation"). Two layers:
+- **Credential values** (api_key/bearer/basic secrets, and the client id/secret an OAuth2 exchange starts from) — `CachedTenantCredentialStore`/`CachedPortalCredentialStore` decorators wrap the real Key Vault stores via keyed DI (`AddKeyedScoped`/`AddKeyedSingleton` + `[FromKeyedServices("keyvault")]`, avoiding self-resolution). 10-minute TTL bounds staleness; `Set`/`Delete` evict immediately on top of that so a rotated/removed credential is never served stale; "not found" is cached too (via a sentinel in `CredentialCacheSupport`) so a misconfigured endpoint missing a credential doesn't hammer Key Vault every call. Only wired up when Key Vault is actually configured.
+- **OAuth2 access tokens** — the bigger win. `ApiDefinitionExecutor`'s oauth2 case now checks `IOAuth2TokenCache` (Redis-backed) before doing the client_credentials exchange; on a hit it skips both the Key Vault round trip and the token-endpoint round trip entirely. Cache key is a SHA256 hash of the resolved token URL + client id + client secret + scopes (via new shared `OAuth2CacheKey.Build`) — not the raw secret — which naturally scopes per-tenant without threading a scope parameter through the executor, since two tenants' actual credential values always hash differently even with identical credential key names. TTL comes from the token response's `expiresInField` (already a configurable field name) minus a 30s safety buffer, falling back to a conservative 5-minute default when absent (`OAuth2CacheKey.ComputeTtl`).
+
+**Found and closed a real gap while wiring this up.** The live address validation/ZIP lookup/autocomplete resolution in `FlowSessionsEndpoints` — the exact code path Session 82's live test exercised — turned out to call `ApiEndpointTestHelper.RunTestAsync` directly, a separate/older implementation from `ApiDefinitionExecutor`, not the flow-engine node handlers' path. Left as-is, none of this session's caching would have applied to the traffic the user actually verified with. Fixed by giving `ApiEndpointTestHelper.RunTestAsync`/`ApplyAuth` an optional `IOAuth2TokenCache? tokenCache = null` parameter — the admin/portal "Test" button call sites (`AdminApiEndpointsEndpoints`, `PortalApiEndpointsEndpoints`) omit it so a manual test click always reflects live config, never a cached token; `FlowSessionsEndpoints`' four live call sites (`ValidateAddress`, `LookupZip`, `AutocompleteAddress`, `SelectAutocompleteAddress`) now inject and pass the real cache.
+
+**Live end-to-end verification with a real vendor.** Switched test-tenant's `address_validation` preference to the USPS oauth2-backed portal endpoint via Session 82's new API Preferences UI, then ran the live CRM flow twice:
+- First call: succeeded: `oauth2token:{hash}` appeared in Redis with TTL ≈28,739s (~8hrs — USPS's actual `expires_in`, minus the 30s buffer, not the 5-minute fallback), plus `cred:portal:usps_client_id`/`usps_client_secret` now cached.
+- Second call: succeeded; token value in Redis was byte-identical to before, and TTL had only decremented naturally with elapsed time (not reset to a fresh ~28,769s) — conclusive proof the second call reused the cached token, skipping both the Key Vault lookup and USPS's token endpoint entirely.
+
+**DRY cleanup — the other Session 82 deferred item, expanded.** User asked to fold in `AdminApiDefinitionsPage.tsx`'s local duplicate of `API_CATEGORIES`/`API_CATEGORY_LABELS`/`apiCategoryBadgeColor`. While fixing it, found the identical block also duplicated in `PortalApiDefinitionsPage.tsx` (its portal-side twin) plus a third variant (`authBadge`/`AUTH_BADGE_COLORS`) in `ApiDefinitionDetailContent.tsx`. Extended `constants/apiTypes.ts` with `AUTH_TYPE_LABELS`, `AUTH_TYPE_BADGE_COLORS`, and an exported `authTypeBadge()` function; all three files now import from the shared module instead of maintaining their own copies.
+
+**Build:** full solution `dotnet build` 0 errors, `dotnet test` 65/65 passing, `npx tsc -b` 0 errors ✓.
+
+### Next Session
+- No specific carry-over from this thread — all three Session 82 deferred items (Key Vault verification, Maintenance page follow-up, constants cleanup) are now closed
+- Return to the platform build-order backlog per CLAUDE.md: Chrome Extension (web automation bridge) is next up, followed by Chat System backend

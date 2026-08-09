@@ -3,6 +3,8 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Web;
+using ContactConnection.Application.Interfaces.Services;
+using ContactConnection.Infrastructure.ApiExecution;
 
 namespace ContactConnection.Api.Endpoints;
 
@@ -36,14 +38,19 @@ internal static class ApiEndpointTestHelper
             m => data.TryGetValue(m.Groups[1].Value, out var val) ? val : "");
     }
 
-    /// <summary>Runs the test and returns the raw response (not wrapped in IResult).</summary>
+    /// <summary>Runs the test and returns the raw response (not wrapped in IResult).
+    /// tokenCache is deliberately optional and defaults to null: the admin/portal "Test" button
+    /// call sites omit it so a test click always reflects live config, never a cached oauth2
+    /// token; FlowSessionsEndpoints' live address validation/ZIP/autocomplete resolution passes
+    /// the real cache since that traffic runs on every call, not once per manual click.</summary>
     public static async Task<RunEndpointTestResponse> RunTestAsync(
         string baseUrl,
         string authConfigJson,
         RunEndpointTestRequest req,
         Func<string, CancellationToken, Task<string?>> getCredential,
         IHttpClientFactory httpFactory,
-        CancellationToken ct)
+        CancellationToken ct,
+        IOAuth2TokenCache? tokenCache = null)
     {
         try
         {
@@ -104,7 +111,7 @@ internal static class ApiEndpointTestHelper
                 catch { }
             }
 
-            await ApplyAuth(request, uriBuilder, authConfigJson, getCredential, httpFactory, ct);
+            await ApplyAuth(request, uriBuilder, authConfigJson, getCredential, httpFactory, ct, tokenCache);
             request.RequestUri = uriBuilder.Uri;
 
             if (!string.IsNullOrEmpty(req.RequestBodyTemplate))
@@ -160,6 +167,7 @@ internal static class ApiEndpointTestHelper
         IHttpClientFactory httpFactory,
         CancellationToken ct)
     {
+        // No tokenCache passed — the "Test" button always runs a live, uncached exchange.
         var result = await RunTestAsync(baseUrl, authConfigJson, req, getCredential, httpFactory, ct);
         return Results.Ok(result);
     }
@@ -170,7 +178,8 @@ internal static class ApiEndpointTestHelper
         string authConfigJson,
         Func<string, CancellationToken, Task<string?>> getCredential,
         IHttpClientFactory httpFactory,
-        CancellationToken ct)
+        CancellationToken ct,
+        IOAuth2TokenCache? tokenCache = null)
     {
         JsonElement root;
         try { root = JsonDocument.Parse(authConfigJson).RootElement; }
@@ -226,6 +235,7 @@ internal static class ApiEndpointTestHelper
                 var contentType    = Str(root, "tokenRequestContentType");
                 var bodyTemplate   = Str(root, "tokenRequestTemplate");
                 var tokenField     = Str(root, "tokenField") is { Length: > 0 } tf ? tf : "access_token";
+                var expiresInField = Str(root, "expiresInField") is { Length: > 0 } ef ? ef : "expires_in";
                 var scopes         = Str(root, "scopes");
 
                 if (string.IsNullOrWhiteSpace(tokenUrl)) break;
@@ -233,6 +243,18 @@ internal static class ApiEndpointTestHelper
                 var clientId     = await getCredential(clientIdKey, ct);
                 var clientSecret = await getCredential(clientSecretKey, ct);
                 if (clientId is null || clientSecret is null) break;
+
+                string? cacheKey = null;
+                if (tokenCache is not null)
+                {
+                    cacheKey = OAuth2CacheKey.Build(tokenUrl, method, placement, clientId, clientSecret, scopes, tokenField);
+                    var cachedToken = await tokenCache.GetAsync(cacheKey, ct);
+                    if (cachedToken is not null)
+                    {
+                        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", cachedToken);
+                        break;
+                    }
+                }
 
                 var tokenHttpMethod = method == "GET" ? HttpMethod.Get : HttpMethod.Post;
                 var tokenRequest    = new HttpRequestMessage(tokenHttpMethod, tokenUrl);
@@ -264,7 +286,11 @@ internal static class ApiEndpointTestHelper
                     {
                         var token = tokenProp.GetString() ?? tokenProp.ToString();
                         if (!string.IsNullOrEmpty(token))
+                        {
                             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                            if (tokenCache is not null && cacheKey is not null)
+                                await tokenCache.SetAsync(cacheKey, token, OAuth2CacheKey.ComputeTtl(tokenEl, expiresInField), ct);
+                        }
                     }
                 }
                 catch { /* token exchange failed — request proceeds without auth */ }

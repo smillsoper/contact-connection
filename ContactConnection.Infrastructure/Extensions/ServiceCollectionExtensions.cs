@@ -219,17 +219,32 @@ public static class ServiceCollectionExtensions
             services.AddSingleton<SecretClient>(_ =>
                 new SecretClient(new Uri(vaultUri), azureCredential));
 
-            services.AddSingleton<IPortalCredentialStore, KeyVaultPortalCredentialStore>();
-            services.AddScoped<ITenantCredentialStore, KeyVaultTenantCredentialStore>();
+            // Registered under the "keyvault" key so the caching decorators below can reach
+            // straight through to the real store without a circular self-resolution.
+            services.AddKeyedSingleton<IPortalCredentialStore, KeyVaultPortalCredentialStore>("keyvault");
+            services.AddKeyedScoped<ITenantCredentialStore, KeyVaultTenantCredentialStore>("keyvault");
+
+            // Redis-backed caching in front of Key Vault — every api_key/bearer/basic auth call
+            // and every oauth2 client-credential lookup goes through these, and a busy campaign
+            // calling the same API definition repeatedly shouldn't hit Key Vault on every single
+            // call. See CredentialCacheSupport for TTL + invalidate-on-write semantics.
+            services.AddSingleton<IPortalCredentialStore, CachedPortalCredentialStore>();
+            services.AddScoped<ITenantCredentialStore, CachedTenantCredentialStore>();
         }
         else
         {
             // No Key Vault configured — register a no-op so credential endpoints start up.
             // Write operations will return 500 until KeyVault:VaultUri is set in secrets.
+            // Nothing worth caching in front of this — it already never touches the network.
             var nullStore = new NullCredentialStore();
             services.AddSingleton<IPortalCredentialStore>(nullStore);
             services.AddSingleton<ITenantCredentialStore>(nullStore);
         }
+
+        // OAuth2 access token cache (Redis-backed) — see ApiDefinitionExecutor's "oauth2" auth
+        // case. Registered unconditionally: harmless (just unused) when no oauth2-configured API
+        // definition exists yet, and doesn't depend on Key Vault being configured.
+        services.AddSingleton<IOAuth2TokenCache, RedisOAuth2TokenCache>();
 
         return services;
     }

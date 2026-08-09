@@ -18,57 +18,14 @@ import {
   testPortalAuth,
   type ApiDefinitionRecord,
 } from '../../api/portal'
-
-const API_CATEGORIES = [
-  { value: 'address',     label: 'Address' },
-  { value: 'order',       label: 'Order' },
-  { value: 'fulfillment', label: 'Fulfillment' },
-  { value: 'media',       label: 'Media' },
-  { value: 'general',     label: 'General' },
-]
+import {
+  API_CATEGORIES,
+  API_CATEGORY_LABELS,
+  API_CATEGORY_BADGE_COLORS,
+  authTypeBadge,
+} from '../../constants/apiTypes'
 
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
-
-const API_CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
-  API_CATEGORIES.map((c) => [c.value, c.label])
-)
-
-const AUTH_TYPE_LABELS: Record<string, string> = {
-  none: 'None',
-  api_key: 'API Key',
-  basic: 'Basic Auth',
-  bearer: 'Bearer Token',
-  oauth2: 'OAuth2',
-  hmac: 'HMAC',
-}
-
-function authTypeBadge(authJson: string) {
-  try {
-    const cfg = JSON.parse(authJson) as { type: string }
-    if (cfg.type === 'none') return null
-    const colors: Record<string, string> = {
-      api_key: 'bg-sky-900/40 text-sky-300',
-      basic: 'bg-gray-700 text-gray-300',
-      bearer: 'bg-indigo-900/40 text-indigo-300',
-      oauth2: 'bg-emerald-900/40 text-emerald-300',
-      hmac: 'bg-amber-900/40 text-amber-300',
-    }
-    return { label: AUTH_TYPE_LABELS[cfg.type] ?? cfg.type, color: colors[cfg.type] ?? 'bg-gray-700 text-gray-300' }
-  } catch {
-    return null
-  }
-}
-
-function apiCategoryBadgeColor(category: string) {
-  const colors: Record<string, string> = {
-    address:     'bg-sky-900/50 text-sky-300',
-    order:       'bg-emerald-900/50 text-emerald-300',
-    fulfillment: 'bg-amber-900/50 text-amber-300',
-    media:       'bg-violet-900/50 text-violet-300',
-    general:     'bg-indigo-900/50 text-indigo-300',
-  }
-  return colors[category] ?? 'bg-gray-800 text-gray-300'
-}
 
 interface FormState {
   apiCategory: string
@@ -253,7 +210,7 @@ export default function PortalApiDefinitionsPage() {
                   return (
                     <tr key={d.id} className="border-b border-gray-800 last:border-0 hover:bg-gray-800/30 transition-colors">
                       <td className="px-4 py-3">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${apiCategoryBadgeColor(d.apiCategory)}`}>
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${API_CATEGORY_BADGE_COLORS[d.apiCategory] ?? 'bg-gray-800 text-gray-300'}`}>
                           {API_CATEGORY_LABELS[d.apiCategory] ?? d.apiCategory}
                         </span>
                       </td>

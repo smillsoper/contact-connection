@@ -11,7 +11,7 @@ namespace ContactConnection.Infrastructure.ApiExecution;
 /// (api_key/bearer/basic/oauth2) the same way ApiEndpointTestHelper does for the admin/portal
 /// "test" endpoints, and normalizes the outcome (success/error/timeout) for flow engine use.
 /// </summary>
-public class ApiDefinitionExecutor(IHttpClientFactory httpClientFactory) : IApiDefinitionExecutor
+public class ApiDefinitionExecutor(IHttpClientFactory httpClientFactory, IOAuth2TokenCache tokenCache) : IApiDefinitionExecutor
 {
     public async Task<ApiDefinitionExecutionResult> ExecuteAsync(
         ApiDefinitionExecutionRequest request, CancellationToken ct = default)
@@ -152,6 +152,7 @@ public class ApiDefinitionExecutor(IHttpClientFactory httpClientFactory) : IApiD
                 var contentType     = Str(root, "tokenRequestContentType");
                 var bodyTemplate    = Str(root, "tokenRequestTemplate");
                 var tokenField      = Str(root, "tokenField") is { Length: > 0 } tf ? tf : "access_token";
+                var expiresInField  = Str(root, "expiresInField") is { Length: > 0 } ef ? ef : "expires_in";
                 var scopes          = Str(root, "scopes");
 
                 if (string.IsNullOrWhiteSpace(tokenUrl)) break;
@@ -159,6 +160,14 @@ public class ApiDefinitionExecutor(IHttpClientFactory httpClientFactory) : IApiD
                 var clientId     = await getCredential(clientIdKey, ct);
                 var clientSecret = await getCredential(clientSecretKey, ct);
                 if (clientId is null || clientSecret is null) break;
+
+                var cacheKey = OAuth2CacheKey.Build(tokenUrl, method, placement, clientId, clientSecret, scopes, tokenField);
+                var cachedToken = await tokenCache.GetAsync(cacheKey, ct);
+                if (cachedToken is not null)
+                {
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", cachedToken);
+                    break;
+                }
 
                 var tokenHttpMethod = method == "GET" ? HttpMethod.Get : HttpMethod.Post;
                 var tokenRequest    = new HttpRequestMessage(tokenHttpMethod, tokenUrl);
@@ -190,7 +199,10 @@ public class ApiDefinitionExecutor(IHttpClientFactory httpClientFactory) : IApiD
                     {
                         var token = tokenProp.GetString() ?? tokenProp.ToString();
                         if (!string.IsNullOrEmpty(token))
+                        {
                             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                            await tokenCache.SetAsync(cacheKey, token, OAuth2CacheKey.ComputeTtl(tokenEl, expiresInField), ct);
+                        }
                     }
                 }
                 catch { /* token exchange failed — request proceeds without auth */ }

@@ -104,6 +104,7 @@ public static class FlowSessionsEndpoints
         IPortalApiEndpointRepository portalEndpointRepo,
         IPortalCredentialStore portalCredStore,
         IHttpClientFactory httpFactory,
+        IOAuth2TokenCache tokenCache,
         TenantContext tenantContext,
         CancellationToken ct)
     {
@@ -209,7 +210,7 @@ public static class FlowSessionsEndpoints
             TestData: addrData);
 
         var response = await ApiEndpointTestHelper.RunTestAsync(
-            baseUrl!, authConfig!, testReq, getCredential, httpFactory, ct);
+            baseUrl!, authConfig!, testReq, getCredential, httpFactory, ct, tokenCache);
 
         if (response.Error is not null)
             return Results.Ok(new AddressValidationResult("error", "API Error", response.Error, null, null));
@@ -235,6 +236,7 @@ public static class FlowSessionsEndpoints
         IPortalApiEndpointRepository portalEndpointRepo,
         IPortalCredentialStore portalCredStore,
         IHttpClientFactory httpFactory,
+        IOAuth2TokenCache tokenCache,
         TenantContext tenantContext,
         CancellationToken ct)
     {
@@ -315,7 +317,7 @@ public static class FlowSessionsEndpoints
             TestData: zipData);
 
         var response = await ApiEndpointTestHelper.RunTestAsync(
-            baseUrl!, authConfig!, testReq, getCredential, httpFactory, ct);
+            baseUrl!, authConfig!, testReq, getCredential, httpFactory, ct, tokenCache);
 
         if (response.Error is not null) return Results.Ok(empty);
 
@@ -338,6 +340,7 @@ public static class FlowSessionsEndpoints
         IPortalApiEndpointRepository portalEndpointRepo,
         IPortalCredentialStore portalCredStore,
         IHttpClientFactory httpFactory,
+        IOAuth2TokenCache tokenCache,
         TenantContext tenantContext,
         CancellationToken ct)
     {
@@ -368,7 +371,7 @@ public static class FlowSessionsEndpoints
             TestData: data);
 
         var response = await ApiEndpointTestHelper.RunTestAsync(
-            baseUrl!, authConfig!, testReq, getCredential, httpFactory, ct);
+            baseUrl!, authConfig!, testReq, getCredential, httpFactory, ct, tokenCache);
 
         if (response.Error is not null) return Results.Ok(empty);
 
@@ -391,6 +394,7 @@ public static class FlowSessionsEndpoints
         IPortalApiEndpointRepository portalEndpointRepo,
         IPortalCredentialStore portalCredStore,
         IHttpClientFactory httpFactory,
+        IOAuth2TokenCache tokenCache,
         TenantContext tenantContext,
         CancellationToken ct)
     {
@@ -431,7 +435,7 @@ public static class FlowSessionsEndpoints
             TestData: data);
 
         var response = await ApiEndpointTestHelper.RunTestAsync(
-            baseUrl!, authConfig!, testReq, getCredential, httpFactory, ct);
+            baseUrl!, authConfig!, testReq, getCredential, httpFactory, ct, tokenCache);
 
         if (response.Error is not null)
             return Results.Ok(new AutocompleteSelectionResult(null, response.Error));

@@ -14,36 +14,10 @@ import {
   API_CATEGORY_BADGE_COLORS,
   API_SUB_TYPE_BADGE_COLORS,
   TTS_PROVIDER_LABELS,
+  authTypeBadge,
 } from '../../constants/apiTypes'
 
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
-
-const AUTH_TYPE_LABELS: Record<string, string> = {
-  none: 'None',
-  api_key: 'API Key',
-  basic: 'Basic Auth',
-  bearer: 'Bearer Token',
-  oauth2: 'OAuth2',
-  hmac: 'HMAC',
-}
-
-const AUTH_BADGE_COLORS: Record<string, string> = {
-  api_key: 'bg-sky-900/40 text-sky-300',
-  basic: 'bg-gray-700 text-gray-300',
-  bearer: 'bg-indigo-900/40 text-indigo-300',
-  oauth2: 'bg-emerald-900/40 text-emerald-300',
-  hmac: 'bg-amber-900/40 text-amber-300',
-}
-
-function authBadge(authJson: string) {
-  try {
-    const cfg = JSON.parse(authJson) as { type: string }
-    if (cfg.type === 'none') return null
-    return { label: AUTH_TYPE_LABELS[cfg.type] ?? cfg.type, color: AUTH_BADGE_COLORS[cfg.type] ?? 'bg-gray-700 text-gray-300' }
-  } catch {
-    return null
-  }
-}
 
 export interface ApiDefinitionRecord {
   id: string
@@ -1838,7 +1812,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
     )
   }
 
-  const authBadgeInfo = authBadge(def.authConfig)
+  const authBadgeInfo = authTypeBadge(def.authConfig)
   const endpointSourceContext = API_TYPE_SOURCE_CONTEXT[endpointForm.apiSubType]
 
   return (
