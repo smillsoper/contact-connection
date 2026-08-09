@@ -176,11 +176,15 @@ public class PlayNodeHandler : ITelephonyNodeHandler
     }
 
     /// <summary>
-    /// Looks up the tenant's chosen provider for ApiSubType.TtsStreaming, if any. Queried
-    /// directly against TenantDbContext rather than ITenantApiPreferenceRepository — that
-    /// repository resolves the tenant via ambient TenantContext, which doesn't exist here
-    /// (this runs from EslBackgroundService, a background service with no HTTP request). Same
-    /// explicit-schema pattern already used by ResolveFileArgAsync below.
+    /// Looks up the tenant's chosen provider for ApiSubType.TtsStreaming, if any — either a
+    /// platform-catalog PortalApiEndpoint, or the tenant's own TenantApiEndpoint (e.g. they
+    /// manage their own vendor subscription/credentials rather than sharing the platform's).
+    /// Queried directly against TenantDbContext rather than ITenantApiPreferenceRepository/
+    /// ITenantApiEndpointRepository/ITenantApiDefinitionRepository — those resolve the tenant
+    /// via ambient TenantContext, which doesn't exist here (this runs from EslBackgroundService,
+    /// a background service with no HTTP request). Same explicit-schema pattern already used by
+    /// ResolveFileArgAsync below. Portal-side lookups still go through the injected repositories
+    /// since those are public-schema and have no such ambient-context dependency.
     /// </summary>
     private async Task<(string ProviderKey, string? SettingsJson)?> ResolveStreamingProviderAsync(
         TelephonyFlowContext ctx, CancellationToken ct)
@@ -190,25 +194,31 @@ public class PlayNodeHandler : ITelephonyNodeHandler
             .FirstOrDefaultAsync(p => p.ApiSubType == ApiSubType.TtsStreaming, ct);
         if (preference is null) return null;
 
-        var endpoint = await _portalEndpointRepo.GetByIdAsync(preference.PortalApiEndpointId, ct);
-        if (endpoint is null)
+        string? provider;
+        if (preference.Source == ApiPreferenceSource.Tenant)
+        {
+            var endpoint = await db.TenantApiEndpoints.FirstOrDefaultAsync(e => e.Id == preference.EndpointId, ct);
+            var definition = endpoint is null ? null
+                : await db.TenantApiDefinitions.FirstOrDefaultAsync(d => d.Id == endpoint.DefinitionId, ct);
+            provider = definition?.Provider;
+        }
+        else
+        {
+            var endpoint = await _portalEndpointRepo.GetByIdAsync(preference.EndpointId, ct);
+            var definition = endpoint is null ? null
+                : await _portalDefRepo.GetByIdAsync(endpoint.DefinitionId, ct);
+            provider = definition?.Provider;
+        }
+
+        if (string.IsNullOrWhiteSpace(provider))
         {
             _logger.LogWarning(
-                "PlayNodeHandler [{Uuid}]: TenantApiPreference for tts_streaming points at a missing PortalApiEndpoint {Id} — falling back to flite",
-                ctx.ChannelUuid, preference.PortalApiEndpointId);
+                "PlayNodeHandler [{Uuid}]: tenant's tts_streaming preference (source={Source}) has no resolvable Provider — falling back to flite",
+                ctx.ChannelUuid, preference.Source);
             return null;
         }
 
-        var definition = await _portalDefRepo.GetByIdAsync(endpoint.DefinitionId, ct);
-        if (definition is null || string.IsNullOrWhiteSpace(definition.Provider))
-        {
-            _logger.LogWarning(
-                "PlayNodeHandler [{Uuid}]: PortalApiDefinition for the tenant's tts_streaming endpoint has no Provider set — falling back to flite",
-                ctx.ChannelUuid);
-            return null;
-        }
-
-        return (definition.Provider, preference.SettingsJson);
+        return (provider, preference.SettingsJson);
     }
 
     /// <summary>

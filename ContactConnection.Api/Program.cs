@@ -176,6 +176,7 @@ app.MapAdminApiDefinitionsEndpoints();
 app.MapAdminApiEndpointsEndpoints();
 app.MapAdminApiPreferencesEndpoints();
 app.MapAdminCredentialsEndpoints();
+app.MapAdminTtsProvidersEndpoints();
 
 // Portal (platform administration)
 app.MapPortalAuthEndpoints();

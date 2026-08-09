@@ -21,6 +21,7 @@ import AdminAgentsPage from './pages/admin/AdminAgentsPage'
 import AdminRolesPage from './pages/admin/AdminRolesPage'
 import AdminApiDefinitionsPage from './pages/admin/AdminApiDefinitionsPage'
 import AdminApiDefinitionDetailPage from './pages/admin/AdminApiDefinitionDetailPage'
+import AdminApiPreferencesPage from './pages/admin/AdminApiPreferencesPage'
 import AdminCredentialsPage from './pages/admin/AdminCredentialsPage'
 import TelephonyPage from './pages/admin/TelephonyPage'
 import SipGatewaysPage from './pages/admin/SipGatewaysPage'
@@ -29,6 +30,7 @@ import CampaignDetailPage from './pages/admin/CampaignDetailPage'
 import PortalApiDefinitionsPage from './pages/portal/PortalApiDefinitionsPage'
 import PortalApiDefinitionDetailPage from './pages/portal/PortalApiDefinitionDetailPage'
 import PortalCredentialsPage from './pages/portal/PortalCredentialsPage'
+import MaintenancePage from './pages/portal/MaintenancePage'
 import CallTraceWindowPage from './pages/CallTraceWindowPage'
 import DashboardsPage from './pages/DashboardsPage'
 import DashboardBuilderPage from './pages/DashboardBuilderPage'
@@ -195,6 +197,14 @@ export default function App() {
             </RequirePortalAuth>
           }
         />
+        <Route
+          path="/portal/maintenance"
+          element={
+            <RequirePortalAuth>
+              <MaintenancePage />
+            </RequirePortalAuth>
+          }
+        />
         <Route path="/portal" element={<Navigate to="/portal/tenants" replace />} />
 
         {/* ── Tenant onboarding and agent invite acceptance (public) ── */}
@@ -239,6 +249,14 @@ export default function App() {
           element={
             <RequireAdminAuth>
               <AdminApiDefinitionDetailPage />
+            </RequireAdminAuth>
+          }
+        />
+        <Route
+          path="/admin/api-preferences"
+          element={
+            <RequireAdminAuth>
+              <AdminApiPreferencesPage />
             </RequireAdminAuth>
           }
         />

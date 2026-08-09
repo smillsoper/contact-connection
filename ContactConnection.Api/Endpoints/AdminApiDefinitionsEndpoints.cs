@@ -71,6 +71,8 @@ public static class AdminApiDefinitionsEndpoints
         Guid id,
         UpdateApiDefinitionRequest request,
         ITenantApiDefinitionRepository repo,
+        ITenantApiEndpointRepository endpointRepo,
+        ITtsStreamProviderFactory ttsFactory,
         TenantContext tenantContext,
         CancellationToken ct)
     {
@@ -85,6 +87,20 @@ public static class AdminApiDefinitionsEndpoints
                 return Results.BadRequest(new { error = $"Unknown api_category '{request.ApiCategory}'." });
             def.UpdateCategory(request.ApiCategory);
         }
+
+        // Provider doubles as a runtime dispatch key only for definitions backing a TtsStreaming
+        // endpoint (see TtsProviderValidation) — a tenant registering their own TTS vendor
+        // account is subject to the same constraint as the platform catalog.
+        if (request.Provider is not null)
+        {
+            var endpoints = await endpointRepo.GetByDefinitionAsync(id, ct);
+            if (endpoints.Any(e => e.ApiSubType == ApiSubType.TtsStreaming))
+            {
+                var error = TtsProviderValidation.Validate(request.Provider, ttsFactory);
+                if (error is not null) return Results.BadRequest(new { error });
+            }
+        }
+
         def.Update(request.Name, request.HttpMethod, request.BaseUrl, request.Description, request.Provider, request.TimeoutSeconds);
         if (request.Headers is not null) def.SetHeaders(request.Headers);
         if (request.QueryParams is not null) def.SetQueryParams(request.QueryParams);

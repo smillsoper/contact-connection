@@ -91,6 +91,7 @@
 | 79 | 2026-07-19 | 9:56 AM CDT | 10:28 AM CDT | 32 min | ~6338 min |
 | 80 | 2026-08-02 | 7:53 AM PDT | 11:40 AM PDT | 227 min | ~6565 min |
 | 81 | 2026-08-06 | 4:16 PM PDT | 5:25 PM PDT | 69 min | ~6634 min |
+| 82 | 2026-08-09 | 8:28 AM PDT | 9:12 AM PDT | 44 min | ~6678 min |
 
 ---
 
@@ -3564,3 +3565,36 @@ Building it required a 3-stage Dockerfile: SignalWire's binary package repo ship
 - Extend `GET /api/v1/portal/tts-providers` (or a tenant-facing equivalent) to include each provider's `RequiredCredentialFields` so credential entry is a labeled form, not raw key-name text boxes
 - Confirm whether tenant-owned `TenantApiDefinition`/`TenantApiEndpoint` registration already has admin UI from an earlier session before building anything new for it
 - Configure a real Key Vault locally (or in a shared dev environment) to finally live-verify tenant credential resolution end-to-end — every test so far has passed only because `NullCredentialStore` no-ops writes, not because a real credential was proven to resolve correctly
+
+---
+
+## Session 82 — Tenant API Preference Source Split, API Preferences UI, and Tenant Migration Reconciliation
+
+**Date:** 2026-08-09
+**Start:** 8:28 AM PDT
+**End:** 9:12 AM PDT
+**Duration:** 44 minutes
+**Cumulative Total:** ~6678 min
+
+### What Was Done
+
+**Implemented the Session 81 plan in full.** `TenantApiPreference.PortalApiEndpointId` was replaced with a discriminated `Source` (`"portal"`|`"tenant"`) + `EndpointId` pointer (new `ApiPreferenceSource` static class), threaded through the domain entity, EF config/migration (`RenameTenantApiPreferenceToSourceEndpoint`), repository, application interface, and every call site that resolved a preference: `AdminApiPreferencesEndpoints` (upsert + `GetAvailable`'s `isTenantSelected` computation, previously missing entirely for tenant-sourced items), `FlowSessionsEndpoints` (3 call sites for address validation/ZIP lookup/autocomplete — fixed non-regressively by skipping the portal lookup when the preference is tenant-sourced, preserving the existing separate `TenantApiEndpoint.IsPreferred` mechanism for those subtypes), and `PlayNodeHandler.ResolveStreamingProviderAsync` (branches to query `TenantApiEndpoints`/`TenantApiDefinitions` directly when tenant-sourced). Migration applied to `tenant_test_tenant`; one existing row's blank `source` backfilled via direct SQL (the migration's `NOT NULL` default couldn't itself satisfy `ApiPreferenceSource.IsValid`).
+
+**TTS provider validation extended to tenant-owned definitions/endpoints** — the Session 81 `TtsProviderValidation` check (originally Portal-only) now also runs on `AdminApiDefinitionsEndpoints.Update` and `AdminApiEndpointsEndpoints.Create`/`Update`, consistent with tenants now being able to register their own TTS vendor accounts. Combined the two `PortalTtsProvidersEndpoints`/new `TtsProvidersEndpoints` into one file exposing both `/api/v1/portal/tts-providers` and `/api/v1/admin/tts-providers`, both now returning `{key, requiredCredentialFields}` instead of bare keys, so the credential-entry UI can render a labeled form.
+
+**Built the tenant-facing API Preferences page** (`/admin/api-preferences`, linked from the tenant admin dashboard). Sub-types grouped by category; each row expands to show platform options and the tenant's own registrations side by side, with select/clear actions. For `tts_streaming`, expanding also renders a credential form driven by the selected option's provider's `RequiredCredentialFields`, keyed `tts_{provider}_{field}` to match `TtsCredentialKeys.For`. Confirmed `AdminApiDefinitionsPage.tsx` already covers tenant-owned definition/endpoint CRUD from an earlier session — no new work needed there.
+
+**Proactive DRY fix:** extracted `constants/apiTypes.ts` as the single source of truth for API category/sub-type labels and badge colors (previously duplicated independently in 3-4 places, the same bug class that bit `tts_streaming` silently not showing up in a picker two sessions ago). `ApiDefinitionDetailContent.tsx` now imports from it; `AdminApiDefinitionsPage.tsx` still has its own local duplicate, deliberately left alone to avoid scope creep.
+
+**Tenant migration drift, found and fixed.** While migrating `tenant_test_tenant`, discovered `tenant_test_contact_center` had been drifting since `AddCallTraceStateSnapshot` (2026-07-12) — missing a backlog of migrations. Patched only today's two column changes via direct SQL as a stopgap and flagged the full backlog for later reconciliation via `POST /api/v1/portal/maintenance/migrate-tenants`, which needed real Entra ID auth that wasn't available at the time.
+
+**Closed that gap this same session.** User confirmed Entra ID is now configured (Tenant/Client ID + secret already present in User Secrets, matching `VITE_ENTRA_*` values in the frontend's `.env.local`, and `KeyVault:VaultUri` now populated too). Built a **Maintenance** page in the Platform Portal (`/portal/maintenance`) with a "Run tenant migrations" button wired to the existing `migrate-tenants` endpoint — this is a standing tool now, not a one-off script. Started the API fresh so it picked up the Entra/Key Vault config (it hadn't been running at all this session), confirmed clean startup with no config errors. User logged in via Entra and ran it: 2/2 tenants migrated, no errors. Verified directly against Postgres rather than trusting the UI report alone: both tenant schemas now have the identical 37 migrations applied (matching all 37 migration files on disk), identical 38-table sets, and `tenant_test_contact_center.tenant_api_preferences` now has the `source`/`endpoint_id`/`settings_json` columns via the real tracked migration, not just last session's raw-SQL patch.
+
+**User-verified end-to-end:** selected live API preferences for the test-tenant tenant through the new UI, then ran a real CRM script flow confirming the selected address validation, address autocomplete, and ZIP code lookup APIs were actually used by the call.
+
+**Build:** full solution `dotnet build` 0 errors, `npx tsc -b` 0 errors ✓.
+
+### Next Session
+- Live-verify tenant credential resolution against the now-configured real Key Vault (`KeyVault:VaultUri` is populated — worth confirming the app is actually reading from it rather than still silently falling back)
+- Consider extending the Maintenance page with other platform-wide operational tasks as they come up
+- `AdminApiDefinitionsPage.tsx` still has its own local duplicate of the category/sub-type constants — low-priority cleanup, deferred twice now

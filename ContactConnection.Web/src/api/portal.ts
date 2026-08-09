@@ -402,3 +402,20 @@ export async function testPortalAuth(authConfig: string): Promise<AuthTestResult
     body: JSON.stringify({ authConfig }),
   })
 }
+
+// ─── Maintenance ─────────────────────────────────────────────────────────────
+
+export interface MigrateTenantsResult {
+  migrated: number
+  errors: string[]
+}
+
+// Applies any pending EF migrations to every tenant schema (idempotent — safe to run
+// repeatedly). Fixes schema drift like a tenant missing migrations that were applied
+// everywhere else. Backend returns 207 when some tenants error, which fetch treats as
+// ok (in the 200-299 range), so both outcomes come back through the normal response path.
+export async function migrateTenants(): Promise<MigrateTenantsResult> {
+  return portalFetch<MigrateTenantsResult>('/api/v1/portal/maintenance/migrate-tenants', {
+    method: 'POST',
+  })
+}

@@ -13,7 +13,8 @@ public class TenantApiPreferenceConfiguration : IEntityTypeConfiguration<TenantA
         builder.HasKey(p => p.Id);
         builder.Property(p => p.Id).HasColumnName("id");
         builder.Property(p => p.ApiSubType).HasColumnName("api_sub_type").HasMaxLength(64).IsRequired();
-        builder.Property(p => p.PortalApiEndpointId).HasColumnName("portal_api_endpoint_id").IsRequired();
+        builder.Property(p => p.Source).HasColumnName("source").HasMaxLength(16).IsRequired();
+        builder.Property(p => p.EndpointId).HasColumnName("endpoint_id").IsRequired();
         builder.Property(p => p.SettingsJson).HasColumnName("settings_json").HasColumnType("jsonb");
         builder.Property(p => p.CreatedAt).HasColumnName("created_at").IsRequired();
         builder.Property(p => p.UpdatedAt).HasColumnName("updated_at");

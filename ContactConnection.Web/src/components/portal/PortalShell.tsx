@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { label: 'Tenants', path: '/portal/tenants' },
   { label: 'API Definitions', path: '/portal/api-definitions' },
   { label: 'Credentials', path: '/portal/credentials' },
+  { label: 'Maintenance', path: '/portal/maintenance' },
 ]
 
 export default function PortalShell({ children }: Props) {

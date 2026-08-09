@@ -145,8 +145,8 @@ public static class FlowSessionsEndpoints
         {
             PortalApiEndpoint? portalEp = null;
             var tenantPref = await tenantPrefRepo.GetBySubTypeAsync(ApiSubType.AddressValidation, ct);
-            if (tenantPref is not null)
-                portalEp = await portalEndpointRepo.GetByIdAsync(tenantPref.PortalApiEndpointId, ct);
+            if (tenantPref is not null && tenantPref.Source == ApiPreferenceSource.Portal)
+                portalEp = await portalEndpointRepo.GetByIdAsync(tenantPref.EndpointId, ct);
             portalEp ??= await portalEndpointRepo.GetPreferredBySubTypeAsync(ApiSubType.AddressValidation, ct)
                          ?? (await portalEndpointRepo.GetBySubTypeAsync(ApiSubType.AddressValidation, ct)).FirstOrDefault();
 
@@ -275,8 +275,8 @@ public static class FlowSessionsEndpoints
         {
             PortalApiEndpoint? portalEp = null;
             var tenantPref = await tenantPrefRepo.GetBySubTypeAsync(ApiSubType.ZipCodeLookup, ct);
-            if (tenantPref is not null)
-                portalEp = await portalEndpointRepo.GetByIdAsync(tenantPref.PortalApiEndpointId, ct);
+            if (tenantPref is not null && tenantPref.Source == ApiPreferenceSource.Portal)
+                portalEp = await portalEndpointRepo.GetByIdAsync(tenantPref.EndpointId, ct);
             portalEp ??= await portalEndpointRepo.GetPreferredBySubTypeAsync(ApiSubType.ZipCodeLookup, ct)
                          ?? (await portalEndpointRepo.GetBySubTypeAsync(ApiSubType.ZipCodeLookup, ct)).FirstOrDefault();
 
@@ -486,8 +486,8 @@ public static class FlowSessionsEndpoints
         {
             PortalApiEndpoint? portalEp = null;
             var pref = await tenantPrefRepo.GetBySubTypeAsync(subType, ct);
-            if (pref is not null)
-                portalEp = await portalEndpointRepo.GetByIdAsync(pref.PortalApiEndpointId, ct);
+            if (pref is not null && pref.Source == ApiPreferenceSource.Portal)
+                portalEp = await portalEndpointRepo.GetByIdAsync(pref.EndpointId, ct);
             portalEp ??= await portalEndpointRepo.GetPreferredBySubTypeAsync(subType, ct)
                          ?? (await portalEndpointRepo.GetBySubTypeAsync(subType, ct)).FirstOrDefault();
 

@@ -44,6 +44,7 @@ const NAV_SECTIONS: NavSection[] = [
     heading: 'Integrations',
     cards: [
       { title: 'API Definitions', desc: 'Connect external services and configure API endpoints.', path: '/admin/api-definitions', live: true },
+      { title: 'API Preferences', desc: 'Choose platform or your own integration for each API type.', path: '/admin/api-preferences', live: true },
       { title: 'Credentials', desc: 'Store API keys, tokens, and secrets for integrations.', path: '/admin/credentials', live: true },
     ],
   },

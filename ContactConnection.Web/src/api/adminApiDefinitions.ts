@@ -144,23 +144,27 @@ export function deleteAdminApiEndpoint(definitionId: string, endpointId: string)
 
 // ─── Tenant API Preferences ──────────────────────────────────────────────────
 
+export type ApiPreferenceSource = 'portal' | 'tenant'
+
 export interface TenantApiPreferenceRecord {
   id: string
   apiSubType: string
-  portalApiEndpointId: string
+  source: ApiPreferenceSource
+  endpointId: string
+  settingsJson: string | null
   createdAt: string
   updatedAt: string | null
 }
 
 export interface AvailableEndpointsResult {
   subType: string
-  tenantPreference: { portalApiEndpointId: string } | null
+  tenantPreference: { source: ApiPreferenceSource; endpointId: string; settingsJson: string | null } | null
   portalEndpoints: AvailableEndpointItem[]
   tenantEndpoints: AvailableEndpointItem[]
 }
 
 export interface AvailableEndpointItem {
-  source: 'portal' | 'tenant'
+  source: ApiPreferenceSource
   definitionId: string
   definitionName: string | null
   definitionProvider: string | null
@@ -170,15 +174,20 @@ export interface AvailableEndpointItem {
   path: string
   isPreferred: boolean
   isActive: boolean
-  isTenantSelected?: boolean
+  isTenantSelected: boolean
 }
 
 export function listAdminApiPreferences(): Promise<TenantApiPreferenceRecord[]> {
   return api.get<TenantApiPreferenceRecord[]>('/api/v1/admin/api-preferences')
 }
 
-export function setAdminApiPreference(subType: string, portalApiEndpointId: string): Promise<TenantApiPreferenceRecord> {
-  return api.put<TenantApiPreferenceRecord>(`/api/v1/admin/api-preferences/${subType}`, { portalApiEndpointId })
+export function setAdminApiPreference(
+  subType: string,
+  source: ApiPreferenceSource,
+  endpointId: string,
+  settingsJson?: string,
+): Promise<TenantApiPreferenceRecord> {
+  return api.put<TenantApiPreferenceRecord>(`/api/v1/admin/api-preferences/${subType}`, { source, endpointId, settingsJson })
 }
 
 export function deleteAdminApiPreference(subType: string): Promise<void> {
@@ -187,6 +196,15 @@ export function deleteAdminApiPreference(subType: string): Promise<void> {
 
 export function getAvailableEndpoints(subType: string): Promise<AvailableEndpointsResult> {
   return api.get<AvailableEndpointsResult>(`/api/v1/admin/available-endpoints/${subType}`)
+}
+
+export interface TtsProviderInfo {
+  key: string
+  requiredCredentialFields: string[]
+}
+
+export function listAdminTtsProviders(): Promise<TtsProviderInfo[]> {
+  return api.get<TtsProviderInfo[]>('/api/v1/admin/tts-providers')
 }
 
 export interface EndpointTestPayload {
