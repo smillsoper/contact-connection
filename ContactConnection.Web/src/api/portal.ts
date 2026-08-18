@@ -1,4 +1,6 @@
 import { usePortalAuthStore } from '../stores/portalAuthStore'
+import type { EntityVersionSummary } from './versioning'
+import type { CredentialAuditEntrySummary } from './credentialAudit'
 
 // Raw fetch with portal auth token — no tenant header needed
 async function portalFetch<T>(
@@ -226,10 +228,19 @@ export async function getPortalApiDefinition(id: string): Promise<ApiDefinitionR
   return portalFetch<ApiDefinitionRecord>(`/api/v1/portal/api-definitions/${id}`)
 }
 
+interface TtsProviderInfo {
+  key: string
+  requiredCredentialFields: string[]
+}
+
 /** Live-registered ITtsStreamProvider keys (e.g. "azure", "elevenlabs") — the valid Provider
- *  values for a definition backing a TtsStreaming endpoint. See TtsProviderValidation. */
+ *  values for a definition backing a TtsStreaming endpoint. See TtsProviderValidation. The
+ *  backend returns full {key, requiredCredentialFields} objects (see TtsProvidersEndpoints and
+ *  the Admin-side listAdminTtsProviders) — this caller only needs the keys, so it unwraps here
+ *  rather than leaking the object shape into DetailApi.listTtsProviders (typed string[]). */
 export async function getPortalTtsProviders(): Promise<string[]> {
-  return portalFetch<string[]>('/api/v1/portal/tts-providers')
+  const providers = await portalFetch<TtsProviderInfo[]>('/api/v1/portal/tts-providers')
+  return providers.map((p) => p.key)
 }
 
 export async function createPortalApiDefinition(data: CreateApiDefinitionData): Promise<ApiDefinitionRecord> {
@@ -258,6 +269,14 @@ export async function deletePortalApiDefinition(id: string): Promise<void> {
   return portalFetch<void>(`/api/v1/portal/api-definitions/${id}`, { method: 'DELETE' })
 }
 
+export async function listPortalApiDefinitionVersions(id: string): Promise<EntityVersionSummary[]> {
+  return portalFetch<EntityVersionSummary[]>(`/api/v1/portal/api-definitions/${id}/versions`)
+}
+
+export async function revertPortalApiDefinition(id: string, versionNumber: number): Promise<ApiDefinitionRecord> {
+  return portalFetch<ApiDefinitionRecord>(`/api/v1/portal/api-definitions/${id}/versions/${versionNumber}/revert`, { method: 'POST' })
+}
+
 // ─── Portal Credentials ──────────────────────────────────────────────────────
 
 export interface CredentialSummary {
@@ -278,6 +297,10 @@ export async function setPortalCredential(keyName: string, value: string): Promi
 
 export async function deletePortalCredential(keyName: string): Promise<void> {
   return portalFetch<void>(`/api/v1/portal/credentials/${keyName}`, { method: 'DELETE' })
+}
+
+export async function listPortalCredentialAudit(keyName: string): Promise<CredentialAuditEntrySummary[]> {
+  return portalFetch<CredentialAuditEntrySummary[]>(`/api/v1/portal/credentials/${keyName}/audit`)
 }
 
 // ─── Portal API Endpoints ────────────────────────────────────────────────────
@@ -350,6 +373,14 @@ export async function updatePortalApiEndpoint(definitionId: string, endpointId: 
 
 export async function setPreferredPortalApiEndpoint(definitionId: string, endpointId: string): Promise<ApiEndpointRecord> {
   return portalFetch<ApiEndpointRecord>(`/api/v1/portal/api-definitions/${definitionId}/endpoints/${endpointId}/set-preferred`, { method: 'POST' })
+}
+
+export async function listPortalApiEndpointVersions(definitionId: string, endpointId: string): Promise<EntityVersionSummary[]> {
+  return portalFetch<EntityVersionSummary[]>(`/api/v1/portal/api-definitions/${definitionId}/endpoints/${endpointId}/versions`)
+}
+
+export async function revertPortalApiEndpoint(definitionId: string, endpointId: string, versionNumber: number): Promise<ApiEndpointRecord> {
+  return portalFetch<ApiEndpointRecord>(`/api/v1/portal/api-definitions/${definitionId}/endpoints/${endpointId}/versions/${versionNumber}/revert`, { method: 'POST' })
 }
 
 export async function deletePortalApiEndpoint(definitionId: string, endpointId: string): Promise<void> {

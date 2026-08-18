@@ -44,19 +44,26 @@ public class ApiDefinitionExecutor(
             }
 
             var httpRequest = new HttpRequestMessage(method, uriBuilder.Uri);
+            string? bodyContentType = null;
             foreach (var (key, value) in request.Headers)
+            {
+                // Content-Type is a content header, not a request header — HttpRequestHeaders
+                // silently rejects it (TryAddWithoutValidation returns false, nothing is stored),
+                // so it has to be captured here and applied to the StringContent below instead of
+                // being read back off httpRequest.Headers, which would never find it.
+                if (string.Equals(key, "Content-Type", StringComparison.OrdinalIgnoreCase))
+                {
+                    bodyContentType = value;
+                    continue;
+                }
                 httpRequest.Headers.TryAddWithoutValidation(key, value);
+            }
 
             await ApplyAuthAsync(httpRequest, uriBuilder, request.AuthConfigJson, request.GetCredential, linkedCts.Token);
             httpRequest.RequestUri = uriBuilder.Uri;
 
             if (request.Body is not null)
-            {
-                var contentType = httpRequest.Headers.TryGetValues("Content-Type", out var ctVals)
-                    ? ctVals.FirstOrDefault() ?? "application/json"
-                    : "application/json";
-                httpRequest.Content = new StringContent(request.Body, Encoding.UTF8, contentType);
-            }
+                httpRequest.Content = new StringContent(request.Body, Encoding.UTF8, bodyContentType ?? "application/json");
 
             var http = httpClientFactory.CreateClient("FlowEngine");
             // GET/HEAD/PUT/DELETE are always safe to retry on an ambiguous failure by HTTP
@@ -173,50 +180,51 @@ public class ApiDefinitionExecutor(
                 if (clientId is null || clientSecret is null) break;
 
                 var cacheKey = OAuth2CacheKey.Build(tokenUrl, method, placement, clientId, clientSecret, scopes, tokenField);
-                var cachedToken = await tokenCache.GetAsync(cacheKey, ct);
-                if (cachedToken is not null)
-                {
-                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", cachedToken);
-                    break;
-                }
 
-                var tokenHttpMethod = method == "GET" ? HttpMethod.Get : HttpMethod.Post;
-                var tokenRequest    = new HttpRequestMessage(tokenHttpMethod, tokenUrl);
+                // GetOrCreateAsync (not a bare Get-then-Set) so concurrent calls sharing this same
+                // cache key don't all independently hit the vendor's token endpoint on a cache
+                // miss — see API_HARDENING_CHECKLIST.md Tier 2 (cache-stampede protection).
+                var token = await tokenCache.GetOrCreateAsync(cacheKey, async exchangeCt =>
+                {
+                    var tokenHttpMethod = method == "GET" ? HttpMethod.Get : HttpMethod.Post;
+                    var tokenRequest    = new HttpRequestMessage(tokenHttpMethod, tokenUrl);
 
-                if (placement == "header")
-                {
-                    var enc = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{clientId}:{clientSecret}"));
-                    tokenRequest.Headers.Authorization = new AuthenticationHeaderValue("Basic", enc);
-                    var form = new List<KeyValuePair<string, string>> { new("grant_type", "client_credentials") };
-                    if (!string.IsNullOrEmpty(scopes)) form.Add(new("scope", scopes));
-                    tokenRequest.Content = new FormUrlEncodedContent(form);
-                }
-                else
-                {
-                    var body = bodyTemplate
-                        .Replace($"{{{{{clientIdKey}}}}}", clientId)
-                        .Replace($"{{{{{clientSecretKey}}}}}", clientSecret);
-                    var ct2 = string.IsNullOrEmpty(contentType) ? "application/json" : contentType;
-                    tokenRequest.Content = new StringContent(body, Encoding.UTF8, ct2);
-                }
-
-                try
-                {
-                    var http = httpClientFactory.CreateClient("FlowEngine");
-                    using var tokenResponse = await http.SendAsync(tokenRequest, ct);
-                    var tokenBody = await tokenResponse.Content.ReadAsStringAsync(ct);
-                    var tokenEl   = JsonDocument.Parse(tokenBody).RootElement;
-                    if (tokenEl.TryGetProperty(tokenField, out var tokenProp))
+                    if (placement == "header")
                     {
-                        var token = tokenProp.GetString() ?? tokenProp.ToString();
-                        if (!string.IsNullOrEmpty(token))
+                        var enc = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{clientId}:{clientSecret}"));
+                        tokenRequest.Headers.Authorization = new AuthenticationHeaderValue("Basic", enc);
+                        var form = new List<KeyValuePair<string, string>> { new("grant_type", "client_credentials") };
+                        if (!string.IsNullOrEmpty(scopes)) form.Add(new("scope", scopes));
+                        tokenRequest.Content = new FormUrlEncodedContent(form);
+                    }
+                    else
+                    {
+                        var body = bodyTemplate
+                            .Replace($"{{{{{clientIdKey}}}}}", clientId)
+                            .Replace($"{{{{{clientSecretKey}}}}}", clientSecret);
+                        var ct2 = string.IsNullOrEmpty(contentType) ? "application/json" : contentType;
+                        tokenRequest.Content = new StringContent(body, Encoding.UTF8, ct2);
+                    }
+
+                    try
+                    {
+                        var http = httpClientFactory.CreateClient("FlowEngine");
+                        using var tokenResponse = await http.SendAsync(tokenRequest, exchangeCt);
+                        var tokenBody = await tokenResponse.Content.ReadAsStringAsync(exchangeCt);
+                        var tokenEl   = JsonDocument.Parse(tokenBody).RootElement;
+                        if (tokenEl.TryGetProperty(tokenField, out var tokenProp))
                         {
-                            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-                            await tokenCache.SetAsync(cacheKey, token, OAuth2CacheKey.ComputeTtl(tokenEl, expiresInField), ct);
+                            var tok = tokenProp.GetString() ?? tokenProp.ToString();
+                            if (!string.IsNullOrEmpty(tok))
+                                return (tok, OAuth2CacheKey.ComputeTtl(tokenEl, expiresInField));
                         }
                     }
-                }
-                catch { /* token exchange failed — request proceeds without auth */ }
+                    catch { /* token exchange failed — request proceeds without auth */ }
+                    return null;
+                }, ct);
+
+                if (token is not null)
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
                 break;
             }
             // hmac: requires request signing — not applied, matching ApiEndpointTestHelper.

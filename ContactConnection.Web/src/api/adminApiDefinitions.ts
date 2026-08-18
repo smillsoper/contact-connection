@@ -1,4 +1,5 @@
 import { api } from './client'
+import type { EntityVersionSummary } from './versioning'
 
 export interface ApiDefinitionRecord {
   id: string
@@ -76,6 +77,14 @@ export function deleteAdminApiDefinition(id: string): Promise<void> {
   return api.delete<void>(`/api/v1/admin/api-definitions/${id}`)
 }
 
+export function listAdminApiDefinitionVersions(id: string): Promise<EntityVersionSummary[]> {
+  return api.get<EntityVersionSummary[]>(`/api/v1/admin/api-definitions/${id}/versions`)
+}
+
+export function revertAdminApiDefinition(id: string, versionNumber: number): Promise<ApiDefinitionRecord> {
+  return api.post<ApiDefinitionRecord>(`/api/v1/admin/api-definitions/${id}/versions/${versionNumber}/revert`, {})
+}
+
 // ─── Admin API Endpoints ─────────────────────────────────────────────────────
 
 export interface ApiEndpointRecord {
@@ -143,6 +152,14 @@ export function setPreferredAdminApiEndpoint(definitionId: string, endpointId: s
 
 export function deleteAdminApiEndpoint(definitionId: string, endpointId: string): Promise<void> {
   return api.delete<void>(`/api/v1/admin/api-definitions/${definitionId}/endpoints/${endpointId}`)
+}
+
+export function listAdminApiEndpointVersions(definitionId: string, endpointId: string): Promise<EntityVersionSummary[]> {
+  return api.get<EntityVersionSummary[]>(`/api/v1/admin/api-definitions/${definitionId}/endpoints/${endpointId}/versions`)
+}
+
+export function revertAdminApiEndpoint(definitionId: string, endpointId: string, versionNumber: number): Promise<ApiEndpointRecord> {
+  return api.post<ApiEndpointRecord>(`/api/v1/admin/api-definitions/${definitionId}/endpoints/${endpointId}/versions/${versionNumber}/revert`, {})
 }
 
 // ─── Tenant API Preferences ──────────────────────────────────────────────────

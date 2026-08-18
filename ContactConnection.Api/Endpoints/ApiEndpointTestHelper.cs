@@ -105,6 +105,7 @@ internal static class ApiEndpointTestHelper
 
             var request = new HttpRequestMessage(method, uriBuilder.Uri);
 
+            string? bodyContentType = null;
             if (!string.IsNullOrEmpty(req.Headers))
             {
                 try
@@ -112,7 +113,20 @@ internal static class ApiEndpointTestHelper
                     var hdrDict = JsonSerializer.Deserialize<Dictionary<string, string>>(req.Headers);
                     if (hdrDict != null)
                         foreach (var (k, v) in hdrDict)
-                            request.Headers.TryAddWithoutValidation(k, SubstituteVars(v, ns, data));
+                        {
+                            var resolved = SubstituteVars(v, ns, data);
+                            // Content-Type is a content header, not a request header —
+                            // HttpRequestHeaders silently rejects it (TryAddWithoutValidation
+                            // returns false, nothing is stored), so it has to be captured here and
+                            // applied to the StringContent below instead of being read back off
+                            // request.Headers, which would never find it.
+                            if (string.Equals(k, "Content-Type", StringComparison.OrdinalIgnoreCase))
+                            {
+                                bodyContentType = resolved;
+                                continue;
+                            }
+                            request.Headers.TryAddWithoutValidation(k, resolved);
+                        }
                 }
                 catch { }
             }
@@ -123,10 +137,7 @@ internal static class ApiEndpointTestHelper
             if (!string.IsNullOrEmpty(req.RequestBodyTemplate))
             {
                 var body = SubstituteVars(req.RequestBodyTemplate, ns, data);
-                var contentType = request.Headers.TryGetValues("Content-Type", out var ctVals)
-                    ? ctVals.FirstOrDefault() ?? "application/json"
-                    : "application/json";
-                request.Content = new StringContent(body, Encoding.UTF8, contentType);
+                request.Content = new StringContent(body, Encoding.UTF8, bodyContentType ?? "application/json");
             }
 
             var http = httpFactory.CreateClient("FlowEngine");
@@ -266,60 +277,81 @@ internal static class ApiEndpointTestHelper
                 var clientSecret = await getCredential(clientSecretKey, ct);
                 if (clientId is null || clientSecret is null) break;
 
-                string? cacheKey = null;
+                Task<(string Token, TimeSpan Ttl)?> Exchange(CancellationToken exchangeCt) => ExchangeTokenAsync(
+                    tokenUrl, method, placement, clientId, clientSecret, scopes, bodyTemplate, clientIdKey, clientSecretKey,
+                    contentType, tokenField, expiresInField, httpFactory, exchangeCt);
+
+                string? token;
                 if (tokenCache is not null)
                 {
-                    cacheKey = OAuth2CacheKey.Build(tokenUrl, method, placement, clientId, clientSecret, scopes, tokenField);
-                    var cachedToken = await tokenCache.GetAsync(cacheKey, ct);
-                    if (cachedToken is not null)
-                    {
-                        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", cachedToken);
-                        break;
-                    }
-                }
-
-                var tokenHttpMethod = method == "GET" ? HttpMethod.Get : HttpMethod.Post;
-                var tokenRequest    = new HttpRequestMessage(tokenHttpMethod, tokenUrl);
-
-                if (placement == "header")
-                {
-                    var enc = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{clientId}:{clientSecret}"));
-                    tokenRequest.Headers.Authorization = new AuthenticationHeaderValue("Basic", enc);
-                    var form = new List<KeyValuePair<string, string>> { new("grant_type", "client_credentials") };
-                    if (!string.IsNullOrEmpty(scopes)) form.Add(new("scope", scopes));
-                    tokenRequest.Content = new FormUrlEncodedContent(form);
+                    // GetOrCreateAsync (not a bare Get-then-Set) so concurrent calls sharing this
+                    // same cache key don't all independently hit the vendor's token endpoint on a
+                    // cache miss — see API_HARDENING_CHECKLIST.md Tier 2 (cache-stampede
+                    // protection). Only reachable from FlowSessionsEndpoints' live resolution,
+                    // which passes a tokenCache; the admin/portal "Test" button never does (see
+                    // this method's doc comment), so a manual test click is never rate-limited by
+                    // waiting on someone else's in-flight exchange.
+                    var cacheKey = OAuth2CacheKey.Build(tokenUrl, method, placement, clientId, clientSecret, scopes, tokenField);
+                    token = await tokenCache.GetOrCreateAsync(cacheKey, Exchange, ct);
                 }
                 else
                 {
-                    var body = bodyTemplate
-                        .Replace($"{{{{{clientIdKey}}}}}", clientId)
-                        .Replace($"{{{{{clientSecretKey}}}}}", clientSecret);
-                    var ct2 = string.IsNullOrEmpty(contentType) ? "application/json" : contentType;
-                    tokenRequest.Content = new StringContent(body, Encoding.UTF8, ct2);
+                    var result = await Exchange(ct);
+                    token = result?.Token;
                 }
 
-                try
-                {
-                    var http = httpFactory.CreateClient("FlowEngine");
-                    using var tokenResponse = await http.SendAsync(tokenRequest, ct);
-                    var tokenBody = await tokenResponse.Content.ReadAsStringAsync(ct);
-                    var tokenEl   = JsonDocument.Parse(tokenBody).RootElement;
-                    if (tokenEl.TryGetProperty(tokenField, out var tokenProp))
-                    {
-                        var token = tokenProp.GetString() ?? tokenProp.ToString();
-                        if (!string.IsNullOrEmpty(token))
-                        {
-                            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-                            if (tokenCache is not null && cacheKey is not null)
-                                await tokenCache.SetAsync(cacheKey, token, OAuth2CacheKey.ComputeTtl(tokenEl, expiresInField), ct);
-                        }
-                    }
-                }
-                catch { /* token exchange failed — request proceeds without auth */ }
+                if (token is not null)
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
                 break;
             }
             // hmac: requires request signing — not applied for inline test
         }
+    }
+
+    /// <summary>Builds and sends the client_credentials token request, and parses the configured
+    /// tokenField/expiresInField out of the response. Returns null on any failure (malformed
+    /// response, missing field, network error) — the caller proceeds unauthenticated rather than
+    /// failing the whole test, matching this method's pre-existing behavior.</summary>
+    private static async Task<(string Token, TimeSpan Ttl)?> ExchangeTokenAsync(
+        string tokenUrl, string method, string placement, string clientId, string clientSecret, string scopes,
+        string bodyTemplate, string clientIdKey, string clientSecretKey, string contentType,
+        string tokenField, string expiresInField, IHttpClientFactory httpFactory, CancellationToken ct)
+    {
+        var tokenHttpMethod = method == "GET" ? HttpMethod.Get : HttpMethod.Post;
+        var tokenRequest    = new HttpRequestMessage(tokenHttpMethod, tokenUrl);
+
+        if (placement == "header")
+        {
+            var enc = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{clientId}:{clientSecret}"));
+            tokenRequest.Headers.Authorization = new AuthenticationHeaderValue("Basic", enc);
+            var form = new List<KeyValuePair<string, string>> { new("grant_type", "client_credentials") };
+            if (!string.IsNullOrEmpty(scopes)) form.Add(new("scope", scopes));
+            tokenRequest.Content = new FormUrlEncodedContent(form);
+        }
+        else
+        {
+            var body = bodyTemplate
+                .Replace($"{{{{{clientIdKey}}}}}", clientId)
+                .Replace($"{{{{{clientSecretKey}}}}}", clientSecret);
+            var ct2 = string.IsNullOrEmpty(contentType) ? "application/json" : contentType;
+            tokenRequest.Content = new StringContent(body, Encoding.UTF8, ct2);
+        }
+
+        try
+        {
+            var http = httpFactory.CreateClient("FlowEngine");
+            using var tokenResponse = await http.SendAsync(tokenRequest, ct);
+            var tokenBody = await tokenResponse.Content.ReadAsStringAsync(ct);
+            var tokenEl   = JsonDocument.Parse(tokenBody).RootElement;
+            if (tokenEl.TryGetProperty(tokenField, out var tokenProp))
+            {
+                var token = tokenProp.GetString() ?? tokenProp.ToString();
+                if (!string.IsNullOrEmpty(token))
+                    return (token, OAuth2CacheKey.ComputeTtl(tokenEl, expiresInField));
+            }
+        }
+        catch { /* token exchange failed — request proceeds without auth */ }
+        return null;
     }
 
     private static string Str(JsonElement el, string prop) =>

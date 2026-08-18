@@ -6,6 +6,8 @@ import AuthConfigForm, {
   serializeAuthConfig,
 } from './AuthConfigForm'
 import type { AuthTestResult } from '../../api/adminApiDefinitions'
+import type { EntityVersionSummary } from '../../api/versioning'
+import VersionHistoryPanel from '../versioning/VersionHistoryPanel'
 import {
   API_CATEGORIES,
   API_CATEGORY_LABELS,
@@ -100,10 +102,18 @@ export interface DetailApi {
   setCredential(keyName: string, value: string): Promise<void>
   testAuth(authConfig: string): Promise<AuthTestResult>
   testEndpoint(definitionId: string, payload: EndpointTestPayload): Promise<EndpointTestResult>
-  /** Live-registered TTS streaming provider keys — Portal only (see TtsProviderValidation).
-   *  Omitted on the tenant Admin side, where this picker doesn't apply. */
+  /** Live-registered TTS streaming provider keys (see TtsProviderValidation) — wired on both
+   *  Admin and Portal, since a tenant registering their own TTS vendor account is subject to the
+   *  same constraint as the platform catalog. Optional only because it's resolved via a
+   *  useEffect that tolerates a missing implementation, not because either side omits it. */
   listTtsProviders?(): Promise<string[]>
   listPagePath: string
+  // Version history — every write is retained forever; revert applies a past snapshot and
+  // records it as a brand-new version (see API_HARDENING_CHECKLIST.md Tier 1).
+  listDefinitionVersions(id: string): Promise<EntityVersionSummary[]>
+  revertDefinition(id: string, versionNumber: number): Promise<ApiDefinitionRecord>
+  listEndpointVersions(definitionId: string, endpointId: string): Promise<EntityVersionSummary[]>
+  revertEndpoint(definitionId: string, endpointId: string, versionNumber: number): Promise<ApiEndpointRecord>
 }
 
 interface EndpointFormData {
@@ -1457,6 +1467,8 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
   const [defSaving, setDefSaving] = useState(false)
   const [defFormError, setDefFormError] = useState<string | null>(null)
   const [togglingActive, setTogglingActive] = useState(false)
+  const [showDefHistory, setShowDefHistory] = useState(false)
+  const [historyEndpointId, setHistoryEndpointId] = useState<string | null>(null)
 
   // Endpoint modal
   const [endpointModal, setEndpointModal] = useState<'create' | 'edit' | null>(null)
@@ -1875,6 +1887,12 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
               {togglingActive ? '…' : def.isActive ? 'Deactivate' : 'Activate'}
             </button>
             <button
+              onClick={() => setShowDefHistory(true)}
+              className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-sm font-medium px-3 py-1.5 rounded-lg transition-colors"
+            >
+              History
+            </button>
+            <button
               onClick={openEditDef}
               className="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium px-4 py-1.5 rounded-lg transition-colors"
             >
@@ -1956,6 +1974,12 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                             Set Preferred
                           </button>
                         )}
+                        <button
+                          onClick={() => setHistoryEndpointId(ep.id)}
+                          className="text-gray-400 hover:text-gray-300 text-xs font-medium transition-colors"
+                        >
+                          History
+                        </button>
                         <button
                           onClick={() => openEditEndpoint(ep)}
                           className="text-indigo-400 hover:text-indigo-300 text-xs font-medium transition-colors"
@@ -2691,6 +2715,32 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
             </div>
           </div>
         </>
+      )}
+
+      {showDefHistory && (
+        <VersionHistoryPanel
+          title="Definition Version History"
+          subtitle={def.name}
+          listVersions={() => api.listDefinitionVersions(definitionId)}
+          onRevert={async (versionNumber) => {
+            const updated = await api.revertDefinition(definitionId, versionNumber)
+            setDef(updated)
+          }}
+          onClose={() => setShowDefHistory(false)}
+        />
+      )}
+
+      {historyEndpointId && (
+        <VersionHistoryPanel
+          title="Endpoint Version History"
+          subtitle={endpoints.find((ep) => ep.id === historyEndpointId)?.name}
+          listVersions={() => api.listEndpointVersions(definitionId, historyEndpointId)}
+          onRevert={async (versionNumber) => {
+            const updated = await api.revertEndpoint(definitionId, historyEndpointId, versionNumber)
+            setEndpoints((prev) => prev.map((ep) => (ep.id === historyEndpointId ? updated : ep)))
+          }}
+          onClose={() => setHistoryEndpointId(null)}
+        />
       )}
     </div>
   )

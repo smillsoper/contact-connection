@@ -44,27 +44,74 @@ are real production risk for a real-time telephony product, not nice-to-haves.
       connection-level failure (request never reached the vendor) always retries regardless of
       method. Surfaced as a checkbox in the endpoint form (POST/PATCH only), with the duplicate-
       risk explanation inline.
-- [ ] **Draft/versioning for API Definitions & Endpoints — IN PROGRESS, backend done, frontend
-      pending (Session 84, 2026-08-09).** Scope expanded per user direction: not just Definitions/
-      Endpoints, and not just draft/publish — full retained version history (every version kept
-      forever, revert by selecting any past version, per-version created-by/edited-by) across
-      **Flows too**. Built as a generic, reusable subsystem: new `EntityVersion` table (both
-      schemas) + `IVersionHistoryService` (keyed `"tenant"`/`"portal"` DI) + `ActorResolver`.
-      Wired into all 5 entity types' Create/Update (auto-snapshot) plus new
-      `GET .../versions` / `POST .../versions/{n}/revert` endpoints — backend is live and build/
-      test-verified. **What's left: the frontend.** No UI yet to browse history or click revert,
-      across three surfaces (Flow Designer, Admin API Definition/Endpoint detail, Portal API
-      Definition/Endpoint detail — the latter two share one component). Don't mark this `[x]`
-      until that UI exists and has been live-verified, not just build-clean.
-- [ ] **Audit trail for credential & definition changes — PARTIALLY closed (Session 84,
-      2026-08-09).** The version history work above fully covers the "definition changes" half —
-      every write to a Definition/Endpoint/Flow now has full audit-quality history (who, when,
-      what, nothing ever deleted). **The "credential" half is untouched** — `Set`/`Delete` on
-      `IPortalCredentialStore`/`ITenantCredentialStore` still have zero audit trail (no record of
-      who changed a secret or when). Same `EntityVersion`/`IVersionHistoryService` mechanism could
-      plausibly cover this, but credentials are secrets — the "snapshot" would need to record
-      *that* a change happened (actor, timestamp, key name), not the value itself. Needs its own
-      pass, not just reusing the entity-snapshot pattern verbatim.
+- [x] **Draft/versioning for API Definitions & Endpoints.** — closed Session 85 (2026-08-16). Full
+      retained version history (every version kept forever, revert by selecting any past version,
+      per-version created-by/edited-by) across Flows, TenantApiDefinition/TenantApiEndpoint (admin),
+      and PortalApiDefinition/PortalApiEndpoint (portal). Backend from Session 84 unchanged
+      (`EntityVersion` table + `IVersionHistoryService` + `ActorResolver`, `GET .../versions` /
+      `POST .../versions/{n}/revert` on all 5 entity types). **Frontend added this session:** new
+      shared `EntityVersionSummary` type (`ContactConnection.Web/src/api/versioning.ts`) and
+      reusable `VersionHistoryPanel` modal component
+      (`src/components/versioning/VersionHistoryPanel.tsx`) — newest-first list, "Current" badge on
+      the active version, created-by/at, change summary, revert button with confirmation,
+      auto-refreshes the list after a revert. Wired into all three surfaces:
+      `ApiDefinitionDetailContent.tsx` (shared by Admin + Portal — "History" button on the
+      definition header card, "History" link per row in the endpoints table) and
+      `FlowDesignerPage.tsx` (top-bar "History" button next to Save/Publish, shown once a flow has
+      been saved; revert reloads the canvas from the newly-active definition via a new shared
+      `loadFlow()` callback). **Correction during user verification:** the CRM Flow Designer
+      (`FlowDesignerPage.tsx`, route `/designer`) and the Telephony Flow Designer
+      (`TelephonyDesignerPage.tsx`, route `/telephony-designer`) turned out to be two entirely
+      separate page components, not one component branching on flow type as assumed — the initial
+      pass only wired the History button into the CRM one, so telephony call flows had no History
+      button in the actual UI. Fixed by applying the identical button/panel/`loadFlow()` wiring to
+      `TelephonyDesignerPage.tsx`; `npm run build` re-verified clean (0 errors) afterward. New API
+      client functions: `listAdminApiDefinitionVersions`/
+      `revertAdminApiDefinition`/`listAdminApiEndpointVersions`/`revertAdminApiEndpoint`
+      (`adminApiDefinitions.ts`), the Portal equivalents (`portal.ts`), and `flowsApi.listVersions`/
+      `flowsApi.revert` (`flows.ts`). **Verification:** `dotnet build` (0 errors) and `npm run
+      build` (`tsc -b && vite build`, 0 errors) both clean. Live-verified against the running local
+      stack (docker services + API on :5135 + Vite on :5173) by driving the exact HTTP calls the new
+      UI makes as `admin@contactconnection.local` on `test-tenant`: for a real Admin API Definition
+      (`TMS Reject API`), one of its Endpoints (`Add Reject`), and a real Flow (`Order Offers
+      (sub-flow)`) — updated each twice to build history, confirmed `GET .../versions` returned
+      newest-first with the correct active flag/actor/timestamp/summary, called
+      `POST .../versions/1/revert`, and confirmed the entity's live content rolled back and a new
+      "Reverted to version 1" version appeared as active. All three entity types round-tripped
+      correctly; test edits were reverted back to their original content afterward. HTTP-level
+      verification found the CRM/Telephony designer split (see correction above); user then
+      confirmed on-screen in the actual browser UI that History → Revert works for API Definitions,
+      Endpoints, CRM flows, and Telephony call flows — full click-through verification complete.
+- [x] **Audit trail for credential & definition changes.** — closed Session 85 (2026-08-16). The
+      "definition changes" half was already covered by Session 84/85's version history. This
+      session closed the remaining "credential" half: new `CredentialAuditEntry` entity — append-
+      only, records actor/timestamp/key name/action (`set`/`delete`), deliberately never the
+      secret value — with its own `ICredentialAuditService` (keyed `"tenant"`/`"portal"` DI,
+      mirroring `IVersionHistoryService`'s split) and `TenantCredentialAuditService`/
+      `PortalCredentialAuditService` implementations. Lives in the same schema as the store it
+      audits (tenant schema for tenant credentials, public schema for portal credentials) via new
+      `credential_audit_entries` tables — migrations `AddCredentialAuditEntries` applied to both
+      `TenantDbContext` (on `tenant_test_tenant`) and `ContactConnectionDbContext`. Wired into
+      `AdminCredentialsEndpoints`/`PortalCredentialsEndpoints`: `Upsert`/`Delete` now resolve the
+      actor via `ActorResolver` and call `audit.RecordAsync(...)` after a successful store write;
+      new `GET .../credentials/{keyName}/audit` endpoint lists an individual key's history,
+      newest-first. **Frontend:** new read-only `CredentialAuditPanel` component (no revert button
+      — unlike `VersionHistoryPanel`, there is nothing to revert to; the secret only ever lives in
+      Key Vault) wired as a "History" link per row on both `AdminCredentialsPage.tsx` and
+      `PortalCredentialsPage.tsx`. **Verification:** `dotnet build` (0 errors) and `npm run build`
+      (0 errors) both clean. Live-verified against the running local stack for both scopes: Admin
+      side via real tenant-admin login (`test-tenant`) — Set → Update → Delete on a scratch key
+      produced 3 audit rows newest-first (`delete`, `set`, `set`) with correct actor/timestamp, and
+      the key correctly disappeared from the live credential list while its audit trail persisted.
+      Portal side has no password-based login to test against directly (see correction below), so
+      verified via a throwaway HS256 JWT minted locally with the dev `Jwt:SigningKey` (matching
+      `PlatformJwtTokenService`'s exact claim shape: `role=platform_admin`, same issuer/audience) —
+      Set → Delete round-tripped identically. **Correction found during this pass:** the project's
+      own memory notes described portal login as `POST /api/v1/portal/auth/login` with email/
+      password (plus a `bootstrap` endpoint) — that's stale. `PortalAuthEndpoints.cs` only exposes
+      `POST /api/v1/portal/auth/entra-login` now; the platform migrated to Entra ID SSO-only in an
+      earlier session (confirmed by the `RemovePlatformAdminPasswordHash` migration and the absence
+      of any `platform_admins` table in the current schema). Memory note corrected.
 - [x] **Fix oauth2 "Test Auth" raw token exposure.** — closed Session 84 (2026-08-09): `AuthTestHelper.TestOAuth2`
       now redacts `tokenField` and `refresh_token` (if present) inside `rawResponse` via a
       `JsonNode` rewrite before serializing, and `tokenPreview` is redacted unconditionally
@@ -75,20 +122,94 @@ are real production risk for a real-time telephony product, not nice-to-haves.
 
 ## Tier 2 — Medium priority
 
-- [ ] **Automated test coverage for the execution/caching/resilience layer.** `ApiDefinitionExecutor`,
-      `ApiEndpointTestHelper`, `CachedTenantCredentialStore`/`CachedPortalCredentialStore`,
-      `RedisOAuth2TokenCache`, `VendorResilienceExecutor` (circuit breaker + retry, Session 84),
-      and `TenantVersionHistoryService`/`PortalVersionHistoryService` (Session 84) all currently
-      have zero test coverage — needs a `ContactConnection.Infrastructure.Tests` and/or
-      `ContactConnection.Api.Tests` project (neither exists yet; only Domain.Tests and
-      Application.Tests do). More overdue now than when this item was first written — the retry/
-      circuit-breaker logic in particular has real edge-case branches (connection-level vs.
-      ambiguous failure classification, request cloning) that deserve real test coverage, not
-      just code review.
-- [ ] **Cache-stampede protection for the OAuth2 token cache.** Concurrent cache misses on the
-      same credentials currently trigger N simultaneous token exchanges instead of 1 (Session 83
-      caching work). Not a correctness bug, but wasteful under load — add a distributed lock or
-      single-flight pattern around the exchange.
+- [x] **Automated test coverage for the execution/caching/resilience layer.** — closed Session 85
+      (2026-08-18). New `tests/ContactConnection.Infrastructure.Tests` project
+      (xUnit + Moq + EF Core InMemory), added to `ContactConnection.slnx`; `ContactConnection.
+      Infrastructure.csproj` now declares `<InternalsVisibleTo Include="ContactConnection.
+      Infrastructure.Tests" />` so tests can construct the `internal` service classes directly.
+      **Covered, 33 tests, all passing:**
+      - `VendorResilienceExecutor` (circuit breaker + retry, Session 84) — the highest-priority
+        target per this item's own note. A scripted `HttpMessageHandler` (no real network) drives
+        every branch: success/4xx/5xx with retry allowed vs. not, connection-level
+        (`SocketException`-wrapped) vs. generic `HttpRequestException` classification, this-
+        attempt's-own-timeout vs. caller-cancellation (`TaskCanceledException` handling — the
+        `when (!ct.IsCancellationRequested)` filter), per-attempt request cloning (body + headers
+        survive retries, original request instance stays reusable), circuit-opens-after-threshold
+        fail-fast behavior, and per-`definitionId` circuit isolation.
+      - `TenantVersionHistoryService` / `PortalVersionHistoryService` (Session 84/85) — snapshot/
+        deactivate-previous/list-newest-first/get-by-version semantics, revert-records-a-new-
+        version-never-rewinds, and no cross-entity leakage, against a real (in-memory)
+        `TenantDbContext`/`ContactConnectionDbContext`.
+      - `TenantCredentialAuditService` / `PortalCredentialAuditService` (Session 85) — record/list/
+        newest-first/scoped-by-key-name, and that a credential's audit trail survives its deletion.
+      **Extended same session, 34 more tests, all passing:**
+      - `CredentialCacheSupport`, `CachedTenantCredentialStore`, `CachedPortalCredentialStore`,
+        `RedisOAuth2TokenCache` — against a **real** local Redis (`cc_redis` via docker-compose;
+        see `RedisFixture`) rather than a mock, since `IDatabase` has many version-fragile
+        optional-parameter overloads not worth faking. Covers cache-hit-skips-inner,
+        cache-miss-populates, Set/Delete-evicts-so-a-rotated-credential-is-never-served-stale,
+        the "not found" sentinel, TTL bounding, `GetForTenantAsync`'s explicit-subdomain scoping
+        being independent of ambient `TenantContext`, and `ListAsync` intentionally never caching.
+      - `ApiDefinitionExecutor` — request building (method/query-merge/body), all four auth
+        dispatch branches (api_key header vs. query placement, bearer, basic, oauth2 cache-hit vs.
+        token-exchange-then-cache vs. exchange-fails-proceeds-unauthenticated), and
+        timeout/unexpected-exception normalization, with `IVendorResilienceExecutor` mocked
+        (its own behavior is covered separately above).
+      - **A real, previously-unknown bug was found and fixed in the process:** a Content-Type
+        header set via a definition/endpoint's `Headers` config silently never applied. Root
+        cause: `HttpRequestHeaders.TryAddWithoutValidation("Content-Type", ...)` returns `false`
+        and stores nothing — .NET treats Content-Type as a content header, not a request header —
+        so the code that later read it back via `httpRequest.Headers.TryGetValues("Content-Type",
+        ...)` never found it and silently fell back to `application/json` every time, regardless
+        of what was configured. Confirmed against real `HttpRequestHeaders` behavior (a standalone
+        repro), then confirmed the identical pattern existed in **both** call sites —
+        `ApiDefinitionExecutor.cs` (flow engine calls) and `ApiEndpointTestHelper.cs` (admin/portal
+        "Test" button + live address validation/ZIP lookup/autocomplete in `FlowSessionsEndpoints`)
+        — since the latter was explicitly ported from the former. Fixed both: the configured
+        Content-Type is now captured while building the request and applied directly to the
+        `StringContent`, instead of being round-tripped through a header collection that silently
+        drops it. `ApiEndpointTestHelper.cs` has no automated test coverage of its own yet (see
+        below), so this half of the fix was verified by compilation only (0 `CS` errors) — worth an
+        explicit live click-through next time the admin/portal "Test" button is exercised with a
+        non-JSON body.
+      **Finished same session:** new `tests/ContactConnection.Api.Tests` project (23 tests) closes
+      the last gap — `ApiEndpointTestHelper` (`ContactConnection.Api`'s sibling of
+      `ApiDefinitionExecutor`, backing the admin/portal "Test" button and `FlowSessionsEndpoints`'
+      live address validation/ZIP/autocomplete resolution). `ContactConnection.Api.csproj` now
+      also declares `<InternalsVisibleTo Include="ContactConnection.Api.Tests" />`. Mirrors the
+      `ApiDefinitionExecutor` test suite's shape (request building, all four auth types including
+      oauth2 cache-hit/miss/exchange-failure, resilience-present-vs-absent dispatch, error
+      handling) plus this helper's own extras: path/query-param `{{ns.field}}` template
+      resolution, `_skipIfEmpty` query handling, malformed-JSON-in-config tolerance, JSON response
+      pretty-printing, and — critically — an explicit regression test proving the Content-Type fix
+      (found earlier this session) actually took effect here too. `dotnet test` across the whole
+      solution: **155/155 passing** (45 Domain, 20 Application, 67 Infrastructure, 23 Api), 0
+      warnings. Tier 2 item 1 is now fully closed.
+- [x] **Cache-stampede protection for the OAuth2 token cache.** — closed Session 85 (2026-08-18).
+      New `IOAuth2TokenCache.GetOrCreateAsync(cacheKey, exchange, ct)` — on a cache miss, only one
+      caller (across threads and, via a Redis `LockTakeAsync`/`LockReleaseAsync` distributed lock,
+      process instances) actually invokes `exchange`; every other concurrent caller for the same
+      key polls briefly for that result instead of also hitting the vendor's token endpoint. If
+      the lock holder doesn't finish within the wait budget (stuck, crashed, or just slow),
+      waiters fall back to running `exchange` themselves — bounded, never blocks indefinitely.
+      `RedisOAuth2TokenCache`'s lock TTL/wait budget/poll interval are constructor parameters
+      (production defaults 10s/8s/150ms) so tests can use tiny values to exercise the fallback
+      path without actually waiting seconds. `ApiDefinitionExecutor` (flow engine, `IOAuth2TokenCache`
+      required) and `ApiEndpointTestHelper` (FlowSessionsEndpoints' live resolution — the only
+      caller that ever passes a `tokenCache`; the admin/portal "Test" button still never does, by
+      design, so a manual test click is never made to wait on someone else's in-flight exchange)
+      both refactored to call it instead of a bare Get-then-Set — `ApiEndpointTestHelper`'s inline
+      token-exchange logic was also extracted into a shared `ExchangeTokenAsync` helper in the
+      process. **Verification:** 6 new tests in `RedisOAuth2TokenCacheTests` against a real local
+      Redis — cache hit skips `exchange` entirely, miss invokes it once and persists the result,
+      exchange-returns-null caches nothing, **10 concurrent misses for the same key invoke
+      `exchange` exactly once** (the actual stampede scenario), concurrent misses for different
+      keys aren't serialized against each other, and a deliberately-stuck external lock holder
+      (simulated by taking the lock directly) causes the waiter to correctly fall back after its
+      wait budget rather than hanging. Existing `ApiDefinitionExecutorTests`/
+      `ApiEndpointTestHelperTests` oauth2 tests updated to mock `GetOrCreateAsync` instead of the
+      now-bypassed `GetAsync`/`SetAsync`. `dotnet test` across the whole solution: **161/161
+      passing** (45 Domain, 20 Application, 73 Infrastructure, 23 Api).
 - [ ] **Outbound rate limiting / throttling.** No protection against a runaway or looping flow
       hammering a vendor. Particularly important for tenants using a shared *platform-default*
       credential — one noisy tenant can exhaust the shared quota for every other tenant on that
@@ -115,12 +236,12 @@ are real production risk for a real-time telephony product, not nice-to-haves.
 
 ---
 
-**Next up (Session 85):** Finish Tier 1 item 3 — build the version history frontend. Backend is
-fully live: `GET/POST .../versions[/{n}/revert]` on `/api/v1/flows`,
-`/api/v1/admin/api-definitions[/{id}/endpoints]`, `/api/v1/portal/api-definitions[/{id}/endpoints]`.
-Needs: a reusable version-history panel/modal (list newest-first, active badge, created-by/at,
-change summary, revert button + confirmation), wired into `FlowDesignerPage.tsx` and
-`ApiDefinitionDetailContent.tsx` (shared by Admin + Portal, so one wiring covers both scopes' Definitions
-and Endpoints). Once live-verified, mark item 3 `[x]` — and consider whether to also close the
-credential-audit half of item 4 in the same pass. After Tier 1 fully closes, move to Tier 2,
-starting with automated test coverage (now more overdue given Session 84's resilience/versioning code).
+**Tier 1 is fully closed. Tier 2 items 1 and 2 are fully closed too** — 161/161 tests passing
+across 4 test projects (`Domain.Tests`, `Application.Tests`, `Infrastructure.Tests`, `Api.Tests`).
+**Next up (Session 86):** One loose end first — live-verify the Content-Type fix in
+`ApiEndpointTestHelper.cs` (admin/portal "Test" button) against a real endpoint with a non-JSON
+body; it has automated test coverage now but no live click-through yet. Then Tier 2 item 3:
+outbound rate limiting/throttling — no protection today against a runaway or looping flow
+hammering a vendor, particularly important for tenants sharing a platform-default credential
+(one noisy tenant can exhaust the shared quota for everyone else on that default). After that:
+implement the `hmac` auth type, then inbound webhook support, in that order per the checklist.

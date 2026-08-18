@@ -124,6 +124,12 @@ public static class ServiceCollectionExtensions
         services.AddKeyedScoped<IVersionHistoryService, TenantVersionHistoryService>("tenant");
         services.AddKeyedScoped<IVersionHistoryService, PortalVersionHistoryService>("portal");
 
+        // Credential audit trail — same split, records THAT a credential Set/Delete happened
+        // (actor/timestamp/key/action), never the secret value. Independent of whether Key Vault
+        // is configured (it only ever runs after a store call already succeeded).
+        services.AddKeyedScoped<ICredentialAuditService, TenantCredentialAuditService>("tenant");
+        services.AddKeyedScoped<ICredentialAuditService, PortalCredentialAuditService>("portal");
+
         // DNS client for email validation (singleton — thread-safe, connection-pooled)
         services.AddSingleton<ILookupClient>(_ => new LookupClient(new LookupClientOptions
         {

@@ -51,6 +51,7 @@ public class TenantDbContext : DbContext
     public DbSet<CallStateHistoryEntry> CallStateHistory => Set<CallStateHistoryEntry>();
     public DbSet<Dashboard> Dashboards => Set<Dashboard>();
     public DbSet<EntityVersion> EntityVersions => Set<EntityVersion>();
+    public DbSet<CredentialAuditEntry> CredentialAuditEntries => Set<CredentialAuditEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -90,6 +91,7 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new CallStateHistoryConfiguration());
         modelBuilder.ApplyConfiguration(new DashboardConfiguration());
         modelBuilder.ApplyConfiguration(new EntityVersionConfiguration());
+        modelBuilder.ApplyConfiguration(new CredentialAuditEntryConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 

@@ -18,6 +18,7 @@ public class ContactConnectionDbContext : DbContext
     public DbSet<PortalApiEndpoint> PortalApiEndpoints => Set<PortalApiEndpoint>();
     public DbSet<PhoneNumberRouting> PhoneNumberRoutings => Set<PhoneNumberRouting>();
     public DbSet<EntityVersion> EntityVersions => Set<EntityVersion>();
+    public DbSet<CredentialAuditEntry> CredentialAuditEntries => Set<CredentialAuditEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -31,6 +32,7 @@ public class ContactConnectionDbContext : DbContext
         modelBuilder.ApplyConfiguration(new PortalApiEndpointConfiguration());
         modelBuilder.ApplyConfiguration(new PhoneNumberRoutingConfiguration());
         modelBuilder.ApplyConfiguration(new EntityVersionConfiguration());
+        modelBuilder.ApplyConfiguration(new CredentialAuditEntryConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 }

@@ -1,4 +1,5 @@
 import { api } from './client'
+import type { CredentialAuditEntrySummary } from './credentialAudit'
 
 export interface CredentialSummary {
   keyName: string
@@ -15,4 +16,8 @@ export function setAdminCredential(keyName: string, value: string): Promise<void
 
 export function deleteAdminCredential(keyName: string): Promise<void> {
   return api.delete<void>(`/api/v1/admin/credentials/${keyName}`)
+}
+
+export function listAdminCredentialAudit(keyName: string): Promise<CredentialAuditEntrySummary[]> {
+  return api.get<CredentialAuditEntrySummary[]>(`/api/v1/admin/credentials/${keyName}/audit`)
 }

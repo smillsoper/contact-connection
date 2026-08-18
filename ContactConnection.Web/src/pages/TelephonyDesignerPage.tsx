@@ -46,6 +46,7 @@ import GeneralApiCallNode from '../components/telephony-designer/nodes/GeneralAp
 
 import type { TelNodeData, TelephonyNodeType, TelephonyFlowDefinition, TelephonyNodeDef } from '../types/telephony-designer'
 import { defaultTelNodeData, TELEPHONY_NODE_META } from '../types/telephony-designer'
+import VersionHistoryPanel from '../components/versioning/VersionHistoryPanel'
 
 const EVENT_LISTENER_TYPES: TelephonyNodeType[] = [
   'tf_on_agent_selected',
@@ -211,14 +212,15 @@ function DesignerCanvas() {
   const [flowSubType, setFlowSubType] = useState<string>('')
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [status, setStatus] = useState('')
+  const [showHistory, setShowHistory] = useState(false)
 
   // Option-picker modal for fixed-exit-option nodes (e.g. tf_general_api_call)
   const [pendingConn, setPendingConn] = useState<Connection | null>(null)
 
-  // Load existing flow
-  useEffect(() => {
-    if (!routeId) return
-    flowsApi.getDetail(routeId).then((detail) => {
+  // Load an existing flow's current definition into the canvas — used on mount and again after
+  // a version-history revert (the revert response carries the newly-active definition).
+  const loadFlow = useCallback((id: string) => {
+    return flowsApi.getDetail(id).then((detail) => {
       if (!detail.definition) return
       const def = JSON.parse(detail.definition) as TelephonyFlowDefinition
       const { nodes: n, edges: e, entryNodeId: entry } = fromTelDef(def)
@@ -230,6 +232,13 @@ function DesignerCanvas() {
       setFlowSubType(detail.flow_sub_type ?? '')
       setFlowId(detail.id)
     })
+  }, [setNodes, setEdges])
+
+  // Load existing flow
+  useEffect(() => {
+    if (!routeId) return
+    loadFlow(routeId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeId])
 
   // When an option is picked in the modal, complete the pending edge (single physical "default"
@@ -404,6 +413,14 @@ function DesignerCanvas() {
         )}
         <div className="flex-1" />
         {status && <span className="text-xs text-gray-400">{status}</span>}
+        {flowId && (
+          <button
+            onClick={() => setShowHistory(true)}
+            className="text-sm border border-gray-600 text-gray-300 hover:bg-gray-800 rounded px-3 py-1"
+          >
+            History
+          </button>
+        )}
         <button
           onClick={handleSave}
           className="text-sm bg-gray-700 hover:bg-gray-600 text-gray-100 rounded px-3 py-1"
@@ -521,6 +538,19 @@ function DesignerCanvas() {
           </div>
         )
       })()}
+
+      {showHistory && flowId && (
+        <VersionHistoryPanel
+          title="Flow Version History"
+          subtitle={flowName}
+          listVersions={() => flowsApi.listVersions(flowId)}
+          onRevert={async (versionNumber) => {
+            await flowsApi.revert(flowId, versionNumber)
+            await loadFlow(flowId)
+          }}
+          onClose={() => setShowHistory(false)}
+        />
+      )}
     </div>
   )
 }

@@ -13,6 +13,7 @@ import {
   activateAdminApiDefinition,
   deactivateAdminApiDefinition,
   deleteAdminApiDefinition,
+  listAdminTtsProviders,
   type ApiDefinitionRecord,
 } from '../../api/adminApiDefinitions'
 import { listAdminCredentials, setAdminCredential } from '../../api/adminCredentials'
@@ -21,6 +22,7 @@ import {
   API_CATEGORIES,
   API_CATEGORY_LABELS,
   API_CATEGORY_BADGE_COLORS,
+  TTS_PROVIDER_LABELS,
   authTypeBadge,
 } from '../../constants/apiTypes'
 
@@ -63,11 +65,15 @@ export default function AdminApiDefinitionsPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
   const [knownCreds, setKnownCreds] = useState<string[]>([])
+  const [ttsProviders, setTtsProviders] = useState<string[]>([])
 
   useEffect(() => {
     load()
     listAdminCredentials()
       .then((list) => setKnownCreds(list.map((c) => c.keyName)))
+      .catch(() => {})
+    listAdminTtsProviders()
+      .then((list) => setTtsProviders(list.map((p) => p.key)))
       .catch(() => {})
   }, [])
 
@@ -297,13 +303,26 @@ export default function AdminApiDefinitionsPage() {
                 </div>
                 <div>
                   <label className="block text-gray-400 text-xs font-medium mb-1.5">Provider</label>
-                  <input
-                    type="text"
-                    value={form.provider}
-                    onChange={(e) => setForm((f) => ({ ...f, provider: e.target.value }))}
-                    placeholder="USPS, SmartyStreets…"
-                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500"
-                  />
+                  {form.apiCategory === 'media' && ttsProviders.length > 0 ? (
+                    <select
+                      value={form.provider}
+                      onChange={(e) => setForm((f) => ({ ...f, provider: e.target.value }))}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="">— Select a provider —</option>
+                      {ttsProviders.map((p) => (
+                        <option key={p} value={p}>{TTS_PROVIDER_LABELS[p] ?? p}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={form.provider}
+                      onChange={(e) => setForm((f) => ({ ...f, provider: e.target.value }))}
+                      placeholder="USPS, SmartyStreets…"
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                    />
+                  )}
                 </div>
               </div>
 

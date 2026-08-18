@@ -4,8 +4,10 @@ import {
   listAdminCredentials,
   setAdminCredential,
   deleteAdminCredential,
+  listAdminCredentialAudit,
   type CredentialSummary,
 } from '../../api/adminCredentials'
+import CredentialAuditPanel from '../../components/versioning/CredentialAuditPanel'
 
 type ModalMode = 'add' | 'edit' | null
 
@@ -23,6 +25,8 @@ export default function AdminCredentialsPage() {
 
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
+
+  const [auditKey, setAuditKey] = useState<string | null>(null)
 
   async function load() {
     setLoading(true)
@@ -137,6 +141,12 @@ export default function AdminCredentialsPage() {
                       {item.updatedOn ? new Date(item.updatedOn).toLocaleString() : '—'}
                     </td>
                     <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={() => setAuditKey(item.keyName)}
+                        className="text-gray-400 hover:text-gray-300 text-xs mr-4 transition-colors"
+                      >
+                        History
+                      </button>
                       <button
                         onClick={() => openEdit(item.keyName)}
                         className="text-indigo-400 hover:text-indigo-300 text-xs mr-4 transition-colors"
@@ -255,6 +265,14 @@ export default function AdminCredentialsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {auditKey !== null && (
+        <CredentialAuditPanel
+          keyName={auditKey}
+          listAudit={listAdminCredentialAudit}
+          onClose={() => setAuditKey(null)}
+        />
       )}
     </AdminShell>
   )
