@@ -39,7 +39,8 @@ public class ApiCallNodeHandler(
 
     private record CallTarget(
         Guid DefinitionId, string HttpMethod, string BaseUrl, string Path, string Headers, string QueryParams,
-        string? RequestBodyTemplate, string AuthConfig, int TimeoutSeconds, bool IsActive, bool IsRetrySafe);
+        string? RequestBodyTemplate, string AuthConfig, int TimeoutSeconds, bool IsActive, bool IsRetrySafe,
+        int? RateLimitPerMinute);
 
     public async Task<NodeResult> ExecuteAsync(
         JsonObject node, FlowExecutionContext ctx,
@@ -88,6 +89,7 @@ public class ApiCallNodeHandler(
                     : null;
                 var headers     = ResolveHeaders(target.Headers, varCtx);
                 var queryParams = ResolveQueryParams(target.QueryParams, varCtx);
+                var hmacPayload = ResolveHmacPayload(target.AuthConfig, varCtx);
 
                 Func<string, CancellationToken, Task<string?>> getCredential = scope == "portal"
                     ? portalCredentials.GetAsync
@@ -107,7 +109,9 @@ public class ApiCallNodeHandler(
                     TimeoutSeconds: timeoutOverride ?? target.TimeoutSeconds,
                     GetCredential: getCredential,
                     DefinitionId: target.DefinitionId,
-                    AllowRetryOnAmbiguousFailure: target.IsRetrySafe), ct);
+                    AllowRetryOnAmbiguousFailure: target.IsRetrySafe,
+                    RateLimitPerMinute: target.RateLimitPerMinute,
+                    HmacPayload: hmacPayload), ct);
 
                 transitionKey = result.TimedOut ? "timeout" : (!result.Success ? "error" : "success");
             }
@@ -135,7 +139,8 @@ public class ApiCallNodeHandler(
         if (def is null) return null;
         return new CallTarget(
             def.Id, endpoint.HttpMethod ?? def.HttpMethod, def.BaseUrl, endpoint.Path, endpoint.Headers, endpoint.QueryParams,
-            endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive, endpoint.IsRetrySafe);
+            endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive, endpoint.IsRetrySafe,
+            def.RateLimitPerMinute);
     }
 
     private async Task<CallTarget?> LoadPortalAsync(Guid endpointId, CancellationToken ct)
@@ -146,7 +151,25 @@ public class ApiCallNodeHandler(
         if (def is null) return null;
         return new CallTarget(
             def.Id, endpoint.HttpMethod ?? def.HttpMethod, def.BaseUrl, endpoint.Path, endpoint.Headers, endpoint.QueryParams,
-            endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive, endpoint.IsRetrySafe);
+            endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive, endpoint.IsRetrySafe,
+            def.RateLimitPerMinute);
+    }
+
+    /// <summary>Extracts the hmac auth type's optional payloadTemplate (if any) and resolves it
+    /// through the same variable resolver as the request body/headers/query params — so the
+    /// signed string can pull in fields the vendor requires even when they aren't part of the
+    /// outgoing body. Returns null when the auth type isn't "hmac" or no template is configured,
+    /// meaning ApiDefinitionExecutor falls back to signing the actual request body.</summary>
+    private string? ResolveHmacPayload(string authConfigJson, VariableContext varCtx)
+    {
+        try
+        {
+            var root = JsonNode.Parse(authConfigJson)?.AsObject();
+            if (root is null || root["type"]?.GetValue<string>() != "hmac") return null;
+            var template = root["payloadTemplate"]?.GetValue<string>();
+            return string.IsNullOrEmpty(template) ? null : Resolver.Resolve(template, varCtx);
+        }
+        catch { return null; } // malformed auth config JSON — same "treat as absent" tolerance as headers/query params
     }
 
     private Dictionary<string, string> ResolveHeaders(string json, VariableContext varCtx)

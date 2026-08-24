@@ -184,7 +184,14 @@ are real production risk for a real-time telephony product, not nice-to-haves.
       pretty-printing, and — critically — an explicit regression test proving the Content-Type fix
       (found earlier this session) actually took effect here too. `dotnet test` across the whole
       solution: **155/155 passing** (45 Domain, 20 Application, 67 Infrastructure, 23 Api), 0
-      warnings. Tier 2 item 1 is now fully closed.
+      warnings. Tier 2 item 1 is now fully closed. **Live click-through closed Session 86
+      (2026-08-24):** the one remaining loose end (automated coverage existed, no live click had
+      been done) is now verified — hit the real admin "Test" endpoint
+      (`POST /api/v1/admin/api-definitions/{id}/endpoints/test`) against a scratch definition
+      pointed at `postman-echo.com` with an XML body and an explicit `Content-Type: application/xml`
+      header. Vendor echoed back `"content-type": "application/xml; charset=utf-8"` and the raw
+      (unparsed) XML body — confirms the fix holds through the real HTTP path, not just the test
+      double. Scratch definition deleted after verification.
 - [x] **Cache-stampede protection for the OAuth2 token cache.** — closed Session 85 (2026-08-18).
       New `IOAuth2TokenCache.GetOrCreateAsync(cacheKey, exchange, ct)` — on a cache miss, only one
       caller (across threads and, via a Redis `LockTakeAsync`/`LockReleaseAsync` distributed lock,
@@ -210,13 +217,108 @@ are real production risk for a real-time telephony product, not nice-to-haves.
       `ApiEndpointTestHelperTests` oauth2 tests updated to mock `GetOrCreateAsync` instead of the
       now-bypassed `GetAsync`/`SetAsync`. `dotnet test` across the whole solution: **161/161
       passing** (45 Domain, 20 Application, 73 Infrastructure, 23 Api).
-- [ ] **Outbound rate limiting / throttling.** No protection against a runaway or looping flow
-      hammering a vendor. Particularly important for tenants using a shared *platform-default*
-      credential — one noisy tenant can exhaust the shared quota for every other tenant on that
-      default.
-- [ ] **Implement the `hmac` auth type.** Currently a documented no-op in both
-      `ApiDefinitionExecutor` and `ApiEndpointTestHelper` — any vendor requiring request signing
-      (several payment/shipping carriers do) can't be integrated today.
+- [x] **Outbound rate limiting / throttling.** — closed Session 86 (2026-08-24). New
+      `IOutboundRateLimiter` (Application) / `RedisOutboundRateLimiter` (Infrastructure) —
+      Redis-backed (not in-memory like the circuit breaker) because the whole point is a shared
+      quota across every API instance, not just one process; fixed-window counter keyed per
+      `definitionId` via an atomic `SET NX EX` seed + `INCR` (no Lua script needed, and the key
+      can never end up without a TTL even if a caller dies mid-request). Keying per definitionId
+      is what makes shared-quota protection actually work: a Portal definition backed by a
+      platform-default credential has exactly one `definitionId` shared by every tenant using it,
+      so they all draw from the same budget — no separate per-tenant wiring needed. New
+      `RateLimitPerMinute` (nullable int) field on `TenantApiDefinition`/`PortalApiDefinition` —
+      opt-in, defaults to unlimited, same "no behavior change until someone sets it" convention as
+      `IsRetrySafe`. Denied calls throw `RateLimitExceededException`, caught by the same
+      catch-all `ApiDefinitionExecutor`/`ApiEndpointTestHelper` already use for every other
+      outbound failure — no new node-handler wiring needed, it just surfaces as the flow's normal
+      `error` transition. Checked first in `ApiDefinitionExecutor.ExecuteAsync`, before any
+      credential lookup or oauth2 token exchange, so a call that's going to be denied doesn't pay
+      for that work first. Wired into both flow-engine paths (`ApiCallNodeHandler`,
+      `GeneralApiCallNodeHandler`, via a new `RateLimitPerMinute` field on their `CallTarget`
+      record) and `FlowSessionsEndpoints`' live address validation/ZIP/autocomplete resolution
+      (threaded through the same `resolvedDefinitionId`/`ResolveApiEndpoint` plumbing
+      `IsRetrySafe` already uses). The admin/portal "Test" button stays exempt by design, matching
+      the existing pattern for the circuit breaker/retry/oauth2 cache — `rateLimiter` is an
+      optional parameter on `ApiEndpointTestHelper.RunTestAsync` that the Test button call sites
+      never pass, so a manual test click always reflects live config and is never blocked by
+      traffic the flow engine generated. Frontend: new "Rate limit (requests/min)" field
+      (optional, blank = unlimited) on the Admin/Portal Definition create form and the shared
+      `ApiDefinitionDetailContent.tsx` edit form, plus a `{n}/min limit` badge on the detail
+      header when set. **Verification:** 9 new tests (`RedisOutboundRateLimiterTests` against a
+      real local Redis — unlimited/zero/negative always-allow, under-limit allowed,
+      exceeds-limit denied with a correct `RetryAfterSeconds`, distinct definitionIds isolated,
+      **10 concurrent callers sharing one definitionId correctly split 4 allowed / 6 denied**,
+      window-rollover resets the budget; plus `ApiDefinitionExecutor`/`ApiEndpointTestHelper`
+      dispatch tests with a mocked limiter) — `dotnet test` across the whole solution:
+      **173/173 passing** (45 Domain, 20 Application, 82 Infrastructure, 26 Api). `dotnet build`
+      and `npm run build`/`tsc -b` both clean, 0 errors. **Live-verified** against the running
+      local stack: created a scratch Admin API Definition (category `address`, pointed at
+      `postman-echo.com`, `rateLimitPerMinute: 2`) with a preferred `address_validation` endpoint,
+      then called the real `POST /api/v1/flow-sessions/{id}/validate-address` path three times in
+      a row as `admin@contactconnection.local` on `test-tenant` — calls 1 and 2 actually reached
+      the vendor (real postman-echo responses came back), call 3 was denied with
+      `"Rate limit exceeded (2/min) for this API definition. Retry after 37s."`; confirmed the
+      Redis key `ratelimit:{definitionId}:{windowStart}` existed with the expected name. Scratch
+      definition and Redis key deleted after verification. Also closed the Tier-2-item-1 loose end
+      carried over from Session 85: live-verified the Content-Type fix in `ApiEndpointTestHelper.cs`
+      (admin/portal "Test" button) against a real endpoint with a non-JSON (XML) body — see that
+      item's note above.
+      **Side effect worth recording:** `tenant_test_contact_center` (the second dev tenant schema)
+      had drifted 7 migrations behind (last applied Session 82, missing everything through Session
+      85's `AddCredentialAuditEntries`) — caught up via the real `POST
+      /api/v1/portal/maintenance/migrate-tenants` reconciliation endpoint (Session 82) rather than
+      hand-written SQL, so it's now current on every migration, not just this session's.
+- [x] **Implement the `hmac` auth type.** — closed Session 86 (2026-08-24). New shared
+      `HmacSigner` (Infrastructure.ApiExecution, used by both `ApiDefinitionExecutor` and
+      `ApiEndpointTestHelper` so the signing convention is defined once) — computes
+      `hex(HMAC(secret, payload))`, or, when the config's `includeTimestamp` is set, the
+      Stripe/Svix-style `"t={unixSeconds},v1={hex(HMAC(secret, "{unixSeconds}.{payload}"))}"`
+      (self-contained in one header, no second "timestamp" header needs its own config field).
+      Supports SHA256/SHA512/SHA1/MD5, defaulting to SHA256 for an unrecognized value.
+      **Mid-session correction, on user direction:** the first pass always signed the literal
+      outgoing request body — the user pointed out real vendor HMAC schemes often sign a
+      *specific subset/rearrangement* of fields (order id, a particular total, a caller field not
+      even present in the outgoing body), not just the raw body, so the auth config needed access
+      to the same flow-variable resolution as the body/headers/query params. Added an optional
+      `payloadTemplate` field to the hmac auth config, using the identical `{{ns.field}}` tag
+      syntax as those other templates; blank still signs the actual request body (the original,
+      still-correct default for the common case). Resolution happens exactly where the other
+      templates are resolved for that call site — **not** inside the low-level executor, which
+      does no templating of its own by design:
+      - CRM/telephony flow-engine paths (`ApiCallNodeHandler`, `GeneralApiCallNodeHandler`) —
+        new `ResolveHmacPayload` helper in each, parses the auth config only for the hmac case,
+        resolves `payloadTemplate` via the real `IVariableResolver`/`VariableContext` (so it can
+        reference any of the 7 real namespaces — `call_record`, `caller`, `agent`, `tenant`,
+        `input`, `api`, `flow` — not just body-adjacent fields), passes the resolved string down
+        via a new `HmacPayload` field on `ApiDefinitionExecutionRequest`.
+      - `ApiEndpointTestHelper` (admin/portal "Test" button + `FlowSessionsEndpoints`' live
+        address validation/ZIP/autocomplete resolution) — resolves `payloadTemplate` via the same
+        `SubstituteVars`/`ns`/`data` mechanism already used for that call's body/query/headers.
+      - Both callers compute a single final `signaturePayload = resolvedTemplate ?? resolvedBody`
+        before applying auth, so `ApplyAuth`/`ApplyAuthAsync`'s hmac case just signs whatever
+        string it's handed — no dual-parameter plumbing needed.
+      Frontend: new "Signed Payload Template" textarea on the HMAC section of `AuthConfigForm.tsx`
+      (shared by Admin + Portal definition forms), with inline hint text explaining the
+      blank-signs-the-body default. **Verification:** 14 new tests — `HmacSignerTests` (pure
+      signing math: bare-hex vs. timestamped format, all 4 algorithms, unrecognized-algorithm
+      fallback, deterministic, different payload/secret ⇒ different signature), plus dispatch
+      tests in both `ApiDefinitionExecutorTests` (signs Body when no HmacPayload given, signs
+      HmacPayload instead when given, no signature header when the credential is missing, default
+      algorithm/header-name when unconfigured) and `ApiEndpointTestHelperTests` (payloadTemplate
+      resolved via SubstituteVars and signed instead of the body, credential-missing case) —
+      `dotnet test` across the whole solution: **191/191 passing** (45 Domain, 20 Application, 97
+      Infrastructure, 29 Api). `dotnet build` and `npm run build`/`tsc -b` both clean, 0 errors.
+      **Live-verified** against the running local stack: created a scratch General-category Admin
+      API Definition pointed at `postman-echo.com` with hmac auth (`secretKey` → a scratch
+      credential set via `PUT /api/v1/admin/credentials/{keyName}`), ran the real admin "Test"
+      endpoint twice — first with no `payloadTemplate` (body `"hello-world"`), then with
+      `payloadTemplate: "{{test.orderId}}:{{test.total}}"` and test data `orderId=555,
+      total=19.99`. Both produced `x-signature` headers that postman-echo echoed back;
+      independently recomputed both in Python (`hmac.new(secret, payload,
+      hashlib.sha256).hexdigest()`) and confirmed **byte-for-byte matches** — `3e88f488...` for
+      the body-signing case, `712a9945...` for the template case (a different signature than the
+      body-signing case, confirming the template genuinely overrides the body rather than being
+      ignored). Scratch definition and credential deleted after verification.
 - [ ] **Inbound webhook support.** Everything today is synchronous request/response. Sub-types
       like `fulfillment_tracking` and `tfn_assignment_*` map naturally to vendor-pushed webhooks
       in the real world; polling-only support is a structural gap, not a config one.
@@ -236,12 +338,15 @@ are real production risk for a real-time telephony product, not nice-to-haves.
 
 ---
 
-**Tier 1 is fully closed. Tier 2 items 1 and 2 are fully closed too** — 161/161 tests passing
-across 4 test projects (`Domain.Tests`, `Application.Tests`, `Infrastructure.Tests`, `Api.Tests`).
-**Next up (Session 86):** One loose end first — live-verify the Content-Type fix in
-`ApiEndpointTestHelper.cs` (admin/portal "Test" button) against a real endpoint with a non-JSON
-body; it has automated test coverage now but no live click-through yet. Then Tier 2 item 3:
-outbound rate limiting/throttling — no protection today against a runaway or looping flow
-hammering a vendor, particularly important for tenants sharing a platform-default credential
-(one noisy tenant can exhaust the shared quota for everyone else on that default). After that:
-implement the `hmac` auth type, then inbound webhook support, in that order per the checklist.
+**Tier 1 is fully closed. Tier 2 items 1–4 are fully closed** — 191/191 tests passing across 4
+test projects (`Domain.Tests`, `Application.Tests`, `Infrastructure.Tests`, `Api.Tests`).
+**Next up (Session 87):** Tier 2 item 5 — inbound webhook support. Everything today is
+synchronous request/response only; `fulfillment_tracking`/`tfn_assignment_*` map naturally to
+vendor-pushed webhooks in the real world, so polling-only support is a structural gap. Worth
+noting the hmac work just closed (item 4) built the *outbound* signing half — an inbound webhook
+receiver will likely want an hmac-signature *verification* helper too (checking an inbound
+`X-Signature`-style header against a computed hash of the raw request body), which is the mirror
+image of `HmacSigner.ComputeSignatureHeaderValue` and could reuse most of the same algorithm-
+dispatch code. Tier 3 after that: credential expiry tracking/warnings, mTLS/AWS SigV4 auth,
+sensitive-field masking for API request/response bodies landing in
+`flow_sessions.variable_store`.

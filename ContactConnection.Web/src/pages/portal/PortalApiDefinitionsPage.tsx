@@ -37,6 +37,7 @@ interface FormState {
   description: string
   provider: string
   timeoutSeconds: string
+  rateLimitPerMinute: string
   auth: AuthFormState
 }
 
@@ -48,6 +49,7 @@ const BLANK_FORM: FormState = {
   description: '',
   provider: '',
   timeoutSeconds: '30',
+  rateLimitPerMinute: '',
   auth: { ...BLANK_AUTH_STATE },
 }
 
@@ -115,6 +117,7 @@ export default function PortalApiDefinitionsPage() {
     setFormError(null)
     try {
       const timeout = parseInt(form.timeoutSeconds) || 30
+      const rateLimitPerMinute = form.rateLimitPerMinute.trim() ? (parseInt(form.rateLimitPerMinute) || 0) : 0
       const authConfig = serializeAuthConfig(form.auth)
       if (editingId) {
         const updated = await updatePortalApiDefinition(editingId, {
@@ -125,6 +128,7 @@ export default function PortalApiDefinitionsPage() {
           provider: form.provider.trim() || undefined,
           timeoutSeconds: timeout,
           authConfig,
+          rateLimitPerMinute,
         })
         setDefs((prev) => prev.map((d) => (d.id === editingId ? updated : d)))
       } else {
@@ -137,6 +141,7 @@ export default function PortalApiDefinitionsPage() {
           provider: form.provider.trim() || undefined,
           timeoutSeconds: timeout,
           authConfig,
+          rateLimitPerMinute: rateLimitPerMinute > 0 ? rateLimitPerMinute : undefined,
         })
         setDefs((prev) => [...prev, created])
       }
@@ -339,8 +344,8 @@ export default function PortalApiDefinitionsPage() {
                 />
               </div>
 
-              {/* Method + Base URL + Timeout */}
-              <div className="grid grid-cols-5 gap-3">
+              {/* Method + Base URL + Timeout + Rate Limit */}
+              <div className="grid grid-cols-6 gap-3">
                 <div>
                   <label className="block text-gray-400 text-xs font-medium mb-1.5">Method</label>
                   <select
@@ -370,6 +375,17 @@ export default function PortalApiDefinitionsPage() {
                     value={form.timeoutSeconds}
                     onChange={(e) => setForm((f) => ({ ...f, timeoutSeconds: e.target.value }))}
                     className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-gray-400 text-xs font-medium mb-1.5">Rate limit (req/min)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Unlimited"
+                    value={form.rateLimitPerMinute}
+                    onChange={(e) => setForm((f) => ({ ...f, rateLimitPerMinute: e.target.value }))}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500"
                   />
                 </div>
               </div>

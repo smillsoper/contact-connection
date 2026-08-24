@@ -43,10 +43,19 @@ public class ApiDefinitionExecutorTests
         return mock;
     }
 
+    private static Mock<IOutboundRateLimiter> MockRateLimiter(bool allow = true)
+    {
+        var mock = new Mock<IOutboundRateLimiter>();
+        mock.Setup(r => r.TryAcquireAsync(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(allow ? RateLimitDecision.Allow : new RateLimitDecision(false, 5));
+        return mock;
+    }
+
     private static ApiDefinitionExecutor CreateExecutor(
         Mock<IVendorResilienceExecutor> resilience,
         Mock<IOAuth2TokenCache>? tokenCache = null,
-        HttpMessageHandler? tokenEndpointHandler = null)
+        HttpMessageHandler? tokenEndpointHandler = null,
+        Mock<IOutboundRateLimiter>? rateLimiter = null)
     {
         var factoryMock = new Mock<IHttpClientFactory>();
         factoryMock.Setup(f => f.CreateClient("FlowEngine"))
@@ -55,7 +64,8 @@ public class ApiDefinitionExecutorTests
         return new ApiDefinitionExecutor(
             factoryMock.Object,
             (tokenCache ?? new Mock<IOAuth2TokenCache>()).Object,
-            resilience.Object);
+            resilience.Object,
+            (rateLimiter ?? MockRateLimiter()).Object);
     }
 
     // ── Request building ─────────────────────────────────────────────────────
@@ -207,6 +217,76 @@ public class ApiDefinitionExecutorTests
         Assert.Equal(Convert.ToBase64String(Encoding.UTF8.GetBytes("alice:hunter2")), captured.Headers.Authorization.Parameter);
     }
 
+    // ── hmac ──────────────────────────────────────────────────────────────────
+    // HmacSigner's own signing math (algorithms, timestamp format) is covered separately by
+    // HmacSignerTests — these only verify ApiDefinitionExecutor picks the right payload to sign
+    // and applies it to the right header.
+
+    [Fact]
+    public async Task HmacAuth_NoHmacPayload_SignsRequestBody()
+    {
+        HttpRequestMessage? captured = null;
+        var resilience = MockResilience(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") }, r => captured = r);
+        var executor = CreateExecutor(resilience);
+
+        await executor.ExecuteAsync(NewRequest(
+            body: "the-request-body",
+            authConfigJson: "{\"type\":\"hmac\",\"algorithm\":\"SHA256\",\"secretKey\":\"k\",\"headerName\":\"X-Sig\",\"includeTimestamp\":false}",
+            getCredential: (_, _) => Task.FromResult<string?>("sekret")));
+
+        var expected = HmacSigner.ComputeSignatureHeaderValue("SHA256", "sekret", "the-request-body", includeTimestamp: false);
+        Assert.Equal(expected, captured!.Headers.GetValues("X-Sig").Single());
+    }
+
+    [Fact]
+    public async Task HmacAuth_HmacPayloadGiven_SignsThatInsteadOfBody()
+    {
+        HttpRequestMessage? captured = null;
+        var resilience = MockResilience(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") }, r => captured = r);
+        var executor = CreateExecutor(resilience);
+
+        var request = NewRequest(
+            body: "the-request-body",
+            authConfigJson: "{\"type\":\"hmac\",\"algorithm\":\"SHA256\",\"secretKey\":\"k\",\"headerName\":\"X-Sig\",\"includeTimestamp\":false}",
+            getCredential: (_, _) => Task.FromResult<string?>("sekret")) with { HmacPayload = "a-different-payload" };
+
+        await executor.ExecuteAsync(request);
+
+        var expected = HmacSigner.ComputeSignatureHeaderValue("SHA256", "sekret", "a-different-payload", includeTimestamp: false);
+        Assert.Equal(expected, captured!.Headers.GetValues("X-Sig").Single());
+    }
+
+    [Fact]
+    public async Task HmacAuth_CredentialMissing_SendsRequestWithoutSignatureHeader()
+    {
+        HttpRequestMessage? captured = null;
+        var resilience = MockResilience(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") }, r => captured = r);
+        var executor = CreateExecutor(resilience);
+
+        var result = await executor.ExecuteAsync(NewRequest(
+            authConfigJson: "{\"type\":\"hmac\",\"secretKey\":\"missing\",\"headerName\":\"X-Sig\"}",
+            getCredential: (_, _) => Task.FromResult<string?>(null)));
+
+        Assert.True(result.Success);
+        Assert.False(captured!.Headers.Contains("X-Sig"));
+    }
+
+    [Fact]
+    public async Task HmacAuth_DefaultsAlgorithmAndHeaderName_WhenNotConfigured()
+    {
+        HttpRequestMessage? captured = null;
+        var resilience = MockResilience(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") }, r => captured = r);
+        var executor = CreateExecutor(resilience);
+
+        await executor.ExecuteAsync(NewRequest(
+            body: "b",
+            authConfigJson: "{\"type\":\"hmac\",\"secretKey\":\"k\"}", // no algorithm/headerName configured
+            getCredential: (_, _) => Task.FromResult<string?>("sekret")));
+
+        var expected = HmacSigner.ComputeSignatureHeaderValue("SHA256", "sekret", "b", includeTimestamp: false);
+        Assert.Equal(expected, captured!.Headers.GetValues("X-Signature").Single()); // "X-Signature" is the documented default
+    }
+
     // ── oauth2 ────────────────────────────────────────────────────────────────
     // IOAuth2TokenCache itself is mocked here (GetOrCreateAsync) — its actual caching/
     // distributed-lock/stampede-protection mechanics are covered separately by
@@ -328,6 +408,40 @@ public class ApiDefinitionExecutorTests
         Assert.False(result.Success);
         Assert.False(result.TimedOut);
         Assert.Equal("vendor exploded", result.Error);
+    }
+
+    // ── Rate limiting ─────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ExecuteAsync_RateLimitDenied_ReturnsErrorResult_NeverCallsResilience()
+    {
+        var resilience = new Mock<IVendorResilienceExecutor>();
+        var rateLimiter = MockRateLimiter(allow: false);
+        var executor = CreateExecutor(resilience, rateLimiter: rateLimiter);
+
+        var result = await executor.ExecuteAsync(NewRequest());
+
+        Assert.False(result.Success);
+        Assert.False(result.TimedOut);
+        Assert.Contains("Rate limit exceeded", result.Error);
+        resilience.Verify(r => r.SendAsync(
+            It.IsAny<Guid>(), It.IsAny<HttpRequestMessage>(), It.IsAny<bool>(), It.IsAny<HttpClient>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RateLimitAllowed_PassesDefinitionIdAndLimitToLimiter()
+    {
+        var definitionId = Guid.NewGuid();
+        var resilience = MockResilience(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("ok") });
+        var rateLimiter = MockRateLimiter();
+        var executor = CreateExecutor(resilience, rateLimiter: rateLimiter);
+
+        var request = NewRequest() with { DefinitionId = definitionId, RateLimitPerMinute = 42 };
+        var result = await executor.ExecuteAsync(request);
+
+        Assert.True(result.Success);
+        rateLimiter.Verify(r => r.TryAcquireAsync(definitionId, 42, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     /// <summary>Handler that always throws — used where the test asserts the token endpoint must

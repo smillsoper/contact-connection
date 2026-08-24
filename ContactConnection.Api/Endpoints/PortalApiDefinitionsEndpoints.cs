@@ -62,6 +62,7 @@ public static class PortalApiDefinitionsEndpoints
 
         var def = PortalApiDefinition.Create(request.ApiCategory, request.Name, request.HttpMethod, request.BaseUrl, request.Description, request.Provider, request.TimeoutSeconds ?? 30);
         if (request.AuthConfig is not null) def.SetAuthConfig(request.AuthConfig);
+        if (request.RateLimitPerMinute is > 0) def.SetRateLimit(request.RateLimitPerMinute);
         await repo.AddAsync(def, ct);
         await repo.SaveChangesAsync(ct);
         await versions.SnapshotAsync(
@@ -113,6 +114,7 @@ public static class PortalApiDefinitionsEndpoints
         if (request.RequestBodyTemplate is not null) def.SetRequestBodyTemplate(request.RequestBodyTemplate);
         if (request.ResponseMapping is not null) def.SetResponseMapping(request.ResponseMapping);
         if (request.AuthConfig is not null) def.SetAuthConfig(request.AuthConfig);
+        if (request.RateLimitPerMinute is not null) def.SetRateLimit(request.RateLimitPerMinute > 0 ? request.RateLimitPerMinute : null);
 
         await repo.SaveChangesAsync(ct);
         await versions.SnapshotAsync(
@@ -161,7 +163,8 @@ public static class PortalApiDefinitionsEndpoints
 
     private static string BuildSnapshot(PortalApiDefinition d) => JsonSerializer.Serialize(new ApiDefinitionSnapshot(
         d.ApiCategory, d.Provider, d.Name, d.Description, d.HttpMethod, d.BaseUrl, d.TimeoutSeconds,
-        d.Headers, d.QueryParams, d.RequestBodyTemplate, d.ResponseMapping, d.AuthConfig, d.IsActive));
+        d.Headers, d.QueryParams, d.RequestBodyTemplate, d.ResponseMapping, d.AuthConfig, d.IsActive,
+        d.RateLimitPerMinute));
 
     private static void ApplySnapshot(PortalApiDefinition d, ApiDefinitionSnapshot s)
     {
@@ -172,6 +175,7 @@ public static class PortalApiDefinitionsEndpoints
         d.SetRequestBodyTemplate(s.RequestBodyTemplate);
         d.SetResponseMapping(s.ResponseMapping);
         d.SetAuthConfig(s.AuthConfig);
+        d.SetRateLimit(s.RateLimitPerMinute);
         if (s.IsActive) d.Activate(); else d.Deactivate();
     }
 
@@ -225,6 +229,7 @@ public static class PortalApiDefinitionsEndpoints
         d.ResponseMapping,
         d.AuthConfig,
         d.IsActive,
+        d.RateLimitPerMinute,
         d.CreatedAt,
         d.UpdatedAt,
     };

@@ -190,6 +190,10 @@ export interface ApiDefinitionRecord {
   responseMapping: string
   authConfig: string
   isActive: boolean
+  /** Outbound requests/minute allowed against this definition, or null for unlimited. Every
+   * tenant using this Portal definition (a platform-default credential) shares this same budget —
+   * see API_HARDENING_CHECKLIST.md Tier 2. */
+  rateLimitPerMinute: number | null
   createdAt: string
   updatedAt: string | null
 }
@@ -203,6 +207,7 @@ export interface CreateApiDefinitionData {
   provider?: string
   timeoutSeconds?: number
   authConfig?: string
+  rateLimitPerMinute?: number
 }
 
 export interface UpdateApiDefinitionData {
@@ -218,6 +223,9 @@ export interface UpdateApiDefinitionData {
   requestBodyTemplate?: string
   responseMapping?: string
   authConfig?: string
+  /** Omit to leave unchanged, 0 to clear back to unlimited, or a positive number to set a new
+   * limit — same convention the backend uses. */
+  rateLimitPerMinute?: number
 }
 
 export async function listPortalApiDefinitions(): Promise<ApiDefinitionRecord[]> {

@@ -14,7 +14,8 @@ namespace ContactConnection.Infrastructure.ApiExecution;
 public class ApiDefinitionExecutor(
     IHttpClientFactory httpClientFactory,
     IOAuth2TokenCache tokenCache,
-    IVendorResilienceExecutor resilience) : IApiDefinitionExecutor
+    IVendorResilienceExecutor resilience,
+    IOutboundRateLimiter rateLimiter) : IApiDefinitionExecutor
 {
     public async Task<ApiDefinitionExecutionResult> ExecuteAsync(
         ApiDefinitionExecutionRequest request, CancellationToken ct = default)
@@ -25,6 +26,13 @@ public class ApiDefinitionExecutor(
 
         try
         {
+            // Checked first, before any credential lookup or token exchange — a call that's
+            // going to be denied shouldn't pay for that work first. No-ops (single Allow, no
+            // Redis round trip) when the definition has no configured limit.
+            var rateLimitDecision = await rateLimiter.TryAcquireAsync(request.DefinitionId, request.RateLimitPerMinute, linkedCts.Token);
+            if (!rateLimitDecision.Allowed)
+                throw new RateLimitExceededException(request.DefinitionId, request.RateLimitPerMinute ?? 0, rateLimitDecision.RetryAfterSeconds);
+
             var method = request.HttpMethod.ToUpperInvariant() switch
             {
                 "POST"   => HttpMethod.Post,
@@ -59,7 +67,10 @@ public class ApiDefinitionExecutor(
                 httpRequest.Headers.TryAddWithoutValidation(key, value);
             }
 
-            await ApplyAuthAsync(httpRequest, uriBuilder, request.AuthConfigJson, request.GetCredential, linkedCts.Token);
+            // hmac's signed payload defaults to the request body when no payloadTemplate was
+            // configured (HmacPayload null) — computed once here rather than inside ApplyAuthAsync
+            // since ApplyAuthAsync has no other reason to know about the request body.
+            await ApplyAuthAsync(httpRequest, uriBuilder, request.AuthConfigJson, request.GetCredential, linkedCts.Token, request.HmacPayload ?? request.Body);
             httpRequest.RequestUri = uriBuilder.Uri;
 
             if (request.Body is not null)
@@ -107,15 +118,15 @@ public class ApiDefinitionExecutor(
     }
 
     // Ported from ContactConnection.Api/Endpoints/ApiEndpointTestHelper.ApplyAuth — same
-    // auth-config JSON shape ("type": "none"|"api_key"|"bearer"|"basic"|"oauth2"), same
-    // credential-key indirection via GetCredential. hmac (request signing) is intentionally
-    // unsupported, matching the existing test-helper behavior.
+    // auth-config JSON shape ("type": "none"|"api_key"|"bearer"|"basic"|"oauth2"|"hmac"), same
+    // credential-key indirection via GetCredential.
     private async Task ApplyAuthAsync(
         HttpRequestMessage request,
         UriBuilder uriBuilder,
         string authConfigJson,
         Func<string, CancellationToken, Task<string?>> getCredential,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? signaturePayload = null)
     {
         JsonElement root;
         try { root = JsonDocument.Parse(authConfigJson).RootElement; }
@@ -227,7 +238,20 @@ public class ApiDefinitionExecutor(
                     request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
                 break;
             }
-            // hmac: requires request signing — not applied, matching ApiEndpointTestHelper.
+            case "hmac":
+            {
+                var algorithm = Str(root, "algorithm") is { Length: > 0 } alg ? alg : "SHA256";
+                var headerName = Str(root, "headerName") is { Length: > 0 } hn ? hn : "X-Signature";
+                var includeTimestamp = root.TryGetProperty("includeTimestamp", out var itsEl)
+                    && itsEl.ValueKind == JsonValueKind.True;
+
+                var secret = await getCredential(Str(root, "secretKey"), ct);
+                if (secret is null) break;
+
+                var signature = HmacSigner.ComputeSignatureHeaderValue(algorithm, secret, signaturePayload, includeTimestamp);
+                request.Headers.TryAddWithoutValidation(headerName, signature);
+                break;
+            }
         }
     }
 

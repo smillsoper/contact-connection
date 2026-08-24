@@ -84,6 +84,20 @@ services:
       - "1025:1025"    # SMTP — configure outbound email to localhost:1025
       - "8025:8025"    # Web UI — http://localhost:8025
 
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cc_cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - freeswitch
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Published routes (Cloudflare Zero Trust dashboard) both target host.docker.internal:
+    #   softphone.contactconnection.cc -> host.docker.internal:7080 (FreeSWITCH WS, host-published)
+    #   *.contactconnection.cc         -> host.docker.internal:5173 (Vite dev server, `npm run dev`)
+    # nginx (port 80) is not currently in either route's path.
+
 volumes:
   cc_pgdata:
   cc_redisdata:

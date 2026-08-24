@@ -39,13 +39,15 @@ internal static class ApiEndpointTestHelper
     }
 
     /// <summary>Runs the test and returns the raw response (not wrapped in IResult).
-    /// tokenCache and resilience are deliberately optional and default to null/false: the
-    /// admin/portal "Test" button call sites omit them so a test click always reflects live
-    /// config and a live attempt — never a cached oauth2 token, and never blocked by a tripped
+    /// tokenCache, resilience, and rateLimiter are deliberately optional and default to null/
+    /// false: the admin/portal "Test" button call sites omit them so a test click always reflects
+    /// live config and a live attempt — never a cached oauth2 token, never blocked by a tripped
     /// circuit breaker (an admin actively testing wants to know if a vendor has recovered, not be
-    /// told "can't tell, circuit's open"). FlowSessionsEndpoints' live address validation/ZIP/
-    /// autocomplete resolution passes both, since that traffic runs on every call, not once per
-    /// manual click.</summary>
+    /// told "can't tell, circuit's open"), and never throttled by traffic the flow engine
+    /// generated (a manual test click shouldn't fail because a live call a moment ago used up the
+    /// definition's budget). FlowSessionsEndpoints' live address validation/ZIP/autocomplete
+    /// resolution passes all three, since that traffic runs on every call, not once per manual
+    /// click.</summary>
     public static async Task<RunEndpointTestResponse> RunTestAsync(
         string baseUrl,
         string authConfigJson,
@@ -56,10 +58,19 @@ internal static class ApiEndpointTestHelper
         IOAuth2TokenCache? tokenCache = null,
         IVendorResilienceExecutor? resilience = null,
         Guid definitionId = default,
-        bool allowRetryOnAmbiguousFailure = false)
+        bool allowRetryOnAmbiguousFailure = false,
+        IOutboundRateLimiter? rateLimiter = null,
+        int? rateLimitPerMinute = null)
     {
         try
         {
+            if (rateLimiter is not null)
+            {
+                var decision = await rateLimiter.TryAcquireAsync(definitionId, rateLimitPerMinute, ct);
+                if (!decision.Allowed)
+                    throw new RateLimitExceededException(definitionId, rateLimitPerMinute ?? 0, decision.RetryAfterSeconds);
+            }
+
             var ns   = req.Namespace;
             var data = req.TestData ?? new();
 
@@ -131,14 +142,19 @@ internal static class ApiEndpointTestHelper
                 catch { }
             }
 
-            await ApplyAuth(request, uriBuilder, authConfigJson, getCredential, httpFactory, ct, tokenCache);
+            // Resolved before ApplyAuth (not after, as request.Content would be) so the hmac case
+            // can sign it — either directly (no payloadTemplate configured) or as the fallback
+            // behind a resolved payloadTemplate, computed the same way just below.
+            var resolvedBody = !string.IsNullOrEmpty(req.RequestBodyTemplate)
+                ? SubstituteVars(req.RequestBodyTemplate, ns, data)
+                : null;
+            var hmacPayload = ResolveHmacPayload(authConfigJson, ns, data);
+
+            await ApplyAuth(request, uriBuilder, authConfigJson, getCredential, httpFactory, ct, tokenCache, hmacPayload ?? resolvedBody);
             request.RequestUri = uriBuilder.Uri;
 
-            if (!string.IsNullOrEmpty(req.RequestBodyTemplate))
-            {
-                var body = SubstituteVars(req.RequestBodyTemplate, ns, data);
-                request.Content = new StringContent(body, Encoding.UTF8, bodyContentType ?? "application/json");
-            }
+            if (resolvedBody is not null)
+                request.Content = new StringContent(resolvedBody, Encoding.UTF8, bodyContentType ?? "application/json");
 
             var http = httpFactory.CreateClient("FlowEngine");
 
@@ -205,6 +221,23 @@ internal static class ApiEndpointTestHelper
         return Results.Ok(result);
     }
 
+    /// <summary>Extracts the hmac auth type's optional payloadTemplate and resolves it through
+    /// the same SubstituteVars/ns/data mechanism as the request body/headers/query params — so
+    /// the signed string can pull in fields the vendor requires even when they aren't part of the
+    /// outgoing body. Returns null when the auth type isn't "hmac" or no template is configured,
+    /// meaning the caller falls back to signing the actual request body.</summary>
+    private static string? ResolveHmacPayload(string authConfigJson, string ns, Dictionary<string, string> data)
+    {
+        try
+        {
+            var root = JsonDocument.Parse(authConfigJson).RootElement;
+            if (!root.TryGetProperty("type", out var tp) || tp.GetString() != "hmac") return null;
+            var template = root.TryGetProperty("payloadTemplate", out var pt) ? pt.GetString() : null;
+            return string.IsNullOrEmpty(template) ? null : SubstituteVars(template, ns, data);
+        }
+        catch { return null; }
+    }
+
     private static async Task ApplyAuth(
         HttpRequestMessage request,
         UriBuilder uriBuilder,
@@ -212,7 +245,8 @@ internal static class ApiEndpointTestHelper
         Func<string, CancellationToken, Task<string?>> getCredential,
         IHttpClientFactory httpFactory,
         CancellationToken ct,
-        IOAuth2TokenCache? tokenCache = null)
+        IOAuth2TokenCache? tokenCache = null,
+        string? signaturePayload = null)
     {
         JsonElement root;
         try { root = JsonDocument.Parse(authConfigJson).RootElement; }
@@ -304,7 +338,20 @@ internal static class ApiEndpointTestHelper
                     request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
                 break;
             }
-            // hmac: requires request signing — not applied for inline test
+            case "hmac":
+            {
+                var algorithm = Str(root, "algorithm") is { Length: > 0 } alg ? alg : "SHA256";
+                var headerName = Str(root, "headerName") is { Length: > 0 } hn ? hn : "X-Signature";
+                var includeTimestamp = root.TryGetProperty("includeTimestamp", out var itsEl)
+                    && itsEl.ValueKind == JsonValueKind.True;
+
+                var secret = await getCredential(Str(root, "secretKey"), ct);
+                if (secret is null) break;
+
+                var signature = HmacSigner.ComputeSignatureHeaderValue(algorithm, secret, signaturePayload, includeTimestamp);
+                request.Headers.TryAddWithoutValidation(headerName, signature);
+                break;
+            }
         }
     }
 

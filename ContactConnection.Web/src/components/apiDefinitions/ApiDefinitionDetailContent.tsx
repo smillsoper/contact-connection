@@ -36,6 +36,10 @@ export interface ApiDefinitionRecord {
   responseMapping: string
   authConfig: string
   isActive: boolean
+  /** Outbound requests/minute allowed against this definition, or null for unlimited. A Portal
+   *  definition's limit is shared across every tenant using it — see
+   *  API_HARDENING_CHECKLIST.md Tier 2. */
+  rateLimitPerMinute: number | null
   createdAt: string
   updatedAt: string | null
 }
@@ -90,6 +94,9 @@ export interface DetailApi {
     provider?: string
     timeoutSeconds?: number
     authConfig?: string
+    /** Omit to leave unchanged, 0 to clear back to unlimited, or a positive number to set a new
+     *  limit. */
+    rateLimitPerMinute?: number
   }): Promise<ApiDefinitionRecord>
   activateDefinition(id: string): Promise<ApiDefinitionRecord>
   deactivateDefinition(id: string): Promise<ApiDefinitionRecord>
@@ -138,6 +145,7 @@ interface DefFormState {
   description: string
   provider: string
   timeoutSeconds: string
+  rateLimitPerMinute: string
   auth: AuthFormState
 }
 
@@ -1679,6 +1687,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
       description: def.description ?? '',
       provider: def.provider ?? '',
       timeoutSeconds: String(def.timeoutSeconds),
+      rateLimitPerMinute: def.rateLimitPerMinute ? String(def.rateLimitPerMinute) : '',
       auth: authStateFromConfig(def.authConfig),
     })
     setDefFormError(null)
@@ -1707,6 +1716,10 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
         provider: defForm.provider.trim() || undefined,
         timeoutSeconds: parseInt(defForm.timeoutSeconds) || 30,
         authConfig: serializeAuthConfig(defForm.auth),
+        // Always sent explicitly (never omitted) since this is a full edit form reflecting the
+        // definition's current state — an empty field means "clear to unlimited" (0), not "leave
+        // whatever's on the server alone".
+        rateLimitPerMinute: defForm.rateLimitPerMinute.trim() ? (parseInt(defForm.rateLimitPerMinute) || 0) : 0,
       })
       setDef(updated)
       setShowDefModal(false)
@@ -1872,6 +1885,12 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
               }
               <span className="text-gray-600">·</span>
               <span className="text-gray-500 text-xs">{def.timeoutSeconds}s timeout</span>
+              {def.rateLimitPerMinute && (
+                <>
+                  <span className="text-gray-600">·</span>
+                  <span className="text-gray-500 text-xs">{def.rateLimitPerMinute}/min limit</span>
+                </>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -2109,6 +2128,21 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                     className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
                   />
                 </div>
+              </div>
+              <div>
+                <label className="block text-gray-400 text-xs font-medium mb-1.5">Rate limit (requests/min)</label>
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="Unlimited"
+                  value={defForm.rateLimitPerMinute}
+                  onChange={(e) => setDefForm((f) => f ? { ...f, rateLimitPerMinute: e.target.value } : f)}
+                  className="w-40 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                />
+                <p className="text-gray-500 text-xs mt-1">
+                  Leave blank for unlimited. If this definition is used by more than one tenant (a
+                  Portal default), this budget applies to their combined traffic, not each one separately.
+                </p>
               </div>
               <div>
                 <p className="text-gray-400 text-xs font-medium uppercase tracking-wide mb-2">Authentication</p>

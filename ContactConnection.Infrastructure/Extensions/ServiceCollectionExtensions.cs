@@ -119,6 +119,11 @@ public static class ServiceCollectionExtensions
         // not be recreated per request/scope. Keyed internally per API Definition.
         services.AddSingleton<IVendorResilienceExecutor, VendorResilienceExecutor>();
 
+        // Outbound rate limiting — Redis-backed (not in-memory, unlike the circuit breaker above)
+        // because the whole point is a shared quota across every API instance, not just this one
+        // process. See API_HARDENING_CHECKLIST.md Tier 2.
+        services.AddSingleton<IOutboundRateLimiter, RedisOutboundRateLimiter>();
+
         // Version history — one IVersionHistoryService implementation per scope (tenant/portal
         // persist to different DbContexts), resolved via keyed DI at each call site.
         services.AddKeyedScoped<IVersionHistoryService, TenantVersionHistoryService>("tenant");

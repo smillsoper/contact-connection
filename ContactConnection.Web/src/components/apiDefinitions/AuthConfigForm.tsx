@@ -42,6 +42,11 @@ export interface AuthConfigHmac {
   secretKey: string
   headerName: string
   includeTimestamp: boolean
+  /** What string actually gets signed, using the same {{ns.field}} tag syntax as the request
+   *  body/headers/query params — lets the signed payload pull in fields the vendor requires
+   *  (order id, a specific total, the caller's phone number, …) whether or not those fields are
+   *  also present in the outgoing request body. Blank = sign the request's actual outgoing body. */
+  payloadTemplate: string
 }
 
 export type AuthConfig =
@@ -115,6 +120,7 @@ export function serializeAuthConfig(state: AuthFormState): string {
         secretKey: state.hmacSecretKey,
         headerName: state.hmacHeaderName,
         includeTimestamp: state.hmacIncludeTimestamp,
+        payloadTemplate: state.hmacPayloadTemplate,
       } satisfies AuthConfigHmac)
     default:
       return JSON.stringify({ type: 'none' })
@@ -152,6 +158,7 @@ export interface AuthFormState {
   hmacSecretKey: string
   hmacHeaderName: string
   hmacIncludeTimestamp: boolean
+  hmacPayloadTemplate: string
 }
 
 export const BLANK_AUTH_STATE: AuthFormState = {
@@ -179,6 +186,7 @@ export const BLANK_AUTH_STATE: AuthFormState = {
   hmacSecretKey: '',
   hmacHeaderName: 'X-Signature',
   hmacIncludeTimestamp: true,
+  hmacPayloadTemplate: '',
 }
 
 export function authStateFromConfig(json: string): AuthFormState {
@@ -215,6 +223,7 @@ export function authStateFromConfig(json: string): AuthFormState {
         hmacSecretKey: cfg.secretKey,
         hmacHeaderName: cfg.headerName,
         hmacIncludeTimestamp: cfg.includeTimestamp,
+        hmacPayloadTemplate: cfg.payloadTemplate ?? '',
       }
     default:
       return base
@@ -840,6 +849,21 @@ export default function AuthConfigForm({ state, onChange, knownCredentials, onAd
             hint="Key reference to stored credential"
             {...credProps}
           />
+          <div>
+            <label className="block text-gray-400 text-xs font-medium mb-1">Signed Payload Template</label>
+            <textarea
+              value={state.hmacPayloadTemplate}
+              onChange={(e) => set({ hmacPayloadTemplate: e.target.value })}
+              placeholder="Leave blank to sign the outgoing request body as-is"
+              rows={2}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 font-mono focus:outline-none focus:border-indigo-500"
+            />
+            <p className="text-gray-600 text-xs mt-1">
+              Optional. Same {'{{namespace.field}}'} tags as the request body/headers/query params — use this
+              when the vendor's expected signature is built from specific fields (e.g. order id +
+              total) rather than the literal outgoing body. Blank signs the actual request body.
+            </p>
+          </div>
           <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"

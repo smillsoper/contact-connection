@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using ContactConnection.Api.Endpoints;
 using ContactConnection.Application.Interfaces.Services;
+using ContactConnection.Infrastructure.ApiExecution;
 using Moq;
 using Xunit;
 
@@ -277,6 +278,62 @@ public class ApiEndpointTestHelperTests
         Assert.Equal(Convert.ToBase64String(Encoding.UTF8.GetBytes("alice:hunter2")), captured.Headers.Authorization.Parameter);
     }
 
+    // ── hmac ──────────────────────────────────────────────────────────────────
+    // HmacSigner's own signing math is covered by HmacSignerTests (Infrastructure.Tests). What's
+    // unique to this layer is payloadTemplate resolution — it goes through SubstituteVars/ns/data
+    // exactly like the request body/query params, which ApiDefinitionExecutor (the flow-engine
+    // sibling, already resolved by the time it sees anything) never has to do itself.
+
+    [Fact]
+    public async Task HmacAuth_NoPayloadTemplate_SignsResolvedRequestBody()
+    {
+        HttpRequestMessage? captured = null;
+        var handler = new FuncHandler(req => { captured = req; return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") }); });
+
+        await ApiEndpointTestHelper.RunTestAsync(
+            "https://vendor.example.com",
+            "{\"type\":\"hmac\",\"algorithm\":\"SHA256\",\"secretKey\":\"k\",\"headerName\":\"X-Sig\",\"includeTimestamp\":false}",
+            NewRequest(requestBodyTemplate: "body-{{address.zip}}", testData: new() { ["zip"] = "62701" }),
+            (_, _) => Task.FromResult<string?>("sekret"),
+            MockFactory(handler).Object, CancellationToken.None);
+
+        var expected = HmacSigner.ComputeSignatureHeaderValue("SHA256", "sekret", "body-62701", includeTimestamp: false);
+        Assert.Equal(expected, captured!.Headers.GetValues("X-Sig").Single());
+    }
+
+    [Fact]
+    public async Task HmacAuth_PayloadTemplateConfigured_SignsResolvedTemplate_NotTheBody()
+    {
+        HttpRequestMessage? captured = null;
+        var handler = new FuncHandler(req => { captured = req; return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") }); });
+
+        await ApiEndpointTestHelper.RunTestAsync(
+            "https://vendor.example.com",
+            "{\"type\":\"hmac\",\"algorithm\":\"SHA256\",\"secretKey\":\"k\",\"headerName\":\"X-Sig\"," +
+            "\"includeTimestamp\":false,\"payloadTemplate\":\"{{address.orderId}}:{{address.total}}\"}",
+            NewRequest(requestBodyTemplate: "unrelated-body", testData: new() { ["orderId"] = "555", ["total"] = "19.99" }),
+            (_, _) => Task.FromResult<string?>("sekret"),
+            MockFactory(handler).Object, CancellationToken.None);
+
+        var expected = HmacSigner.ComputeSignatureHeaderValue("SHA256", "sekret", "555:19.99", includeTimestamp: false);
+        Assert.Equal(expected, captured!.Headers.GetValues("X-Sig").Single());
+    }
+
+    [Fact]
+    public async Task HmacAuth_CredentialMissing_SendsRequestWithoutSignatureHeader()
+    {
+        HttpRequestMessage? captured = null;
+        var handler = new FuncHandler(req => { captured = req; return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") }); });
+
+        var result = await ApiEndpointTestHelper.RunTestAsync(
+            "https://vendor.example.com", "{\"type\":\"hmac\",\"secretKey\":\"missing\",\"headerName\":\"X-Sig\"}",
+            NewRequest(), (_, _) => Task.FromResult<string?>(null),
+            MockFactory(handler).Object, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.False(captured!.Headers.Contains("X-Sig"));
+    }
+
     // ── oauth2 — the admin/portal "Test" button never passes a tokenCache (always live) ────────
 
     [Fact]
@@ -414,6 +471,52 @@ public class ApiEndpointTestHelperTests
             NoCredential, MockFactory(handler).Object, CancellationToken.None, resilience: resilience.Object);
 
         Assert.Equal("via-resilience", result.Body);
+    }
+
+    // ── rate limiting ─────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task NoRateLimiter_NeverConsulted_SendsDirectly()
+    {
+        var handler = new FuncHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("direct") }));
+
+        var result = await ApiEndpointTestHelper.RunTestAsync(
+            "https://vendor.example.com", "{\"type\":\"none\"}", NewRequest(),
+            NoCredential, MockFactory(handler).Object, CancellationToken.None); // rateLimiter omitted
+
+        Assert.Equal("direct", result.Body);
+    }
+
+    [Fact]
+    public async Task RateLimiterDenies_ReturnsErrorResult_NeverSendsTheRequest()
+    {
+        var handler = new FuncHandler(_ => throw new InvalidOperationException("must never be called when the rate limiter denies"));
+        var rateLimiter = new Mock<IOutboundRateLimiter>();
+        rateLimiter.Setup(r => r.TryAcquireAsync(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RateLimitDecision(false, 7));
+
+        var result = await ApiEndpointTestHelper.RunTestAsync(
+            "https://vendor.example.com", "{\"type\":\"none\"}", NewRequest(),
+            NoCredential, MockFactory(handler).Object, CancellationToken.None, rateLimiter: rateLimiter.Object);
+
+        Assert.False(result.Success);
+        Assert.Contains("Rate limit exceeded", result.Error);
+    }
+
+    [Fact]
+    public async Task RateLimiterAllows_RequestProceedsNormally()
+    {
+        var handler = new FuncHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("allowed") }));
+        var rateLimiter = new Mock<IOutboundRateLimiter>();
+        rateLimiter.Setup(r => r.TryAcquireAsync(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RateLimitDecision.Allow);
+
+        var result = await ApiEndpointTestHelper.RunTestAsync(
+            "https://vendor.example.com", "{\"type\":\"none\"}", NewRequest(),
+            NoCredential, MockFactory(handler).Object, CancellationToken.None, rateLimiter: rateLimiter.Object);
+
+        Assert.True(result.Success);
+        Assert.Equal("allowed", result.Body);
     }
 
     // ── Error handling ────────────────────────────────────────────────────────
