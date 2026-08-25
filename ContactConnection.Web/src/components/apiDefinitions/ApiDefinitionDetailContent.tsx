@@ -61,6 +61,10 @@ export interface ApiEndpointRecord {
   isPreferred: boolean
   isActive: boolean
   isRetrySafe: boolean
+  /** JSON array of dot-separated response field paths (e.g. ["ssn","customer.dob"]) redacted
+   *  before the response is shown in the Test panel or persisted by a live api_call node. See
+   *  API_HARDENING_CHECKLIST.md Tier 3. */
+  sensitiveResponseFields: string
   createdAt: string
   updatedAt: string | null
 }
@@ -73,6 +77,7 @@ export interface EndpointTestPayload {
   requestBodyTemplate?: string
   namespace: string
   testData: Record<string, string>
+  sensitiveResponseFields?: string[]
 }
 
 export interface EndpointTestResult {
@@ -180,6 +185,7 @@ interface EndpointFormData {
   headers?: string
   responseMapping?: string
   isRetrySafe?: boolean
+  sensitiveResponseFields?: string
 }
 
 interface DefFormState {
@@ -356,6 +362,9 @@ interface EndpointForm {
   payloadBody: string
   responseMapping: ResponseMappingConfig
   isRetrySafe: boolean
+  /** One dot-separated field path per line (e.g. "ssn", "customer.dob") — see
+   *  pathsToJson/jsonToPaths for the JSON array round-trip. */
+  sensitiveResponseFields: string
 }
 
 const BLANK_KV: KVRow[] = [{ key: '', value: '' }]
@@ -373,6 +382,23 @@ const BLANK_ENDPOINT_FORM: EndpointForm = {
   payloadBody: '',
   responseMapping: { outcomes: [] },
   isRetrySafe: false,
+  sensitiveResponseFields: '',
+}
+
+/** One path per line (blank lines ignored) <-> JSON array of dot-separated paths. */
+function pathsToArray(text: string): string[] {
+  return text.split('\n').map((l) => l.trim()).filter(Boolean)
+}
+function pathsToJson(text: string): string {
+  return JSON.stringify(pathsToArray(text))
+}
+function jsonToPaths(json: string): string {
+  try {
+    const arr = JSON.parse(json)
+    return Array.isArray(arr) ? arr.join('\n') : ''
+  } catch {
+    return ''
+  }
 }
 
 function kvToJson(rows: KVRow[]): string {
@@ -1559,6 +1585,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
         requestBodyTemplate: endpointForm.requestBodyTemplate || undefined,
         namespace: endpointSourceContext.namespace,
         testData: endpointForm.testData,
+        sensitiveResponseFields: pathsToArray(endpointForm.sensitiveResponseFields),
       })
       setTestResult(result)
     } catch (e: unknown) {
@@ -1580,6 +1607,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
         requestBodyTemplate: endpointForm.requestBodyTemplate || undefined,
         namespace: endpointSourceContext.namespace,
         testData: endpointForm.testData,
+        sensitiveResponseFields: pathsToArray(endpointForm.sensitiveResponseFields),
       })
       let parsedBody: unknown = result.body
       try { if (result.body) parsedBody = JSON.parse(result.body) } catch { /* keep raw */ }
@@ -1616,6 +1644,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
         requestBodyTemplate: endpointForm.payloadBody || undefined,
         namespace: endpointSourceContext.namespace,
         testData: {},
+        sensitiveResponseFields: pathsToArray(endpointForm.sensitiveResponseFields),
       })
       setTestResult(result)
     } catch (e: unknown) {
@@ -1644,6 +1673,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
         requestBodyTemplate: substituteVarTags(endpointForm.requestBodyTemplate, values) || undefined,
         namespace: 'general',
         testData: {},
+        sensitiveResponseFields: pathsToArray(endpointForm.sensitiveResponseFields),
       })
       setTestResult(result)
     } catch (e: unknown) {
@@ -1665,6 +1695,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
         requestBodyTemplate: endpointForm.payloadBody || undefined,
         namespace: endpointSourceContext.namespace,
         testData: {},
+        sensitiveResponseFields: pathsToArray(endpointForm.sensitiveResponseFields),
       })
       let parsedBody: unknown = result.body
       try { if (result.body) parsedBody = JSON.parse(result.body) } catch { /* keep raw */ }
@@ -1811,6 +1842,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
       payloadBody: '',
       responseMapping: parseResponseMapping(ep.responseMapping),
       isRetrySafe: ep.isRetrySafe,
+      sensitiveResponseFields: jsonToPaths(ep.sensitiveResponseFields),
     })
     setEditingEndpointId(ep.id)
     setEndpointFormError(null)
@@ -1838,6 +1870,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
         headers: kvToJson(endpointForm.headers),
         responseMapping: JSON.stringify(endpointForm.responseMapping),
         isRetrySafe: endpointForm.isRetrySafe,
+        sensitiveResponseFields: pathsToJson(endpointForm.sensitiveResponseFields),
       }
       if (endpointModal === 'edit' && editingEndpointId) {
         const updated = await api.updateEndpoint(definitionId, editingEndpointId, data)
@@ -2401,6 +2434,22 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                         </div>
                       )
                     })()}
+                    <div>
+                      <label className="block text-gray-400 text-xs font-medium mb-1.5">Sensitive Response Fields</label>
+                      <textarea
+                        value={endpointForm.sensitiveResponseFields}
+                        onChange={(e) => setEndpointForm((f) => ({ ...f, sensitiveResponseFields: e.target.value }))}
+                        placeholder={'ssn\ncustomer.dob\npayment.cardNumber'}
+                        rows={3}
+                        spellCheck={false}
+                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 font-mono focus:outline-none focus:border-indigo-500 resize-none"
+                      />
+                      <p className="text-gray-600 text-xs mt-1">
+                        One dot-separated field path per line. Matching values are replaced with{' '}
+                        <span className="text-gray-400 font-mono">[REDACTED]</span> before the response is shown in
+                        the Test panel below and before a live flow ever stores it. Optional — blank means no masking.
+                      </p>
+                    </div>
                   </div>
                 )}
 

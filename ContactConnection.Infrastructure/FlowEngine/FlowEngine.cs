@@ -131,8 +131,17 @@ public class FlowEngine : IFlowEngine
         AttachSectionInfo(ctx, state);
 
         // Save ctx AFTER advance so CurrentNodeId reflects where the engine stopped,
-        // not the entry node — same pattern as AdvanceAsync.
-        if (!state.IsTerminal)
+        // not the entry node — same pattern as AdvanceAsync. A flow that fully auto-advances
+        // start-to-finish with zero agent interaction (e.g. an api_call node straight into an
+        // end node) reaches IsTerminal within this same call, so this needs the identical
+        // if-terminal-complete/else-save-to-redis branching AdvanceAsync already uses below —
+        // previously this only ever saved to Redis, so an all-automatic flow's session was never
+        // persisted as complete in Postgres, and never even landed in Redis either (found and
+        // fixed Session 90, while live-verifying sensitive-field masking against a real
+        // all-automatic scratch flow).
+        if (state.IsTerminal)
+            await CompleteSession(ctx, ct);
+        else
             await SaveToRedis(ctx, ct);
 
         await _notifier.PushNodeStateAsync(session.Id, state, ct);

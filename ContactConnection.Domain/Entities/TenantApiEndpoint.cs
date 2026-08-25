@@ -27,6 +27,16 @@ public class TenantApiEndpoint
     /// </summary>
     public bool IsRetrySafe { get; private set; }
 
+    /// <summary>
+    /// JSON array of dot-separated paths into the response body (e.g. `["ssn","customer.dob"]`)
+    /// whose values get replaced with a fixed placeholder before the response is shown in the
+    /// admin/portal "Test" button and before it's persisted into flow_sessions.variable_store by
+    /// a live api_call node. "[]" (the default) means no masking — opt-in, matches
+    /// IsRetrySafe/RateLimitPerMinute's "no behavior change until configured" convention. See
+    /// API_HARDENING_CHECKLIST.md Tier 3.
+    /// </summary>
+    public string SensitiveResponseFields { get; private set; } = "[]";
+
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? UpdatedAt { get; private set; }
 
@@ -95,4 +105,5 @@ public class TenantApiEndpoint
     public void Activate() { IsActive = true; UpdatedAt = DateTimeOffset.UtcNow; }
     public void Deactivate() { IsActive = false; UpdatedAt = DateTimeOffset.UtcNow; }
     public void SetRetrySafe(bool isRetrySafe) { IsRetrySafe = isRetrySafe; UpdatedAt = DateTimeOffset.UtcNow; }
+    public void SetSensitiveResponseFields(string fieldPathsJson) { SensitiveResponseFields = fieldPathsJson; UpdatedAt = DateTimeOffset.UtcNow; }
 }

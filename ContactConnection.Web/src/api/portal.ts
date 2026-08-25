@@ -330,6 +330,7 @@ export interface ApiEndpointRecord {
   isPreferred: boolean
   isActive: boolean
   isRetrySafe: boolean
+  sensitiveResponseFields: string
   createdAt: string
   updatedAt: string | null
 }
@@ -346,6 +347,7 @@ export interface CreateApiEndpointData {
   headers?: string
   responseMapping?: string
   isRetrySafe?: boolean
+  sensitiveResponseFields?: string
 }
 
 export interface UpdateApiEndpointData {
@@ -360,6 +362,7 @@ export interface UpdateApiEndpointData {
   headers?: string
   responseMapping?: string
   isRetrySafe?: boolean
+  sensitiveResponseFields?: string
 }
 
 export async function listPortalApiEndpoints(definitionId: string): Promise<ApiEndpointRecord[]> {
@@ -404,6 +407,7 @@ export interface EndpointTestPayload {
   requestBodyTemplate?: string
   namespace: string
   testData: Record<string, string>
+  sensitiveResponseFields?: string[]
 }
 
 export interface EndpointTestResult {

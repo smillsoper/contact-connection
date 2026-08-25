@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using System.Web;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Infrastructure.ApiExecution;
+using ContactConnection.Infrastructure.Common;
 
 namespace ContactConnection.Api.Endpoints;
 
@@ -15,7 +16,13 @@ public record RunEndpointTestRequest(
     string? Headers,
     string? RequestBodyTemplate,
     string Namespace,
-    Dictionary<string, string> TestData);
+    Dictionary<string, string> TestData,
+    /// <summary>Dot-separated response field paths to redact from the returned Body (e.g.
+    /// ["ssn","customer.dob"]) — mirrors the saved endpoint's SensitiveResponseFields, but passed
+    /// directly here rather than looked up server-side, since a Test click may be testing an
+    /// in-progress, not-yet-saved endpoint form. Null/empty = no masking. See
+    /// API_HARDENING_CHECKLIST.md Tier 3.</summary>
+    List<string>? SensitiveResponseFields = null);
 
 public record RunEndpointTestResponse(
     bool Success,
@@ -180,6 +187,12 @@ internal static class ApiEndpointTestHelper
             }
             using var _ = response;
             var responseBody = await response.Content.ReadAsStringAsync(ct);
+
+            // Masked before the response is ever handed back to the browser — the caller passes
+            // whatever's currently in the endpoint form, saved or not (see the field's own doc
+            // comment on RunEndpointTestRequest).
+            if (req.SensitiveResponseFields is { Count: > 0 } sensitiveFields)
+                responseBody = ResponseFieldMasker.MaskJson(responseBody, sensitiveFields);
 
             string prettyBody = responseBody;
             try

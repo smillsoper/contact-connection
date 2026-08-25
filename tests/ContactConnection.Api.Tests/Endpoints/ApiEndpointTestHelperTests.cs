@@ -430,6 +430,46 @@ public class ApiEndpointTestHelperTests
         Assert.True(sharedCalled);
     }
 
+    // ── sensitive-field masking ──────────────────────────────────────────────
+    // ResponseFieldMasker's own masking correctness is covered by ResponseFieldMaskerTests
+    // (Infrastructure.Tests) — these only verify RunTestAsync actually applies it to the Body
+    // it returns. See API_HARDENING_CHECKLIST.md Tier 3.
+
+    [Fact]
+    public async Task SensitiveFieldsConfigured_MatchingField_RedactedInReturnedBody()
+    {
+        var handler = new FuncHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("{\"ssn\":\"123-45-6789\",\"name\":\"Jane\"}", Encoding.UTF8, "application/json"),
+        }));
+
+        var result = await ApiEndpointTestHelper.RunTestAsync(
+            "https://vendor.example.com", "{\"type\":\"none\"}",
+            NewRequest() with { SensitiveResponseFields = ["ssn"] },
+            NoCredential, MockFactory(handler).Object, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("[REDACTED]", result.Body);
+        Assert.DoesNotContain("123-45-6789", result.Body);
+        Assert.Contains("Jane", result.Body); // untouched field still present
+    }
+
+    [Fact]
+    public async Task SensitiveFieldsNotConfigured_BodyReturnedUnmasked()
+    {
+        var handler = new FuncHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("{\"ssn\":\"123-45-6789\"}", Encoding.UTF8, "application/json"),
+        }));
+
+        var result = await ApiEndpointTestHelper.RunTestAsync(
+            "https://vendor.example.com", "{\"type\":\"none\"}",
+            NewRequest(), // SensitiveResponseFields defaults to null
+            NoCredential, MockFactory(handler).Object, CancellationToken.None);
+
+        Assert.Contains("123-45-6789", result.Body);
+    }
+
     // ── oauth2 — the admin/portal "Test" button never passes a tokenCache (always live) ────────
 
     [Fact]

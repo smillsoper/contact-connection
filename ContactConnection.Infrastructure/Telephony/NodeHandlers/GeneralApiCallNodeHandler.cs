@@ -35,7 +35,7 @@ public class GeneralApiCallNodeHandler(
     private record CallTarget(
         Guid DefinitionId, string HttpMethod, string BaseUrl, string Path, string Headers, string QueryParams,
         string? RequestBodyTemplate, string AuthConfig, int TimeoutSeconds, bool IsActive, bool IsRetrySafe,
-        int? RateLimitPerMinute);
+        int? RateLimitPerMinute, string SensitiveResponseFields);
 
     public async Task<TelephonyNodeResult> ExecuteAsync(
         JsonObject node, TelephonyFlowContext ctx, CancellationToken ct = default)
@@ -46,6 +46,7 @@ public class GeneralApiCallNodeHandler(
 
         ApiDefinitionExecutionResult result;
         string transitionKey;
+        var targetSensitiveFields = "[]";
 
         if (string.IsNullOrEmpty(endpointIdStr) || !Guid.TryParse(endpointIdStr, out var endpointId))
         {
@@ -59,6 +60,7 @@ public class GeneralApiCallNodeHandler(
             var target = scope == "portal"
                 ? await LoadPortalAsync(endpointId, ct)
                 : await LoadTenantAsync(ctx.TenantSchemaName, endpointId, ct);
+            targetSensitiveFields = target?.SensitiveResponseFields ?? "[]";
 
             if (target is null)
             {
@@ -112,8 +114,11 @@ public class GeneralApiCallNodeHandler(
 
         if (!string.IsNullOrEmpty(outputVariable))
         {
-            ctx.Vars[outputVariable] = ApiResponseWrapper.BuildJson(result);
-            foreach (var (key, value) in ApiResponseWrapper.BuildFlat(result))
+            // Masked BEFORE it ever reaches flow variables — see the identical comment in
+            // ApiCallNodeHandler (the CRM-engine sibling this was ported from).
+            var maskedResult = ResponseFieldMasker.Mask(result, targetSensitiveFields);
+            ctx.Vars[outputVariable] = ApiResponseWrapper.BuildJson(maskedResult);
+            foreach (var (key, value) in ApiResponseWrapper.BuildFlat(maskedResult))
                 ctx.Vars[$"{outputVariable}.{key}"] = value;
         }
 
@@ -133,7 +138,7 @@ public class GeneralApiCallNodeHandler(
         return new CallTarget(
             def.Id, endpoint.HttpMethod ?? def.HttpMethod, def.BaseUrl, endpoint.Path, endpoint.Headers, endpoint.QueryParams,
             endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive, endpoint.IsRetrySafe,
-            def.RateLimitPerMinute);
+            def.RateLimitPerMinute, endpoint.SensitiveResponseFields);
     }
 
     private async Task<CallTarget?> LoadPortalAsync(Guid endpointId, CancellationToken ct)
@@ -145,7 +150,7 @@ public class GeneralApiCallNodeHandler(
         return new CallTarget(
             def.Id, endpoint.HttpMethod ?? def.HttpMethod, def.BaseUrl, endpoint.Path, endpoint.Headers, endpoint.QueryParams,
             endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive, endpoint.IsRetrySafe,
-            def.RateLimitPerMinute);
+            def.RateLimitPerMinute, endpoint.SensitiveResponseFields);
     }
 
     /// <summary>Telephony-engine twin of ApiCallNodeHandler.ResolveHmacPayload — extracts the

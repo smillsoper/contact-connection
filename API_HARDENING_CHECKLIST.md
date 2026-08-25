@@ -497,23 +497,86 @@ are real production risk for a real-time telephony product, not nice-to-haves.
       `AuthConfigForm.tsx`. **Solution-wide: 244/244 tests passing** (45 Domain, 20 Application,
       134 Infrastructure, 45 Api). `dotnet build` and `npm run build`/`tsc -b` both clean, 0
       errors. Scratch definitions/credentials deleted after both live verifications.
-- [ ] **Sensitive-field masking for API request/response bodies.** Full vendor responses land
-      unmasked in `flow_sessions.variable_store` once written to flow variables (confirmed —
-      that's a real persisted JSONB column, not hypothetical). This is the same underlying
-      problem as the planned call-recording masking work, just on the API-integration side —
-      worth designing as one shared "sensitive field" concept rather than solving it twice.
-      Natural to sequence alongside the call-recording/masking telephony nodes already planned.
+- [x] **Sensitive-field masking for API request/response bodies.** — closed Session 90
+      (2026-08-25). **Scope correction at session start:** the item's original note proposed
+      designing this alongside the planned call-recording masking work (new telephony/CRM flow
+      designer nodes); the user redirected — this item was really about masking sensitive data in
+      **API responses** (the Test button's preview and, more importantly, the real persisted
+      `flow_sessions.variable_store` JSONB column a live `api_call` node writes into), a distinct
+      problem from call-recording masking with no telephony-node dependency. Scoped via a
+      follow-up question to cover **both** enforcement points with one shared config, per user
+      choice. New per-endpoint `SensitiveResponseFields` field (`TenantApiEndpoint`/
+      `PortalApiEndpoint`, JSON array of dot-separated paths e.g. `["ssn","customer.dob"]`,
+      default `"[]"` = no masking, same opt-in convention as `IsRetrySafe`/`RateLimitPerMinute`).
+      New shared `ResponseFieldMasker` (`Infrastructure.Common`, alongside `ApiResponseWrapper`) —
+      parses the path config, walks a `JsonNode` DOM, replaces matching values with a fixed
+      `[REDACTED]` placeholder; a path that doesn't resolve in a given response is a silent no-op,
+      matching the tolerance every other field-path config in this codebase (response mapping,
+      hmac payload templates) already uses. Deliberately minimal — dot-paths only, no array
+      indexing/wildcards, since the common case (SSN/DOB/card number) is almost always a
+      top-level or nested object field. Two call sites: **(1)** `ApiCallNodeHandler`/
+      `GeneralApiCallNodeHandler` — masked immediately after `executor.ExecuteAsync` returns and
+      *before* the result is ever handed to `ApiResponseWrapper.BuildJson`/`BuildFlat`, so the
+      masked (not raw) value is what actually lands in flow variables and gets persisted; this is
+      the real fix. **(2)** `ApiEndpointTestHelper.RunTestAsync` — masks the response before
+      returning it to the browser; the admin/portal "Test" button passes whatever's currently in
+      the endpoint form via a new `SensitiveResponseFields` field on `RunEndpointTestRequest`
+      (not looked up server-side), since a Test click may be testing an in-progress, not-yet-saved
+      endpoint. New migrations `AddSensitiveResponseFieldsToApiEndpoints` (both `TenantDbContext`
+      and `ContactConnectionDbContext`), applied to `tenant_test_tenant` and the public schema.
+      Frontend: new "Sensitive Response Fields" textarea (one dot-path per line) on the shared
+      endpoint form in `ApiDefinitionDetailContent.tsx`, wired into save and all 5 Test-button call
+      sites. **A real, previously-unknown bug found and fixed in the process:** while live-
+      verifying the flow-execution masking path with a fully-automatic scratch flow (an `api_call`
+      node transitioning straight into an `end` node, no agent interaction), the session never
+      persisted as complete — `FlowEngine.StartAsync` only called `SaveToRedis` when the
+      auto-advance loop *didn't* reach a terminal node within the same call, with no corresponding
+      `else` branch calling `CompleteSession` (the Postgres write) when it did — unlike
+      `AdvanceAsync`, which already had the correct `if (state.IsTerminal) CompleteSession() else
+      SaveToRedis()` branching a few lines down. A fully-automatic flow's session was silently
+      orphaned: not marked complete in Postgres, never even written to Redis either. Fixed to
+      match `AdvanceAsync`'s existing pattern. **No automated test coverage for this fix** —
+      `FlowEngine` has zero existing unit tests and building that harness (8+ mocked dependencies:
+      `IFlowRepository`, `IFlowSessionRepository`, `IAgentRepository`, `ICallRecordRepository`,
+      Redis, `TenantContext`, `IFlowNotifier`, `ICallTraceRecorder`, node handlers) from scratch
+      was judged disproportionate to a one-line fix for this session; verified instead via a real
+      before/after live reproduction (see below) — worth a dedicated `FlowEngineTests` project
+      next time this class is touched. **Verification:** 18 new `ResponseFieldMaskerTests`
+      (Infrastructure.Tests) covering path parsing, top-level/nested/multi-path masking,
+      path-not-present no-ops, malformed-intermediate-object no-ops, and the
+      `ApiDefinitionExecutionResult`-returning overload's same-instance-when-unchanged behavior; 2
+      new dispatch tests in `ApiEndpointTestHelperTests` confirming the Test-button path actually
+      applies masking. `dotnet test` across the whole solution: **264/264 passing** (45 Domain, 20
+      Application, 152 Infrastructure, 47 Api). `dotnet build` and `npm run build`/`tsc -b` both
+      clean, 0 errors. **Live-verified** against the running local stack and real external
+      services: (1) admin "Test" button against `postman-echo.com/get?ssn=...&name=Jane` with
+      `sensitiveResponseFields: ["args.ssn"]` — response came back with `"ssn":"[REDACTED]"`,
+      `"name":"Jane"` untouched; (2) the real production path — built a scratch general-category
+      Admin API Definition/Endpoint (masking `args.ssn`), a scratch Flow (`api_call` → `end`,
+      zero agent interaction), inserted scratch `call_records`/`call_interactions` rows directly
+      via SQL, started a real flow session via `POST /api/v1/flow-sessions`, and queried
+      `flow_sessions.variable_store` directly in Postgres afterward: **before** the FlowEngine fix
+      the row was stuck at `status=active`/`variable_store={}` (the session-completion bug, caught
+      by this very verification attempt); **after** the fix, `status=complete`,
+      `completed_at` set, and `variable_store` contained
+      `"vendorResp.response.args.ssn":"[REDACTED]"` alongside
+      `"vendorResp.response.args.name":"Jane"` — the actual persisted JSONB column, masked
+      correctly, with the untouched field proving masking is precise per configured path rather
+      than blanket-redacting the whole response. Scratch definition, endpoint, flow, sessions, and
+      call records all deleted after verification.
 
 ---
 
-**Tier 1 is fully closed. Tier 2 is fully closed.** Tier 3: 2 of 3 items closed (credential
-expiry tracking, mTLS/AWS SigV4 auth) — 244/244 tests passing across 4 test projects
-(`Domain.Tests`, `Application.Tests`, `Infrastructure.Tests`, `Api.Tests`).
-**Next up (Session 90):** the last Tier 3 item — sensitive-field masking for API
-request/response bodies landing in `flow_sessions.variable_store`. Not an urgent production
-risk. Worth designing as one shared "sensitive field" concept alongside the planned
-call-recording/masking telephony work rather than solving it twice — see that item's own note
-above. Worth noting inbound webhooks (Session 87) only wired dispatch for `fulfillment_tracking`
-— `tfn_assignment_*`/`campaign_results` webhooks are received and logged but not acted on, since
-no TFN/telephony domain entity exists yet to dispatch to; that gap closes naturally once the
-FreeSWITCH + Telephony session builds those entities, not as further API-hardening work.
+**Tier 1, Tier 2, and Tier 3 are all now fully closed.** 264/264 tests passing across 4 test
+projects (`Domain.Tests`, `Application.Tests`, `Infrastructure.Tests`, `Api.Tests`). This checklist
+has no further open items as of Session 90 (2026-08-25) — new gaps found later (in this system or
+elsewhere) should get their own entry rather than reopening a closed one.
+**Worth noting for future sessions:**
+- Inbound webhooks (Session 87) only wired dispatch for `fulfillment_tracking` —
+  `tfn_assignment_*`/`campaign_results` webhooks are received and logged but not acted on, since
+  no TFN/telephony domain entity exists yet to dispatch to; that gap closes naturally once the
+  FreeSWITCH + Telephony session builds those entities, not as further API-hardening work.
+- `FlowEngine` has zero automated test coverage (see the Session 90 entry above) — worth a
+  dedicated test project next time that class needs a real change, not just this one-line fix.
+- Portal-side credential-expiry tracking (Session 88) still lacks an independent live
+  click-through — Entra ID is SSO-only with no password-based login to script against locally.

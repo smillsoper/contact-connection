@@ -90,6 +90,7 @@ public static class PortalApiEndpointsEndpoints
         if (request.Headers is not null) endpoint.SetHeaders(request.Headers);
         if (request.ResponseMapping is not null) endpoint.SetResponseMapping(request.ResponseMapping);
         if (request.IsRetrySafe is not null) endpoint.SetRetrySafe(request.IsRetrySafe.Value);
+        if (request.SensitiveResponseFields is not null) endpoint.SetSensitiveResponseFields(request.SensitiveResponseFields);
 
         await repo.AddAsync(endpoint, ct);
         await repo.SaveChangesAsync(ct);
@@ -140,6 +141,7 @@ public static class PortalApiEndpointsEndpoints
         if (request.Headers is not null) endpoint.SetHeaders(request.Headers);
         if (request.ResponseMapping is not null) endpoint.SetResponseMapping(request.ResponseMapping);
         if (request.IsRetrySafe is not null) endpoint.SetRetrySafe(request.IsRetrySafe.Value);
+        if (request.SensitiveResponseFields is not null) endpoint.SetSensitiveResponseFields(request.SensitiveResponseFields);
 
         await repo.SaveChangesAsync(ct);
         await versions.SnapshotAsync(
@@ -191,7 +193,8 @@ public static class PortalApiEndpointsEndpoints
 
     private static string BuildSnapshot(PortalApiEndpoint e) => JsonSerializer.Serialize(new ApiEndpointSnapshot(
         e.ApiSubType, e.Name, e.Description, e.Path, e.HttpMethod, e.RequestBodyTemplate,
-        e.QueryParams, e.Headers, e.ResponseMapping, e.SortOrder, e.IsPreferred, e.IsActive, e.IsRetrySafe));
+        e.QueryParams, e.Headers, e.ResponseMapping, e.SortOrder, e.IsPreferred, e.IsActive, e.IsRetrySafe,
+        e.SensitiveResponseFields));
 
     // ApiSubType is deliberately not reverted — see the matching note in AdminApiEndpointsEndpoints.
     private static void ApplySnapshot(PortalApiEndpoint e, ApiEndpointSnapshot s)
@@ -202,6 +205,7 @@ public static class PortalApiEndpointsEndpoints
         e.SetHeaders(s.Headers);
         e.SetResponseMapping(s.ResponseMapping);
         e.SetRetrySafe(s.IsRetrySafe);
+        e.SetSensitiveResponseFields(s.SensitiveResponseFields);
         if (s.IsActive) e.Activate(); else e.Deactivate();
         if (s.IsPreferred) e.SetPreferred(); else e.ClearPreferred();
     }
@@ -274,6 +278,7 @@ public static class PortalApiEndpointsEndpoints
         e.IsPreferred,
         e.IsActive,
         e.IsRetrySafe,
+        e.SensitiveResponseFields,
         e.CreatedAt,
         e.UpdatedAt,
     };
@@ -290,7 +295,11 @@ public record CreateApiEndpointRequest(
     string? QueryParams,
     string? Headers,
     string? ResponseMapping,
-    bool? IsRetrySafe = null);
+    bool? IsRetrySafe = null,
+    /// <summary>JSON array of dot-separated response field paths to redact — see
+    /// TenantApiEndpoint/PortalApiEndpoint.SensitiveResponseFields. Null = leave at the
+    /// entity default ("[]", no masking).</summary>
+    string? SensitiveResponseFields = null);
 
 public record UpdateApiEndpointRequest(
     string Name,
@@ -303,4 +312,5 @@ public record UpdateApiEndpointRequest(
     string? QueryParams,
     string? Headers,
     string? ResponseMapping,
-    bool? IsRetrySafe = null);
+    bool? IsRetrySafe = null,
+    string? SensitiveResponseFields = null);
