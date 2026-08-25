@@ -13,6 +13,9 @@ public class WebhookEndpointRepository : IWebhookEndpointRepository
 
     public WebhookEndpointRepository(ScopedTenantDbContextFactory factory) => _factory = factory;
 
+    public Task<List<WebhookEndpoint>> GetAllAsync(CancellationToken ct = default) =>
+        Db.WebhookEndpoints.OrderByDescending(w => w.CreatedAt).ToListAsync(ct);
+
     public Task<WebhookEndpoint?> GetByTenantApiEndpointIdAsync(Guid tenantApiEndpointId, CancellationToken ct = default) =>
         Db.WebhookEndpoints.FirstOrDefaultAsync(w => w.TenantApiEndpointId == tenantApiEndpointId, ct);
 

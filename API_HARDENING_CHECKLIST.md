@@ -380,6 +380,27 @@ are real production risk for a real-time telephony product, not nice-to-haves.
       creating a second event row or reprocessing (confirmed via direct DB query — event count
       stayed at 2 `processed` rows, not 3). Scratch definition, endpoint, webhook, credential,
       order, order line, and webhook events all deleted after verification.
+      **UX gap found and closed during pre-merge review (Session 90, 2026-08-25):** the only UI
+      entry point was a "Webhook" button buried inside a specific API Endpoint's detail view —
+      user pointed out (correctly) there was no way to see "which vendors are pushing us data"
+      without already knowing which endpoint to look under. The data model reason a webhook is
+      endpoint-scoped is real (1:1 sidecar to a `TenantApiEndpoint`, reuses that endpoint's own
+      `ResponseMapping` for payload evaluation — not a freestanding resource), but that doesn't
+      require the *UI* to only be reachable that way. Added a tenant-wide **Webhooks dashboard
+      page** (`/admin/webhooks`, linked from the Integrations section of the admin dashboard) —
+      new `GET /api/v1/admin/webhooks` (`AdminWebhooksEndpoints.cs`) joins every
+      `WebhookEndpoint` in the tenant against its owning `TenantApiEndpoint`/`TenantApiDefinition`
+      plus its most recent `WebhookEvent`, so an admin can see every configured webhook, its
+      URL/active-status, and its last-event status/time in one list without knowing which
+      endpoint to check first. New `IWebhookEndpointRepository.GetAllAsync`. Clicking a row opens
+      the *exact same* `WebhookConfigPanel` already built for the per-endpoint entry point (no
+      duplicated config UI) — the dashboard only solves discoverability, not configuration, which
+      correctly stays endpoint-scoped. **Verification:** `dotnet build`/`npm run build` both
+      clean; `dotnet test` 264/264 still passing (no behavior change to existing code, purely
+      additive). **Live-verified:** empty-list case, then a real scratch Definition/Endpoint/
+      webhook created via the API showed up correctly joined (definition/endpoint names, path,
+      URL); sent a real signed webhook POST to it and confirmed the dashboard's `lastEventAt`/
+      `lastEventStatus` picked it up. Scratch data deleted after; list confirmed empty again.
 
 ## Tier 3 — Lower priority / forward-looking
 

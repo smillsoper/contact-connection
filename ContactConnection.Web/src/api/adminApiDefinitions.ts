@@ -241,6 +241,27 @@ export function listAdminWebhookEvents(definitionId: string, endpointId: string,
   return api.get<WebhookEventRecord[]>(`${webhookBase(definitionId, endpointId)}/events?take=${take}`)
 }
 
+// ─── Admin Webhooks dashboard (tenant-wide list, across every Definition/Endpoint) ────────────
+
+export interface AdminWebhookSummary {
+  webhookEndpointId: string
+  definitionId: string
+  definitionName: string
+  endpointId: string
+  endpointName: string
+  endpointPath: string
+  url: string
+  isActive: boolean
+  createdAt: string
+  updatedAt: string | null
+  lastEventAt: string | null
+  lastEventStatus: WebhookEventRecord['processingStatus'] | null
+}
+
+export function listAdminWebhooks(): Promise<AdminWebhookSummary[]> {
+  return api.get<AdminWebhookSummary[]>('/api/v1/admin/webhooks')
+}
+
 // ─── Tenant API Preferences ──────────────────────────────────────────────────
 
 export type ApiPreferenceSource = 'portal' | 'tenant'
