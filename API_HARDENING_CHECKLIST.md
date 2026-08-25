@@ -383,9 +383,58 @@ are real production risk for a real-time telephony product, not nice-to-haves.
 
 ## Tier 3 — Lower priority / forward-looking
 
-- [ ] **Credential expiry tracking/warnings.** Entra (and many vendors') client secrets expire on
-      a schedule; nothing here warns an admin before a credential lapses and silently breaks a
-      live integration.
+- [x] **Credential expiry tracking/warnings.** — closed Session 88 (2026-08-25). Uses Azure Key
+      Vault's own native `SecretProperties.ExpiresOn` — not a new field this app invented. New
+      optional `expiresOn` parameter on `IPortalCredentialStore`/`ITenantCredentialStore.SetAsync`
+      (defaults to `null` — no behavior change for existing callers, same convention as
+      `IsRetrySafe`/`RateLimitPerMinute`); `KeyVaultCredentialStoreBase.SetAsync` now builds a
+      `KeyVaultSecret` and sets `Properties.ExpiresOn` before calling `SetSecretAsync`, and
+      `ListAsync` reads `props.ExpiresOn` back into a new field on `CredentialSummary`. Passed
+      through both Redis-caching decorators (`CachedTenantCredentialStore`/
+      `CachedPortalCredentialStore`) untouched — nothing to cache differently, expiry is metadata
+      on the same secret. `NullCredentialStore`'s write path still fails with the existing
+      clear-error message (Key Vault not configured). **A rotation footgun deliberately guarded
+      against:** every `SetAsync` call creates a new Key Vault secret *version*, so an existing
+      expiry does **not** automatically carry over when an admin rotates a secret's value without
+      re-specifying it — a real way to silently lose the warning right when it matters least. The
+      Admin/Portal Credentials "Update" form's Expires On field now prefills from the *current*
+      item's `expiresOn` (converted to the date input's `YYYY-MM-DD`) rather than starting blank,
+      so leaving it untouched during a routine value rotation keeps tracking the same date; a
+      docstring on the interface and inline UI copy both call this out explicitly. `UpsertCredentialRequest`
+      gained an optional `ExpiresOn` field; `AdminCredentialsEndpoints`/`PortalCredentialsEndpoints`
+      thread it through to `SetAsync` and return it from the list endpoint. Frontend: new shared
+      `CredentialExpiryBadge` component (`ContactConnection.Web/src/components/versioning/`) —
+      color-coded (neutral / amber "Expiring soon" within 30 days / red "Expired") — as a new
+      "Expires" column on both `AdminCredentialsPage.tsx` and `PortalCredentialsPage.tsx`, plus an
+      amber summary banner above the table listing which keys are expiring/expired when any are.
+      No new backend "expiring" endpoint — the existing list response already carries `expiresOn`,
+      so the threshold math is pure client-side date arithmetic against data already being
+      fetched, matching the effort level of a Tier 3 item. No notification/email path built — out
+      of scope for this item; an admin has to visit the Credentials page to see the warning
+      (documented limitation, not a silent gap). **Verification:** 2 new tests
+      (`SetAsync_PassesExpiresOnThroughToInner` in both `CachedTenantCredentialStoreTests` and
+      `CachedPortalCredentialStoreTests`) plus the 2 existing `SetAsync` verify-call assertions
+      updated for the new parameter — `dotnet test` across the whole solution: **223/223 passing**
+      (45 Domain, 20 Application, 118 Infrastructure, 40 Api). `dotnet build` and `npm run
+      build`/`tsc -b` both clean, 0 errors. **Live-verified** against the running local stack and
+      the **real** `contactconnection-kv` Key Vault (not a mock): logged in as
+      `admin@contactconnection.local` on `test-tenant`, set a scratch credential with
+      `expiresOn` 90 days out via the real `PUT /api/v1/admin/credentials/{keyName}` — `GET
+      /api/v1/admin/credentials` echoed the exact date back; set a second scratch credential
+      expiring in 10 days to exercise the warning-window math; then rotated the first credential's
+      value **without** `expiresOn` and confirmed the new secret version correctly came back with
+      `expiresOn: null` (validating the exact footgun the UI prefill guards against), with the
+      credential audit trail (Session 85) still recording both `set` calls correctly alongside it.
+      Both scratch credentials deleted after. Portal side not independently live-clicked this
+      session — Entra ID is SSO-only with no password-based login to script against locally, and
+      minting a throwaway JWT (the Session 85 precedent for portal-side verification) would have
+      required extracting the real Key Vault signing key via a client-secret credential, which the
+      harness's own permission classifier correctly declined as a sensitive-secret extraction; not
+      worth working around. Portal coverage instead rests on: the identical
+      `KeyVaultCredentialStoreBase.SetAsync`/`ListAsync` code path already live-verified on the
+      tenant side (same class, different Key Vault prefix), `PortalCredentialsEndpoints.cs` being
+      structurally identical to the tenant-side handler edited in lockstep, and
+      `CachedPortalCredentialStoreTests`' own new passthrough test.
 - [ ] **mTLS / AWS SigV4 auth support** for the small number of vendors that require them.
 - [ ] **Sensitive-field masking for API request/response bodies.** Full vendor responses land
       unmasked in `flow_sessions.variable_store` once written to flow variables (confirmed —
@@ -396,14 +445,13 @@ are real production risk for a real-time telephony product, not nice-to-haves.
 
 ---
 
-**Tier 1 is fully closed. Tier 2 is fully closed** — all 5 items done, 221/221 tests passing
+**Tier 1 is fully closed. Tier 2 is fully closed** — all 5 items done, 223/223 tests passing
 across 4 test projects (`Domain.Tests`, `Application.Tests`, `Infrastructure.Tests`,
 `Api.Tests`).
-**Next up (Session 88):** Tier 3 — credential expiry tracking/warnings, mTLS/AWS SigV4 auth,
-sensitive-field masking for API request/response bodies landing in
-`flow_sessions.variable_store`. None of these are urgent production risks the way Tier 1/2 were;
-work top-down unless redirected. Worth noting inbound webhooks (just closed) only wired
-dispatch for `fulfillment_tracking` — `tfn_assignment_*`/`campaign_results` webhooks are received
-and logged but not acted on, since no TFN/telephony domain entity exists yet to dispatch to; that
-gap closes naturally once the FreeSWITCH + Telephony session builds those entities, not as
-further API-hardening work.
+**Next up (Session 89):** Tier 3 — mTLS/AWS SigV4 auth, sensitive-field masking for API
+request/response bodies landing in `flow_sessions.variable_store`. Neither is an urgent
+production risk the way Tier 1/2 were; no particular order required between them. Worth noting
+inbound webhooks (Session 87) only wired dispatch for `fulfillment_tracking` —
+`tfn_assignment_*`/`campaign_results` webhooks are received and logged but not acted on, since no
+TFN/telephony domain entity exists yet to dispatch to; that gap closes naturally once the
+FreeSWITCH + Telephony session builds those entities, not as further API-hardening work.

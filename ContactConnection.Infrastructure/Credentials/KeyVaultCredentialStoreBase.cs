@@ -46,9 +46,11 @@ internal abstract class KeyVaultCredentialStoreBase
         }
     }
 
-    public async Task SetAsync(string keyName, string value, CancellationToken ct = default)
+    public async Task SetAsync(string keyName, string value, DateTimeOffset? expiresOn = null, CancellationToken ct = default)
     {
-        await _client.SetSecretAsync(VaultName(keyName), value, ct);
+        var secret = new KeyVaultSecret(VaultName(keyName), value);
+        secret.Properties.ExpiresOn = expiresOn;
+        await _client.SetSecretAsync(secret, ct);
     }
 
     public async Task DeleteAsync(string keyName, CancellationToken ct = default)
@@ -71,7 +73,8 @@ internal abstract class KeyVaultCredentialStoreBase
             if (!props.Name.StartsWith(Prefix) || props.Enabled == false) continue;
             results.Add(new CredentialSummary(
                 StripPrefix(props.Name),
-                props.UpdatedOn));
+                props.UpdatedOn,
+                props.ExpiresOn));
         }
         return results.OrderBy(r => r.KeyName).ToList();
     }

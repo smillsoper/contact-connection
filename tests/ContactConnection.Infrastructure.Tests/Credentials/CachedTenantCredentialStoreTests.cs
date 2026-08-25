@@ -67,8 +67,20 @@ public class CachedTenantCredentialStoreTests(RedisFixture fixture)
         var after = await store.GetAsync("rotating_key");
 
         Assert.Equal("new-value", after);
-        inner.Verify(i => i.SetAsync("rotating_key", "new-value", It.IsAny<CancellationToken>()), Times.Once);
+        inner.Verify(i => i.SetAsync("rotating_key", "new-value", null, It.IsAny<CancellationToken>()), Times.Once);
         inner.Verify(i => i.GetAsync("rotating_key", It.IsAny<CancellationToken>()), Times.Exactly(2)); // eviction forced a real re-read
+    }
+
+    [Fact]
+    public async Task SetAsync_PassesExpiresOnThroughToInner()
+    {
+        var subdomain = $"t-{Guid.NewGuid():N}";
+        var (store, inner) = Create(fixture, subdomain);
+        var expiresOn = DateTimeOffset.UtcNow.AddDays(90);
+
+        await store.SetAsync("expiring_key", "value", expiresOn);
+
+        inner.Verify(i => i.SetAsync("expiring_key", "value", expiresOn, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

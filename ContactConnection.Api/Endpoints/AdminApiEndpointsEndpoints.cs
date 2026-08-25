@@ -317,7 +317,7 @@ public static class AdminApiEndpointsEndpoints
 
         var webhook = WebhookEndpoint.Create(endpointId);
         var secret = GenerateSecret();
-        await credStore.SetAsync(webhook.CredentialKeyName, secret, ct);
+        await credStore.SetAsync(webhook.CredentialKeyName, secret, ct: ct);
         await webhookRepo.AddAsync(webhook, ct);
         await webhookRepo.SaveChangesAsync(ct);
 
@@ -365,7 +365,7 @@ public static class AdminApiEndpointsEndpoints
         if (webhook is null) return Results.NotFound();
 
         var secret = GenerateSecret();
-        await credStore.SetAsync(webhook.CredentialKeyName, secret, ct);
+        await credStore.SetAsync(webhook.CredentialKeyName, secret, ct: ct);
         return Results.Ok(ToWebhookResponse(webhook, tenantContext) with { Secret = secret });
     }
 

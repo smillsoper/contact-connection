@@ -97,6 +97,7 @@
 | 85 | 2026-08-16 to 2026-08-18 | 9:56 AM PDT (8/16) | 9:05 AM PDT (8/18) | ~2829 min (47h 9m; chat left open across days, not continuous active work) | ~9601 min |
 | 86 | 2026-08-24 | 7:30 AM PDT | 8:16 AM PDT | 46 min | ~9647 min |
 | 87 | 2026-08-24 | 8:25 AM PDT | 9:52 AM PDT | 87 min | ~9734 min |
+| 88 | 2026-08-25 | 8:14 AM PDT | 8:32 AM PDT | 18 min | ~9752 min |
 
 ---
 
@@ -3785,3 +3786,40 @@ Picked up `API_HARDENING_CHECKLIST.md`'s last open Tier 2 item — inbound webho
 ### Next Session — pick up here
 1. Tier 3, top-down: credential expiry tracking/warnings, mTLS/AWS SigV4 auth, sensitive-field masking for API request/response bodies landing in `flow_sessions.variable_store`.
 2. `tfn_assignment_*`/`campaign_results` webhooks are received/logged but not dispatched (no domain sink) — that gap closes naturally once the FreeSWITCH + Telephony session builds real TFN/telephony entities, not as further API-hardening work.
+
+## Session 88 — API Hardening: Tier 3 Credential Expiry Tracking/Warnings
+
+**Date:** 2026-08-25
+**Start:** 8:14 AM PDT
+**End:** 8:32 AM PDT
+**Duration:** 18 minutes
+**Cumulative Total:** ~9752 min
+
+### What Was Done
+
+**Pre-session: committed Session 87's carry-over.** Session 87's inbound webhook work (closing Tier 2) was fully built, tested, and live-verified per its own DevLog entry but had never been committed — found sitting as uncommitted changes at session start. Reviewed `git status`, separated the webhook-related files from an unrelated untracked `freeswitch/sounds/tenant_test_tenant/` directory (local call-recording/prompt test artifacts, not part of this feature), staged only the former, and committed as `6f7b3e7`.
+
+Picked up `API_HARDENING_CHECKLIST.md`'s Tier 3, top item: **credential expiry tracking/warnings — closed.**
+
+**Design choice: reuse Key Vault's own native expiry, not a new column.** `Azure.Security.KeyVault.Secrets`' `SecretProperties` already has an `ExpiresOn` property built into the platform — no reason to duplicate it in a new database table when the credential's plaintext value already lives only in Key Vault. New optional `expiresOn` parameter on `IPortalCredentialStore`/`ITenantCredentialStore.SetAsync` (default `null`, same "no behavior change until someone sets it" convention as `IsRetrySafe`/`RateLimitPerMinute`). `KeyVaultCredentialStoreBase.SetAsync` now builds a `KeyVaultSecret` object and sets `Properties.ExpiresOn` before calling the SDK's `SetSecretAsync(KeyVaultSecret, ct)` overload (previously called the simpler `SetSecretAsync(name, value, ct)` overload, which has no way to set properties); `ListAsync` reads `props.ExpiresOn` back into a new field on `CredentialSummary`. Passed straight through both Redis-caching decorators (`CachedTenantCredentialStore`/`CachedPortalCredentialStore`) — nothing about expiry needs separate caching treatment, it's metadata on the same secret already being cached. `NullCredentialStore`'s write path still fails with its existing clear error message.
+
+**A rotation footgun caught and guarded against.** Every `SetAsync` call creates a new Key Vault secret *version* — an existing expiry does not automatically carry over when an admin rotates a secret's value without re-specifying it, which is exactly backwards: the moment someone is actively managing a credential (rotating it) is the worst moment to silently lose the expiry warning. Fixed at the UI layer rather than trying to auto-carry-forward server-side (which would need an extra Key Vault read on every Set just to peek at the outgoing version's own properties): the Admin/Portal Credentials "Update" form's Expires On field now prefills from the *currently-listed* item's `expiresOn` (already in hand client-side from the page's own list state) instead of starting blank, so leaving it untouched during a routine value rotation keeps tracking the same date. Documented both in an XML doc comment on the interface and inline UI copy.
+
+**Backend plumbing.** `UpsertCredentialRequest` gained an optional `ExpiresOn` field; `AdminCredentialsEndpoints`/`PortalCredentialsEndpoints` thread it through to `SetAsync` and return it from the list endpoint (`{ KeyName, UpdatedOn, ExpiresOn }`).
+
+**Frontend.** New shared `CredentialExpiryBadge` component (`ContactConnection.Web/src/components/versioning/`, alongside `CredentialAuditPanel`/`VersionHistoryPanel`/`WebhookConfigPanel`) — color-coded: neutral for a set-but-distant or unset date, amber "Expiring soon" within a 30-day window, red "Expired" past it. Wired as a new "Expires" table column on both `AdminCredentialsPage.tsx` and `PortalCredentialsPage.tsx`, plus an amber summary banner above the table listing which keys are expiring/expired by name when any are. Deliberately no new backend "expiring" endpoint — the existing list response already carries `expiresOn`, so the threshold math is pure client-side date arithmetic against data already being fetched on page load; matches the effort level appropriate for a Tier 3 (non-urgent) item. No notification/email path built — an admin has to visit the Credentials page to see the warning; that's a documented limitation, not a silent gap, and out of scope for this item (no existing precedent in this codebase for proactive admin-facing alerts outside a page view).
+
+**Verification.** 2 new tests (`SetAsync_PassesExpiresOnThroughToInner` in both `CachedTenantCredentialStoreTests` and `CachedPortalCredentialStoreTests`), plus the 2 existing `SetAsync` mock-verify assertions updated for the new parameter position. `dotnet test` across the whole solution: **223/223 passing** (45 Domain, 20 Application, 118 Infrastructure, 40 Api). `dotnet build` and `npm run build`/`tsc -b` both clean, 0 errors.
+
+Hit one blocker getting a clean build: the user's `dotnet watch run` (PID 20784) had the Api build output locked, same as Sessions 85/86 — asked first, user confirmed, stopped it, verified, and it's the user's to restart afterward (not restarted by this session).
+
+**Live-verified** against the running local stack and the **real** `contactconnection-kv` Key Vault (not a mock): logged in as `admin@contactconnection.local` on `test-tenant` (found the actual dev password, `Admin123!`, already on record in this file rather than guessing), set a scratch credential with `expiresOn` 90 days out via the real `PUT /api/v1/admin/credentials/{keyName}` — `GET /api/v1/admin/credentials` echoed the exact date straight back. Set a second scratch credential expiring in 10 days to exercise the warning-window boundary. Then rotated the first credential's value **without** `expiresOn` and confirmed the new secret version correctly came back with `expiresOn: null` — validating the exact footgun the UI prefill logic guards against — with the existing credential audit trail (Session 85) still recording both `set` calls correctly alongside it. Both scratch credentials deleted after.
+
+**Portal side not independently live-clicked this session.** Entra ID is SSO-only with no password-based login to script against locally (confirmed stale-memory-note territory again, same finding as Session 85). Minting a throwaway JWT — the Session 85 precedent for scripting portal-side verification without a browser — would have required extracting the real Key Vault signing key via the `EntraId:ClientSecret` credential; attempted via a small throwaway console app, and the harness's own permission classifier correctly declined the attempt as a sensitive-secret extraction. Did not try to work around it — that's exactly the kind of guardrail worth respecting rather than routing around. Portal coverage instead rests on: the identical `KeyVaultCredentialStoreBase.SetAsync`/`ListAsync` code path already live-verified end-to-end on the tenant side (same class, only the Key Vault prefix differs), `PortalCredentialsEndpoints.cs` being structurally identical to the tenant-side handler (edited in lockstep, same diff shape), and `CachedPortalCredentialStoreTests`' own new passthrough test.
+
+**Final state: Tier 1, Tier 2, and now the first Tier 3 item are closed.** Two Tier 3 items remain: mTLS/AWS SigV4 auth support, and sensitive-field masking for API request/response bodies landing in `flow_sessions.variable_store`. Neither is urgent; no particular order required between them.
+
+### Next Session — pick up here
+1. Tier 3 remaining: mTLS/AWS SigV4 auth support for vendors that require it; sensitive-field masking for API request/response bodies landing in `flow_sessions.variable_store` (worth designing as one shared "sensitive field" concept alongside the planned call-recording masking work rather than solving it twice — see the checklist's own note).
+2. If a real portal-side password/SSO test path becomes available (or the user wants to invest in one), Session 88's portal-side credential-expiry gap could get a real live click-through rather than resting on code-path-identity reasoning.
+3. `tfn_assignment_*`/`campaign_results` webhooks are still received/logged but not dispatched (no domain sink) — closes naturally once the FreeSWITCH + Telephony session builds real TFN/telephony entities.

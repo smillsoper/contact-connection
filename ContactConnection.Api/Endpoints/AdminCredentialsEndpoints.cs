@@ -24,7 +24,7 @@ public static class AdminCredentialsEndpoints
         CancellationToken ct)
     {
         var items = await store.ListAsync(ct);
-        return Results.Ok(items.Select(i => new { i.KeyName, i.UpdatedOn }));
+        return Results.Ok(items.Select(i => new { i.KeyName, i.UpdatedOn, i.ExpiresOn }));
     }
 
     private static async Task<IResult> Upsert(
@@ -41,7 +41,7 @@ public static class AdminCredentialsEndpoints
         var actor = ActorResolver.Resolve(http.User);
         if (actor is null) return Results.Unauthorized();
 
-        await store.SetAsync(keyName, request.Value, ct);
+        await store.SetAsync(keyName, request.Value, request.ExpiresOn, ct);
         await audit.RecordAsync(keyName, CredentialAuditAction.Set, actor.Value.Id, actor.Value.Name, ct);
         return Results.NoContent();
     }

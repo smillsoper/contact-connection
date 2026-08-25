@@ -290,16 +290,17 @@ export async function revertPortalApiDefinition(id: string, versionNumber: numbe
 export interface CredentialSummary {
   keyName: string
   updatedOn: string | null
+  expiresOn: string | null
 }
 
 export async function listPortalCredentials(): Promise<CredentialSummary[]> {
   return portalFetch<CredentialSummary[]>('/api/v1/portal/credentials')
 }
 
-export async function setPortalCredential(keyName: string, value: string): Promise<void> {
+export async function setPortalCredential(keyName: string, value: string, expiresOn?: string | null): Promise<void> {
   return portalFetch<void>(`/api/v1/portal/credentials/${keyName}`, {
     method: 'PUT',
-    body: JSON.stringify({ value }),
+    body: JSON.stringify({ value, expiresOn: expiresOn || null }),
   })
 }
 

@@ -19,7 +19,7 @@ internal class KeyVaultTenantCredentialStore : KeyVaultCredentialStoreBase, ITen
     }
 
     Task<string?> ITenantCredentialStore.GetAsync(string keyName, CancellationToken ct) => GetAsync(keyName, ct);
-    Task ITenantCredentialStore.SetAsync(string keyName, string value, CancellationToken ct) => SetAsync(keyName, value, ct);
+    Task ITenantCredentialStore.SetAsync(string keyName, string value, DateTimeOffset? expiresOn, CancellationToken ct) => SetAsync(keyName, value, expiresOn, ct);
     Task ITenantCredentialStore.DeleteAsync(string keyName, CancellationToken ct) => DeleteAsync(keyName, ct);
     Task<IReadOnlyList<CredentialSummary>> ITenantCredentialStore.ListAsync(CancellationToken ct) => ListAsync(ct);
 

@@ -47,8 +47,20 @@ public class CachedPortalCredentialStoreTests(RedisFixture fixture)
         await store.SetAsync(key, "new-value");
         Assert.Equal("new-value", await store.GetAsync(key));
 
-        inner.Verify(i => i.SetAsync(key, "new-value", It.IsAny<CancellationToken>()), Times.Once);
+        inner.Verify(i => i.SetAsync(key, "new-value", null, It.IsAny<CancellationToken>()), Times.Once);
         inner.Verify(i => i.GetAsync(key, It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task SetAsync_PassesExpiresOnThroughToInner()
+    {
+        var key = $"k-{Guid.NewGuid():N}";
+        var (store, inner) = Create(fixture);
+        var expiresOn = DateTimeOffset.UtcNow.AddDays(90);
+
+        await store.SetAsync(key, "value", expiresOn);
+
+        inner.Verify(i => i.SetAsync(key, "value", expiresOn, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

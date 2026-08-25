@@ -21,9 +21,9 @@ internal class NullCredentialStore : IPortalCredentialStore, ITenantCredentialSt
     Task<IReadOnlyList<CredentialSummary>> ITenantCredentialStore.ListAsync(CancellationToken ct) =>
         Task.FromResult(EmptyList);
 
-    Task IPortalCredentialStore.SetAsync(string keyName, string value, CancellationToken ct) => Fail();
+    Task IPortalCredentialStore.SetAsync(string keyName, string value, DateTimeOffset? expiresOn, CancellationToken ct) => Fail();
     Task IPortalCredentialStore.DeleteAsync(string keyName, CancellationToken ct) => Fail();
-    Task ITenantCredentialStore.SetAsync(string keyName, string value, CancellationToken ct) => Fail();
+    Task ITenantCredentialStore.SetAsync(string keyName, string value, DateTimeOffset? expiresOn, CancellationToken ct) => Fail();
     Task ITenantCredentialStore.DeleteAsync(string keyName, CancellationToken ct) => Fail();
 
     private static Task Fail() =>
