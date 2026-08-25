@@ -435,7 +435,68 @@ are real production risk for a real-time telephony product, not nice-to-haves.
       tenant side (same class, different Key Vault prefix), `PortalCredentialsEndpoints.cs` being
       structurally identical to the tenant-side handler edited in lockstep, and
       `CachedPortalCredentialStoreTests`' own new passthrough test.
-- [ ] **mTLS / AWS SigV4 auth support** for the small number of vendors that require them.
+- [x] **mTLS / AWS SigV4 auth support** for the small number of vendors that require them. —
+      closed Session 89 (2026-08-25). Both new auth types, added to the same auth-config dispatch
+      switch as api_key/bearer/basic/oauth2/hmac in `ApiDefinitionExecutor` (flow engine) and
+      `ApiEndpointTestHelper` (admin/portal "Test" button + `FlowSessionsEndpoints`' live
+      resolution) — but architecturally very different from each other, so built and verified
+      separately.
+      **AWS SigV4** — new `AwsSigV4Signer` (pure computation, mirrors `HmacSigner`'s shape):
+      signs the minimal required header set (`host`, `x-amz-date`, and `x-amz-security-token`
+      when a session token credential is configured) per the AWS Signature Version 4 spec —
+      canonical request → string to sign → derived signing key (`AWS4"+secret → date → region →
+      service → aws4_request` HMAC-SHA256 chain) → `Authorization` header. New `aws_sigv4` auth
+      config: `accessKeyIdKey`/`secretAccessKeyKey` (required credential keys),
+      `sessionTokenKey` (optional, for temporary STS credentials), `region`, `service`. Unlike
+      `hmac`'s `payloadTemplate`, there's no customizable payload subset — SigV4 is a spec-
+      mandated algorithm signing the literal outgoing body, not a vendor convention with room for
+      an override. **Verification:** 10 pure-signer tests in `AwsSigV4SignerTests` validated
+      against the **official published AWS SigV4 test suite** (`aws-sig-v4-test-suite`, fetched
+      live from its GitHub/npm mirrors rather than trusting a memorized secret key — an early
+      attempt using a half-remembered secret key was caught and corrected this way) — 3 exact
+      request/signature vectors (`get-vanilla`, `post-vanilla`, `get-vanilla-query-order-key`,
+      the last covering canonical-query-string sorting with duplicate keys and mixed-case
+      values) matched byte-for-byte, plus session-token/different-payload/different-secret/
+      determinism cases. 6 more dispatch tests across both `ApiDefinitionExecutorTests` and
+      `ApiEndpointTestHelperTests` (headers applied, credential-missing fallback, session-token
+      header + signed-headers list). Frontend: new "AWS Signature V4" option in
+      `AuthConfigForm.tsx` with Access Key ID / Secret Access Key / Region / Service / optional
+      Session Token fields. **Live-verified** against the real admin "Test" endpoint hitting
+      `postman-echo.com/get` — the vendor echoed back the exact `Authorization`/`X-Amz-Date`
+      headers the executor sent, confirming the real HTTP path (not just the pure signer) works.
+      **mTLS** — architecturally different from every other auth type here: client-certificate
+      identity is a property of the TLS transport itself, not something attachable to an
+      individual `HttpRequestMessage` the way a header or query param is. New
+      `IMtlsHttpClientProvider`/`MtlsHttpClientProvider` (singleton, `ConcurrentDictionary`
+      cached per `(definitionId, certificate content hash)`) resolves a dedicated
+      `SocketsHttpHandler`-backed `HttpClient` carrying the configured client certificate — so a
+      call doesn't rebuild the TLS handshake machinery every time, and rotating the stored
+      certificate naturally produces a fresh client instead of silently reusing a stale one. Both
+      `ApiDefinitionExecutor` and `ApiEndpointTestHelper` now select the HTTP client *before*
+      sending (peeking at the auth config's `type` first) instead of always using the shared
+      `"FlowEngine"` named client — the one real structural change this item required, exactly as
+      flagged before starting. New `mtls` auth config: `certKey` (credential holding a
+      base64-encoded PKCS#12/.pfx blob — cert + private key bundled as one opaque credential-store
+      value, no new secret-storage mechanism), `certPasswordKey` (optional). Certificate loaded
+      via `X509CertificateLoader.LoadPkcs12` (the modern non-obsolete API). Falls back to the
+      shared client — not a hard failure — when the cert credential is missing or unusable,
+      matching every other auth type's "proceed unauthenticated, let the vendor reject it"
+      precedent. **Unlike** `tokenCache`/`resilience`/`rateLimiter`, `mtlsProvider` *is* wired
+      into the admin/portal "Test" button (not withheld) — without the right client cert an
+      mtls-configured vendor rejects the TLS handshake outright, so a Test click would be
+      meaningless otherwise. **Verification:** 6 dispatch tests (client selection verified by
+      instance reference, not headers) across both test projects. **Live-verified against a real
+      external mTLS-only server** — `https://client.badssl.com`, badssl.com's public test fixture
+      built exactly for this (documented client cert at `badssl.com/certs/badssl.com-client.p12`,
+      password `badssl.com`). A control call with no cert configured got the server's actual
+      `400 No required SSL certificate was sent` rejection; the real admin "Test" endpoint with
+      the cert credential set returned the server's genuine green "client.badssl.com" success
+      page, which only renders after a successful mutual-TLS handshake — full real end-to-end
+      proof through Key Vault → `MtlsHttpClientProvider` → `SocketsHttpHandler` → actual TLS
+      handshake, not a mock. Frontend: new "Mutual TLS (Client Certificate)" option in
+      `AuthConfigForm.tsx`. **Solution-wide: 244/244 tests passing** (45 Domain, 20 Application,
+      134 Infrastructure, 45 Api). `dotnet build` and `npm run build`/`tsc -b` both clean, 0
+      errors. Scratch definitions/credentials deleted after both live verifications.
 - [ ] **Sensitive-field masking for API request/response bodies.** Full vendor responses land
       unmasked in `flow_sessions.variable_store` once written to flow variables (confirmed —
       that's a real persisted JSONB column, not hypothetical). This is the same underlying
@@ -445,13 +506,14 @@ are real production risk for a real-time telephony product, not nice-to-haves.
 
 ---
 
-**Tier 1 is fully closed. Tier 2 is fully closed** — all 5 items done, 223/223 tests passing
-across 4 test projects (`Domain.Tests`, `Application.Tests`, `Infrastructure.Tests`,
-`Api.Tests`).
-**Next up (Session 89):** Tier 3 — mTLS/AWS SigV4 auth, sensitive-field masking for API
-request/response bodies landing in `flow_sessions.variable_store`. Neither is an urgent
-production risk the way Tier 1/2 were; no particular order required between them. Worth noting
-inbound webhooks (Session 87) only wired dispatch for `fulfillment_tracking` —
-`tfn_assignment_*`/`campaign_results` webhooks are received and logged but not acted on, since no
-TFN/telephony domain entity exists yet to dispatch to; that gap closes naturally once the
+**Tier 1 is fully closed. Tier 2 is fully closed.** Tier 3: 2 of 3 items closed (credential
+expiry tracking, mTLS/AWS SigV4 auth) — 244/244 tests passing across 4 test projects
+(`Domain.Tests`, `Application.Tests`, `Infrastructure.Tests`, `Api.Tests`).
+**Next up (Session 90):** the last Tier 3 item — sensitive-field masking for API
+request/response bodies landing in `flow_sessions.variable_store`. Not an urgent production
+risk. Worth designing as one shared "sensitive field" concept alongside the planned
+call-recording/masking telephony work rather than solving it twice — see that item's own note
+above. Worth noting inbound webhooks (Session 87) only wired dispatch for `fulfillment_tracking`
+— `tfn_assignment_*`/`campaign_results` webhooks are received and logged but not acted on, since
+no TFN/telephony domain entity exists yet to dispatch to; that gap closes naturally once the
 FreeSWITCH + Telephony session builds those entities, not as further API-hardening work.

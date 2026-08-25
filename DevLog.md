@@ -98,6 +98,7 @@
 | 86 | 2026-08-24 | 7:30 AM PDT | 8:16 AM PDT | 46 min | ~9647 min |
 | 87 | 2026-08-24 | 8:25 AM PDT | 9:52 AM PDT | 87 min | ~9734 min |
 | 88 | 2026-08-25 | 8:14 AM PDT | 8:32 AM PDT | 18 min | ~9752 min |
+| 89 | 2026-08-25 | 8:32 AM PDT | 9:16 AM PDT | 44 min | ~9796 min |
 
 ---
 
@@ -3822,4 +3823,41 @@ Hit one blocker getting a clean build: the user's `dotnet watch run` (PID 20784)
 ### Next Session — pick up here
 1. Tier 3 remaining: mTLS/AWS SigV4 auth support for vendors that require it; sensitive-field masking for API request/response bodies landing in `flow_sessions.variable_store` (worth designing as one shared "sensitive field" concept alongside the planned call-recording masking work rather than solving it twice — see the checklist's own note).
 2. If a real portal-side password/SSO test path becomes available (or the user wants to invest in one), Session 88's portal-side credential-expiry gap could get a real live click-through rather than resting on code-path-identity reasoning.
+3. `tfn_assignment_*`/`campaign_results` webhooks are still received/logged but not dispatched (no domain sink) — closes naturally once the FreeSWITCH + Telephony session builds real TFN/telephony entities.
+
+## Session 89 — Cloudflare Tunnel Fix + API Hardening: Tier 3 mTLS/AWS SigV4 Auth Support
+
+**Date:** 2026-08-25
+**Start:** 8:32 AM PDT
+**End:** 9:16 AM PDT
+**Duration:** 44 minutes
+**Cumulative Total:** ~9796 min
+
+### What Was Done
+
+**Pre-session: diagnosed and fixed an intermittent Cloudflare tunnel issue.** User reported `ERR_SSL_PROTOCOL_ERROR` on `admin.contactconnection.cc` recurring roughly every 90 minutes, lasting about a minute each time. Pulled `docker logs cc_cloudflared` and found the exact pattern: all 4 QUIC (UDP) edge connections dying **simultaneously**, repeatedly, each with `error="failed to accept QUIC stream: timeout: no recent network activity"` — all 4 dropping at the same instant points at something outside cloudflared itself (most likely WSL2/Docker Desktop network idling, or a router/NAT UDP conntrack timeout) silently killing the QUIC sessions before cloudflared's own keepalive notices. Fixed by adding `--protocol http2` to the tunnel command in `docker-compose.yml`, switching from QUIC/UDP to HTTP/2/TCP transport, which tolerates idle/NAT timeouts far better. Applied via `docker compose up -d cloudflared`; cloudflared's own post-restart connectivity pre-check independently confirmed `suggested_protocol=http2` for this host, corroborating the diagnosis. User confirmed stable afterward. Committed separately (`983f4dd`) before starting the checklist work.
+
+Picked up `API_HARDENING_CHECKLIST.md` Tier 3's second item — **mTLS / AWS SigV4 auth support — closed.** Entered this understanding both auth types are architecturally very different (SigV4 is request-level, mTLS is transport-level) and asked the user how to scope it; user chose to build both in one session rather than defer mTLS.
+
+**AWS SigV4.** New `AwsSigV4Signer` (Infrastructure.ApiExecution) — pure computation mirroring `HmacSigner`'s shape: canonical request → string to sign → derived signing key (the `"AWS4"+secret → date → region → service → aws4_request` HMAC-SHA256 chain) → `Authorization` header. Signs the minimal required header set per AWS's own documented minimum (`host`, `x-amz-date`, and `x-amz-security-token` when a session token credential is configured) — no customizable payload subset like hmac's `payloadTemplate`, since SigV4 is a spec-mandated algorithm signing the literal outgoing body, not a vendor convention with room for an override. New `aws_sigv4` auth config: `accessKeyIdKey`/`secretAccessKeyKey` (required), `sessionTokenKey` (optional, temporary STS creds), `region`, `service`. Wired into the same dispatch switch as every other auth type in both `ApiDefinitionExecutor` and `ApiEndpointTestHelper`.
+
+**Correctness discipline worth recording:** rather than trust a memorized AWS SigV4 test vector for the unit tests, fetched the actual official `aws-sig-v4-test-suite` (published by AWS, mirrored on GitHub/npm) live via WebFetch/WebSearch. This caught a real near-miss — an initial recollection of the test suite's secret access key had a `/` where the real value has a `+` (`wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY`); cross-checked two independent primary sources (raw GitHub file, npm package's `index.json`) before trusting it. Three exact request/signature vectors (`get-vanilla`, `post-vanilla`, `get-vanilla-query-order-key` — the last covering canonical-query-string sorting with duplicate keys and mixed-case values) matched byte-for-byte on the first run.
+
+**mTLS.** Architecturally different from every other auth type here — client-certificate identity is a property of the TLS transport itself, not attachable to an individual `HttpRequestMessage` the way a header or query param is. New `IMtlsHttpClientProvider`/`MtlsHttpClientProvider` (Application/Infrastructure, singleton) caches one `SocketsHttpHandler`-backed `HttpClient` per `(definitionId, certificate content hash)` in a `ConcurrentDictionary` — so a call doesn't rebuild the TLS handshake machinery every time, and rotating the stored certificate naturally produces a fresh client (disposing the stale one) instead of silently reusing it. Both `ApiDefinitionExecutor` and `ApiEndpointTestHelper` now peek at the auth config's `type` and select the HTTP client *before* sending, instead of always grabbing the shared `"FlowEngine"` named client — the one real structural change this item required, flagged to the user before starting. New `mtls` auth config: `certKey` (credential holding a base64-encoded PKCS#12/.pfx blob — cert + private key bundled as one opaque credential-store value, no new secret-storage mechanism needed) and optional `certPasswordKey`. Certificate loaded via `X509CertificateLoader.LoadPkcs12` (the modern non-obsolete .NET 9+ API, not the deprecated `X509Certificate2` constructors). Falls back to the shared client (not a hard failure) when the cert credential is missing or unusable, matching every other auth type's "proceed unauthenticated, let the vendor reject it" precedent. Unlike `tokenCache`/`resilience`/`rateLimiter`, the new `mtlsProvider` parameter **is** wired into the admin/portal "Test" button (not withheld) — without the right client cert an mtls-configured vendor rejects the TLS handshake outright, so a Test click would be meaningless otherwise.
+
+**Verification.** 10 pure-signer `AwsSigV4SignerTests` (the 3 official vectors plus session-token/different-payload/different-secret/determinism/canonical-encoding cases) + 6 dispatch tests across `ApiDefinitionExecutorTests`/`ApiEndpointTestHelperTests` for aws_sigv4, plus 6 more dispatch tests (client-selection-by-instance-reference, not headers) for mtls. Solution-wide: **244/244 passing** (45 Domain, 20 Application, 134 Infrastructure, 45 Api). `dotnet build` and `npm run build`/`tsc -b` both clean, 0 errors. Frontend: new "AWS Signature V4" and "Mutual TLS (Client Certificate)" options in `AuthConfigForm.tsx`, shared by Admin + Portal.
+
+Hit the file-lock issue twice more getting clean builds (the user's `dotnet watch run` restarted itself after the earlier cloudflared-triggered stop) — asked each time before stopping it, per the established pattern. One of the two `TaskStop` calls on the background verification API process didn't actually kill the underlying `ContactConnection.Api.exe` child process (same loose end noted after Session 88) — caught it via `netstat`/`wmic` before declaring done rather than leaving another orphaned port lock.
+
+**Live-verified against real external services** (no AWS account and no real mTLS vendor exist in this project, so both used the strongest publicly-available real substitutes rather than settling for unit tests alone):
+- **AWS SigV4** — hit the real admin "Test" endpoint against `postman-echo.com/get`. The vendor echoed back the exact `Authorization: AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/...` and `X-Amz-Date` headers the executor sent, confirming the real HTTP path (not just the pure signer) works.
+- **mTLS** — hit the real admin "Test" endpoint against `https://client.badssl.com`, badssl.com's public test fixture built exactly for this purpose (documented client cert at `badssl.com/certs/badssl.com-client.p12`, password `badssl.com`). A control call with `"type":"none"` got the server's actual `400 No required SSL certificate was sent` rejection, proving the target genuinely requires the cert; the real call with the cert credential configured returned the server's genuine green "client.badssl.com" success page, which only renders after a successful mutual-TLS handshake. Full real end-to-end proof through Key Vault → `MtlsHttpClientProvider` → `SocketsHttpHandler` → an actual TLS handshake with an external server, not a mock.
+
+Scratch definitions and credentials (both AWS and mTLS) deleted after verification; API process stopped and port confirmed free afterward.
+
+**Final state: Tier 1, Tier 2, and now 2 of 3 Tier 3 items are closed.** One Tier 3 item remains: sensitive-field masking for API request/response bodies landing in `flow_sessions.variable_store`.
+
+### Next Session — pick up here
+1. The last Tier 3 item: sensitive-field masking for API request/response bodies landing in `flow_sessions.variable_store`. Worth designing as one shared "sensitive field" concept alongside the planned call-recording masking work rather than solving it twice.
+2. If a real portal-side password/SSO test path becomes available, Session 88's portal-side credential-expiry gap could get a real live click-through.
 3. `tfn_assignment_*`/`campaign_results` webhooks are still received/logged but not dispatched (no domain sink) — closes naturally once the FreeSWITCH + Telephony session builds real TFN/telephony entities.

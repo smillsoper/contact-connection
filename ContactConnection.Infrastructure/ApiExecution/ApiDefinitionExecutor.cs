@@ -15,7 +15,8 @@ public class ApiDefinitionExecutor(
     IHttpClientFactory httpClientFactory,
     IOAuth2TokenCache tokenCache,
     IVendorResilienceExecutor resilience,
-    IOutboundRateLimiter rateLimiter) : IApiDefinitionExecutor
+    IOutboundRateLimiter rateLimiter,
+    IMtlsHttpClientProvider mtlsHttpClientProvider) : IApiDefinitionExecutor
 {
     public async Task<ApiDefinitionExecutionResult> ExecuteAsync(
         ApiDefinitionExecutionRequest request, CancellationToken ct = default)
@@ -76,7 +77,11 @@ public class ApiDefinitionExecutor(
             if (request.Body is not null)
                 httpRequest.Content = new StringContent(request.Body, Encoding.UTF8, bodyContentType ?? "application/json");
 
-            var http = httpClientFactory.CreateClient("FlowEngine");
+            // mTLS identity is a transport-level property (the TLS handshake itself), not
+            // something ApplyAuthAsync can attach to httpRequest the way every other auth type's
+            // headers/query params are — so the client itself has to be selected based on the
+            // auth config before sending, not the shared "FlowEngine" client used otherwise.
+            var http = await ResolveHttpClientAsync(request.AuthConfigJson, request.GetCredential, request.DefinitionId, linkedCts.Token);
             // GET/HEAD/PUT/DELETE are always safe to retry on an ambiguous failure by HTTP
             // semantics; for POST/PATCH, only the endpoint's own IsRetrySafe opt-in
             // (request.AllowRetryOnAmbiguousFailure) allows it.
@@ -252,7 +257,66 @@ public class ApiDefinitionExecutor(
                 request.Headers.TryAddWithoutValidation(headerName, signature);
                 break;
             }
+            case "aws_sigv4":
+            {
+                var accessKeyId = await getCredential(Str(root, "accessKeyIdKey"), ct);
+                var secretAccessKey = await getCredential(Str(root, "secretAccessKeyKey"), ct);
+                if (accessKeyId is null || secretAccessKey is null) break;
+
+                var sessionTokenKey = Str(root, "sessionTokenKey");
+                var sessionToken = sessionTokenKey.Length > 0 ? await getCredential(sessionTokenKey, ct) : null;
+                var region = Str(root, "region");
+                var service = Str(root, "service");
+
+                var host = uriBuilder.Uri.IsDefaultPort ? uriBuilder.Host : $"{uriBuilder.Host}:{uriBuilder.Port}";
+                var sig = AwsSigV4Signer.Sign(
+                    request.Method.Method, uriBuilder.Path, uriBuilder.Query, host, signaturePayload,
+                    accessKeyId, secretAccessKey, sessionToken, region, service, DateTimeOffset.UtcNow);
+
+                request.Headers.TryAddWithoutValidation("X-Amz-Date", sig.AmzDate);
+                if (sig.SecurityToken is not null)
+                    request.Headers.TryAddWithoutValidation("X-Amz-Security-Token", sig.SecurityToken);
+                request.Headers.TryAddWithoutValidation("Authorization", sig.AuthorizationHeader);
+                break;
+            }
+            // "mtls" intentionally has no case here — the client certificate is applied to the
+            // HttpClient itself (see ResolveHttpClientAsync), not to this HttpRequestMessage.
+            // There are no headers/query params for this auth type to add.
         }
+    }
+
+    /// <summary>Selects the HttpClient to send with: the shared "FlowEngine" client for every
+    /// auth type except "mtls", which needs its own client carrying the configured client
+    /// certificate. Falls back to the shared client if the cert credential is missing or
+    /// unusable — same "proceed unauthenticated" precedent every other auth type follows when its
+    /// credential can't be resolved (the vendor will simply reject the TLS handshake, surfacing as
+    /// a normal connection failure rather than a special case here).</summary>
+    private async Task<HttpClient> ResolveHttpClientAsync(
+        string authConfigJson,
+        Func<string, CancellationToken, Task<string?>> getCredential,
+        Guid definitionId,
+        CancellationToken ct)
+    {
+        JsonElement root;
+        try { root = JsonDocument.Parse(authConfigJson).RootElement; }
+        catch { return httpClientFactory.CreateClient("FlowEngine"); }
+
+        if (!root.TryGetProperty("type", out var tp) || tp.GetString() != "mtls")
+            return httpClientFactory.CreateClient("FlowEngine");
+
+        var certKey = Str(root, "certKey");
+        var certBase64 = await getCredential(certKey, ct);
+        if (certBase64 is null) return httpClientFactory.CreateClient("FlowEngine");
+
+        byte[] certBytes;
+        try { certBytes = Convert.FromBase64String(certBase64); }
+        catch (FormatException) { return httpClientFactory.CreateClient("FlowEngine"); }
+
+        var certPasswordKey = Str(root, "certPasswordKey");
+        var certPassword = certPasswordKey.Length > 0 ? await getCredential(certPasswordKey, ct) : null;
+
+        return mtlsHttpClientProvider.GetClient(definitionId, certBytes, certPassword)
+            ?? httpClientFactory.CreateClient("FlowEngine");
     }
 
     private static string Str(JsonElement el, string prop) =>

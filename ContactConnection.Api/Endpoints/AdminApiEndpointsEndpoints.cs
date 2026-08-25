@@ -253,6 +253,7 @@ public static class AdminApiEndpointsEndpoints
         ITenantApiDefinitionRepository defRepo,
         ITenantCredentialStore credStore,
         IHttpClientFactory httpFactory,
+        IMtlsHttpClientProvider mtlsProvider,
         TenantContext tenantContext,
         CancellationToken ct)
     {
@@ -266,7 +267,8 @@ public static class AdminApiEndpointsEndpoints
             request,
             (key, token) => credStore.GetAsync(key, token),
             httpFactory,
-            ct);
+            ct,
+            mtlsProvider);
     }
 
     private static async Task<IResult> Delete(

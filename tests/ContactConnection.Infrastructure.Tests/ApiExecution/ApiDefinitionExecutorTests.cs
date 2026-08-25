@@ -55,7 +55,8 @@ public class ApiDefinitionExecutorTests
         Mock<IVendorResilienceExecutor> resilience,
         Mock<IOAuth2TokenCache>? tokenCache = null,
         HttpMessageHandler? tokenEndpointHandler = null,
-        Mock<IOutboundRateLimiter>? rateLimiter = null)
+        Mock<IOutboundRateLimiter>? rateLimiter = null,
+        Mock<IMtlsHttpClientProvider>? mtlsProvider = null)
     {
         var factoryMock = new Mock<IHttpClientFactory>();
         factoryMock.Setup(f => f.CreateClient("FlowEngine"))
@@ -65,7 +66,8 @@ public class ApiDefinitionExecutorTests
             factoryMock.Object,
             (tokenCache ?? new Mock<IOAuth2TokenCache>()).Object,
             resilience.Object,
-            (rateLimiter ?? MockRateLimiter()).Object);
+            (rateLimiter ?? MockRateLimiter()).Object,
+            (mtlsProvider ?? new Mock<IMtlsHttpClientProvider>()).Object);
     }
 
     // ── Request building ─────────────────────────────────────────────────────
@@ -285,6 +287,131 @@ public class ApiDefinitionExecutorTests
 
         var expected = HmacSigner.ComputeSignatureHeaderValue("SHA256", "sekret", "b", includeTimestamp: false);
         Assert.Equal(expected, captured!.Headers.GetValues("X-Signature").Single()); // "X-Signature" is the documented default
+    }
+
+    // ── aws_sigv4 ─────────────────────────────────────────────────────────────
+    // AwsSigV4Signer's own signing math is covered separately by AwsSigV4SignerTests (against
+    // the official AWS test vectors) — these only verify ApiDefinitionExecutor resolves the
+    // right credentials and applies the resulting headers.
+
+    [Fact]
+    public async Task AwsSigV4Auth_AppliesAuthorizationAndDateHeaders_MatchingIndependentComputation()
+    {
+        HttpRequestMessage? captured = null;
+        var resilience = MockResilience(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") }, r => captured = r);
+        var executor = CreateExecutor(resilience);
+
+        await executor.ExecuteAsync(NewRequest(
+            url: "https://vendor.example.com/orders",
+            authConfigJson: "{\"type\":\"aws_sigv4\",\"accessKeyIdKey\":\"akid\",\"secretAccessKeyKey\":\"secret\",\"region\":\"us-east-1\",\"service\":\"execute-api\"}",
+            getCredential: (key, _) => Task.FromResult<string?>(key == "akid" ? "AKIDEXAMPLE" : "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY")));
+
+        Assert.True(captured!.Headers.Contains("X-Amz-Date"));
+        Assert.False(captured.Headers.Contains("X-Amz-Security-Token"));
+        var authHeader = captured.Headers.GetValues("Authorization").Single();
+        Assert.StartsWith("AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/", authHeader);
+        Assert.Contains("us-east-1/execute-api/aws4_request", authHeader);
+        Assert.Contains("SignedHeaders=host;x-amz-date,", authHeader);
+    }
+
+    [Fact]
+    public async Task AwsSigV4Auth_CredentialMissing_SendsRequestWithoutAuthHeader()
+    {
+        HttpRequestMessage? captured = null;
+        var resilience = MockResilience(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") }, r => captured = r);
+        var executor = CreateExecutor(resilience);
+
+        var result = await executor.ExecuteAsync(NewRequest(
+            authConfigJson: "{\"type\":\"aws_sigv4\",\"accessKeyIdKey\":\"missing\",\"secretAccessKeyKey\":\"missing\",\"region\":\"us-east-1\",\"service\":\"execute-api\"}",
+            getCredential: (_, _) => Task.FromResult<string?>(null)));
+
+        Assert.True(result.Success);
+        Assert.False(captured!.Headers.Contains("Authorization"));
+        Assert.False(captured.Headers.Contains("X-Amz-Date"));
+    }
+
+    [Fact]
+    public async Task AwsSigV4Auth_SessionTokenConfigured_AddsSecurityTokenHeader_AndIsSignedHeader()
+    {
+        HttpRequestMessage? captured = null;
+        var resilience = MockResilience(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") }, r => captured = r);
+        var executor = CreateExecutor(resilience);
+
+        await executor.ExecuteAsync(NewRequest(
+            authConfigJson: "{\"type\":\"aws_sigv4\",\"accessKeyIdKey\":\"akid\",\"secretAccessKeyKey\":\"secret\",\"sessionTokenKey\":\"token\",\"region\":\"us-east-1\",\"service\":\"execute-api\"}",
+            getCredential: (key, _) => Task.FromResult<string?>(key switch
+            {
+                "akid" => "AKIDEXAMPLE",
+                "secret" => "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
+                "token" => "a-session-token",
+                _ => null,
+            })));
+
+        Assert.Equal("a-session-token", captured!.Headers.GetValues("X-Amz-Security-Token").Single());
+        Assert.Contains("SignedHeaders=host;x-amz-date;x-amz-security-token,", captured.Headers.GetValues("Authorization").Single());
+    }
+
+    // ── mtls ──────────────────────────────────────────────────────────────────
+    // The certificate itself is applied to the HttpClient (via IMtlsHttpClientProvider), not to
+    // the HttpRequestMessage — so these verify the right client reaches the resilience executor,
+    // not any header.
+
+    [Fact]
+    public async Task MtlsAuth_CertResolves_UsesTheProvidedClient_NotTheSharedOne()
+    {
+        // resilience.SendAsync is fully mocked below (never actually calls through to the client's
+        // real handler), so the client just needs to be a distinguishable instance to verify against.
+        var mtlsClient = new HttpClient(new UnusedHandler());
+        var mtlsProvider = new Mock<IMtlsHttpClientProvider>();
+        mtlsProvider.Setup(p => p.GetClient(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<string?>()))
+            .Returns(mtlsClient);
+
+        var resilience = new Mock<IVendorResilienceExecutor>();
+        resilience.Setup(r => r.SendAsync(
+                It.IsAny<Guid>(), It.IsAny<HttpRequestMessage>(), It.IsAny<bool>(), It.IsAny<HttpClient>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") });
+
+        var executor = CreateExecutor(resilience, mtlsProvider: mtlsProvider);
+
+        var certBase64 = Convert.ToBase64String("fake-pfx-bytes"u8.ToArray());
+        await executor.ExecuteAsync(NewRequest(
+            authConfigJson: "{\"type\":\"mtls\",\"certKey\":\"cert\"}",
+            getCredential: (_, _) => Task.FromResult<string?>(certBase64)));
+
+        resilience.Verify(r => r.SendAsync(
+            It.IsAny<Guid>(), It.IsAny<HttpRequestMessage>(), It.IsAny<bool>(),
+            It.Is<HttpClient>(c => ReferenceEquals(c, mtlsClient)), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task MtlsAuth_CredentialMissing_FallsBackToSharedClient_NeverCallsProvider()
+    {
+        var mtlsProvider = new Mock<IMtlsHttpClientProvider>();
+        var resilience = MockResilience(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") });
+        var executor = CreateExecutor(resilience, mtlsProvider: mtlsProvider);
+
+        var result = await executor.ExecuteAsync(NewRequest(
+            authConfigJson: "{\"type\":\"mtls\",\"certKey\":\"missing\"}",
+            getCredential: (_, _) => Task.FromResult<string?>(null)));
+
+        Assert.True(result.Success);
+        mtlsProvider.Verify(p => p.GetClient(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<string?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task MtlsAuth_ProviderReturnsNull_FallsBackToSharedClient_RequestStillSucceeds()
+    {
+        var mtlsProvider = new Mock<IMtlsHttpClientProvider>();
+        mtlsProvider.Setup(p => p.GetClient(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<string?>()))
+            .Returns((HttpClient?)null); // bad password / corrupt PKCS#12
+        var resilience = MockResilience(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") });
+        var executor = CreateExecutor(resilience, mtlsProvider: mtlsProvider);
+
+        var result = await executor.ExecuteAsync(NewRequest(
+            authConfigJson: "{\"type\":\"mtls\",\"certKey\":\"cert\"}",
+            getCredential: (_, _) => Task.FromResult<string?>(Convert.ToBase64String("fake"u8.ToArray()))));
+
+        Assert.True(result.Success);
     }
 
     // ── oauth2 ────────────────────────────────────────────────────────────────

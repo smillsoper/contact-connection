@@ -126,6 +126,10 @@ public static class ServiceCollectionExtensions
         // process. See API_HARDENING_CHECKLIST.md Tier 2.
         services.AddSingleton<IOutboundRateLimiter, RedisOutboundRateLimiter>();
 
+        // mTLS client-certificate HttpClient cache — singleton so the cached clients' TLS
+        // connection pools persist for the process lifetime. See API_HARDENING_CHECKLIST.md Tier 3.
+        services.AddSingleton<IMtlsHttpClientProvider, MtlsHttpClientProvider>();
+
         // Version history — one IVersionHistoryService implementation per scope (tenant/portal
         // persist to different DbContexts), resolved via keyed DI at each call site.
         services.AddKeyedScoped<IVersionHistoryService, TenantVersionHistoryService>("tenant");

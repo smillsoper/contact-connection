@@ -60,7 +60,8 @@ internal static class ApiEndpointTestHelper
         Guid definitionId = default,
         bool allowRetryOnAmbiguousFailure = false,
         IOutboundRateLimiter? rateLimiter = null,
-        int? rateLimitPerMinute = null)
+        int? rateLimitPerMinute = null,
+        IMtlsHttpClientProvider? mtlsProvider = null)
     {
         try
         {
@@ -156,7 +157,11 @@ internal static class ApiEndpointTestHelper
             if (resolvedBody is not null)
                 request.Content = new StringContent(resolvedBody, Encoding.UTF8, bodyContentType ?? "application/json");
 
-            var http = httpFactory.CreateClient("FlowEngine");
+            // mTLS identity is a transport-level property (the TLS handshake itself), not
+            // something ApplyAuth can attach to `request` the way every other auth type's
+            // headers/query params are — so the client itself has to be selected based on the
+            // auth config, not the shared "FlowEngine" client used otherwise.
+            var http = await ResolveHttpClientAsync(authConfigJson, getCredential, httpFactory, mtlsProvider, definitionId, ct);
 
             HttpResponseMessage response;
             if (resilience is not null)
@@ -214,10 +219,15 @@ internal static class ApiEndpointTestHelper
         RunEndpointTestRequest req,
         Func<string, CancellationToken, Task<string?>> getCredential,
         IHttpClientFactory httpFactory,
-        CancellationToken ct)
+        CancellationToken ct,
+        IMtlsHttpClientProvider? mtlsProvider = null)
     {
         // No tokenCache passed — the "Test" button always runs a live, uncached exchange.
-        var result = await RunTestAsync(baseUrl, authConfigJson, req, getCredential, httpFactory, ct);
+        // mtlsProvider IS passed (unlike tokenCache/resilience/rateLimiter, which are
+        // deliberately withheld from a manual test click) — without the right client
+        // certificate, an mtls-configured vendor rejects the TLS handshake outright, so a Test
+        // click means nothing for that auth type unless the cert is actually applied.
+        var result = await RunTestAsync(baseUrl, authConfigJson, req, getCredential, httpFactory, ct, mtlsProvider: mtlsProvider);
         return Results.Ok(result);
     }
 
@@ -352,7 +362,69 @@ internal static class ApiEndpointTestHelper
                 request.Headers.TryAddWithoutValidation(headerName, signature);
                 break;
             }
+            case "aws_sigv4":
+            {
+                var accessKeyId = await getCredential(Str(root, "accessKeyIdKey"), ct);
+                var secretAccessKey = await getCredential(Str(root, "secretAccessKeyKey"), ct);
+                if (accessKeyId is null || secretAccessKey is null) break;
+
+                var sessionTokenKey = Str(root, "sessionTokenKey");
+                var sessionToken = sessionTokenKey.Length > 0 ? await getCredential(sessionTokenKey, ct) : null;
+                var region = Str(root, "region");
+                var service = Str(root, "service");
+
+                var host = uriBuilder.Uri.IsDefaultPort ? uriBuilder.Host : $"{uriBuilder.Host}:{uriBuilder.Port}";
+                var sig = AwsSigV4Signer.Sign(
+                    request.Method.Method, uriBuilder.Path, uriBuilder.Query, host, signaturePayload,
+                    accessKeyId, secretAccessKey, sessionToken, region, service, DateTimeOffset.UtcNow);
+
+                request.Headers.TryAddWithoutValidation("X-Amz-Date", sig.AmzDate);
+                if (sig.SecurityToken is not null)
+                    request.Headers.TryAddWithoutValidation("X-Amz-Security-Token", sig.SecurityToken);
+                request.Headers.TryAddWithoutValidation("Authorization", sig.AuthorizationHeader);
+                break;
+            }
+            // "mtls" intentionally has no case here — the client certificate is applied to the
+            // HttpClient itself (see ResolveHttpClientAsync), not to this HttpRequestMessage.
+            // There are no headers/query params for this auth type to add.
         }
+    }
+
+    /// <summary>Selects the HttpClient to send with: the shared "FlowEngine" client for every
+    /// auth type except "mtls", which needs its own client carrying the configured client
+    /// certificate. Falls back to the shared client if mtlsProvider wasn't supplied, or if the
+    /// cert credential is missing or unusable — same "proceed unauthenticated" precedent every
+    /// other auth type follows when its credential can't be resolved.</summary>
+    private static async Task<HttpClient> ResolveHttpClientAsync(
+        string authConfigJson,
+        Func<string, CancellationToken, Task<string?>> getCredential,
+        IHttpClientFactory httpFactory,
+        IMtlsHttpClientProvider? mtlsProvider,
+        Guid definitionId,
+        CancellationToken ct)
+    {
+        if (mtlsProvider is null) return httpFactory.CreateClient("FlowEngine");
+
+        JsonElement root;
+        try { root = JsonDocument.Parse(authConfigJson).RootElement; }
+        catch { return httpFactory.CreateClient("FlowEngine"); }
+
+        if (!root.TryGetProperty("type", out var tp) || tp.GetString() != "mtls")
+            return httpFactory.CreateClient("FlowEngine");
+
+        var certKey = Str(root, "certKey");
+        var certBase64 = await getCredential(certKey, ct);
+        if (certBase64 is null) return httpFactory.CreateClient("FlowEngine");
+
+        byte[] certBytes;
+        try { certBytes = Convert.FromBase64String(certBase64); }
+        catch (FormatException) { return httpFactory.CreateClient("FlowEngine"); }
+
+        var certPasswordKey = Str(root, "certPasswordKey");
+        var certPassword = certPasswordKey.Length > 0 ? await getCredential(certPasswordKey, ct) : null;
+
+        return mtlsProvider.GetClient(definitionId, certBytes, certPassword)
+            ?? httpFactory.CreateClient("FlowEngine");
     }
 
     /// <summary>Builds and sends the client_credentials token request, and parses the configured

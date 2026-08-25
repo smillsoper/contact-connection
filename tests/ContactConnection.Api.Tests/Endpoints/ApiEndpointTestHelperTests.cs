@@ -334,6 +334,102 @@ public class ApiEndpointTestHelperTests
         Assert.False(captured!.Headers.Contains("X-Sig"));
     }
 
+    // ── aws_sigv4 ─────────────────────────────────────────────────────────────
+    // AwsSigV4Signer's own signing math is covered by AwsSigV4SignerTests (Infrastructure.Tests,
+    // against the official AWS test vectors) — these only verify RunTestAsync resolves the right
+    // credentials and applies the resulting headers.
+
+    [Fact]
+    public async Task AwsSigV4Auth_AppliesAuthorizationAndDateHeaders()
+    {
+        HttpRequestMessage? captured = null;
+        var handler = new FuncHandler(req => { captured = req; return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") }); });
+
+        await ApiEndpointTestHelper.RunTestAsync(
+            "https://vendor.example.com",
+            "{\"type\":\"aws_sigv4\",\"accessKeyIdKey\":\"akid\",\"secretAccessKeyKey\":\"secret\",\"region\":\"us-east-1\",\"service\":\"execute-api\"}",
+            NewRequest(),
+            (key, _) => Task.FromResult<string?>(key == "akid" ? "AKIDEXAMPLE" : "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"),
+            MockFactory(handler).Object, CancellationToken.None);
+
+        Assert.True(captured!.Headers.Contains("X-Amz-Date"));
+        Assert.StartsWith("AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/", captured.Headers.GetValues("Authorization").Single());
+    }
+
+    [Fact]
+    public async Task AwsSigV4Auth_CredentialMissing_SendsRequestWithoutAuthHeader()
+    {
+        HttpRequestMessage? captured = null;
+        var handler = new FuncHandler(req => { captured = req; return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") }); });
+
+        var result = await ApiEndpointTestHelper.RunTestAsync(
+            "https://vendor.example.com",
+            "{\"type\":\"aws_sigv4\",\"accessKeyIdKey\":\"missing\",\"secretAccessKeyKey\":\"missing\",\"region\":\"us-east-1\",\"service\":\"execute-api\"}",
+            NewRequest(), NoCredential, MockFactory(handler).Object, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.False(captured!.Headers.Contains("Authorization"));
+    }
+
+    // ── mtls ──────────────────────────────────────────────────────────────────
+    // The certificate is applied to the HttpClient itself (via IMtlsHttpClientProvider), not to
+    // the HttpRequestMessage, so these verify the right client is used rather than any header.
+
+    [Fact]
+    public async Task MtlsAuth_CertResolves_UsesTheProvidedClient_NotTheSharedOne()
+    {
+        var sharedHandler = new FuncHandler(_ => throw new InvalidOperationException("shared client should not be used"));
+        var mtlsCalled = false;
+        var mtlsHandler = new FuncHandler(req => { mtlsCalled = true; return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") }); });
+        var mtlsClient = new HttpClient(mtlsHandler);
+
+        var mtlsProvider = new Mock<IMtlsHttpClientProvider>();
+        mtlsProvider.Setup(p => p.GetClient(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<string?>())).Returns(mtlsClient);
+
+        var result = await ApiEndpointTestHelper.RunTestAsync(
+            "https://vendor.example.com", "{\"type\":\"mtls\",\"certKey\":\"cert\"}", NewRequest(),
+            (_, _) => Task.FromResult<string?>(Convert.ToBase64String("fake-pfx-bytes"u8.ToArray())),
+            MockFactory(sharedHandler).Object, CancellationToken.None,
+            mtlsProvider: mtlsProvider.Object);
+
+        Assert.True(result.Success);
+        Assert.True(mtlsCalled);
+    }
+
+    [Fact]
+    public async Task MtlsAuth_NoProviderSupplied_FallsBackToSharedClient()
+    {
+        var sharedCalled = false;
+        var handler = new FuncHandler(req => { sharedCalled = true; return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") }); });
+
+        var result = await ApiEndpointTestHelper.RunTestAsync(
+            "https://vendor.example.com", "{\"type\":\"mtls\",\"certKey\":\"cert\"}", NewRequest(),
+            (_, _) => Task.FromResult<string?>(Convert.ToBase64String("fake"u8.ToArray())),
+            MockFactory(handler).Object, CancellationToken.None); // mtlsProvider omitted entirely
+
+        Assert.True(result.Success);
+        Assert.True(sharedCalled);
+    }
+
+    [Fact]
+    public async Task MtlsAuth_ProviderReturnsNull_FallsBackToSharedClient()
+    {
+        var sharedCalled = false;
+        var handler = new FuncHandler(req => { sharedCalled = true; return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") }); });
+
+        var mtlsProvider = new Mock<IMtlsHttpClientProvider>();
+        mtlsProvider.Setup(p => p.GetClient(It.IsAny<Guid>(), It.IsAny<byte[]>(), It.IsAny<string?>())).Returns((HttpClient?)null);
+
+        var result = await ApiEndpointTestHelper.RunTestAsync(
+            "https://vendor.example.com", "{\"type\":\"mtls\",\"certKey\":\"cert\"}", NewRequest(),
+            (_, _) => Task.FromResult<string?>(Convert.ToBase64String("fake"u8.ToArray())),
+            MockFactory(handler).Object, CancellationToken.None,
+            mtlsProvider: mtlsProvider.Object);
+
+        Assert.True(result.Success);
+        Assert.True(sharedCalled);
+    }
+
     // ── oauth2 — the admin/portal "Test" button never passes a tokenCache (always live) ────────
 
     [Fact]

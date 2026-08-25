@@ -107,6 +107,7 @@ public static class FlowSessionsEndpoints
         IOAuth2TokenCache tokenCache,
         IVendorResilienceExecutor resilience,
         IOutboundRateLimiter rateLimiter,
+        IMtlsHttpClientProvider mtlsProvider,
         TenantContext tenantContext,
         CancellationToken ct)
     {
@@ -222,7 +223,7 @@ public static class FlowSessionsEndpoints
 
         var response = await ApiEndpointTestHelper.RunTestAsync(
             baseUrl!, authConfig!, testReq, getCredential, httpFactory, ct, tokenCache,
-            resilience, resolvedDefinitionId, resolvedIsRetrySafe, rateLimiter, resolvedRateLimitPerMinute);
+            resilience, resolvedDefinitionId, resolvedIsRetrySafe, rateLimiter, resolvedRateLimitPerMinute, mtlsProvider);
 
         if (response.Error is not null)
             return Results.Ok(new AddressValidationResult("error", "API Error", response.Error, null, null));
@@ -251,6 +252,7 @@ public static class FlowSessionsEndpoints
         IOAuth2TokenCache tokenCache,
         IVendorResilienceExecutor resilience,
         IOutboundRateLimiter rateLimiter,
+        IMtlsHttpClientProvider mtlsProvider,
         TenantContext tenantContext,
         CancellationToken ct)
     {
@@ -341,7 +343,7 @@ public static class FlowSessionsEndpoints
 
         var response = await ApiEndpointTestHelper.RunTestAsync(
             baseUrl!, authConfig!, testReq, getCredential, httpFactory, ct, tokenCache,
-            resilience, resolvedDefinitionId, resolvedIsRetrySafe, rateLimiter, resolvedRateLimitPerMinute);
+            resilience, resolvedDefinitionId, resolvedIsRetrySafe, rateLimiter, resolvedRateLimitPerMinute, mtlsProvider);
 
         if (response.Error is not null) return Results.Ok(empty);
 
@@ -367,6 +369,7 @@ public static class FlowSessionsEndpoints
         IOAuth2TokenCache tokenCache,
         IVendorResilienceExecutor resilience,
         IOutboundRateLimiter rateLimiter,
+        IMtlsHttpClientProvider mtlsProvider,
         TenantContext tenantContext,
         CancellationToken ct)
     {
@@ -398,7 +401,7 @@ public static class FlowSessionsEndpoints
 
         var response = await ApiEndpointTestHelper.RunTestAsync(
             baseUrl!, authConfig!, testReq, getCredential, httpFactory, ct, tokenCache,
-            resilience, definitionId, isRetrySafe, rateLimiter, rateLimitPerMinute);
+            resilience, definitionId, isRetrySafe, rateLimiter, rateLimitPerMinute, mtlsProvider);
 
         if (response.Error is not null) return Results.Ok(empty);
 
@@ -424,6 +427,7 @@ public static class FlowSessionsEndpoints
         IOAuth2TokenCache tokenCache,
         IVendorResilienceExecutor resilience,
         IOutboundRateLimiter rateLimiter,
+        IMtlsHttpClientProvider mtlsProvider,
         TenantContext tenantContext,
         CancellationToken ct)
     {
@@ -465,7 +469,7 @@ public static class FlowSessionsEndpoints
 
         var response = await ApiEndpointTestHelper.RunTestAsync(
             baseUrl!, authConfig!, testReq, getCredential, httpFactory, ct, tokenCache,
-            resilience, definitionId, isRetrySafe, rateLimiter, rateLimitPerMinute);
+            resilience, definitionId, isRetrySafe, rateLimiter, rateLimitPerMinute, mtlsProvider);
 
         if (response.Error is not null)
             return Results.Ok(new AutocompleteSelectionResult(null, response.Error));

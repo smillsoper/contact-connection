@@ -228,6 +228,7 @@ public static class PortalApiEndpointsEndpoints
         IPortalApiDefinitionRepository defRepo,
         IPortalCredentialStore credStore,
         IHttpClientFactory httpFactory,
+        IMtlsHttpClientProvider mtlsProvider,
         CancellationToken ct)
     {
         var def = await defRepo.GetByIdAsync(definitionId, ct);
@@ -239,7 +240,8 @@ public static class PortalApiEndpointsEndpoints
             request,
             (key, token) => credStore.GetAsync(key, token),
             httpFactory,
-            ct);
+            ct,
+            mtlsProvider);
     }
 
     private static async Task<IResult> Delete(
