@@ -79,4 +79,78 @@ public class HmacSignerTests
         var b = HmacSigner.ComputeSignatureHeaderValue("SHA256", "secret-b", "payload", includeTimestamp: false);
         Assert.NotEqual(a, b);
     }
+
+    // ── VerifySignatureHeaderValue — the inbound-webhook mirror of Compute ────────────────────
+
+    [Theory]
+    [InlineData("SHA256")]
+    [InlineData("SHA512")]
+    [InlineData("SHA1")]
+    [InlineData("MD5")]
+    public void RoundTrip_NoTimestamp_ComputeThenVerify_Succeeds(string algorithm)
+    {
+        var header = HmacSigner.ComputeSignatureHeaderValue(algorithm, "sekret", "the-payload", includeTimestamp: false);
+        Assert.True(HmacSigner.VerifySignatureHeaderValue(algorithm, "sekret", "the-payload", header, includeTimestamp: false));
+    }
+
+    [Fact]
+    public void RoundTrip_WithTimestamp_ComputeThenVerify_Succeeds()
+    {
+        var header = HmacSigner.ComputeSignatureHeaderValue("SHA256", "sekret", "the-payload", includeTimestamp: true);
+        Assert.True(HmacSigner.VerifySignatureHeaderValue("SHA256", "sekret", "the-payload", header, includeTimestamp: true));
+    }
+
+    [Fact]
+    public void Verify_WrongSecret_Fails()
+    {
+        var header = HmacSigner.ComputeSignatureHeaderValue("SHA256", "sekret", "the-payload", includeTimestamp: false);
+        Assert.False(HmacSigner.VerifySignatureHeaderValue("SHA256", "wrong-secret", "the-payload", header, includeTimestamp: false));
+    }
+
+    [Fact]
+    public void Verify_TamperedPayload_Fails()
+    {
+        var header = HmacSigner.ComputeSignatureHeaderValue("SHA256", "sekret", "the-payload", includeTimestamp: false);
+        Assert.False(HmacSigner.VerifySignatureHeaderValue("SHA256", "sekret", "a-different-payload", header, includeTimestamp: false));
+    }
+
+    [Fact]
+    public void Verify_TamperedHeader_Fails()
+    {
+        var header = HmacSigner.ComputeSignatureHeaderValue("SHA256", "sekret", "the-payload", includeTimestamp: false);
+        var tampered = header[..^1] + (header[^1] == 'a' ? 'b' : 'a');
+        Assert.False(HmacSigner.VerifySignatureHeaderValue("SHA256", "sekret", "the-payload", tampered, includeTimestamp: false));
+    }
+
+    [Fact]
+    public void Verify_NullOrEmptyHeader_Fails()
+    {
+        Assert.False(HmacSigner.VerifySignatureHeaderValue("SHA256", "sekret", "payload", null, includeTimestamp: false));
+        Assert.False(HmacSigner.VerifySignatureHeaderValue("SHA256", "sekret", "payload", "", includeTimestamp: false));
+    }
+
+    [Fact]
+    public void Verify_MalformedTimestampedHeader_Fails()
+    {
+        Assert.False(HmacSigner.VerifySignatureHeaderValue("SHA256", "sekret", "payload", "not-the-right-format", includeTimestamp: true));
+        Assert.False(HmacSigner.VerifySignatureHeaderValue("SHA256", "sekret", "payload", "t=abc,v1=deadbeef", includeTimestamp: true));
+    }
+
+    [Fact]
+    public void Verify_TimestampOutsideTolerance_Fails_EvenWithCorrectSignature()
+    {
+        var staleTimestamp = DateTimeOffset.UtcNow.AddSeconds(-600).ToUnixTimeSeconds();
+        var expectedHash = Convert.ToHexStringLower(new HMACSHA256(Encoding.UTF8.GetBytes("sekret"))
+            .ComputeHash(Encoding.UTF8.GetBytes($"{staleTimestamp}.payload")));
+        var header = $"t={staleTimestamp},v1={expectedHash}";
+
+        Assert.False(HmacSigner.VerifySignatureHeaderValue("SHA256", "sekret", "payload", header, includeTimestamp: true, toleranceSeconds: 300));
+    }
+
+    [Fact]
+    public void Verify_TimestampWithinTolerance_Succeeds()
+    {
+        var header = HmacSigner.ComputeSignatureHeaderValue("SHA256", "sekret", "payload", includeTimestamp: true);
+        Assert.True(HmacSigner.VerifySignatureHeaderValue("SHA256", "sekret", "payload", header, includeTimestamp: true, toleranceSeconds: 300));
+    }
 }

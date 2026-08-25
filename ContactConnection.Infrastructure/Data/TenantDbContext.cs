@@ -52,6 +52,8 @@ public class TenantDbContext : DbContext
     public DbSet<Dashboard> Dashboards => Set<Dashboard>();
     public DbSet<EntityVersion> EntityVersions => Set<EntityVersion>();
     public DbSet<CredentialAuditEntry> CredentialAuditEntries => Set<CredentialAuditEntry>();
+    public DbSet<WebhookEndpoint> WebhookEndpoints => Set<WebhookEndpoint>();
+    public DbSet<WebhookEvent> WebhookEvents => Set<WebhookEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -92,6 +94,8 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new DashboardConfiguration());
         modelBuilder.ApplyConfiguration(new EntityVersionConfiguration());
         modelBuilder.ApplyConfiguration(new CredentialAuditEntryConfiguration());
+        modelBuilder.ApplyConfiguration(new WebhookEndpointConfiguration());
+        modelBuilder.ApplyConfiguration(new WebhookEventConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 

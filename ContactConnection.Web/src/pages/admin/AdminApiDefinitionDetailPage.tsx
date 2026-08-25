@@ -18,6 +18,13 @@ import {
   listAdminApiEndpointVersions,
   revertAdminApiEndpoint,
   listAdminTtsProviders,
+  getAdminWebhook,
+  enableAdminWebhook,
+  updateAdminWebhook,
+  regenerateAdminWebhookSecret,
+  regenerateAdminWebhookToken,
+  disableAdminWebhook,
+  listAdminWebhookEvents,
 } from '../../api/adminApiDefinitions'
 import { listAdminCredentials, setAdminCredential } from '../../api/adminCredentials'
 
@@ -44,6 +51,13 @@ const adminApi: DetailApi = {
   revertDefinition: revertAdminApiDefinition,
   listEndpointVersions: listAdminApiEndpointVersions,
   revertEndpoint: revertAdminApiEndpoint,
+  getWebhook: getAdminWebhook,
+  enableWebhook: enableAdminWebhook,
+  updateWebhook: updateAdminWebhook,
+  regenerateWebhookSecret: regenerateAdminWebhookSecret,
+  regenerateWebhookToken: regenerateAdminWebhookToken,
+  disableWebhook: disableAdminWebhook,
+  listWebhookEvents: listAdminWebhookEvents,
 }
 
 export default function AdminApiDefinitionDetailPage() {

@@ -8,6 +8,7 @@ import AuthConfigForm, {
 import type { AuthTestResult } from '../../api/adminApiDefinitions'
 import type { EntityVersionSummary } from '../../api/versioning'
 import VersionHistoryPanel from '../versioning/VersionHistoryPanel'
+import WebhookConfigPanel from '../versioning/WebhookConfigPanel'
 import {
   API_CATEGORIES,
   API_CATEGORY_LABELS,
@@ -83,6 +84,39 @@ export interface EndpointTestResult {
   error: string | null
 }
 
+export interface WebhookConfig {
+  id: string
+  tenantApiEndpointId: string
+  path: string
+  tenantSubdomain: string
+  signatureHeaderName: string
+  signatureAlgorithm: string
+  includeTimestamp: boolean
+  timestampToleranceSeconds: number
+  isActive: boolean
+  createdAt: string
+  updatedAt: string | null
+  secret: string | null
+}
+
+export interface UpdateWebhookConfigData {
+  signatureHeaderName?: string
+  signatureAlgorithm?: string
+  includeTimestamp?: boolean
+  timestampToleranceSeconds?: number
+  isActive?: boolean
+}
+
+export interface WebhookEventRecord {
+  id: string
+  receivedAt: string
+  signatureValid: boolean
+  processingStatus: 'received' | 'processed' | 'duplicate' | 'rejected' | 'failed'
+  processingError: string | null
+  outcomeKey: string | null
+  processedAt: string | null
+}
+
 export interface DetailApi {
   getDefinition(id: string): Promise<ApiDefinitionRecord>
   updateDefinition(id: string, data: {
@@ -121,6 +155,17 @@ export interface DetailApi {
   revertDefinition(id: string, versionNumber: number): Promise<ApiDefinitionRecord>
   listEndpointVersions(definitionId: string, endpointId: string): Promise<EntityVersionSummary[]>
   revertEndpoint(definitionId: string, endpointId: string, versionNumber: number): Promise<ApiEndpointRecord>
+  // Inbound webhooks — tenant-scoped only (see API_HARDENING_CHECKLIST.md Tier 2). Optional
+  // because Portal definitions don't support webhooks yet — no domain consumer exists yet for a
+  // platform-shared vendor push, so the Portal side simply omits these and the UI hides the
+  // "Webhook" button/panel accordingly.
+  getWebhook?(definitionId: string, endpointId: string): Promise<WebhookConfig>
+  enableWebhook?(definitionId: string, endpointId: string): Promise<WebhookConfig>
+  updateWebhook?(definitionId: string, endpointId: string, data: UpdateWebhookConfigData): Promise<WebhookConfig>
+  regenerateWebhookSecret?(definitionId: string, endpointId: string): Promise<WebhookConfig>
+  regenerateWebhookToken?(definitionId: string, endpointId: string): Promise<WebhookConfig>
+  disableWebhook?(definitionId: string, endpointId: string): Promise<void>
+  listWebhookEvents?(definitionId: string, endpointId: string): Promise<WebhookEventRecord[]>
 }
 
 interface EndpointFormData {
@@ -1477,6 +1522,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
   const [togglingActive, setTogglingActive] = useState(false)
   const [showDefHistory, setShowDefHistory] = useState(false)
   const [historyEndpointId, setHistoryEndpointId] = useState<string | null>(null)
+  const [webhookEndpointId, setWebhookEndpointId] = useState<string | null>(null)
 
   // Endpoint modal
   const [endpointModal, setEndpointModal] = useState<'create' | 'edit' | null>(null)
@@ -1999,6 +2045,14 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                         >
                           History
                         </button>
+                        {api.getWebhook && (
+                          <button
+                            onClick={() => setWebhookEndpointId(ep.id)}
+                            className="text-gray-400 hover:text-gray-300 text-xs font-medium transition-colors"
+                          >
+                            Webhook
+                          </button>
+                        )}
                         <button
                           onClick={() => openEditEndpoint(ep)}
                           className="text-indigo-400 hover:text-indigo-300 text-xs font-medium transition-colors"
@@ -2774,6 +2828,21 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
             setEndpoints((prev) => prev.map((ep) => (ep.id === historyEndpointId ? updated : ep)))
           }}
           onClose={() => setHistoryEndpointId(null)}
+        />
+      )}
+
+      {webhookEndpointId && api.getWebhook && api.enableWebhook && api.updateWebhook
+        && api.regenerateWebhookSecret && api.regenerateWebhookToken && api.disableWebhook && api.listWebhookEvents && (
+        <WebhookConfigPanel
+          endpointName={endpoints.find((ep) => ep.id === webhookEndpointId)?.name ?? ''}
+          getWebhook={() => api.getWebhook!(definitionId, webhookEndpointId)}
+          enableWebhook={() => api.enableWebhook!(definitionId, webhookEndpointId)}
+          updateWebhook={(data) => api.updateWebhook!(definitionId, webhookEndpointId, data)}
+          regenerateSecret={() => api.regenerateWebhookSecret!(definitionId, webhookEndpointId)}
+          regenerateToken={() => api.regenerateWebhookToken!(definitionId, webhookEndpointId)}
+          disableWebhook={() => api.disableWebhook!(definitionId, webhookEndpointId)}
+          listEvents={() => api.listWebhookEvents!(definitionId, webhookEndpointId)}
+          onClose={() => setWebhookEndpointId(null)}
         />
       )}
     </div>

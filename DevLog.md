@@ -96,6 +96,7 @@
 | 84 | 2026-08-09 | 10:17 AM PDT | 11:17 AM PDT | 60 min | ~6772 min |
 | 85 | 2026-08-16 to 2026-08-18 | 9:56 AM PDT (8/16) | 9:05 AM PDT (8/18) | ~2829 min (47h 9m; chat left open across days, not continuous active work) | ~9601 min |
 | 86 | 2026-08-24 | 7:30 AM PDT | 8:16 AM PDT | 46 min | ~9647 min |
+| 87 | 2026-08-24 | 8:25 AM PDT | 9:52 AM PDT | 87 min | ~9734 min |
 
 ---
 
@@ -3750,3 +3751,37 @@ Frontend: new "Signed Payload Template" textarea on `AuthConfigForm.tsx`'s HMAC 
 1. Tier 2 item 5 — inbound webhook support. Everything today is synchronous request/response only; `fulfillment_tracking`/`tfn_assignment_*` map naturally to vendor-pushed webhooks in the real world, so polling-only support is a structural gap, not a config one.
 2. Worth noting: the hmac work this session built the *outbound* signing half. An inbound webhook receiver will likely want an hmac-signature *verification* helper too (checking an inbound `X-Signature`-style header against a computed hash of the raw request body) — the mirror image of `HmacSigner.ComputeSignatureHeaderValue`, and could reuse most of the same algorithm-dispatch code.
 3. Tier 3 after that: credential expiry tracking/warnings, mTLS/AWS SigV4 auth, sensitive-field masking for API request/response bodies landing in `flow_sessions.variable_store`.
+
+## Session 87 — API Hardening: Tier 2 Fully Closed (Inbound Webhook Support)
+
+**Date:** 2026-08-24
+**Start:** 8:25 AM PDT
+**End:** 9:52 AM PDT
+**Duration:** 87 minutes
+**Cumulative Total:** ~9734 min
+
+### What Was Done
+
+Picked up `API_HARDENING_CHECKLIST.md`'s last open Tier 2 item — inbound webhook support. Entered plan mode given the scope (new entities, a public unauthenticated receiver, dispatch semantics); asked the user two scoping questions before building: **tenant-scoped only** (Portal/platform-shared webhooks descoped — no TFN/telephony domain entity exists yet to dispatch a portal-side event to, so it would only ever reach "received and stored"), and **reuse the existing outcome-mapping DSL** for payload mapping rather than build dedicated path fields.
+
+**New domain entities.** `WebhookEndpoint` — 1:1 sidecar to a `TenantApiEndpoint` (unique FK), opaque random `Token` for the public URL, signature config (header name, SHA256/512/1/MD5, optional Stripe/Svix-style timestamped format + tolerance window). The shared secret is deliberately not stored on the entity — it lives in the existing `ITenantCredentialStore` under the deterministic key `webhook:{Id}`, exactly like every other credential in this system, no new secret-storage mechanism. `WebhookEvent` — append-only receipt log; `RawBody` is a `text` column (not `jsonb`) so a non-JSON or malformed vendor body never fails on write; `BodyHash` (SHA256 of the raw body) is always computed as the dedup key. Migration `AddWebhooks` applied to `tenant_test_tenant`.
+
+**Signature verification.** New `HmacSigner.VerifySignatureHeaderValue` — the true mirror of Session 86's `ComputeSignatureHeaderValue`, same file/algorithm dispatch. Only recognizes the two formats `ComputeSignatureHeaderValue` itself produces (bare hex, or `t=...,v1=...`); a stale timestamp outside the configured tolerance is rejected even with an otherwise-correct signature (replay protection). Comparison is constant-time via `CryptographicOperations.FixedTimeEquals`.
+
+**The receiver.** New public `POST /api/v1/webhooks/{token}` (`AllowAnonymous`) relies entirely on the *existing* `TenantResolutionMiddleware` for tenant identification — a vendor posting to the tenant's real subdomain host gets `TenantContext.Current` populated for free via the middleware's host-header fallback, exactly like every other tenant-scoped request. No middleware changes needed at all. Core logic factored into an internal, unit-testable `WebhookReceiveHandler` (mirrors the `ApiEndpointTestHelper` precedent of keeping the minimal-API delegate thin): verify signature → dedup check (`ExistsAsync` on `(WebhookEndpointId, BodyHash)`, backed by a real unique index as race defense-in-depth) → parse JSON → evaluate the payload mapping → dispatch.
+
+**Payload mapping — reused the existing DSL as-is, zero new mapping code.** `AddressResponseMappingEvaluator` (the evaluator already backing the `ResponseMapping` field's address-validation outcomes/conditions/fieldMappings, in `FlowSessionsEndpoints.cs`, with its existing `ResponseMappingPanel` admin UI) turned out to be domain-agnostic despite the name — its return shape is just an outcome name plus a resolved `to`-target dictionary. Called directly from the new webhook handler with zero extraction, rename, or new frontend field-mapping UI. An admin configures a `fulfillment_tracking` endpoint's webhook payload mapping in the exact same panel they'd use for a live response.
+
+**Dispatch — wired for the one sub-type with a real domain sink today.** `fulfillment_tracking`: outcome name `"shipped"` (requires resolved `orderLineId` + `trackingNumber`) → `OrderLine.Ship(...)`; `"delivered"` (requires `orderLineId`) → `OrderLine.MarkDelivered()`; both via new `IOrderRepository.GetByLineIdAsync` — a fulfillment webhook identifies a shipment by *our* `OrderLine.Id` (the vendor is expected to have been given it as their reference at submit time; no new outbound wiring needed since `{{...}}` body templating already supports passing it). Any other/unrecognized sub-type or outcome is stored/logged only, matching the checklist's own note that no dispatch target exists yet for `tfn_assignment_*`/`campaign_results`.
+
+**Admin config + frontend.** `GET/POST/PATCH/DELETE .../api-endpoints/{id}/webhook`, `.../webhook/regenerate-secret`, `.../webhook/regenerate-token`, `.../webhook/events?take=n` added to `AdminApiEndpointsEndpoints`; the secret is reveal-once (returned only by enable/regenerate-secret responses, never re-fetchable via GET). New `WebhookConfigPanel.tsx` (mirrors `CredentialAuditPanel`/`VersionHistoryPanel`'s modal shape) wired as a "Webhook" button per endpoint row in the shared `ApiDefinitionDetailContent.tsx`. The six webhook methods are optional on the shared `DetailApi` interface (same pattern as `listTtsProviders?`), so the Portal wrapper simply omits them and the button doesn't render there — no Portal-side webhook UI exists, matching the tenant-scoped-only decision.
+
+**Verification.** 30 new tests: 12 `HmacSignerTests` round-trip/tamper/replay-window cases (bumped from a `[Theory]` covering all 4 algorithms), 7 `WebhookEndpointRepository`/`WebhookEventRepository` cases against EF InMemory, 11 `WebhookReceiveHandlerTests` dispatch cases (signature valid/invalid/null-secret/stale-timestamp, dedup short-circuit, non-JSON body, shipped/delivered success, missing-field failure, no-matching-line failure, unrecognized-sub-type stores-only). `dotnet test` across the whole solution: **221/221 passing** (45 Domain, 20 Application, 116 Infrastructure, 40 Api). `dotnet build` and `npm run build`/`tsc -b` both clean, 0 errors.
+
+**Live-verified** against the running local stack: created a scratch Admin API Definition/Endpoint (category `fulfillment`, sub-type `fulfillment_tracking`) with a `shipped`/`delivered` outcome mapping, enabled its webhook, and drove the real `POST /api/v1/webhooks/{token}` path as `admin@contactconnection.local` on `test-tenant` against a scratch `Order`/`OrderLine` (inserted directly via SQL — no cart/checkout flow needed for this kind of verification). A correctly-signed (openssl HMAC-SHA256, Stripe/Svix timestamped format) `shipped` payload updated the order line's `fulfillment_status`/`tracking_number` in Postgres and logged a `processed` `WebhookEvent`; a `delivered` follow-up updated it again; a bad-signature POST was correctly rejected with 401 and logged as `rejected`; and a byte-identical redelivery of the `shipped` payload returned 200 without creating a second event row or reprocessing — confirmed via direct DB query (event count stayed at 2 `processed` rows, not 3). Scratch definition, endpoint, webhook, credential, order, order line, and webhook events all deleted after verification.
+
+**Final state: Tier 1 and Tier 2 are both now fully closed.** Next up is Tier 3 (credential expiry tracking/warnings, mTLS/AWS SigV4 auth, sensitive-field masking) — none urgent, no particular order required.
+
+### Next Session — pick up here
+1. Tier 3, top-down: credential expiry tracking/warnings, mTLS/AWS SigV4 auth, sensitive-field masking for API request/response bodies landing in `flow_sessions.variable_store`.
+2. `tfn_assignment_*`/`campaign_results` webhooks are received/logged but not dispatched (no domain sink) — that gap closes naturally once the FreeSWITCH + Telephony session builds real TFN/telephony entities, not as further API-hardening work.

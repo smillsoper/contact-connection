@@ -195,6 +195,9 @@ app.MapTenantAdminInviteEndpoints();
 app.MapFreeSwitchDirectoryEndpoints();
 app.MapTtsStreamRelayEndpoints();
 
+// Inbound vendor webhooks (public — authenticated via per-endpoint HMAC signature, not bearer JWT)
+app.MapWebhooksEndpoints();
+
 // SignalR hubs
 app.MapHub<FlowHub>("/hubs/flow");
 app.MapHub<CallTraceHub>("/hubs/call-trace");

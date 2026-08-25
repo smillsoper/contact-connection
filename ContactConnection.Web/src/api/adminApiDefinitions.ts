@@ -170,6 +170,74 @@ export function revertAdminApiEndpoint(definitionId: string, endpointId: string,
   return api.post<ApiEndpointRecord>(`/api/v1/admin/api-definitions/${definitionId}/endpoints/${endpointId}/versions/${versionNumber}/revert`, {})
 }
 
+// ─── Inbound webhooks — see API_HARDENING_CHECKLIST.md Tier 2 ──────────────────
+
+export interface WebhookConfig {
+  id: string
+  tenantApiEndpointId: string
+  path: string
+  tenantSubdomain: string
+  signatureHeaderName: string
+  signatureAlgorithm: string
+  includeTimestamp: boolean
+  timestampToleranceSeconds: number
+  isActive: boolean
+  createdAt: string
+  updatedAt: string | null
+  /** Only populated by enable/regenerate-secret responses — shown to the admin once and never
+   * re-fetchable afterward. */
+  secret: string | null
+}
+
+export interface UpdateWebhookConfigData {
+  signatureHeaderName?: string
+  signatureAlgorithm?: string
+  includeTimestamp?: boolean
+  timestampToleranceSeconds?: number
+  isActive?: boolean
+}
+
+export interface WebhookEventRecord {
+  id: string
+  receivedAt: string
+  signatureValid: boolean
+  processingStatus: 'received' | 'processed' | 'duplicate' | 'rejected' | 'failed'
+  processingError: string | null
+  outcomeKey: string | null
+  processedAt: string | null
+}
+
+const webhookBase = (definitionId: string, endpointId: string) =>
+  `/api/v1/admin/api-definitions/${definitionId}/endpoints/${endpointId}/webhook`
+
+export function getAdminWebhook(definitionId: string, endpointId: string): Promise<WebhookConfig> {
+  return api.get<WebhookConfig>(webhookBase(definitionId, endpointId))
+}
+
+export function enableAdminWebhook(definitionId: string, endpointId: string): Promise<WebhookConfig> {
+  return api.post<WebhookConfig>(webhookBase(definitionId, endpointId), {})
+}
+
+export function updateAdminWebhook(definitionId: string, endpointId: string, data: UpdateWebhookConfigData): Promise<WebhookConfig> {
+  return api.patch<WebhookConfig>(webhookBase(definitionId, endpointId), data)
+}
+
+export function regenerateAdminWebhookSecret(definitionId: string, endpointId: string): Promise<WebhookConfig> {
+  return api.post<WebhookConfig>(`${webhookBase(definitionId, endpointId)}/regenerate-secret`, {})
+}
+
+export function regenerateAdminWebhookToken(definitionId: string, endpointId: string): Promise<WebhookConfig> {
+  return api.post<WebhookConfig>(`${webhookBase(definitionId, endpointId)}/regenerate-token`, {})
+}
+
+export function disableAdminWebhook(definitionId: string, endpointId: string): Promise<void> {
+  return api.delete<void>(webhookBase(definitionId, endpointId))
+}
+
+export function listAdminWebhookEvents(definitionId: string, endpointId: string, take = 50): Promise<WebhookEventRecord[]> {
+  return api.get<WebhookEventRecord[]>(`${webhookBase(definitionId, endpointId)}/events?take=${take}`)
+}
+
 // ─── Tenant API Preferences ──────────────────────────────────────────────────
 
 export type ApiPreferenceSource = 'portal' | 'tenant'

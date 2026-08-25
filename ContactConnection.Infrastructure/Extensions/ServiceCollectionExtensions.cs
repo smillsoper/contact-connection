@@ -69,6 +69,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IPortalApiEndpointRepository, PortalApiEndpointRepository>();
         services.AddScoped<ITenantApiEndpointRepository, TenantApiEndpointRepository>();
         services.AddScoped<ITenantApiPreferenceRepository, TenantApiPreferenceRepository>();
+        services.AddScoped<IWebhookEndpointRepository, WebhookEndpointRepository>();
+        services.AddScoped<IWebhookEventRepository, WebhookEventRepository>();
 
         services.AddScoped<ITenantInviteRepository, TenantInviteRepository>();
         services.AddScoped<ITenantAdminInviteRepository, TenantAdminInviteRepository>();

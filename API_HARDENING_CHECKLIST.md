@@ -319,9 +319,67 @@ are real production risk for a real-time telephony product, not nice-to-haves.
       the body-signing case, `712a9945...` for the template case (a different signature than the
       body-signing case, confirming the template genuinely overrides the body rather than being
       ignored). Scratch definition and credential deleted after verification.
-- [ ] **Inbound webhook support.** Everything today is synchronous request/response. Sub-types
-      like `fulfillment_tracking` and `tfn_assignment_*` map naturally to vendor-pushed webhooks
-      in the real world; polling-only support is a structural gap, not a config one.
+- [x] **Inbound webhook support.** — closed Session 87 (2026-08-24). Tenant-scoped only (user
+      call — Portal/platform-shared webhooks descoped until a real portal-side consumer exists;
+      no TFN/telephony domain entities exist yet, so a portal webhook would only ever reach
+      "received and stored," never dispatched). New `WebhookEndpoint` entity — 1:1 sidecar to a
+      `TenantApiEndpoint` (unique FK), opaque random `Token` used in the public URL, signature
+      config (header name, SHA256/512/1/MD5, optional Stripe/Svix-style timestamped format,
+      tolerance window). Shared secret deliberately not stored on the entity — lives in the
+      existing `ITenantCredentialStore` under the deterministic key `webhook:{Id}`, same as every
+      other credential. New `WebhookEvent` — append-only receipt log (raw body as `text`, not
+      `jsonb`, to tolerate non-JSON/malformed bodies; `BodyHash` always computed as the dedup key;
+      `ProcessingStatus`: received/processed/duplicate/rejected/failed). New
+      `HmacSigner.VerifySignatureHeaderValue` — the true mirror of Session 86's
+      `ComputeSignatureHeaderValue`, same file/algorithm dispatch, constant-time comparison via
+      `CryptographicOperations.FixedTimeEquals`, rejects a stale timestamp outside tolerance
+      (replay protection) even with an otherwise-correct signature. New public
+      `POST /api/v1/webhooks/{token}` (`AllowAnonymous`) — relies entirely on the **existing**
+      `TenantResolutionMiddleware` for tenant identification (host-header subdomain, same as
+      every other tenant-scoped request); no middleware changes needed. Core logic factored into
+      an internal, unit-testable `WebhookReceiveHandler` (mirrors the `ApiEndpointTestHelper`
+      precedent): verify signature → dedup check (`ExistsAsync` on `(WebhookEndpointId,
+      BodyHash)`, backed by a real unique index as race defense-in-depth) → parse JSON → evaluate
+      the payload mapping → dispatch. **Payload mapping reuses the existing outcome-mapping DSL
+      as-is** (user call) — `AddressResponseMappingEvaluator` (the evaluator already backing the
+      `ResponseMapping` field's address-validation outcomes/conditions/fieldMappings, and its
+      existing `ResponseMappingPanel` admin UI) is domain-agnostic despite the name, so it's
+      called directly with zero new field-mapping UI or backend code. Dispatch wired for the one
+      sub-type with a real domain sink today — `fulfillment_tracking`: outcome name `"shipped"`
+      (requires resolved `orderLineId` + `trackingNumber`) → `OrderLine.Ship(...)`; `"delivered"`
+      (requires `orderLineId`) → `OrderLine.MarkDelivered()`; both via new
+      `IOrderRepository.GetByLineIdAsync` (a fulfillment webhook identifies a shipment by our
+      `OrderLine.Id`, not `Order.Id` — the vendor is expected to have been given it as their
+      reference at submit time, no new outbound wiring needed since `{{...}}` body templating
+      already supports this). Any other/unrecognized sub-type or outcome is stored/logged only —
+      documented gap, no dispatch target exists yet for `tfn_assignment_*`/`campaign_results`.
+      Admin config: `GET/POST/PATCH/DELETE .../endpoints/{id}/webhook`,
+      `.../webhook/regenerate-secret`, `.../webhook/regenerate-token`,
+      `.../webhook/events?take=n` on `AdminApiEndpointsEndpoints`; secret is reveal-once (returned
+      only by enable/regenerate-secret, never re-fetchable). Frontend: new `WebhookConfigPanel`
+      (mirrors `CredentialAuditPanel`/`VersionHistoryPanel`'s modal shape) wired as a "Webhook"
+      button per endpoint row in the shared `ApiDefinitionDetailContent.tsx` — enable/URL/secret-
+      reveal/signature config/recent-events log; the six webhook methods are optional on the
+      shared `DetailApi` interface (same pattern as `listTtsProviders?`) so the Portal wrapper
+      simply omits them and the button doesn't render there. **Verification:** 30 new tests
+      (9 `HmacSigner` round-trip/tamper/replay-window cases, 7 `WebhookEndpointRepository`/
+      `WebhookEventRepository` cases against EF InMemory, 11 `WebhookReceiveHandler` dispatch
+      cases covering signature valid/invalid/null-secret/stale-timestamp, dedup short-circuit,
+      non-JSON body, shipped/delivered success, missing-field failure, no-matching-line failure,
+      and unrecognized-sub-type stores-only) — `dotnet test` across the whole solution:
+      **221/221 passing** (45 Domain, 20 Application, 116 Infrastructure, 40 Api). `dotnet build`
+      and `npm run build`/`tsc -b` both clean, 0 errors. **Live-verified** against the running
+      local stack: created a scratch Admin API Definition/Endpoint (category `fulfillment`,
+      sub-type `fulfillment_tracking`) with a `shipped`/`delivered` outcome mapping, enabled its
+      webhook, and drove the real `POST /api/v1/webhooks/{token}` path as `admin@
+      contactconnection.local` on `test-tenant` against a scratch `Order`/`OrderLine`: a
+      correctly-signed `shipped` payload updated the order line's `fulfillment_status`/
+      `tracking_number` in Postgres and logged a `processed` `WebhookEvent`; a `delivered`
+      follow-up updated it again; a bad-signature POST was correctly rejected with 401 and logged
+      as `rejected`; and a byte-identical redelivery of the `shipped` payload returned 200 without
+      creating a second event row or reprocessing (confirmed via direct DB query — event count
+      stayed at 2 `processed` rows, not 3). Scratch definition, endpoint, webhook, credential,
+      order, order line, and webhook events all deleted after verification.
 
 ## Tier 3 — Lower priority / forward-looking
 
@@ -338,15 +396,14 @@ are real production risk for a real-time telephony product, not nice-to-haves.
 
 ---
 
-**Tier 1 is fully closed. Tier 2 items 1–4 are fully closed** — 191/191 tests passing across 4
-test projects (`Domain.Tests`, `Application.Tests`, `Infrastructure.Tests`, `Api.Tests`).
-**Next up (Session 87):** Tier 2 item 5 — inbound webhook support. Everything today is
-synchronous request/response only; `fulfillment_tracking`/`tfn_assignment_*` map naturally to
-vendor-pushed webhooks in the real world, so polling-only support is a structural gap. Worth
-noting the hmac work just closed (item 4) built the *outbound* signing half — an inbound webhook
-receiver will likely want an hmac-signature *verification* helper too (checking an inbound
-`X-Signature`-style header against a computed hash of the raw request body), which is the mirror
-image of `HmacSigner.ComputeSignatureHeaderValue` and could reuse most of the same algorithm-
-dispatch code. Tier 3 after that: credential expiry tracking/warnings, mTLS/AWS SigV4 auth,
+**Tier 1 is fully closed. Tier 2 is fully closed** — all 5 items done, 221/221 tests passing
+across 4 test projects (`Domain.Tests`, `Application.Tests`, `Infrastructure.Tests`,
+`Api.Tests`).
+**Next up (Session 88):** Tier 3 — credential expiry tracking/warnings, mTLS/AWS SigV4 auth,
 sensitive-field masking for API request/response bodies landing in
-`flow_sessions.variable_store`.
+`flow_sessions.variable_store`. None of these are urgent production risks the way Tier 1/2 were;
+work top-down unless redirected. Worth noting inbound webhooks (just closed) only wired
+dispatch for `fulfillment_tracking` — `tfn_assignment_*`/`campaign_results` webhooks are received
+and logged but not acted on, since no TFN/telephony domain entity exists yet to dispatch to; that
+gap closes naturally once the FreeSWITCH + Telephony session builds those entities, not as
+further API-hardening work.
