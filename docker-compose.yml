@@ -88,7 +88,7 @@ services:
     image: cloudflare/cloudflared:latest
     container_name: cc_cloudflared
     restart: unless-stopped
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    command: tunnel --no-autoupdate --protocol http2 run --token ${CLOUDFLARE_TUNNEL_TOKEN}
     depends_on:
       - freeswitch
     extra_hosts:
@@ -97,6 +97,12 @@ services:
     #   softphone.contactconnection.cc -> host.docker.internal:7080 (FreeSWITCH WS, host-published)
     #   *.contactconnection.cc         -> host.docker.internal:5173 (Vite dev server, `npm run dev`)
     # nginx (port 80) is not currently in either route's path.
+    # --protocol http2: default QUIC (UDP) transport was dropping all 4 edge connections
+    # simultaneously every ~90 min (`timeout: no recent network activity`, all connIndex 0-3 at
+    # once) on this Windows/Docker Desktop/WSL2 host, surfacing to the browser as
+    # ERR_SSL_PROTOCOL_ERROR for ~5-30s per drop until cloudflared reconnected. Diagnosed Session
+    # 88 (2026-08-25) from `docker logs cc_cloudflared`. HTTP/2 (TCP) transport handles idle/NAT
+    # timeouts far more gracefully than QUIC on this kind of host networking setup.
 
 volumes:
   cc_pgdata:
