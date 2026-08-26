@@ -52,4 +52,10 @@ public class Dashboard
         Layout    = layout;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
+
+    /// <summary>True if this agent may see the dashboard at all — its creator, always; anyone
+    /// else in the tenant only once it's shared. Mirrors IDashboardRepository.GetVisibleAsync's
+    /// filter, but for a single already-fetched dashboard (the by-id GET/PUT/DELETE routes)
+    /// rather than the list query.</summary>
+    public bool IsVisibleTo(Guid agentId) => IsShared || CreatedByAgentId == agentId;
 }

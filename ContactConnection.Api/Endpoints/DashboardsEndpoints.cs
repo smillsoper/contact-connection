@@ -18,10 +18,7 @@ public static class DashboardsEndpoints
             CancellationToken ct) =>
         {
             if (tenantContext.Current is null) return Results.Unauthorized();
-
-            var agentIdClaim = http.User.FindFirst("sub")?.Value;
-            if (!Guid.TryParse(agentIdClaim, out var agentId))
-                return Results.Unauthorized();
+            if (!TryGetAgentId(http, out var agentId)) return Results.Unauthorized();
 
             var dashboard = Dashboard.Create(
                 tenantId:         tenantContext.Current.Id,
@@ -43,10 +40,7 @@ public static class DashboardsEndpoints
             CancellationToken ct) =>
         {
             if (tenantContext.Current is null) return Results.Unauthorized();
-
-            var agentIdClaim = http.User.FindFirst("sub")?.Value;
-            if (!Guid.TryParse(agentIdClaim, out var agentId))
-                return Results.Unauthorized();
+            if (!TryGetAgentId(http, out var agentId)) return Results.Unauthorized();
 
             var list = await dashboards.GetVisibleAsync(tenantContext.Current.Id, agentId, ct);
             return Results.Ok(list.Select(d => d.ToResponse()));
@@ -56,12 +50,17 @@ public static class DashboardsEndpoints
             Guid id,
             IDashboardRepository dashboards,
             TenantContext tenantContext,
+            HttpContext http,
             CancellationToken ct) =>
         {
             if (tenantContext.Current is null) return Results.Unauthorized();
+            if (!TryGetAgentId(http, out var agentId)) return Results.Unauthorized();
 
             var dashboard = await dashboards.GetByIdAsync(id, ct);
-            if (dashboard is null || dashboard.TenantId != tenantContext.Current.Id)
+            // A private (unshared) dashboard belonging to someone else is treated exactly like a
+            // dashboard that doesn't exist — same as GetVisibleAsync already does for the list —
+            // so its existence isn't leaked to a tenant-mate who merely also holds reports.view.
+            if (dashboard is null || dashboard.TenantId != tenantContext.Current.Id || !dashboard.IsVisibleTo(agentId))
                 return Results.NotFound();
 
             return Results.Ok(dashboard.ToDetailResponse());
@@ -72,13 +71,19 @@ public static class DashboardsEndpoints
             UpdateDashboardRequest req,
             IDashboardRepository dashboards,
             TenantContext tenantContext,
+            HttpContext http,
             CancellationToken ct) =>
         {
             if (tenantContext.Current is null) return Results.Unauthorized();
+            if (!TryGetAgentId(http, out var agentId)) return Results.Unauthorized();
 
             var dashboard = await dashboards.GetByIdAsync(id, ct);
-            if (dashboard is null || dashboard.TenantId != tenantContext.Current.Id)
+            if (dashboard is null || dashboard.TenantId != tenantContext.Current.Id || !dashboard.IsVisibleTo(agentId))
                 return Results.NotFound();
+            // Sharing controls visibility, not editability — a shared dashboard is read-only to
+            // everyone except the agent who created it. reports.manage alone (checked by the
+            // route policy below) is not the same as owning this specific dashboard.
+            if (dashboard.CreatedByAgentId != agentId) return Results.Forbid();
 
             dashboard.Update(req.Name, req.IsShared, req.Layout);
             await dashboards.SaveChangesAsync(ct);
@@ -90,13 +95,16 @@ public static class DashboardsEndpoints
             Guid id,
             IDashboardRepository dashboards,
             TenantContext tenantContext,
+            HttpContext http,
             CancellationToken ct) =>
         {
             if (tenantContext.Current is null) return Results.Unauthorized();
+            if (!TryGetAgentId(http, out var agentId)) return Results.Unauthorized();
 
             var dashboard = await dashboards.GetByIdAsync(id, ct);
-            if (dashboard is null || dashboard.TenantId != tenantContext.Current.Id)
+            if (dashboard is null || dashboard.TenantId != tenantContext.Current.Id || !dashboard.IsVisibleTo(agentId))
                 return Results.NotFound();
+            if (dashboard.CreatedByAgentId != agentId) return Results.Forbid();
 
             dashboards.Delete(dashboard);
             await dashboards.SaveChangesAsync(ct);
@@ -104,6 +112,9 @@ public static class DashboardsEndpoints
             return Results.NoContent();
         }).RequireAuthorization("ReportsManage");
     }
+
+    private static bool TryGetAgentId(HttpContext http, out Guid agentId) =>
+        Guid.TryParse(http.User.FindFirst("sub")?.Value, out agentId);
 
     private static object ToResponse(this Dashboard d) => new
     {
