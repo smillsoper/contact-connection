@@ -67,14 +67,20 @@ export default function DashboardBuilderPage() {
   const [configuringId, setConfiguringId] = useState<string | null>(null)
   const [liveEvent, setLiveEvent] = useState<AgentStateEvent | null>(null)
   const [liveCallEvent, setLiveCallEvent] = useState<CallStateEvent | null>(null)
+  // Opening an existing dashboard defaults to view-only, even for a manager — most visits are
+  // "just looking," not editing, and a blank canvas has nothing to view, so it starts in edit
+  // mode instead. editMode (not isEditing alone) is what every edit-affordance below actually
+  // checks — it also folds in the permission check, so a view-only role can never toggle in.
+  const [isEditing, setIsEditing] = useState(!id)
+  const editMode = canManage && isEditing
 
   const draggingTypeRef = useRef<DashboardWidgetType | null>(null)
 
-  // Load an existing dashboard by id; otherwise start blank
-  useEffect(() => {
-    if (!id) return
+  // Load an existing dashboard by id — also used to discard unsaved edits when leaving edit mode
+  // without saving (Cancel), by re-fetching the last-saved version from the server.
+  const loadDashboard = useCallback((dashId: string) => {
     setLoading(true)
-    dashboardsApi.getDetail(id)
+    return dashboardsApi.getDetail(dashId)
       .then((detail) => {
         setDashboardId(detail.id)
         setName(detail.name)
@@ -87,7 +93,22 @@ export default function DashboardBuilderPage() {
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load dashboard'))
       .finally(() => setLoading(false))
-  }, [id])
+  }, [])
+
+  useEffect(() => {
+    if (!id) return
+    loadDashboard(id)
+  }, [id, loadDashboard])
+
+  const handleCancelEdit = useCallback(() => {
+    // A brand-new, never-saved dashboard has nothing to revert to — leave the page entirely,
+    // same as before this view/edit toggle existed. An existing one drops back to view mode and
+    // discards any unsaved local changes by re-fetching what's actually saved.
+    if (!dashboardId) { navigate('/dashboards'); return }
+    setError(null)
+    setIsEditing(false)
+    loadDashboard(dashboardId)
+  }, [dashboardId, navigate, loadDashboard])
 
   // SignalR — join the supervisor group for this tenant, listen for agent state pushes
   useEffect(() => {
@@ -197,7 +218,7 @@ export default function DashboardBuilderPage() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Dashboard Name"
-              disabled={!canManage}
+              disabled={!editMode}
               className="bg-gray-800 border border-gray-700 rounded px-3 py-1 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-sky-500 w-56 disabled:opacity-60 disabled:cursor-not-allowed"
             />
             <label className="flex items-center gap-1.5 text-sm text-gray-300 shrink-0">
@@ -205,7 +226,7 @@ export default function DashboardBuilderPage() {
                 type="checkbox"
                 checked={isShared}
                 onChange={(e) => setIsShared(e.target.checked)}
-                disabled={!canManage}
+                disabled={!editMode}
                 className="rounded disabled:opacity-60"
               />
               Shared
@@ -218,27 +239,46 @@ export default function DashboardBuilderPage() {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {error && <span className="text-xs text-red-400">{error}</span>}
-            <button
-              onClick={() => navigate('/dashboards')}
-              className="text-sm text-gray-300 border border-gray-700 hover:border-gray-500 px-4 py-1.5 rounded-lg transition-colors"
-            >
-              {canManage ? 'Cancel' : 'Back'}
-            </button>
-            {canManage && (
-              <button
-                onClick={handleSave}
-                disabled={saving || !name.trim()}
-                className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-1.5 rounded-lg disabled:opacity-50 transition-colors"
-              >
-                {saving ? 'Saving…' : 'Save'}
-              </button>
+            {editMode ? (
+              <>
+                <button
+                  onClick={handleCancelEdit}
+                  className="text-sm text-gray-300 border border-gray-700 hover:border-gray-500 px-4 py-1.5 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving || !name.trim()}
+                  className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-1.5 rounded-lg disabled:opacity-50 transition-colors"
+                >
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => navigate('/dashboards')}
+                  className="text-sm text-gray-300 border border-gray-700 hover:border-gray-500 px-4 py-1.5 rounded-lg transition-colors"
+                >
+                  Back
+                </button>
+                {canManage && (
+                  <button
+                    onClick={() => setIsEditing(true)}
+                    className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-1.5 rounded-lg transition-colors"
+                  >
+                    Edit
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>
       </div>
 
-      {/* Widget palette — create-only, hidden for view-only users */}
-      {canManage && (
+      {/* Widget palette — edit-mode only */}
+      {editMode && (
       <div className="flex items-center gap-3 bg-gray-900 border-b border-gray-800 px-6 py-4 overflow-x-auto shrink-0">
         {WIDGET_TYPES.map((type) => {
           const meta = WIDGET_META[type]
@@ -278,9 +318,9 @@ export default function DashboardBuilderPage() {
               rowHeight={30}
               margin={[12, 12]}
               draggableHandle=".widget-drag-handle"
-              isDraggable={canManage}
-              isResizable={canManage}
-              isDroppable={canManage}
+              isDraggable={editMode}
+              isResizable={editMode}
+              isDroppable={editMode}
               droppingItem={{ i: '__dropping-elem__', x: 0, y: 0, w: 4, h: 8 }}
               onDrop={handleDrop}
               onDropDragOver={() => ({})}
@@ -290,8 +330,8 @@ export default function DashboardBuilderPage() {
                 <div key={w.id}>
                   <WidgetShell
                     title={WIDGET_META[w.widgetType].label}
-                    onConfigure={canManage ? () => setConfiguringId(w.id) : undefined}
-                    onRemove={canManage ? () => handleRemove(w.id) : undefined}
+                    onConfigure={editMode ? () => setConfiguringId(w.id) : undefined}
+                    onRemove={editMode ? () => handleRemove(w.id) : undefined}
                   >
                     {renderWidget(w.widgetType, w.config)}
                   </WidgetShell>
@@ -300,7 +340,7 @@ export default function DashboardBuilderPage() {
             </GridLayoutWithWidth>
             {widgets.length === 0 && (
               <div className="flex items-center justify-center h-40 text-gray-600 text-sm border-2 border-dashed border-gray-800 rounded-xl">
-                Drag a widget from the palette above to get started.
+                {editMode ? 'Drag a widget from the palette above to get started.' : 'This dashboard has no widgets yet.'}
               </div>
             )}
           </DashboardCallStateLiveContext.Provider>
