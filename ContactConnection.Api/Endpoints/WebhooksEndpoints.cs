@@ -6,10 +6,10 @@ namespace ContactConnection.Api.Endpoints;
 
 /// <summary>
 /// Public inbound-webhook receiver — vendors push events here (e.g. fulfillment tracking
-/// updates) instead of us only ever polling/calling out. Authenticated via a per-endpoint HMAC
-/// signature (see HmacSigner.VerifySignatureHeaderValue), not bearer JWT — this route is
-/// deliberately AllowAnonymous. Tenant identification relies entirely on the existing
-/// TenantResolutionMiddleware (host-header subdomain, same as every other tenant-scoped
+/// updates, contact-record updates) instead of us only ever polling/calling out. Authenticated
+/// via a per-webhook HMAC signature (see HmacSigner.VerifySignatureHeaderValue), not bearer JWT —
+/// this route is deliberately AllowAnonymous. Tenant identification relies entirely on the
+/// existing TenantResolutionMiddleware (host-header subdomain, same as every other tenant-scoped
 /// request) — no new tenant-resolution mechanism. See API_HARDENING_CHECKLIST.md Tier 2,
 /// "Inbound webhook support".
 /// </summary>
@@ -25,10 +25,11 @@ public static class WebhooksEndpoints
         string token,
         HttpContext http,
         IWebhookEndpointRepository webhookEndpointRepo,
-        ITenantApiEndpointRepository apiEndpointRepo,
         ITenantCredentialStore credStore,
         IWebhookEventRepository eventRepo,
         IOrderRepository orderRepo,
+        ICallRecordRepository callRecordRepo,
+        ICustomFieldService customFieldService,
         TenantContext tenantContext,
         CancellationToken ct)
     {
@@ -38,9 +39,6 @@ public static class WebhooksEndpoints
 
         var webhookEndpoint = await webhookEndpointRepo.GetByTokenAsync(token, ct);
         if (webhookEndpoint is null || !webhookEndpoint.IsActive) return Results.NotFound();
-
-        var apiEndpoint = await apiEndpointRepo.GetByIdAsync(webhookEndpoint.TenantApiEndpointId, ct);
-        if (apiEndpoint is null) return Results.NotFound();
 
         http.Request.EnableBuffering();
         string rawBody;
@@ -52,15 +50,15 @@ public static class WebhooksEndpoints
         var signatureHeader = http.Request.Headers[webhookEndpoint.SignatureHeaderName].FirstOrDefault();
 
         var result = await WebhookReceiveHandler.ProcessAsync(
-            webhookEndpoint, apiEndpoint, rawBody, http.Request.ContentType, signatureHeader, secret,
-            eventRepo, orderRepo, ct);
+            webhookEndpoint, tenantContext.Current!.Id, rawBody, http.Request.ContentType, signatureHeader, secret,
+            eventRepo, orderRepo, callRecordRepo, customFieldService, ct);
 
         return result.Outcome switch
         {
             WebhookReceiveHandler.ReceiveOutcome.InvalidSignature => Results.Unauthorized(),
             // Duplicate and Accepted both ack fast with 2xx — a vendor retrying an already-
             // handled delivery should not be told to keep retrying, and a processing failure
-            // (bad mapping, unknown order line) has already been durably logged, not lost.
+            // (bad mapping, no matching record) has already been durably logged, not lost.
             _ => Results.Ok(),
         };
     }

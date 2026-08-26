@@ -173,32 +173,8 @@ export function revertAdminApiEndpoint(definitionId: string, endpointId: string,
   return api.post<ApiEndpointRecord>(`/api/v1/admin/api-definitions/${definitionId}/endpoints/${endpointId}/versions/${versionNumber}/revert`, {})
 }
 
-// ─── Inbound webhooks — see API_HARDENING_CHECKLIST.md Tier 2 ──────────────────
-
-export interface WebhookConfig {
-  id: string
-  tenantApiEndpointId: string
-  path: string
-  tenantSubdomain: string
-  signatureHeaderName: string
-  signatureAlgorithm: string
-  includeTimestamp: boolean
-  timestampToleranceSeconds: number
-  isActive: boolean
-  createdAt: string
-  updatedAt: string | null
-  /** Only populated by enable/regenerate-secret responses — shown to the admin once and never
-   * re-fetchable afterward. */
-  secret: string | null
-}
-
-export interface UpdateWebhookConfigData {
-  signatureHeaderName?: string
-  signatureAlgorithm?: string
-  includeTimestamp?: boolean
-  timestampToleranceSeconds?: number
-  isActive?: boolean
-}
+// ─── Inbound webhooks — standalone, mapped onto a canonical domain object. Not tied to any API
+// Definition/Endpoint. See API_HARDENING_CHECKLIST.md Tier 2. ──────────────────────────────────
 
 export interface WebhookEventRecord {
   id: string
@@ -210,46 +186,32 @@ export interface WebhookEventRecord {
   processedAt: string | null
 }
 
-const webhookBase = (definitionId: string, endpointId: string) =>
-  `/api/v1/admin/api-definitions/${definitionId}/endpoints/${endpointId}/webhook`
-
-export function getAdminWebhook(definitionId: string, endpointId: string): Promise<WebhookConfig> {
-  return api.get<WebhookConfig>(webhookBase(definitionId, endpointId))
+export interface AdminWebhook {
+  id: string
+  name: string
+  description: string | null
+  canonicalType: string
+  /** JSON-encoded WebhookMappingConfig — see CanonicalWebhookMappingEvaluator.cs for the shape. */
+  mappingConfig: string
+  path: string
+  tenantSubdomain: string
+  signatureHeaderName: string
+  signatureAlgorithm: string
+  includeTimestamp: boolean
+  timestampToleranceSeconds: number
+  isActive: boolean
+  createdAt: string
+  updatedAt: string | null
+  /** Only populated by create/regenerate-secret responses — shown to the admin once and never
+   * re-fetchable afterward. */
+  secret: string | null
 }
-
-export function enableAdminWebhook(definitionId: string, endpointId: string): Promise<WebhookConfig> {
-  return api.post<WebhookConfig>(webhookBase(definitionId, endpointId), {})
-}
-
-export function updateAdminWebhook(definitionId: string, endpointId: string, data: UpdateWebhookConfigData): Promise<WebhookConfig> {
-  return api.patch<WebhookConfig>(webhookBase(definitionId, endpointId), data)
-}
-
-export function regenerateAdminWebhookSecret(definitionId: string, endpointId: string): Promise<WebhookConfig> {
-  return api.post<WebhookConfig>(`${webhookBase(definitionId, endpointId)}/regenerate-secret`, {})
-}
-
-export function regenerateAdminWebhookToken(definitionId: string, endpointId: string): Promise<WebhookConfig> {
-  return api.post<WebhookConfig>(`${webhookBase(definitionId, endpointId)}/regenerate-token`, {})
-}
-
-export function disableAdminWebhook(definitionId: string, endpointId: string): Promise<void> {
-  return api.delete<void>(webhookBase(definitionId, endpointId))
-}
-
-export function listAdminWebhookEvents(definitionId: string, endpointId: string, take = 50): Promise<WebhookEventRecord[]> {
-  return api.get<WebhookEventRecord[]>(`${webhookBase(definitionId, endpointId)}/events?take=${take}`)
-}
-
-// ─── Admin Webhooks dashboard (tenant-wide list, across every Definition/Endpoint) ────────────
 
 export interface AdminWebhookSummary {
-  webhookEndpointId: string
-  definitionId: string
-  definitionName: string
-  endpointId: string
-  endpointName: string
-  endpointPath: string
+  id: string
+  name: string
+  description: string | null
+  canonicalType: string
   url: string
   isActive: boolean
   createdAt: string
@@ -258,8 +220,58 @@ export interface AdminWebhookSummary {
   lastEventStatus: WebhookEventRecord['processingStatus'] | null
 }
 
+export interface CreateWebhookData {
+  name: string
+  canonicalType: string
+  description?: string
+  mappingConfig?: string
+  signatureHeaderName?: string
+  signatureAlgorithm?: string
+  includeTimestamp?: boolean
+  timestampToleranceSeconds?: number
+}
+
+export interface UpdateWebhookData {
+  name?: string
+  description?: string
+  mappingConfig?: string
+  signatureHeaderName?: string
+  signatureAlgorithm?: string
+  includeTimestamp?: boolean
+  timestampToleranceSeconds?: number
+  isActive?: boolean
+}
+
 export function listAdminWebhooks(): Promise<AdminWebhookSummary[]> {
   return api.get<AdminWebhookSummary[]>('/api/v1/admin/webhooks')
+}
+
+export function createAdminWebhook(data: CreateWebhookData): Promise<AdminWebhook> {
+  return api.post<AdminWebhook>('/api/v1/admin/webhooks', data)
+}
+
+export function getAdminWebhook(id: string): Promise<AdminWebhook> {
+  return api.get<AdminWebhook>(`/api/v1/admin/webhooks/${id}`)
+}
+
+export function updateAdminWebhook(id: string, data: UpdateWebhookData): Promise<AdminWebhook> {
+  return api.patch<AdminWebhook>(`/api/v1/admin/webhooks/${id}`, data)
+}
+
+export function regenerateAdminWebhookSecret(id: string): Promise<AdminWebhook> {
+  return api.post<AdminWebhook>(`/api/v1/admin/webhooks/${id}/regenerate-secret`, {})
+}
+
+export function regenerateAdminWebhookToken(id: string): Promise<AdminWebhook> {
+  return api.post<AdminWebhook>(`/api/v1/admin/webhooks/${id}/regenerate-token`, {})
+}
+
+export function deleteAdminWebhook(id: string): Promise<void> {
+  return api.delete<void>(`/api/v1/admin/webhooks/${id}`)
+}
+
+export function listAdminWebhookEvents(id: string, take = 50): Promise<WebhookEventRecord[]> {
+  return api.get<WebhookEventRecord[]>(`/api/v1/admin/webhooks/${id}/events?take=${take}`)
 }
 
 // ─── Tenant API Preferences ──────────────────────────────────────────────────

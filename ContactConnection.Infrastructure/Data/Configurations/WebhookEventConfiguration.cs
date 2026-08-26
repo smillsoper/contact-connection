@@ -27,5 +27,17 @@ public class WebhookEventConfiguration : IEntityTypeConfiguration<WebhookEvent>
         // application-level ExistsAsync check in WebhookReceiveHandler.
         builder.HasIndex(e => new { e.WebhookEndpointId, e.BodyHash }).IsUnique().HasDatabaseName("ix_webhook_events_endpoint_body_hash");
         builder.HasIndex(e => e.WebhookEndpointId).HasDatabaseName("ix_webhook_events_webhook_endpoint_id");
+
+        // Shadow FK (no navigation property on either side — WebhookEvent is an append-only
+        // receipt log, not something a WebhookEndpoint needs to eagerly load) with a real
+        // DB-level cascade, matching OrderLine→Order/CallInteraction→CallRecord's convention:
+        // deleting a webhook must not leave orphaned event rows behind. Found live during
+        // Session 90's redesign verification — WebhookEndpointId previously had no FK
+        // relationship configured at all, so AdminWebhooksEndpoints' Delete left every event
+        // row behind un-cascaded.
+        builder.HasOne<WebhookEndpoint>()
+            .WithMany()
+            .HasForeignKey(e => e.WebhookEndpointId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

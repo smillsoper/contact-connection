@@ -8,7 +8,7 @@ import AuthConfigForm, {
 import type { AuthTestResult } from '../../api/adminApiDefinitions'
 import type { EntityVersionSummary } from '../../api/versioning'
 import VersionHistoryPanel from '../versioning/VersionHistoryPanel'
-import WebhookConfigPanel from '../versioning/WebhookConfigPanel'
+import JsonTree from '../shared/JsonTree'
 import {
   API_CATEGORIES,
   API_CATEGORY_LABELS,
@@ -89,39 +89,6 @@ export interface EndpointTestResult {
   error: string | null
 }
 
-export interface WebhookConfig {
-  id: string
-  tenantApiEndpointId: string
-  path: string
-  tenantSubdomain: string
-  signatureHeaderName: string
-  signatureAlgorithm: string
-  includeTimestamp: boolean
-  timestampToleranceSeconds: number
-  isActive: boolean
-  createdAt: string
-  updatedAt: string | null
-  secret: string | null
-}
-
-export interface UpdateWebhookConfigData {
-  signatureHeaderName?: string
-  signatureAlgorithm?: string
-  includeTimestamp?: boolean
-  timestampToleranceSeconds?: number
-  isActive?: boolean
-}
-
-export interface WebhookEventRecord {
-  id: string
-  receivedAt: string
-  signatureValid: boolean
-  processingStatus: 'received' | 'processed' | 'duplicate' | 'rejected' | 'failed'
-  processingError: string | null
-  outcomeKey: string | null
-  processedAt: string | null
-}
-
 export interface DetailApi {
   getDefinition(id: string): Promise<ApiDefinitionRecord>
   updateDefinition(id: string, data: {
@@ -160,17 +127,6 @@ export interface DetailApi {
   revertDefinition(id: string, versionNumber: number): Promise<ApiDefinitionRecord>
   listEndpointVersions(definitionId: string, endpointId: string): Promise<EntityVersionSummary[]>
   revertEndpoint(definitionId: string, endpointId: string, versionNumber: number): Promise<ApiEndpointRecord>
-  // Inbound webhooks — tenant-scoped only (see API_HARDENING_CHECKLIST.md Tier 2). Optional
-  // because Portal definitions don't support webhooks yet — no domain consumer exists yet for a
-  // platform-shared vendor push, so the Portal side simply omits these and the UI hides the
-  // "Webhook" button/panel accordingly.
-  getWebhook?(definitionId: string, endpointId: string): Promise<WebhookConfig>
-  enableWebhook?(definitionId: string, endpointId: string): Promise<WebhookConfig>
-  updateWebhook?(definitionId: string, endpointId: string, data: UpdateWebhookConfigData): Promise<WebhookConfig>
-  regenerateWebhookSecret?(definitionId: string, endpointId: string): Promise<WebhookConfig>
-  regenerateWebhookToken?(definitionId: string, endpointId: string): Promise<WebhookConfig>
-  disableWebhook?(definitionId: string, endpointId: string): Promise<void>
-  listWebhookEvents?(definitionId: string, endpointId: string): Promise<WebhookEventRecord[]>
 }
 
 interface EndpointFormData {
@@ -601,91 +557,6 @@ function VarChip({ tag, label, example, copied, onCopy }: VarChipProps) {
         : <span className="text-gray-600 group-hover:text-gray-400 text-xs shrink-0 mt-0.5">⎘</span>
       }
     </button>
-  )
-}
-
-// ── JsonNode (recursive response tree) ────────────────────────────────────
-
-interface JsonNodeProps {
-  name: string
-  value: unknown
-  path: string
-  depth: number
-  copiedPath: string | null
-  onCopy: (path: string) => void
-}
-
-function JsonNode({ name, value, path, depth, copiedPath, onCopy }: JsonNodeProps) {
-  const [expanded, setExpanded] = useState(true)
-  const isObj = value !== null && typeof value === 'object'
-
-  if (isObj) {
-    const isArr = Array.isArray(value)
-    const entries: [string, unknown, string][] = isArr
-      ? (value as unknown[]).map((v, i) => [`[${i}]`, v, `${path}[${i}]`])
-      : Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, v, path ? `${path}.${k}` : k])
-
-    if (depth === 0) {
-      return (
-        <div className="w-full overflow-hidden">
-          {entries.map(([k, v, childPath]) => (
-            <JsonNode key={k} name={k} value={v} path={childPath} depth={1} copiedPath={copiedPath} onCopy={onCopy} />
-          ))}
-        </div>
-      )
-    }
-
-    return (
-      <div className="pl-3 border-l border-gray-800/50 overflow-hidden">
-        <div className="flex items-center overflow-hidden group/arr">
-          <button
-            onClick={() => setExpanded(e => !e)}
-            className="flex items-center gap-1 py-0.5 flex-1 min-w-0 text-left hover:bg-gray-800/30 rounded-l px-0.5 overflow-hidden"
-          >
-            <span className="text-gray-600 text-[10px] w-3 shrink-0">{expanded ? '▾' : '▸'}</span>
-            <span className="font-mono text-gray-300 text-xs truncate">{name}</span>
-            <span className="text-gray-600 text-[10px] ml-0.5 shrink-0">{isArr ? `[${(value as unknown[]).length}]` : `{}`}</span>
-          </button>
-          {isArr && path && (
-            <button
-              onClick={() => onCopy(path)}
-              title={`Copy array path: ${path}`}
-              className={`shrink-0 px-1 py-0.5 text-[10px] transition-colors ${copiedPath === path ? 'text-emerald-400' : 'text-gray-700 group-hover/arr:text-gray-500 hover:text-gray-300'}`}
-            >
-              {copiedPath === path ? '✓' : '⎘'}
-            </button>
-          )}
-        </div>
-        {expanded && entries.map(([k, v, childPath]) => (
-          <JsonNode key={k} name={k} value={v} path={childPath} depth={depth + 1} copiedPath={copiedPath} onCopy={onCopy} />
-        ))}
-      </div>
-    )
-  }
-
-  const displayVal = value === null ? 'null' : String(value)
-  const valColor = value === null ? 'text-gray-600'
-    : typeof value === 'number' ? 'text-sky-400'
-    : typeof value === 'boolean' ? 'text-emerald-400'
-    : 'text-amber-300'
-
-  return (
-    <div className="pl-3 border-l border-gray-800/50 overflow-hidden">
-      <button
-        onClick={() => onCopy(path)}
-        title={`Copy path: ${path}`}
-        className="flex items-center gap-1 py-0.5 w-full text-left hover:bg-indigo-900/20 rounded px-0.5 group overflow-hidden"
-      >
-        <span className="text-gray-600 text-[10px] w-3 shrink-0" />
-        <span className="font-mono text-gray-400 text-xs shrink-0 max-w-[45%] truncate">{name}:</span>
-        <span className={`font-mono text-xs ml-1 flex-1 min-w-0 truncate ${valColor}`} title={displayVal}>
-          {displayVal.length > 22 ? displayVal.slice(0, 22) + '…' : displayVal}
-        </span>
-        <span className={`text-[10px] shrink-0 ${copiedPath === path ? 'text-emerald-400' : 'text-gray-700 group-hover:text-gray-500'}`}>
-          {copiedPath === path ? '✓' : '⎘'}
-        </span>
-      </button>
-    </div>
   )
 }
 
@@ -1158,7 +1029,7 @@ function ResponseMappingPanel({ config, onChange, sourceContext, subType, testRu
               </div>
             </div>
             <div className="flex-1 overflow-y-auto px-2 py-2">
-              <JsonNode name="" value={capturedBody} path="" depth={0} copiedPath={copiedPath} onCopy={handleCopyPath} />
+              <JsonTree name="" value={capturedBody} path="" depth={0} copiedPath={copiedPath} onCopy={handleCopyPath} />
             </div>
           </div>
         )}
@@ -1498,7 +1369,7 @@ function ResponseMappingPanel({ config, onChange, sourceContext, subType, testRu
         </div>
         <div className="flex-1 overflow-y-auto overflow-x-hidden px-2 py-2">
           {activeOutcome?.capturedResponse?.body != null ? (
-            <JsonNode
+            <JsonTree
               name="response"
               value={activeOutcome.capturedResponse.body}
               path=""
@@ -1548,7 +1419,6 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
   const [togglingActive, setTogglingActive] = useState(false)
   const [showDefHistory, setShowDefHistory] = useState(false)
   const [historyEndpointId, setHistoryEndpointId] = useState<string | null>(null)
-  const [webhookEndpointId, setWebhookEndpointId] = useState<string | null>(null)
 
   // Endpoint modal
   const [endpointModal, setEndpointModal] = useState<'create' | 'edit' | null>(null)
@@ -2078,14 +1948,6 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                         >
                           History
                         </button>
-                        {api.getWebhook && (
-                          <button
-                            onClick={() => setWebhookEndpointId(ep.id)}
-                            className="text-gray-400 hover:text-gray-300 text-xs font-medium transition-colors"
-                          >
-                            Webhook
-                          </button>
-                        )}
                         <button
                           onClick={() => openEditEndpoint(ep)}
                           className="text-indigo-400 hover:text-indigo-300 text-xs font-medium transition-colors"
@@ -2877,21 +2739,6 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
             setEndpoints((prev) => prev.map((ep) => (ep.id === historyEndpointId ? updated : ep)))
           }}
           onClose={() => setHistoryEndpointId(null)}
-        />
-      )}
-
-      {webhookEndpointId && api.getWebhook && api.enableWebhook && api.updateWebhook
-        && api.regenerateWebhookSecret && api.regenerateWebhookToken && api.disableWebhook && api.listWebhookEvents && (
-        <WebhookConfigPanel
-          endpointName={endpoints.find((ep) => ep.id === webhookEndpointId)?.name ?? ''}
-          getWebhook={() => api.getWebhook!(definitionId, webhookEndpointId)}
-          enableWebhook={() => api.enableWebhook!(definitionId, webhookEndpointId)}
-          updateWebhook={(data) => api.updateWebhook!(definitionId, webhookEndpointId, data)}
-          regenerateSecret={() => api.regenerateWebhookSecret!(definitionId, webhookEndpointId)}
-          regenerateToken={() => api.regenerateWebhookToken!(definitionId, webhookEndpointId)}
-          disableWebhook={() => api.disableWebhook!(definitionId, webhookEndpointId)}
-          listEvents={() => api.listWebhookEvents!(definitionId, webhookEndpointId)}
-          onClose={() => setWebhookEndpointId(null)}
         />
       )}
     </div>

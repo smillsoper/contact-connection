@@ -1,7 +1,8 @@
+using System.Text.Json;
 using ContactConnection.Api.Endpoints;
 using ContactConnection.Application.Interfaces.Repositories;
+using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Domain.Entities;
-using ContactConnection.Domain.ValueObjects.Commerce;
 using ContactConnection.Infrastructure.ApiExecution;
 using Moq;
 using Xunit;
@@ -9,299 +10,212 @@ using Xunit;
 namespace ContactConnection.Api.Tests.Endpoints;
 
 /// <summary>
-/// Covers WebhookReceiveHandler — the core inbound-webhook processing logic (signature
-/// verification, dedup, payload-mapping evaluation, fulfillment_tracking dispatch) behind
-/// WebhooksEndpoints.cs's public receiver. See API_HARDENING_CHECKLIST.md Tier 2, "Inbound
-/// webhook support".
+/// Covers WebhookReceiveHandler.ProcessAsync — signature verification, dedup, and JSON parsing
+/// around the dispatch to CanonicalWebhookMappingEvaluator (covered in its own test class).
+/// Replaces the deleted pre-redesign WebhookReceiveHandlerTests, same coverage shape, now driving
+/// the standalone canonical-mapping evaluator instead of the old endpoint-scoped fulfillment
+/// branch. See API_HARDENING_CHECKLIST.md Tier 2.
 /// </summary>
 public class WebhookReceiveHandlerTests
 {
-    private const string Secret = "test-secret";
+    private const string Secret = "shh-its-a-secret";
 
-    // Outcomes "shipped"/"delivered" keyed on a "status" field, mapping "line_id"/"tracking" from
-    // the payload into the reserved "orderLineId"/"trackingNumber" to-targets the dispatcher
-    // reads — the exact DSL an admin would configure via ResponseMappingPanel.
-    private const string FulfillmentMapping = """
-        {"outcomes":[
-          {"name":"shipped","conditions":[{"path":"status","op":"eq","value":"shipped"}],
-           "fieldMappings":[{"from":"line_id","to":"orderLineId"},{"from":"tracking","to":"trackingNumber"}]},
-          {"name":"delivered","conditions":[{"path":"status","op":"eq","value":"delivered"}],
-           "fieldMappings":[{"from":"line_id","to":"orderLineId"}]}
-        ]}
-        """;
-
-    private static WebhookEndpoint NewWebhookEndpoint()
+    private static WebhookEndpoint NewWebhook(bool includeTimestamp = false, int toleranceSeconds = 300, object? mappingConfig = null)
     {
-        var endpoint = WebhookEndpoint.Create(Guid.NewGuid());
-        // Default to the bare-hex format for most tests — the timestamped-format tests configure
-        // IncludeTimestamp explicitly.
-        endpoint.SetSignatureConfig("X-Signature", "SHA256", includeTimestamp: false, toleranceSeconds: 300);
-        return endpoint;
+        var webhook = WebhookEndpoint.Create("Test Webhook", CanonicalWebhookType.OrderLine);
+        webhook.SetSignatureConfig("X-Signature", "SHA256", includeTimestamp, toleranceSeconds);
+        if (mappingConfig is not null) webhook.SetMappingConfig(JsonSerializer.Serialize(mappingConfig));
+        return webhook;
     }
 
-    private static TenantApiEndpoint NewFulfillmentTrackingEndpoint(string? responseMapping = null)
+    private static Mock<IWebhookEventRepository> NewEventRepo(bool exists = false)
     {
-        var endpoint = TenantApiEndpoint.Create(
-            Guid.NewGuid(), ApiCategory.Fulfillment, ApiSubType.FulfillmentTracking, "Tracking Webhook", "/webhook");
-        endpoint.SetResponseMapping(responseMapping ?? FulfillmentMapping);
-        return endpoint;
+        var repo = new Mock<IWebhookEventRepository>();
+        repo.Setup(r => r.ExistsAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(exists);
+        return repo;
     }
 
-    private static TenantApiEndpoint NewUnwiredSubTypeEndpoint() =>
-        TenantApiEndpoint.Create(Guid.NewGuid(), ApiCategory.Media, ApiSubType.CampaignResults, "Campaign Results", "/webhook");
+    private static Task<WebhookReceiveHandler.ReceiveResult> Process(
+        WebhookEndpoint webhook, string rawBody, string? signatureHeaderValue, string? secret,
+        IWebhookEventRepository eventRepo, IOrderRepository? orderRepo = null,
+        ICallRecordRepository? callRecordRepo = null, ICustomFieldService? customFieldService = null) =>
+        WebhookReceiveHandler.ProcessAsync(
+            webhook, Guid.NewGuid(), rawBody, "application/json", signatureHeaderValue, secret,
+            eventRepo, orderRepo ?? new Mock<IOrderRepository>().Object,
+            callRecordRepo ?? new Mock<ICallRecordRepository>().Object,
+            customFieldService ?? new Mock<ICustomFieldService>().Object,
+            CancellationToken.None);
 
-    private static CartItem MakeCartItem() => new(
-        OfferId: Guid.NewGuid(), ProductId: Guid.NewGuid(), Sku: "SKU001", Description: "Test Product",
-        Quantity: 1, FullPrice: 29.95m, ExtendedPrice: 29.95m, Shipping: 5.95m, Weight: 1.0m, SalesTax: 0m,
-        ShippingExempt: false, TaxExempt: false, OnBackOrder: false, AutoShip: false, AutoShipIntervalDays: 0,
-        IsUpsell: false, UpsellQty: 0, MixMatchCode: null, ShipMethod: null, DeliveryMessage: null, ShipToJson: null,
-        Payments: [], PersonalizationAnswers: [], KitSelections: [],
-        CanadaSurcharge: 0m, AKHISurcharge: 0m, OutlyingUSSurcharge: 0m, ForeignSurcharge: 0m);
-
-    private static (Order order, OrderLine line) MakeOrderWithLine()
-    {
-        var orderId = Guid.NewGuid();
-        var tenantId = Guid.NewGuid();
-        var line = OrderLine.FromCartItem(orderId, tenantId, MakeCartItem());
-        var order = Order.CreateFromCart(orderId, tenantId, null, CartDocument.Empty(), [line]);
-        return (order, line);
-    }
-
-    private static Mock<IWebhookEventRepository> MockEventRepo(bool exists = false)
-    {
-        var mock = new Mock<IWebhookEventRepository>();
-        mock.Setup(r => r.ExistsAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(exists);
-        return mock;
-    }
-
-    // ── Signature verification ──────────────────────────────────────────────────────────────
+    // ── Signature verification ───────────────────────────────────────────────
 
     [Fact]
-    public async Task ProcessAsync_ValidSignature_ReturnsAccepted_AndLogsSignatureValidTrue()
+    public async Task ValidSignature_NoTimestamp_Accepted()
     {
-        var webhookEndpoint = NewWebhookEndpoint();
-        var apiEndpoint = NewUnwiredSubTypeEndpoint();
-        var body = "{\"hello\":\"world\"}";
-        var header = HmacSigner.ComputeSignatureHeaderValue(webhookEndpoint.SignatureAlgorithm, Secret, body, includeTimestamp: false);
-        var eventRepo = MockEventRepo();
-        var orderRepo = new Mock<IOrderRepository>();
+        var webhook = NewWebhook(includeTimestamp: false);
+        const string body = "{}";
+        var header = HmacSigner.ComputeSignatureHeaderValue("SHA256", Secret, body, includeTimestamp: false);
+        var eventRepo = NewEventRepo();
 
-        var result = await WebhookReceiveHandler.ProcessAsync(
-            webhookEndpoint, apiEndpoint, body, "application/json", header, Secret, eventRepo.Object, orderRepo.Object, CancellationToken.None);
+        var result = await Process(webhook, body, header, Secret, eventRepo.Object);
 
         Assert.Equal(WebhookReceiveHandler.ReceiveOutcome.Accepted, result.Outcome);
-        Assert.NotNull(result.Event);
         Assert.True(result.Event!.SignatureValid);
-        eventRepo.Verify(r => r.AddAsync(It.IsAny<WebhookEvent>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task InvalidSignature_ReturnsInvalidSignatureOutcome_AndPersistsRejectedEvent()
+    {
+        var webhook = NewWebhook(includeTimestamp: false);
+        var eventRepo = NewEventRepo();
+
+        var result = await Process(webhook, "{}", "totally-wrong-signature", Secret, eventRepo.Object);
+
+        Assert.Equal(WebhookReceiveHandler.ReceiveOutcome.InvalidSignature, result.Outcome);
+        Assert.Equal(WebhookEventStatus.Rejected, result.Event!.ProcessingStatus);
+        eventRepo.Verify(r => r.AddAsync(It.Is<WebhookEvent>(e => e.ProcessingStatus == WebhookEventStatus.Rejected), It.IsAny<CancellationToken>()), Times.Once);
         eventRepo.Verify(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task ProcessAsync_InvalidSignature_ReturnsInvalidSignature_LogsRejectedEvent_NoDispatch()
+    public async Task NullSecret_TreatedAsInvalidSignature_EvenWithAValidLookingHeader()
     {
-        var webhookEndpoint = NewWebhookEndpoint();
-        var apiEndpoint = NewFulfillmentTrackingEndpoint();
-        var eventRepo = MockEventRepo();
-        var orderRepo = new Mock<IOrderRepository>();
+        var webhook = NewWebhook(includeTimestamp: false);
+        var header = HmacSigner.ComputeSignatureHeaderValue("SHA256", Secret, "{}", includeTimestamp: false);
+        var eventRepo = NewEventRepo();
 
-        var result = await WebhookReceiveHandler.ProcessAsync(
-            webhookEndpoint, apiEndpoint, "{\"status\":\"shipped\"}", "application/json",
-            "not-a-real-signature", Secret, eventRepo.Object, orderRepo.Object, CancellationToken.None);
-
-        Assert.Equal(WebhookReceiveHandler.ReceiveOutcome.InvalidSignature, result.Outcome);
-        Assert.NotNull(result.Event);
-        Assert.False(result.Event!.SignatureValid);
-        Assert.Equal(WebhookEventStatus.Rejected, result.Event.ProcessingStatus);
-        orderRepo.Verify(r => r.GetByLineIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task ProcessAsync_NullSecret_TreatedAsInvalidSignature()
-    {
-        var webhookEndpoint = NewWebhookEndpoint();
-        var apiEndpoint = NewUnwiredSubTypeEndpoint();
-        var eventRepo = MockEventRepo();
-        var orderRepo = new Mock<IOrderRepository>();
-
-        var result = await WebhookReceiveHandler.ProcessAsync(
-            webhookEndpoint, apiEndpoint, "{}", null, "anything", secret: null, eventRepo.Object, orderRepo.Object, CancellationToken.None);
+        // secret: null — e.g. the credential store has no secret stored for this webhook
+        var result = await Process(webhook, "{}", header, null, eventRepo.Object);
 
         Assert.Equal(WebhookReceiveHandler.ReceiveOutcome.InvalidSignature, result.Outcome);
     }
 
     [Fact]
-    public async Task ProcessAsync_TimestampOutsideTolerance_TreatedAsInvalidSignature()
+    public async Task StaleTimestamp_RejectedAsInvalidSignature_EvenWithCorrectHmac()
     {
-        var webhookEndpoint = NewWebhookEndpoint();
-        webhookEndpoint.SetSignatureConfig("X-Signature", "SHA256", includeTimestamp: true, toleranceSeconds: 60);
-        var apiEndpoint = NewUnwiredSubTypeEndpoint();
-        var body = "{}";
-        // Compute a correctly-signed header, but stamped far enough in the past to fall outside
-        // the 60s tolerance — a valid signature over a stale timestamp is still rejected (replay
-        // protection).
-        var staleHeader = ComputeStaleTimestampedHeader(webhookEndpoint.SignatureAlgorithm, Secret, body, secondsAgo: 600);
-        var eventRepo = MockEventRepo();
-        var orderRepo = new Mock<IOrderRepository>();
+        var webhook = NewWebhook(includeTimestamp: true, toleranceSeconds: 60);
+        const string body = "{}";
+        // Hand-build a header with a timestamp far outside tolerance but a correctly computed HMAC for it.
+        var staleTimestamp = DateTimeOffset.UtcNow.AddHours(-1).ToUnixTimeSeconds();
+        var signed = HmacSignerTestHelper.ComputeForTimestamp("SHA256", Secret, body, staleTimestamp);
+        var header = $"t={staleTimestamp},v1={signed}";
+        var eventRepo = NewEventRepo();
 
-        var result = await WebhookReceiveHandler.ProcessAsync(
-            webhookEndpoint, apiEndpoint, body, "application/json", staleHeader, Secret, eventRepo.Object, orderRepo.Object, CancellationToken.None);
+        var result = await Process(webhook, body, header, Secret, eventRepo.Object);
 
         Assert.Equal(WebhookReceiveHandler.ReceiveOutcome.InvalidSignature, result.Outcome);
     }
 
-    private static string ComputeStaleTimestampedHeader(string algorithm, string secret, string payload, int secondsAgo)
-    {
-        var timestamp = DateTimeOffset.UtcNow.AddSeconds(-secondsAgo).ToUnixTimeSeconds();
-        // Recompute the same way HmacSigner does internally, just with a caller-chosen timestamp.
-        using var hmac = new System.Security.Cryptography.HMACSHA256(System.Text.Encoding.UTF8.GetBytes(secret));
-        var hash = Convert.ToHexStringLower(hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes($"{timestamp}.{payload}")));
-        return $"t={timestamp},v1={hash}";
-    }
-
-    // ── Dedup ────────────────────────────────────────────────────────────────────────────────
+    // ── Dedup ─────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task ProcessAsync_DuplicateBody_ReturnsDuplicate_DoesNotInsertOrDispatch()
+    public async Task DuplicateBody_ReturnsDuplicateOutcome_NoNewEventPersisted()
     {
-        var webhookEndpoint = NewWebhookEndpoint();
-        var apiEndpoint = NewFulfillmentTrackingEndpoint();
-        var body = "{\"status\":\"shipped\",\"line_id\":\"" + Guid.NewGuid() + "\",\"tracking\":\"1Z999\"}";
-        var header = HmacSigner.ComputeSignatureHeaderValue(webhookEndpoint.SignatureAlgorithm, Secret, body, includeTimestamp: false);
-        var eventRepo = MockEventRepo(exists: true);
-        var orderRepo = new Mock<IOrderRepository>();
+        var webhook = NewWebhook(includeTimestamp: false);
+        const string body = "{}";
+        var header = HmacSigner.ComputeSignatureHeaderValue("SHA256", Secret, body, includeTimestamp: false);
+        var eventRepo = NewEventRepo(exists: true); // simulates an already-seen (endpointId, bodyHash)
 
-        var result = await WebhookReceiveHandler.ProcessAsync(
-            webhookEndpoint, apiEndpoint, body, "application/json", header, Secret, eventRepo.Object, orderRepo.Object, CancellationToken.None);
+        var result = await Process(webhook, body, header, Secret, eventRepo.Object);
 
         Assert.Equal(WebhookReceiveHandler.ReceiveOutcome.Duplicate, result.Outcome);
         Assert.Null(result.Event);
         eventRepo.Verify(r => r.AddAsync(It.IsAny<WebhookEvent>(), It.IsAny<CancellationToken>()), Times.Never);
-        orderRepo.Verify(r => r.GetByLineIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // ── Non-JSON body ───────────────────────────────────────────────────────────────────────
+    // ── Body parsing ──────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task ProcessAsync_NonJsonBody_MarksFailed_ButStillAccepted()
+    public async Task NonJsonBody_MarksFailed_StillPersistsEvent()
     {
-        var webhookEndpoint = NewWebhookEndpoint();
-        var apiEndpoint = NewFulfillmentTrackingEndpoint();
-        var body = "not json at all";
-        var header = HmacSigner.ComputeSignatureHeaderValue(webhookEndpoint.SignatureAlgorithm, Secret, body, includeTimestamp: false);
-        var eventRepo = MockEventRepo();
-        var orderRepo = new Mock<IOrderRepository>();
+        var webhook = NewWebhook(includeTimestamp: false);
+        const string body = "not { json at all";
+        var header = HmacSigner.ComputeSignatureHeaderValue("SHA256", Secret, body, includeTimestamp: false);
+        var eventRepo = NewEventRepo();
 
-        var result = await WebhookReceiveHandler.ProcessAsync(
-            webhookEndpoint, apiEndpoint, body, "text/plain", header, Secret, eventRepo.Object, orderRepo.Object, CancellationToken.None);
+        var result = await Process(webhook, body, header, Secret, eventRepo.Object);
 
         Assert.Equal(WebhookReceiveHandler.ReceiveOutcome.Accepted, result.Outcome);
         Assert.Equal(WebhookEventStatus.Failed, result.Event!.ProcessingStatus);
         Assert.Contains("not valid JSON", result.Event.ProcessingError);
     }
 
-    // ── fulfillment_tracking dispatch ───────────────────────────────────────────────────────
-
     [Fact]
-    public async Task ProcessAsync_FulfillmentTracking_Shipped_CallsShip_AndMarksProcessed()
+    public async Task EmptyBody_TreatedAsEmptyJsonObject_NotAParseFailure()
     {
-        var webhookEndpoint = NewWebhookEndpoint();
-        var apiEndpoint = NewFulfillmentTrackingEndpoint();
-        var (order, line) = MakeOrderWithLine();
-        var body = $$"""{"status":"shipped","line_id":"{{line.Id}}","tracking":"1Z999AA10123456784"}""";
-        var header = HmacSigner.ComputeSignatureHeaderValue(webhookEndpoint.SignatureAlgorithm, Secret, body, includeTimestamp: false);
-        var eventRepo = MockEventRepo();
-        var orderRepo = new Mock<IOrderRepository>();
-        orderRepo.Setup(r => r.GetByLineIdAsync(line.Id, It.IsAny<CancellationToken>())).ReturnsAsync(order);
+        var webhook = NewWebhook(includeTimestamp: false);
+        const string body = "";
+        var header = HmacSigner.ComputeSignatureHeaderValue("SHA256", Secret, body, includeTimestamp: false);
+        var eventRepo = NewEventRepo();
 
-        var result = await WebhookReceiveHandler.ProcessAsync(
-            webhookEndpoint, apiEndpoint, body, "application/json", header, Secret, eventRepo.Object, orderRepo.Object, CancellationToken.None);
+        var result = await Process(webhook, body, header, Secret, eventRepo.Object);
 
-        Assert.Equal(WebhookEventStatus.Processed, result.Event!.ProcessingStatus);
-        Assert.Equal("shipped", result.Event.OutcomeKey);
-        Assert.Equal(OrderLineStatus.Shipped, line.FulfillmentStatus);
-        Assert.Equal("1Z999AA10123456784", line.TrackingNumber);
-        orderRepo.Verify(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        // Empty body parses as "{}" — dispatch still runs (and fails for a different reason: no
+        // mapping configured), it just isn't a JSON *parse* failure.
+        Assert.Equal(WebhookReceiveHandler.ReceiveOutcome.Accepted, result.Outcome);
+        Assert.DoesNotContain("not valid JSON", result.Event!.ProcessingError ?? "");
     }
 
-    [Fact]
-    public async Task ProcessAsync_FulfillmentTracking_Delivered_CallsMarkDelivered_AndMarksProcessed()
-    {
-        var webhookEndpoint = NewWebhookEndpoint();
-        var apiEndpoint = NewFulfillmentTrackingEndpoint();
-        var (order, line) = MakeOrderWithLine();
-        line.Ship("1Z999AA10123456784"); // deliveries follow a prior ship in the real world
-        var body = $$"""{"status":"delivered","line_id":"{{line.Id}}"}""";
-        var header = HmacSigner.ComputeSignatureHeaderValue(webhookEndpoint.SignatureAlgorithm, Secret, body, includeTimestamp: false);
-        var eventRepo = MockEventRepo();
-        var orderRepo = new Mock<IOrderRepository>();
-        orderRepo.Setup(r => r.GetByLineIdAsync(line.Id, It.IsAny<CancellationToken>())).ReturnsAsync(order);
-
-        var result = await WebhookReceiveHandler.ProcessAsync(
-            webhookEndpoint, apiEndpoint, body, "application/json", header, Secret, eventRepo.Object, orderRepo.Object, CancellationToken.None);
-
-        Assert.Equal(WebhookEventStatus.Processed, result.Event!.ProcessingStatus);
-        Assert.Equal(OrderLineStatus.Delivered, line.FulfillmentStatus);
-    }
+    // ── Dispatch outcome propagation ─────────────────────────────────────────
 
     [Fact]
-    public async Task ProcessAsync_FulfillmentTracking_ShippedMissingTrackingNumber_MarksFailed()
+    public async Task NoMappingConfigured_MarksFailed()
     {
-        var webhookEndpoint = NewWebhookEndpoint();
-        var apiEndpoint = NewFulfillmentTrackingEndpoint();
-        var (order, line) = MakeOrderWithLine();
-        // "tracking" field omitted from the payload entirely — fieldMapping resolves nothing for it.
-        var body = $$"""{"status":"shipped","line_id":"{{line.Id}}"}""";
-        var header = HmacSigner.ComputeSignatureHeaderValue(webhookEndpoint.SignatureAlgorithm, Secret, body, includeTimestamp: false);
-        var eventRepo = MockEventRepo();
-        var orderRepo = new Mock<IOrderRepository>();
-        orderRepo.Setup(r => r.GetByLineIdAsync(line.Id, It.IsAny<CancellationToken>())).ReturnsAsync(order);
+        var webhook = NewWebhook(includeTimestamp: false); // default MappingConfig "{}"
+        const string body = "{}";
+        var header = HmacSigner.ComputeSignatureHeaderValue("SHA256", Secret, body, includeTimestamp: false);
+        var eventRepo = NewEventRepo();
 
-        var result = await WebhookReceiveHandler.ProcessAsync(
-            webhookEndpoint, apiEndpoint, body, "application/json", header, Secret, eventRepo.Object, orderRepo.Object, CancellationToken.None);
+        var result = await Process(webhook, body, header, Secret, eventRepo.Object);
 
         Assert.Equal(WebhookEventStatus.Failed, result.Event!.ProcessingStatus);
-        Assert.Contains("trackingNumber", result.Event.ProcessingError);
-        Assert.Equal(OrderLineStatus.Pending, line.FulfillmentStatus); // untouched
-        orderRepo.Verify(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Contains("no mapping configured", result.Event.ProcessingError, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task ProcessAsync_FulfillmentTracking_NoMatchingOrderLine_MarksFailed()
+    public async Task SuccessfulDispatch_MarksProcessed_WithOutcomeSummary()
     {
-        var webhookEndpoint = NewWebhookEndpoint();
-        var apiEndpoint = NewFulfillmentTrackingEndpoint();
-        var unknownLineId = Guid.NewGuid();
-        var body = $$"""{"status":"shipped","line_id":"{{unknownLineId}}","tracking":"1Z999"}""";
-        var header = HmacSigner.ComputeSignatureHeaderValue(webhookEndpoint.SignatureAlgorithm, Secret, body, includeTimestamp: false);
-        var eventRepo = MockEventRepo();
+        var lineId = Guid.NewGuid();
+        var webhook = NewWebhook(includeTimestamp: false, mappingConfig: new
+        {
+            canonicalType = "order_line",
+            rootMatch = new { sourcePath = "orderLineId", matchField = "Id" },
+            operation = new { name = "MarkDelivered", @params = new Dictionary<string, string>() },
+            onNoMatch = "skip_and_log",
+        });
+        var order = Order.CreateFromCart(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            ContactConnection.Domain.ValueObjects.Commerce.CartDocument.Empty(),
+            [OrderLine.FromCartItem(Guid.NewGuid(), Guid.NewGuid(), new ContactConnection.Domain.ValueObjects.Commerce.CartItem(
+                OfferId: Guid.NewGuid(), ProductId: Guid.NewGuid(), Sku: "SKU-A", Description: "x",
+                Quantity: 1, FullPrice: 1m, ExtendedPrice: 1m, Shipping: 0m, Weight: 0m, SalesTax: 0m,
+                ShippingExempt: true, TaxExempt: true, OnBackOrder: false, AutoShip: false, AutoShipIntervalDays: 0,
+                IsUpsell: false, UpsellQty: 0, MixMatchCode: null, ShipMethod: null, DeliveryMessage: null, ShipToJson: null,
+                Payments: [], PersonalizationAnswers: [], KitSelections: [],
+                CanadaSurcharge: 0m, AKHISurcharge: 0m, OutlyingUSSurcharge: 0m, ForeignSurcharge: 0m))]);
+        var actualLineId = order.Lines[0].Id;
+
         var orderRepo = new Mock<IOrderRepository>();
-        orderRepo.Setup(r => r.GetByLineIdAsync(unknownLineId, It.IsAny<CancellationToken>())).ReturnsAsync((Order?)null);
+        orderRepo.Setup(r => r.GetByLineIdAsync(actualLineId, It.IsAny<CancellationToken>())).ReturnsAsync(order);
 
-        var result = await WebhookReceiveHandler.ProcessAsync(
-            webhookEndpoint, apiEndpoint, body, "application/json", header, Secret, eventRepo.Object, orderRepo.Object, CancellationToken.None);
+        var body = $$"""{"orderLineId":"{{actualLineId}}"}""";
+        var header = HmacSigner.ComputeSignatureHeaderValue("SHA256", Secret, body, includeTimestamp: false);
+        var eventRepo = NewEventRepo();
 
-        Assert.Equal(WebhookEventStatus.Failed, result.Event!.ProcessingStatus);
-        Assert.Contains("No order line found", result.Event.ProcessingError);
+        var result = await Process(webhook, body, header, Secret, eventRepo.Object, orderRepo: orderRepo.Object);
+
+        Assert.Equal(WebhookEventStatus.Processed, result.Event!.ProcessingStatus);
+        Assert.Equal(OrderLineStatus.Delivered, order.Lines[0].FulfillmentStatus);
     }
+}
 
-    [Fact]
-    public async Task ProcessAsync_UnrecognizedSubType_StoresOnly_DoesNotDispatch()
+/// <summary>Tiny helper to hand-build a stale-timestamp HMAC header for the replay-window test —
+/// HmacSigner.ComputeSignatureHeaderValue always stamps DateTimeOffset.UtcNow, so it can't itself
+/// produce a header with an arbitrary past timestamp.</summary>
+internal static class HmacSignerTestHelper
+{
+    public static string ComputeForTimestamp(string algorithm, string secret, string payload, long unixSeconds)
     {
-        var webhookEndpoint = NewWebhookEndpoint();
-        var apiEndpoint = NewUnwiredSubTypeEndpoint(); // campaign_results — no domain sink yet
-        apiEndpoint.SetResponseMapping(FulfillmentMapping); // even if an outcome would match...
-        var body = "{\"status\":\"shipped\",\"line_id\":\"" + Guid.NewGuid() + "\",\"tracking\":\"1Z999\"}";
-        var header = HmacSigner.ComputeSignatureHeaderValue(webhookEndpoint.SignatureAlgorithm, Secret, body, includeTimestamp: false);
-        var eventRepo = MockEventRepo();
-        var orderRepo = new Mock<IOrderRepository>();
-
-        var result = await WebhookReceiveHandler.ProcessAsync(
-            webhookEndpoint, apiEndpoint, body, "application/json", header, Secret, eventRepo.Object, orderRepo.Object, CancellationToken.None);
-
-        // ...it's never dispatched, because this sub-type has no wired consumer.
-        Assert.Equal(WebhookEventStatus.Received, result.Event!.ProcessingStatus);
-        Assert.Equal("shipped", result.Event.OutcomeKey); // still recorded for visibility
-        orderRepo.Verify(r => r.GetByLineIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        using var hmac = new System.Security.Cryptography.HMACSHA256(System.Text.Encoding.UTF8.GetBytes(secret));
+        var hash = hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes($"{unixSeconds}.{payload}"));
+        return Convert.ToHexStringLower(hash);
     }
 }

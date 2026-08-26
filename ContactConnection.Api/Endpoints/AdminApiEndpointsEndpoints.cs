@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text.Json;
 using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
@@ -24,14 +23,6 @@ public static class AdminApiEndpointsEndpoints
         group.MapDelete("{endpointId:guid}", Delete);
         group.MapGet("{endpointId:guid}/versions", ListVersions);
         group.MapPost("{endpointId:guid}/versions/{versionNumber:int}/revert", Revert);
-
-        group.MapGet("{endpointId:guid}/webhook", GetWebhook);
-        group.MapPost("{endpointId:guid}/webhook", EnableWebhook);
-        group.MapPatch("{endpointId:guid}/webhook", UpdateWebhook);
-        group.MapPost("{endpointId:guid}/webhook/regenerate-secret", RegenerateWebhookSecret);
-        group.MapPost("{endpointId:guid}/webhook/regenerate-token", RegenerateWebhookToken);
-        group.MapDelete("{endpointId:guid}/webhook", DisableWebhook);
-        group.MapGet("{endpointId:guid}/webhook/events", ListWebhookEvents);
 
         return app;
     }
@@ -290,158 +281,6 @@ public static class AdminApiEndpointsEndpoints
         return Results.NoContent();
     }
 
-    // ── Webhook config ──────────────────────────────────────────────────────────────────────
-    // See API_HARDENING_CHECKLIST.md Tier 2, "Inbound webhook support". Secrets are shown to
-    // the admin exactly once, on enable/regenerate — never re-displayed after — matching the
-    // reveal-once convention used elsewhere in this system for generated secrets.
-
-    private static async Task<IResult> GetWebhook(
-        Guid definitionId, Guid endpointId,
-        ITenantApiEndpointRepository repo, IWebhookEndpointRepository webhookRepo,
-        TenantContext tenantContext, CancellationToken ct)
-    {
-        if (!tenantContext.HasTenant) return Results.Unauthorized();
-        var endpoint = await repo.GetByIdAsync(endpointId, ct);
-        if (endpoint is null || endpoint.DefinitionId != definitionId) return Results.NotFound();
-
-        var webhook = await webhookRepo.GetByTenantApiEndpointIdAsync(endpointId, ct);
-        if (webhook is null) return Results.NotFound();
-        return Results.Ok(ToWebhookResponse(webhook, tenantContext));
-    }
-
-    private static async Task<IResult> EnableWebhook(
-        Guid definitionId, Guid endpointId,
-        ITenantApiEndpointRepository repo, IWebhookEndpointRepository webhookRepo,
-        ITenantCredentialStore credStore, TenantContext tenantContext, CancellationToken ct)
-    {
-        if (!tenantContext.HasTenant) return Results.Unauthorized();
-        var endpoint = await repo.GetByIdAsync(endpointId, ct);
-        if (endpoint is null || endpoint.DefinitionId != definitionId) return Results.NotFound();
-
-        if (await webhookRepo.GetByTenantApiEndpointIdAsync(endpointId, ct) is not null)
-            return Results.BadRequest(new { error = "This endpoint already has a webhook configured." });
-
-        var webhook = WebhookEndpoint.Create(endpointId);
-        var secret = GenerateSecret();
-        await credStore.SetAsync(webhook.CredentialKeyName, secret, ct: ct);
-        await webhookRepo.AddAsync(webhook, ct);
-        await webhookRepo.SaveChangesAsync(ct);
-
-        return Results.Ok(ToWebhookResponse(webhook, tenantContext) with { Secret = secret });
-    }
-
-    private static async Task<IResult> UpdateWebhook(
-        Guid definitionId, Guid endpointId, UpdateWebhookRequest request,
-        ITenantApiEndpointRepository repo, IWebhookEndpointRepository webhookRepo,
-        TenantContext tenantContext, CancellationToken ct)
-    {
-        if (!tenantContext.HasTenant) return Results.Unauthorized();
-        var endpoint = await repo.GetByIdAsync(endpointId, ct);
-        if (endpoint is null || endpoint.DefinitionId != definitionId) return Results.NotFound();
-
-        var webhook = await webhookRepo.GetByTenantApiEndpointIdAsync(endpointId, ct);
-        if (webhook is null) return Results.NotFound();
-
-        if (request.SignatureHeaderName is not null || request.SignatureAlgorithm is not null
-            || request.IncludeTimestamp is not null || request.TimestampToleranceSeconds is not null)
-        {
-            webhook.SetSignatureConfig(
-                request.SignatureHeaderName ?? webhook.SignatureHeaderName,
-                request.SignatureAlgorithm ?? webhook.SignatureAlgorithm,
-                request.IncludeTimestamp ?? webhook.IncludeTimestamp,
-                request.TimestampToleranceSeconds ?? webhook.TimestampToleranceSeconds);
-        }
-        if (request.IsActive is true) webhook.Activate();
-        else if (request.IsActive is false) webhook.Deactivate();
-
-        await webhookRepo.SaveChangesAsync(ct);
-        return Results.Ok(ToWebhookResponse(webhook, tenantContext));
-    }
-
-    private static async Task<IResult> RegenerateWebhookSecret(
-        Guid definitionId, Guid endpointId,
-        ITenantApiEndpointRepository repo, IWebhookEndpointRepository webhookRepo,
-        ITenantCredentialStore credStore, TenantContext tenantContext, CancellationToken ct)
-    {
-        if (!tenantContext.HasTenant) return Results.Unauthorized();
-        var endpoint = await repo.GetByIdAsync(endpointId, ct);
-        if (endpoint is null || endpoint.DefinitionId != definitionId) return Results.NotFound();
-
-        var webhook = await webhookRepo.GetByTenantApiEndpointIdAsync(endpointId, ct);
-        if (webhook is null) return Results.NotFound();
-
-        var secret = GenerateSecret();
-        await credStore.SetAsync(webhook.CredentialKeyName, secret, ct: ct);
-        return Results.Ok(ToWebhookResponse(webhook, tenantContext) with { Secret = secret });
-    }
-
-    private static async Task<IResult> RegenerateWebhookToken(
-        Guid definitionId, Guid endpointId,
-        ITenantApiEndpointRepository repo, IWebhookEndpointRepository webhookRepo,
-        TenantContext tenantContext, CancellationToken ct)
-    {
-        if (!tenantContext.HasTenant) return Results.Unauthorized();
-        var endpoint = await repo.GetByIdAsync(endpointId, ct);
-        if (endpoint is null || endpoint.DefinitionId != definitionId) return Results.NotFound();
-
-        var webhook = await webhookRepo.GetByTenantApiEndpointIdAsync(endpointId, ct);
-        if (webhook is null) return Results.NotFound();
-
-        webhook.RegenerateToken();
-        await webhookRepo.SaveChangesAsync(ct);
-        return Results.Ok(ToWebhookResponse(webhook, tenantContext));
-    }
-
-    private static async Task<IResult> DisableWebhook(
-        Guid definitionId, Guid endpointId,
-        ITenantApiEndpointRepository repo, IWebhookEndpointRepository webhookRepo,
-        ITenantCredentialStore credStore, TenantContext tenantContext, CancellationToken ct)
-    {
-        if (!tenantContext.HasTenant) return Results.Unauthorized();
-        var endpoint = await repo.GetByIdAsync(endpointId, ct);
-        if (endpoint is null || endpoint.DefinitionId != definitionId) return Results.NotFound();
-
-        var webhook = await webhookRepo.GetByTenantApiEndpointIdAsync(endpointId, ct);
-        if (webhook is null) return Results.NotFound();
-
-        await credStore.DeleteAsync(webhook.CredentialKeyName, ct);
-        await webhookRepo.DeleteAsync(webhook, ct);
-        await webhookRepo.SaveChangesAsync(ct);
-        return Results.NoContent();
-    }
-
-    private static async Task<IResult> ListWebhookEvents(
-        Guid definitionId, Guid endpointId, int? take,
-        ITenantApiEndpointRepository repo, IWebhookEndpointRepository webhookRepo,
-        IWebhookEventRepository eventRepo, TenantContext tenantContext, CancellationToken ct)
-    {
-        if (!tenantContext.HasTenant) return Results.Unauthorized();
-        var endpoint = await repo.GetByIdAsync(endpointId, ct);
-        if (endpoint is null || endpoint.DefinitionId != definitionId) return Results.NotFound();
-
-        var webhook = await webhookRepo.GetByTenantApiEndpointIdAsync(endpointId, ct);
-        if (webhook is null) return Results.NotFound();
-
-        var events = await eventRepo.ListByEndpointAsync(webhook.Id, take ?? 50, ct);
-        return Results.Ok(events.Select(e => new
-        {
-            e.Id,
-            e.ReceivedAt,
-            e.SignatureValid,
-            e.ProcessingStatus,
-            e.ProcessingError,
-            e.OutcomeKey,
-            e.ProcessedAt,
-        }));
-    }
-
-    private static WebhookResponse ToWebhookResponse(WebhookEndpoint w, TenantContext tenantContext) => new(
-        w.Id, w.TenantApiEndpointId, $"/api/v1/webhooks/{w.Token}", tenantContext.Current!.Subdomain,
-        w.SignatureHeaderName, w.SignatureAlgorithm, w.IncludeTimestamp, w.TimestampToleranceSeconds,
-        w.IsActive, w.CreatedAt, w.UpdatedAt, null);
-
-    private static string GenerateSecret() => Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
-
     private static object ToResponse(TenantApiEndpoint e) => new
     {
         e.Id,
@@ -464,26 +303,3 @@ public static class AdminApiEndpointsEndpoints
         e.UpdatedAt,
     };
 }
-
-public record UpdateWebhookRequest(
-    string? SignatureHeaderName,
-    string? SignatureAlgorithm,
-    bool? IncludeTimestamp,
-    int? TimestampToleranceSeconds,
-    bool? IsActive);
-
-/// <summary>Secret is populated only by EnableWebhook/RegenerateWebhookSecret responses — the
-/// reveal-once convention; every other response leaves it null.</summary>
-public record WebhookResponse(
-    Guid Id,
-    Guid TenantApiEndpointId,
-    string Path,
-    string TenantSubdomain,
-    string SignatureHeaderName,
-    string SignatureAlgorithm,
-    bool IncludeTimestamp,
-    int TimestampToleranceSeconds,
-    bool IsActive,
-    DateTimeOffset CreatedAt,
-    DateTimeOffset? UpdatedAt,
-    string? Secret);

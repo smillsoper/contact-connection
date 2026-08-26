@@ -401,6 +401,84 @@ are real production risk for a real-time telephony product, not nice-to-haves.
       webhook created via the API showed up correctly joined (definition/endpoint names, path,
       URL); sent a real signed webhook POST to it and confirmed the dashboard's `lastEventAt`/
       `lastEventStatus` picked it up. Scratch data deleted after; list confirmed empty again.
+      **Redesigned from endpoint-scoped to standalone canonical-object mapping (Session 91,
+      2026-08-25/26)** — after seeing the built dashboard, user rejected the endpoint-scoped 1:1
+      design as "tacked-on": a webhook isn't really an operation on an outbound API endpoint, and
+      reusing that endpoint's `ResponseMapping` DSL only ever supported one hardcoded
+      `fulfillment_tracking` case. Replaced entirely: a webhook is now a **standalone** resource —
+      the admin pastes a sample payload, sees it as a browsable/clickable tree, picks a **curated
+      canonical domain object** (`order` | `order_line` | `call_record`, `CanonicalWebhookType`),
+      and builds a visual mapping — which payload field identifies the target record
+      (`rootMatch`), which field(s) set which property via a curated per-type operation catalog
+      (never raw reflection — `order_line`: `Ship`/`MarkDelivered`/`Cancel`; `order`: `Cancel`;
+      `call_record`: `SetCustomField` via the existing `ICustomFieldService`, zero new
+      domain/repository code needed for that type), and no-match/multiple-match edge-case
+      policies (`skip_and_log` | `ignore` for no-match; `skip_and_log` | `update_all` for
+      multiple-match). New **parent+children array shape** — `order` with `itemsArray` set finds
+      one parent `Order` via `rootMatch`, then walks a payload array (e.g. a fulfillment agency's
+      multi-line-item status update) matching each item against `Order.Lines` by `Sku` or `Id`
+      (the user's own example scoped this). `WebhookEndpoint` reshaped: dropped
+      `TenantApiEndpointId`; added `Name`, `Description`, `CanonicalType`, `MappingConfig` (jsonb).
+      New `CanonicalWebhookMappingEvaluator` (replaces `AddressResponseMappingEvaluator` for this
+      purpose) — dispatch is a plain switch over `canonicalType` + `operation.Name` (3 types × ≤3
+      operations doesn't warrant a plugin abstraction); its own self-contained dot+bracket JSON
+      path resolver (a deliberate 4th duplicate of the same convention already independently
+      copied 3× in `FlowSessionsEndpoints.cs` — not worth the refactor risk to touch stable,
+      tested code for this). Deserializes `MappingConfig` with `PropertyNameCaseInsensitive =
+      true` (a real bug caught before merge — the frontend authors camelCase JSON against
+      PascalCase C# properties, and a bare `JsonSerializer.Deserialize` call outside the ASP.NET
+      Core request pipeline defaults to case-sensitive). Full CRUD rewrite of
+      `AdminWebhooksEndpoints.cs` keyed by the webhook's own id (previously a
+      `(definitionId, endpointId)` pair). Deleted the old endpoint-scoped
+      `WebhookReceiveHandler`/`WebhooksEndpoints`/`AdminWebhooksEndpoints`/`WebhookConfigPanel`/
+      old `AdminWebhooksPage` outright and rewrote fresh; surgically removed the 7 webhook routes/
+      handlers from `AdminApiEndpointsEndpoints.cs`, leaving its endpoint CRUD/version history/
+      sensitive-field masking untouched. Frontend: extracted the response-mapping tree UI into a
+      real shared `components/shared/JsonTree.tsx` (previously copy-pasted, now genuinely shared —
+      directly answering the "tacked-on" feedback) and built new `WebhookMappingEditor.tsx` — a
+      single modal handling create/edit: paste-payload → tree → canonical-type/root-match/
+      operation pickers (a "Pick from payload" toggle wires tree-node clicks into whichever field
+      is active) → itemsArray config when applicable → signature settings → reveal-once secret →
+      recent-events log. New `constants/canonicalWebhookTypes.ts` mirrors the backend catalog
+      (same convention as `constants/apiTypes.ts`). Migration `RebuildWebhooksAsCanonicalMapping`
+      applied to `tenant_test_tenant` (`tenant_test_contact_center` never had the original
+      `AddWebhooks` migration either — pre-existing drift, left flagged rather than reconciled;
+      no Entra ID session available to drive the portal maintenance endpoint this session).
+      **Second bug found and fixed live, mid-verification:** deleting a webhook left its
+      `WebhookEvent` rows orphaned in Postgres — `WebhookEventConfiguration` had never declared a
+      real FK relationship for `WebhookEndpointId` (just a bare `Guid` property), so there was no
+      DB-level cascade at all. Added a shadow FK (`HasOne<WebhookEndpoint>().WithMany()
+      .HasForeignKey(...).OnDelete(Cascade)`, no navigation property needed on either side) via
+      new migration `AddWebhookEventsCascadeFk`, matching the `OrderLine`→`Order`/
+      `CallInteraction`→`CallRecord` convention already used elsewhere in this codebase; applied
+      to `tenant_test_tenant`, one pre-existing orphaned row (predating this session) cleaned up
+      by hand first so the constraint could be added. **Verification:** new
+      `CanonicalWebhookMappingEvaluatorTests` (19 cases — flat `order_line` match/Ship/
+      MarkDelivered/Cancel, `call_record` match by `Id`/`ContactIdExternal`/`SetCustomField`,
+      `order`+`itemsArray` shape exercising both `skip_and_log` and `update_all` multiple-match
+      policies and both no-match policies, malformed-config/payload handling) and a rewritten
+      `WebhookReceiveHandlerTests` (9 cases — signature valid/invalid/null-secret/stale-timestamp,
+      dedup short-circuit, non-JSON/empty body, no-mapping-configured, successful dispatch)
+      replacing the deleted pre-redesign versions; skipped a dedicated repository-CRUD test file
+      (no precedent anywhere in this codebase for testing a trivial EF passthrough repository —
+      relies on the live walkthrough instead, same as `OrderRepository`/`CallRecordRepository`).
+      `dotnet test` whole-solution: **274/274 passing** (45 Domain, 20 Application, 64 Api, 145
+      Infrastructure). `dotnet build` and `npm run build`/`tsc -b` both clean, 0 errors.
+      **Live-verified** against the running local stack as `admin@contactconnection.local` on
+      `test-tenant`: (1) flat `order_line` — scratch `Order`/`OrderLine` via SQL, signed `Ship`
+      payload → `fulfillment_status`/`tracking_number` updated, order status recomputed to
+      `shipped`, event `processed`; (2) `order`+`itemsArray` against a scratch `Order` with two
+      lines sharing a SKU — `skip_and_log` left both `pending` and logged
+      `"No line items were updated."`; switched the same webhook to `update_all` and redelivered —
+      both lines correctly moved to `delivered`; (3) `call_record` `SetCustomField` matched by
+      `ContactIdExternal` — confirmed both the `custom_field_values` row and the
+      `call_records.custom_fields` JSONB snapshot updated; (4) a bad-signature POST still rejected
+      (401, logged `rejected`); (5) a byte-identical redelivery still deduped (200, no new event
+      row — event count stayed at 1 `processed`, not 2); (6) the cascade-FK fix confirmed
+      separately — created a webhook, delivered one event (row count 1), deleted the webhook,
+      confirmed the event row was gone (count 0). All scratch webhooks/orders/lines/call record/
+      custom field definition deleted after verification; final sweep confirmed zero scratch rows
+      remaining.
 
 ## Tier 3 — Lower priority / forward-looking
 

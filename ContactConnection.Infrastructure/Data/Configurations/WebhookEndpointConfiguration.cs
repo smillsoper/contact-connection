@@ -12,7 +12,10 @@ public class WebhookEndpointConfiguration : IEntityTypeConfiguration<WebhookEndp
 
         builder.HasKey(e => e.Id);
         builder.Property(e => e.Id).HasColumnName("id");
-        builder.Property(e => e.TenantApiEndpointId).HasColumnName("tenant_api_endpoint_id").IsRequired();
+        builder.Property(e => e.Name).HasColumnName("name").HasMaxLength(200).IsRequired();
+        builder.Property(e => e.Description).HasColumnName("description").HasMaxLength(500);
+        builder.Property(e => e.CanonicalType).HasColumnName("canonical_type").HasMaxLength(50).IsRequired();
+        builder.Property(e => e.MappingConfig).HasColumnName("mapping_config").HasColumnType("jsonb").IsRequired().HasDefaultValue("{}");
         builder.Property(e => e.Token).HasColumnName("token").HasMaxLength(64).IsRequired();
         builder.Property(e => e.SignatureHeaderName).HasColumnName("signature_header_name").HasMaxLength(100).IsRequired();
         builder.Property(e => e.SignatureAlgorithm).HasColumnName("signature_algorithm").HasMaxLength(20).IsRequired();
@@ -24,7 +27,7 @@ public class WebhookEndpointConfiguration : IEntityTypeConfiguration<WebhookEndp
 
         builder.Ignore(e => e.CredentialKeyName);
 
-        builder.HasIndex(e => e.TenantApiEndpointId).IsUnique().HasDatabaseName("ix_webhook_endpoints_tenant_api_endpoint_id");
         builder.HasIndex(e => e.Token).IsUnique().HasDatabaseName("ix_webhook_endpoints_token");
+        builder.HasIndex(e => e.CanonicalType).HasDatabaseName("ix_webhook_endpoints_canonical_type");
     }
 }

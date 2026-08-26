@@ -16,9 +16,6 @@ public class WebhookEndpointRepository : IWebhookEndpointRepository
     public Task<List<WebhookEndpoint>> GetAllAsync(CancellationToken ct = default) =>
         Db.WebhookEndpoints.OrderByDescending(w => w.CreatedAt).ToListAsync(ct);
 
-    public Task<WebhookEndpoint?> GetByTenantApiEndpointIdAsync(Guid tenantApiEndpointId, CancellationToken ct = default) =>
-        Db.WebhookEndpoints.FirstOrDefaultAsync(w => w.TenantApiEndpointId == tenantApiEndpointId, ct);
-
     public Task<WebhookEndpoint?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
         Db.WebhookEndpoints.FirstOrDefaultAsync(w => w.Id == id, ct);
 
