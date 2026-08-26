@@ -555,9 +555,29 @@ public sealed class EslBackgroundService : BackgroundService
             Guid? bridgedAgentId = Guid.TryParse(
                 bridgeSession.Vars.GetValueOrDefault("_assigned_agent_id"), out var bridgedAgentIdParsed)
                 ? bridgedAgentIdParsed : null;
+
+            // Service Level: was this call answered within the campaign's
+            // ServiceLevelThresholdSeconds of entering the queue? Reporting-only — captured here
+            // for future dashboard use, no control-flow depends on it. Null when the call never
+            // queued at all (e.g. a direct-extension bridge, which has no _in_queue_at).
+            bool? metServiceLevel = null;
+            if (bridgeSession.Vars.TryGetValue("_in_queue_at", out var inQueueAtStr) &&
+                DateTimeOffset.TryParse(inQueueAtStr, out var inQueueAt))
+            {
+                var dbFactory = recorderScope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
+                await using var db = dbFactory.Create(bridgeSession.TenantSchemaName);
+                var campaign = await db.Campaigns.FirstOrDefaultAsync(c => c.Id == bridgeSession.CampaignId, ct);
+                if (campaign is not null)
+                {
+                    var secondsWaited = (DateTimeOffset.UtcNow - inQueueAt).TotalSeconds;
+                    metServiceLevel = secondsWaited <= campaign.ServiceLevelThresholdSeconds;
+                }
+            }
+
             await callStateRecorder.RecordAsync(
                 bridgeSession.TenantId, bridgeSession.TenantSchemaName, bridgeSession.CallRecordId,
-                CallHistoryState.Active, bridgeSession.CampaignId, bridgedAgentId, detail: null, ct: ct);
+                CallHistoryState.Active, bridgeSession.CampaignId, bridgedAgentId, detail: null,
+                metServiceLevel: metServiceLevel, ct: ct);
         }
 
         // Stop any active play loop — the call is now bridged
