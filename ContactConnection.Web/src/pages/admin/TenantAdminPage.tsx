@@ -50,10 +50,16 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    heading: 'Reporting',
+    cards: [
+      { title: 'Supervisor Dashboards', desc: 'Build and view live/historical widget dashboards — calls handled, AHT, conversion, and more.', path: '/dashboards', live: true },
+    ],
+  },
+  {
     heading: 'Coming Soon',
     cards: [
       { title: 'Commerce', desc: 'Products, offers, orders, and subscriptions.', path: '/admin/commerce', live: false },
-      { title: 'Reports', desc: 'Call analytics, agent performance, and custom dashboards.', path: '/admin/reports', live: false },
+      { title: 'Reports', desc: 'Call analytics, agent performance, and scheduled/exported reporting.', path: '/admin/reports', live: false },
       { title: 'Chat', desc: 'Internal team messaging and channel management.', path: '/admin/chat', live: false },
       { title: 'Settings', desc: 'Workspace settings, branding, and security policy.', path: '/admin/settings', live: false },
     ],

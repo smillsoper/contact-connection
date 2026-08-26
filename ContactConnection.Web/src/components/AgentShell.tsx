@@ -64,12 +64,6 @@ export default function AgentShell() {
             Flows
           </button>
           <button
-            onClick={() => navigate('/dashboards')}
-            className="text-xs text-gray-400 hover:text-indigo-300 transition-colors"
-          >
-            Dashboards
-          </button>
-          <button
             onClick={handleLogout}
             className="text-xs text-gray-400 hover:text-white transition-colors"
           >

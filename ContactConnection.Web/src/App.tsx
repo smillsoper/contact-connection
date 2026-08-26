@@ -122,31 +122,6 @@ export default function App() {
             </RequireAuth>
           }
         />
-        <Route
-          path="/dashboards"
-          element={
-            <RequireAuth>
-              <DashboardsPage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/dashboard-builder"
-          element={
-            <RequireAuth>
-              <DashboardBuilderPage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/dashboard-builder/:id"
-          element={
-            <RequireAuth>
-              <DashboardBuilderPage />
-            </RequireAuth>
-          }
-        />
-
         {/* ── Platform portal routes ── */}
         <Route path="/portal/login" element={<PortalLoginPage />} />
         <Route path="/portal/auth/callback" element={<PortalAuthCallbackPage />} />
@@ -306,6 +281,36 @@ export default function App() {
           element={
             <RequireAdminAuth>
               <CampaignDetailPage />
+            </RequireAdminAuth>
+          }
+        />
+
+        {/* Supervisor Dashboards — moved out of the agent portal (Session 92); linked from the
+            admin dashboard's Reporting section instead of the agent shell's top bar. Route paths
+            kept as /dashboards, not /admin/dashboards, to avoid touching every internal
+            navigate() call in DashboardsPage/DashboardBuilderPage — access control is what
+            changed (RequireAuth → RequireAdminAuth), not the URL shape. */}
+        <Route
+          path="/dashboards"
+          element={
+            <RequireAdminAuth>
+              <DashboardsPage />
+            </RequireAdminAuth>
+          }
+        />
+        <Route
+          path="/dashboard-builder"
+          element={
+            <RequireAdminAuth>
+              <DashboardBuilderPage />
+            </RequireAdminAuth>
+          }
+        />
+        <Route
+          path="/dashboard-builder/:id"
+          element={
+            <RequireAdminAuth>
+              <DashboardBuilderPage />
             </RequireAdminAuth>
           }
         />

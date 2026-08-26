@@ -51,7 +51,7 @@ export default function DashboardsPage() {
             >
               ← Back
             </button>
-            <span className="text-sm font-semibold text-white">Dashboards</span>
+            <span className="text-sm font-semibold text-white">Supervisor Dashboards</span>
           </div>
           <button
             onClick={() => navigate('/dashboard-builder')}
