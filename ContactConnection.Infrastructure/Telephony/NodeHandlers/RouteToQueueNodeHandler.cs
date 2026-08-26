@@ -39,13 +39,17 @@ public class RouteToQueueNodeHandler : ITelephonyNodeHandler
         // and can answer via the existing screen-pop flow.
         await using var db = _factory.Create(ctx.TenantSchemaName);
 
+        var campaign = await db.Campaigns.FirstOrDefaultAsync(c => c.Id == ctx.CampaignId, ct);
+
         // Ranked (proficiency DESC, longest-idle tie-break), currently-Available eligible agents.
-        // Step 4 of the ring-strategy work will truncate this per campaign.RingStrategy; for now
-        // (Step 2) every agent still gets stored, preserving today's ring-all behavior exactly —
-        // this step only replaces the eligible-agent-building logic itself with the shared,
-        // bug-fixed helper.
+        // RingTopNByProficiency truncates to the top N before storing — the same click-based
+        // ring/claim mechanics as RingAll otherwise, just a restricted candidate set. RingAll and
+        // (until the arbitration work lands) AutoAnswerBestAgent both still ring everyone ranked.
         var ranked = await _ranker.GetRankedEligibleAgentsAsync(db, ctx.TenantId, ctx.CampaignId, ct: ct);
-        var availableAgentIds = ranked.Select(r => r.AgentId).ToList();
+        var eligible = campaign?.RingStrategy == CampaignRingStrategy.RingTopNByProficiency
+            ? ranked.Take(campaign.RingTopN)
+            : ranked;
+        var availableAgentIds = eligible.Select(r => r.AgentId).ToList();
 
         // Store the eligible agent IDs so the caller's CHANNEL_HANGUP can clean up,
         // and so the screen pop is targeted.

@@ -1,5 +1,6 @@
 using ContactConnection.Api.Hubs;
 using ContactConnection.Application.Interfaces.Services;
+using ContactConnection.Domain.Entities;
 using ContactConnection.Infrastructure.Data;
 using ContactConnection.Infrastructure.Telephony;
 using Microsoft.AspNetCore.SignalR;
@@ -78,22 +79,28 @@ public sealed class QueuePollingService : BackgroundService
 
         // Ranked (proficiency DESC, longest-idle tie-break), currently-Available eligible agents
         // for this campaign (direct + active group assignments) — shared with
-        // RouteToQueueNodeHandler via EligibleAgentRanker. Step 4 of the ring-strategy work will
-        // apply strategy-aware truncation/exclusion here; for now this only replaces the inline
-        // eligible-agent-building logic with the shared, bug-fixed helper (preserves today's
-        // ring-all-in-arbitrary-order behavior exactly).
+        // RouteToQueueNodeHandler via EligibleAgentRanker.
         using var scope = _scopeFactory.CreateScope();
         var dbFactory   = scope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
         var ranker      = scope.ServiceProvider.GetRequiredService<EligibleAgentRanker>();
         await using var db = dbFactory.Create(session.TenantSchemaName);
 
+        var campaign = await db.Campaigns.FirstOrDefaultAsync(c => c.Id == session.CampaignId, ct);
         var ranked = await ranker.GetRankedEligibleAgentsAsync(db, session.TenantId, session.CampaignId, ct: ct);
+
+        // RingTopNByProficiency truncates to the top N here too, so a re-poll (an agent newly
+        // going Available mid-queue) still only offers the call to the same restricted set the
+        // initial RouteToQueueNodeHandler pass would have. RingAll and (until the arbitration
+        // work lands) AutoAnswerBestAgent still ring everyone ranked.
+        var eligible = campaign?.RingStrategy == CampaignRingStrategy.RingTopNByProficiency
+            ? ranked.Take(campaign.RingTopN).ToList()
+            : ranked;
 
         _logger.LogInformation(
             "QueuePoller: {Uuid} — {Count} ranked eligible agent(s): [{Agents}]",
-            session.ChannelUuid, ranked.Count, string.Join(", ", ranked.Select(r => r.AgentId)));
+            session.ChannelUuid, eligible.Count, string.Join(", ", eligible.Select(r => r.AgentId)));
 
-        foreach (var agentId in ranked.Select(r => r.AgentId))
+        foreach (var agentId in eligible.Select(r => r.AgentId))
         {
             // Per-agent ring key — prevents duplicate pops within the TTL window.
             // After 30 seconds the key expires and the call is re-offered automatically.
