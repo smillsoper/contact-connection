@@ -156,6 +156,13 @@ export default function SoftphonePanel() {
     if (callStatus === 'queued') { setPickingUp(false); setPickUpError(null) }
   }, [callRecordId])
 
+  // RingStrategy.AutoAnswerBestAgent — the server picked this agent with no click, so the ref
+  // that normally gets set inside handlePickUp (below) must be armed here instead, the moment
+  // the receiveAutoConnecting push arrives — ahead of the whisper/bridge INVITE that follows it.
+  useEffect(() => {
+    if (callStatus === 'auto-connecting') autoAnswerBridgeRef.current = true
+  }, [callStatus, callRecordId])
+
   // ── Transfer numbers for this campaign ───────────────────────────────────
   useEffect(() => {
     if (!campaignId) { setTransferNumbers([]); return }
@@ -692,6 +699,27 @@ export default function SoftphonePanel() {
             <p className="text-center text-xs text-yellow-500">Softphone {registrationStatus === 'registering' ? 'registering…' : 'not registered'}</p>
           )}
           {pickUpError && <p className="text-center text-xs text-red-400">{pickUpError}</p>}
+        </div>
+      )}
+
+      {/* ── AUTO-CONNECTING (RingStrategy.AutoAnswerBestAgent — server picked this agent, no
+           click needed; the whisper/bridge INVITE auto-answers itself moments after this
+           renders, per the useEffect above that arms autoAnswerBridgeRef) ── */}
+      {callStatus === 'auto-connecting' && (
+        <div className="flex flex-col gap-3 flex-1">
+          <div className="flex justify-center pt-2">
+            <div className="relative flex items-center justify-center">
+              <span className="absolute w-12 h-12 rounded-full bg-indigo-500 opacity-30 animate-ping" />
+              <span className="relative w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center">
+                <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              </span>
+            </div>
+          </div>
+          <div className="text-center">
+            <p className="text-xs text-indigo-400 font-medium mb-1">Connecting you…</p>
+            <p className="text-white font-semibold text-sm truncate">{callerNumber ?? 'Unknown'}</p>
+            {destinationNumber && <p className="text-gray-400 text-xs font-mono truncate">→ {destinationNumber}</p>}
+          </div>
         </div>
       )}
 

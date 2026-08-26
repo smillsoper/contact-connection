@@ -62,6 +62,19 @@ public interface IFlowHubClient
     /// <summary>ESL screen pop — inbound call parked for this agent.</summary>
     Task ReceiveIncomingCall(string callRecordId, string callerNumber, string callerName, string destinationNumber, string campaignId);
 
+    /// <summary>Server-initiated delivery (RingStrategy.AutoAnswerBestAgent) — the system picked
+    /// this agent (no click required). Pushed BEFORE the originate call, not after: the softphone
+    /// must arm its auto-answer flag ahead of the whisper/bridge INVITE that follows, or JsSIP
+    /// could receive that INVITE before the flag is set and fall back to a manual ring. A push
+    /// this early can therefore still be followed by ReceiveAutoConnectFailed if delivery
+    /// doesn't pan out (e.g. the softphone turns out to be unreachable).</summary>
+    Task ReceiveAutoConnecting(string callRecordId, string callerNumber, string callerName, string destinationNumber, string campaignId);
+
+    /// <summary>Follows a ReceiveAutoConnecting push when the delivery it preceded didn't
+    /// succeed — lets the agent's UI drop the "Connecting…" state instead of getting stuck in it,
+    /// since no actual call is coming for that callRecordId after all.</summary>
+    Task ReceiveAutoConnectFailed(string callRecordId);
+
     /// <summary>Script pop delivered after whisper bridge — pushes CRM flow session JSON to the agent.</summary>
     Task ReceiveScriptPop(string sessionJson);
 

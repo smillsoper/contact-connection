@@ -72,4 +72,10 @@ public class RedisCallSessionStore : ITelephonyCallSessionStore
         var db = _redis.GetDatabase();
         await db.KeyDeleteAsync(key);
     }
+
+    public async Task<bool> TrySetKeyAsync(string key, string value, TimeSpan ttl, CancellationToken ct = default)
+    {
+        var db = _redis.GetDatabase();
+        return await db.StringSetAsync(key, value, ttl, When.NotExists);
+    }
 }

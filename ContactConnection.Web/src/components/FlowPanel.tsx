@@ -263,7 +263,7 @@ function TabBar({ sessions, activeSessionId, onSelect }: TabBarProps) {
 
 export default function FlowPanel() {
   const { token, tenantSubdomain } = useAuthStore()
-  const { setQueued, callRecordId } = useCallStore()
+  const { setQueued, setAutoConnecting, reset: resetCall, callRecordId } = useCallStore()
   const { sessions, activeSessionId, addSession, removeSession, setActiveSession } = useFlowSessionsStore()
   const setAgentStateCode = useAgentStateStore((s) => s.setAgentStateCode)
   const [hub, setHub] = useState<signalR.HubConnection | null>(null)
@@ -292,6 +292,25 @@ export default function FlowPanel() {
     connection.on('receiveIncomingCall', (callRecordId: string, callerNumber: string, callerName: string, destinationNumber: string, campaignId: string) => {
       console.log('[SignalR] receiveIncomingCall', { callRecordId, callerNumber, callerName, destinationNumber, campaignId })
       setQueued(callerNumber, callerName, callRecordId, destinationNumber, campaignId)
+    })
+
+    // RingStrategy.AutoAnswerBestAgent — the system picked this agent, no click required.
+    // SoftphonePanel arms auto-answer off of callStatus === 'auto-connecting'; the actual
+    // whisper/bridge INVITE follows shortly after this push.
+    connection.on('receiveAutoConnecting', (callRecordId: string, callerNumber: string, callerName: string, destinationNumber: string, campaignId: string) => {
+      console.log('[SignalR] receiveAutoConnecting', { callRecordId, callerNumber, callerName, destinationNumber, campaignId })
+      setAutoConnecting(callerNumber, callerName, callRecordId, destinationNumber, campaignId)
+    })
+
+    // Follows receiveAutoConnecting when delivery didn't pan out (e.g. softphone unreachable) —
+    // no call is actually coming for this callRecordId, so drop back out of "Connecting…"
+    // rather than leaving the agent stuck. Only relevant if we're still showing that same call.
+    connection.on('receiveAutoConnectFailed', (failedCallRecordId: string) => {
+      console.log('[SignalR] receiveAutoConnectFailed', { failedCallRecordId })
+      const current = useCallStore.getState()
+      if (current.callStatus === 'auto-connecting' && current.callRecordId === failedCallRecordId) {
+        resetCall()
+      }
     })
 
     // Script pop delivered after whisper bridge (agent_selected → tf_whisper → tf_end → CHANNEL_BRIDGE → agent_answer)
