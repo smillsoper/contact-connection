@@ -135,8 +135,11 @@ export default function AdminWebhooksPage() {
       {editorTarget && (
         <WebhookMappingEditor
           webhookId={editorTarget === 'new' ? null : editorTarget}
-          onClose={() => setEditorTarget(null)}
-          onSaved={() => { setEditorTarget(null); load() }}
+          onClose={() => { setEditorTarget(null); load() }}
+          // Refreshes the list in the background without dismissing the modal — the editor
+          // decides for itself when to close (immediately after an edit-save, but only once the
+          // admin dismisses it after a create, so the reveal-once secret stays visible).
+          onSaved={load}
         />
       )}
     </AdminShell>

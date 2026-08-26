@@ -79,8 +79,8 @@ const ALGORITHMS = ['SHA256', 'SHA512', 'SHA1', 'MD5']
 
 interface Props {
   webhookId: string | null // null = creating a new webhook
-  onClose: () => void
-  onSaved: () => void
+  onClose: () => void // dismiss the modal — the editor itself decides when to call this
+  onSaved: () => void // a create/update/delete completed — refresh the list; does NOT dismiss
 }
 
 // Standalone webhook creation/edit flow: name a webhook, paste a sample payload to see it as a
@@ -90,7 +90,12 @@ interface Props {
 // "Webhook" button/panel entirely — a webhook here is its own standalone resource, not an
 // operation attached to an outbound API connection. See API_HARDENING_CHECKLIST.md Tier 2.
 export default function WebhookMappingEditor({ webhookId, onClose, onSaved }: Props) {
-  const isEdit = webhookId !== null
+  // Local, not derived from the prop: after a successful create, the modal switches itself into
+  // edit mode (currentId becomes the new webhook's id) instead of closing, so the reveal-once
+  // secret stays on screen until the admin dismisses it themselves — closing immediately on
+  // create was the bug (onSaved used to double as "close", so the secret never rendered).
+  const [currentId, setCurrentId] = useState<string | null>(webhookId)
+  const isEdit = currentId !== null
 
   const [loading, setLoading] = useState(isEdit)
   const [webhook, setWebhook] = useState<AdminWebhook | null>(null)
@@ -223,11 +228,14 @@ export default function WebhookMappingEditor({ webhookId, onClose, onSaved }: Pr
     setError(null)
     try {
       const mappingConfigJson = JSON.stringify(mapping)
-      if (isEdit && webhookId) {
-        await updateAdminWebhook(webhookId, {
+      if (isEdit && currentId) {
+        await updateAdminWebhook(currentId, {
           name, description: description || undefined, mappingConfig: mappingConfigJson,
           signatureHeaderName, signatureAlgorithm, includeTimestamp, timestampToleranceSeconds: timestampTolerance, isActive,
         })
+        // Editing an existing webhook never reveals a new secret, so it's safe to close.
+        onSaved()
+        onClose()
       } else {
         const created = await createAdminWebhook({
           name, canonicalType: mapping.canonicalType, description: description || undefined, mappingConfig: mappingConfigJson,
@@ -235,8 +243,10 @@ export default function WebhookMappingEditor({ webhookId, onClose, onSaved }: Pr
         })
         if (created.secret) setRevealedSecret(created.secret)
         setWebhook(created)
+        setCurrentId(created.id) // switch into edit mode in place — do NOT close, the secret above is reveal-once
+        setEvents([]) // a brand new webhook has no events yet; skip the network round-trip
+        onSaved() // refresh the list in the background without dismissing this modal
       }
-      onSaved()
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -245,28 +255,28 @@ export default function WebhookMappingEditor({ webhookId, onClose, onSaved }: Pr
   }
 
   async function handleRegenerateSecret() {
-    if (!webhookId) return
+    if (!currentId) return
     setSaving(true)
     try {
-      const updated = await regenerateAdminWebhookSecret(webhookId)
+      const updated = await regenerateAdminWebhookSecret(currentId)
       if (updated.secret) setRevealedSecret(updated.secret)
     } catch (e) { setError((e as Error).message) } finally { setSaving(false) }
   }
 
   async function handleRegenerateToken() {
-    if (!webhookId) return
+    if (!currentId) return
     setSaving(true)
     try {
-      const updated = await regenerateAdminWebhookToken(webhookId)
+      const updated = await regenerateAdminWebhookToken(currentId)
       setWebhook(updated)
     } catch (e) { setError((e as Error).message) } finally { setSaving(false) }
   }
 
   async function handleDelete() {
-    if (!webhookId || !confirm(`Delete webhook "${name}"? This cannot be undone.`)) return
+    if (!currentId || !confirm(`Delete webhook "${name}"? This cannot be undone.`)) return
     setSaving(true)
     try {
-      await deleteAdminWebhook(webhookId)
+      await deleteAdminWebhook(currentId)
       onSaved()
       onClose()
     } catch (e) { setError((e as Error).message) } finally { setSaving(false) }
