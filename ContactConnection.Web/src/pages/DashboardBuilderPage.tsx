@@ -110,6 +110,17 @@ export default function DashboardBuilderPage() {
     loadDashboard(dashboardId)
   }, [dashboardId, navigate, loadDashboard])
 
+  const handleStartEdit = useCallback(() => {
+    // View mode allows free drag/resize as a personal, unsaved layout preference (see the grid
+    // props below) — so `widgets` may already differ from what's actually saved by the time
+    // someone clicks Edit. Re-fetch first so a real edit session always starts from the true
+    // saved layout, not whatever they'd been idly rearranging for themselves; otherwise a casual
+    // view-mode drag followed by Edit → Save would silently promote a personal tweak to
+    // everyone's layout.
+    if (dashboardId) loadDashboard(dashboardId)
+    setIsEditing(true)
+  }, [dashboardId, loadDashboard])
+
   // SignalR — join the supervisor group for this tenant, listen for agent state pushes
   useEffect(() => {
     if (!token) return
@@ -265,7 +276,7 @@ export default function DashboardBuilderPage() {
                 </button>
                 {canManage && (
                   <button
-                    onClick={() => setIsEditing(true)}
+                    onClick={handleStartEdit}
                     className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-1.5 rounded-lg transition-colors"
                   >
                     Edit
@@ -306,6 +317,11 @@ export default function DashboardBuilderPage() {
 
       {/* Canvas */}
       <div className="flex-1 p-6">
+        {!loading && !editMode && widgets.length > 0 && (
+          <p className="text-gray-600 text-xs mb-3">
+            Drag or resize tiles to rearrange them for yourself — it's just for this screen and won't change what anyone else sees.
+          </p>
+        )}
         {loading ? (
           <div className="flex items-center justify-center h-40 text-gray-500 text-sm">Loading…</div>
         ) : (
@@ -318,8 +334,12 @@ export default function DashboardBuilderPage() {
               rowHeight={30}
               margin={[12, 12]}
               draggableHandle=".widget-drag-handle"
-              isDraggable={editMode}
-              isResizable={editMode}
+              // Free rearranging/resizing is allowed in view mode too — a personal, unsaved
+              // layout preference (see handleStartEdit) since not everyone's screen is the same.
+              // Only isDroppable stays edit-gated: it accepts *new* widgets from the palette,
+              // which is hidden outside edit mode anyway, so there's nothing to drop.
+              isDraggable
+              isResizable
               isDroppable={editMode}
               droppingItem={{ i: '__dropping-elem__', x: 0, y: 0, w: 4, h: 8 }}
               onDrop={handleDrop}
