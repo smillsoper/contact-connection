@@ -45,9 +45,15 @@ function SettingsForm({ campaign, flows, onSaved }: SettingsFormProps) {
   const [maxQueueSize, setMaxQueueSize] = useState(campaign.maxQueueSize)
   const [queueTimeout, setQueueTimeout] = useState(campaign.queueTimeoutSeconds)
   const [slThreshold, setSlThreshold] = useState(campaign.serviceLevelThresholdSeconds)
+  // Was never tracked here at all (no state, no input, no save payload field) — every save
+  // silently reset it server-side to the backend request record's default (10). Found while
+  // wiring up the ring-strategy fields below; fixed alongside them since it's the same form/payload.
+  const [shortAbandonThreshold, setShortAbandonThreshold] = useState(campaign.shortAbandonThresholdSeconds)
   const [accelEnabled, setAccelEnabled] = useState(campaign.queueAccelerationEnabled)
   const [accelInterval, setAccelInterval] = useState(campaign.queueAccelerationIntervalSeconds)
   const [accelBoost, setAccelBoost] = useState(campaign.queueAccelerationPriorityBoost)
+  const [ringStrategy, setRingStrategy] = useState(campaign.ringStrategy)
+  const [ringTopN, setRingTopN] = useState(campaign.ringTopN)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
@@ -67,9 +73,12 @@ function SettingsForm({ campaign, flows, onSaved }: SettingsFormProps) {
         maxQueueSize: hasQueue ? maxQueueSize : 50,
         queueTimeoutSeconds: hasQueue ? queueTimeout : 300,
         serviceLevelThresholdSeconds: !isOutbound ? slThreshold : 30,
+        shortAbandonThresholdSeconds: shortAbandonThreshold,
         queueAccelerationEnabled: hasQueue ? accelEnabled : false,
         queueAccelerationIntervalSeconds: accelInterval,
         queueAccelerationPriorityBoost: accelBoost,
+        ringStrategy: hasQueue ? ringStrategy : 'ring_all',
+        ringTopN,
       })
       // Save fallback script flow
       if (flowId && flowId !== campaign.flowId) {
@@ -314,6 +323,48 @@ function SettingsForm({ campaign, flows, onSaved }: SettingsFormProps) {
               />
             </div>
           )}
+
+          {/* Short Abandon Threshold — inbound only */}
+          {direction === 'inbound' && (
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">
+                Short Abandon Threshold <span className="text-gray-600">(seconds)</span>
+              </label>
+              <input
+                type="number" min={0} value={shortAbandonThreshold}
+                onChange={(e) => setShortAbandonThreshold(Number(e.target.value))}
+                className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <p className="text-gray-600 text-xs mt-1">Hang-ups within this many seconds of entering the queue count as a "short" abandon rather than "long" in reporting.</p>
+            </div>
+          )}
+
+          {/* Ring Strategy */}
+          <div className="md:col-span-2">
+            <label className="block text-xs text-gray-400 mb-1">Ring Strategy</label>
+            <select
+              value={ringStrategy}
+              onChange={(e) => setRingStrategy(e.target.value)}
+              className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="ring_all">Ring All — broadcast to every available agent, first to click wins</option>
+              <option value="auto_answer_best_agent">Auto-Answer Best Agent — system picks the top-ranked agent and connects them automatically</option>
+              <option value="ring_top_n_by_proficiency">Ring Top N by Proficiency — ring only the highest-ranked agents, first to click wins</option>
+            </select>
+            <p className="text-gray-600 text-xs mt-1">
+              Ranking is by agent proficiency for this campaign, then longest idle. Ring All is the best fit for a shared line where any agent should grab the next call; the other two route to specific best-qualified agents instead.
+            </p>
+            {ringStrategy === 'ring_top_n_by_proficiency' && (
+              <div className="mt-3 max-w-[160px]">
+                <label className="block text-xs text-gray-400 mb-1">Ring Top</label>
+                <input
+                  type="number" min={1} value={ringTopN}
+                  onChange={(e) => setRingTopN(Number(e.target.value))}
+                  className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+            )}
+          </div>
 
           {/* Queue Acceleration */}
           <div className="md:col-span-2">

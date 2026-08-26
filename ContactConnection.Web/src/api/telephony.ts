@@ -32,9 +32,14 @@ export interface Campaign {
   maxQueueSize: number
   queueTimeoutSeconds: number
   serviceLevelThresholdSeconds: number
+  shortAbandonThresholdSeconds: number
   queueAccelerationEnabled: boolean
   queueAccelerationIntervalSeconds: number
   queueAccelerationPriorityBoost: number
+  /** How a queued call is delivered to agents — 'ring_all' | 'auto_answer_best_agent' | 'ring_top_n_by_proficiency'. */
+  ringStrategy: string
+  /** Only meaningful when ringStrategy === 'ring_top_n_by_proficiency'. */
+  ringTopN: number
   client?: { id: string; name: string }
   createdAt: string
   updatedAt: string
@@ -155,9 +160,15 @@ export const updateCampaign = (id: string, data: {
   maxQueueSize: number
   queueTimeoutSeconds: number
   serviceLevelThresholdSeconds: number
+  // Was missing here entirely — every save silently reset it server-side to the backend
+  // request record's default (10), regardless of what was actually configured. Found and
+  // fixed alongside the ring-strategy fields below, since this is the same payload object.
+  shortAbandonThresholdSeconds: number
   queueAccelerationEnabled: boolean
   queueAccelerationIntervalSeconds: number
   queueAccelerationPriorityBoost: number
+  ringStrategy: string
+  ringTopN: number
 }) => api.put<Campaign>(`/api/v1/campaigns/${id}`, data)
 
 export const setCampaignFlow = (id: string, flowId: string) =>
