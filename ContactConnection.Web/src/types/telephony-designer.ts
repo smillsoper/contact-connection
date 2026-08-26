@@ -162,7 +162,10 @@ export const TELEPHONY_NODE_META: Record<
     label: 'Route to Queue',
     color: '#1d4ed8',
     description: 'Push the call to the agent queue',
-    handles: 'single',
+    // 'default' (chain into e.g. hold music) always renders, same as before; 'on_timeout' is a
+    // second, optional-to-wire handle for MaxQueueSize/QueueTimeoutSeconds overflow — see
+    // RouteToQueueNode.tsx.
+    handles: 'multi',
   },
   tf_play: {
     label: 'Play',

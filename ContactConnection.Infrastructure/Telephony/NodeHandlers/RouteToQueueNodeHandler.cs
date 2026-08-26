@@ -13,13 +13,16 @@ public class RouteToQueueNodeHandler : ITelephonyNodeHandler
     private readonly ITenantDbContextFactory _factory;
     private readonly ICallStateHistoryRecorder _callStateRecorder;
     private readonly EligibleAgentRanker _ranker;
+    private readonly ITelephonyCallSessionStore _sessionStore;
 
     public RouteToQueueNodeHandler(
-        ITenantDbContextFactory factory, ICallStateHistoryRecorder callStateRecorder, EligibleAgentRanker ranker)
+        ITenantDbContextFactory factory, ICallStateHistoryRecorder callStateRecorder, EligibleAgentRanker ranker,
+        ITelephonyCallSessionStore sessionStore)
     {
         _factory           = factory;
         _callStateRecorder = callStateRecorder;
         _ranker            = ranker;
+        _sessionStore       = sessionStore;
     }
 
     public async Task<TelephonyNodeResult> ExecuteAsync(
@@ -41,10 +44,42 @@ public class RouteToQueueNodeHandler : ITelephonyNodeHandler
 
         var campaign = await db.Campaigns.FirstOrDefaultAsync(c => c.Id == ctx.CampaignId, ct);
 
+        // Shared by both the MaxQueueSize-reject branch below and the normal queue-entry path —
+        // an edge wired from this node's "on_timeout" handle. Also used by QueuePollingService
+        // (stashed into _on_timeout_node_id below) when a queued call later exceeds
+        // QueueTimeoutSeconds. Same target for both "couldn't get in" and "waited too long" —
+        // operationally the same "couldn't stay queued" outcome, distinguished only by
+        // CallAbandonType (QueueFull vs QueueTimeout) for reporting.
+        var onTimeoutNodeId = node["transitions"]?["on_timeout"]?.GetValue<string>();
+
+        if (campaign is not null && campaign.MaxQueueSize > 0)
+        {
+            var allSessions = await _sessionStore.GetAllAsync(ct);
+            var currentlyQueued = allSessions.Count(
+                s => s.CampaignId == ctx.CampaignId && s.Vars.GetValueOrDefault("_queued") == "true");
+
+            if (currentlyQueued >= campaign.MaxQueueSize)
+            {
+                await _callStateRecorder.RecordAsync(
+                    ctx.TenantId, ctx.TenantSchemaName, ctx.CallRecordId,
+                    CallHistoryState.Abandoned, ctx.CampaignId, agentId: null, detail: "Queue full",
+                    abandonType: CallAbandonType.QueueFull, ct: ct);
+
+                if (!string.IsNullOrEmpty(onTimeoutNodeId))
+                    return new TelephonyNodeResult(onTimeoutNodeId, "queue_full");
+
+                // No overflow path defined — never leave the caller silently parked with no audio.
+                if (ctx.Esl is not null)
+                    await ctx.Esl.HangupChannelAsync(ctx.ChannelUuid, ct);
+                return new TelephonyNodeResult(null, "queue_full");
+            }
+        }
+
         // Ranked (proficiency DESC, longest-idle tie-break), currently-Available eligible agents.
         // RingTopNByProficiency truncates to the top N before storing — the same click-based
         // ring/claim mechanics as RingAll otherwise, just a restricted candidate set. RingAll and
-        // (until the arbitration work lands) AutoAnswerBestAgent both still ring everyone ranked.
+        // AutoAnswerBestAgent (delivered by QueuePollingService's arbitration pass, not here)
+        // both get the full ranked list.
         var ranked = await _ranker.GetRankedEligibleAgentsAsync(db, ctx.TenantId, ctx.CampaignId, ct: ct);
         var eligible = campaign?.RingStrategy == CampaignRingStrategy.RingTopNByProficiency
             ? ranked.Take(campaign.RingTopN)
@@ -59,6 +94,9 @@ public class RouteToQueueNodeHandler : ITelephonyNodeHandler
         // Stashed so a later abandon at hangup can compute in-queue wait time without a DB round trip.
         var enteredQueueAt = DateTimeOffset.UtcNow;
         ctx.Vars["_in_queue_at"] = enteredQueueAt.ToString("O");
+
+        if (!string.IsNullOrEmpty(onTimeoutNodeId))
+            ctx.Vars["_on_timeout_node_id"] = onTimeoutNodeId;
 
         await _callStateRecorder.RecordAsync(
             ctx.TenantId, ctx.TenantSchemaName, ctx.CallRecordId,

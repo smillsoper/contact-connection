@@ -98,6 +98,9 @@ public sealed class QueuePollingService : BackgroundService
         var dbFactory            = scope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
         var ranker               = scope.ServiceProvider.GetRequiredService<EligibleAgentRanker>();
         var deliveryService      = scope.ServiceProvider.GetRequiredService<QueuedCallDeliveryService>();
+        var callStateRecorder    = scope.ServiceProvider.GetRequiredService<ICallStateHistoryRecorder>();
+        var telephonyFlowEngine  = scope.ServiceProvider.GetRequiredService<ITelephonyFlowEngine>();
+        var config               = scope.ServiceProvider.GetRequiredService<IConfiguration>();
 
         var tenantId     = sessions[0].TenantId;
         var tenantSchema = sessions[0].TenantSchemaName;
@@ -110,12 +113,35 @@ public sealed class QueuePollingService : BackgroundService
 
         var now = DateTimeOffset.UtcNow;
 
+        // ── QueueTimeoutSeconds eviction — before any delivery/arbitration work, so an evicted
+        // call never competes for an agent it's about to be kicked out of the queue for anyway.
+        var activeSessions = new List<TelephonyCallSession>();
+        foreach (var session in sessions)
+        {
+            if (!campaigns.TryGetValue(session.CampaignId, out var campaign))
+            {
+                activeSessions.Add(session);
+                continue;
+            }
+
+            var secondsWaited = (now - ParseInQueueAt(session, now)).TotalSeconds;
+            if (campaign.QueueTimeoutSeconds > 0 && secondsWaited >= campaign.QueueTimeoutSeconds)
+            {
+                await EvictTimedOutCallAsync(session, tenantId, tenantSchema, callStateRecorder, telephonyFlowEngine, config, ct);
+                continue;
+            }
+
+            activeSessions.Add(session);
+        }
+
+        if (activeSessions.Count == 0) return;
+
         // Agents claimed this tick — excluded from every later pass so nobody gets double-offered
         // (auto-answered on one call while simultaneously rung for another).
         var claimedThisTick = new HashSet<Guid>();
 
         // ── AutoAnswerBestAgent — highest effective priority first ──────────────────────────
-        var autoAnswerCandidates = sessions
+        var autoAnswerCandidates = activeSessions
             .Where(s => campaigns.TryGetValue(s.CampaignId, out var c) && c.RingStrategy == CampaignRingStrategy.AutoAnswerBestAgent)
             .Select(s => (Session: s, Campaign: campaigns[s.CampaignId], InQueueAt: ParseInQueueAt(s, now)));
         var autoAnswerQueue = OrderByArbitrationPriority(autoAnswerCandidates, now);
@@ -124,13 +150,51 @@ public sealed class QueuePollingService : BackgroundService
             await TryAutoAnswerDeliverAsync(session, tenantId, tenantSchema, db, ranker, deliveryService, claimedThisTick, ct);
 
         // ── RingAll / RingTopNByProficiency — click-based, unchanged mechanics ──────────────
-        foreach (var session in sessions)
+        foreach (var session in activeSessions)
         {
             if (!campaigns.TryGetValue(session.CampaignId, out var campaign)) continue;
             if (campaign.RingStrategy == CampaignRingStrategy.AutoAnswerBestAgent) continue; // handled above
 
             await NotifyEligibleAgentsAsync(session, campaign, db, ranker, claimedThisTick, ct);
         }
+    }
+
+    /// <summary>A queued call that's waited past campaign.QueueTimeoutSeconds — dequeues it,
+    /// records the abandon, and either resumes the flow at the "on_timeout" node
+    /// RouteToQueueNodeHandler stashed (if one was wired) or hangs up directly, mirroring
+    /// TelEndNodeHandler's own "no transition defined" fallback so the caller is never left
+    /// silently parked.</summary>
+    private async Task EvictTimedOutCallAsync(
+        TelephonyCallSession session, Guid tenantId, string tenantSchema,
+        ICallStateHistoryRecorder callStateRecorder, ITelephonyFlowEngine telephonyFlowEngine,
+        IConfiguration config, CancellationToken ct)
+    {
+        session.Vars.Remove("_queued");
+        await _sessionStore.SaveAsync(session, ct);
+
+        await callStateRecorder.RecordAsync(
+            tenantId, tenantSchema, session.CallRecordId, CallHistoryState.Abandoned, session.CampaignId,
+            agentId: null, detail: "Queue timeout", abandonType: CallAbandonType.QueueTimeout, ct: ct);
+
+        var host = config["FreeSWITCH:Host"] ?? "127.0.0.1";
+        var port = int.Parse(config["FreeSWITCH:EslPort"] ?? "8021");
+        var pass = config["FreeSWITCH:EslPassword"] ?? "ClueCon";
+
+        await using var esl = new EslClient();
+        await esl.ConnectAsync(host, port, pass, ct);
+
+        if (session.Vars.TryGetValue("_on_timeout_node_id", out var onTimeoutNodeId) && !string.IsNullOrEmpty(onTimeoutNodeId))
+        {
+            await telephonyFlowEngine.ResumeFromNodeAsync(session.ChannelUuid, onTimeoutNodeId, esl, ct);
+        }
+        else
+        {
+            await esl.HangupChannelAsync(session.ChannelUuid, ct);
+        }
+
+        _logger.LogInformation(
+            "QueuePoller: evicted timed-out call {CallRecordId} from queue (channel {Uuid}, campaign {CampaignId})",
+            session.CallRecordId, session.ChannelUuid, session.CampaignId);
     }
 
     private async Task TryAutoAnswerDeliverAsync(
