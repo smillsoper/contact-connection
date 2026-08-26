@@ -53,6 +53,11 @@ builder.Services.AddScoped<ICallTraceNotifier, CallTraceNotifier>();
 // singleton with no HTTP request scope, so it cannot depend on a scoped service.
 builder.Services.AddSingleton<IDashboardNotifier, DashboardNotifier>();
 
+// Claims a queued call for a specific agent and delivers it — shared by the agent's manual
+// "Pick Up" click (TelephonyEndpoints.AnswerQueuedCall) and QueuePollingService's server-
+// initiated RingStrategy.AutoAnswerBestAgent delivery (no HTTP round trip).
+builder.Services.AddScoped<QueuedCallDeliveryService>();
+
 // ESL background service — connects to FreeSWITCH and handles CHANNEL_PARK / CHANNEL_HANGUP
 builder.Services.AddHostedService<EslBackgroundService>();
 
