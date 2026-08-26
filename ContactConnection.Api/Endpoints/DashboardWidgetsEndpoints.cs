@@ -14,7 +14,7 @@ public static class DashboardWidgetsEndpoints
 {
     public static void MapDashboardWidgetsEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/v1/dashboard-widgets").RequireAuthorization();
+        var group = app.MapGroup("/api/v1/dashboard-widgets").RequireAuthorization("ReportsView");
 
         group.MapGet("/agent-state-counter", async (
             Guid? campaignId,

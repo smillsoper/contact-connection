@@ -46,6 +46,16 @@ export default function DashboardBuilderPage() {
   const { id } = useParams<{ id?: string }>()
   const token = useAuthStore((s) => s.token)
   const tenantSubdomain = useAuthStore((s) => s.tenantSubdomain)
+  // reports.view (checked at the route level) is enough to open and look at an existing
+  // dashboard's live widgets — there's no separate read-only viewer page, this builder doubles
+  // as both. reports.manage additionally unlocks creating, editing layout/config, and saving.
+  const canManage = useAuthStore((s) => s.hasPermission('reports.manage'))
+
+  // Nothing to view on the blank "create new" canvas without manage rights — bounce back rather
+  // than show an editor whose only action (Save) is about to be hidden.
+  useEffect(() => {
+    if (!id && !canManage) navigate('/dashboards', { replace: true })
+  }, [id, canManage, navigate])
 
   const [dashboardId, setDashboardId] = useState<string | null>(id ?? null)
   const [name, setName] = useState('New Dashboard')
@@ -187,17 +197,24 @@ export default function DashboardBuilderPage() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Dashboard Name"
-              className="bg-gray-800 border border-gray-700 rounded px-3 py-1 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-sky-500 w-56"
+              disabled={!canManage}
+              className="bg-gray-800 border border-gray-700 rounded px-3 py-1 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-sky-500 w-56 disabled:opacity-60 disabled:cursor-not-allowed"
             />
             <label className="flex items-center gap-1.5 text-sm text-gray-300 shrink-0">
               <input
                 type="checkbox"
                 checked={isShared}
                 onChange={(e) => setIsShared(e.target.checked)}
-                className="rounded"
+                disabled={!canManage}
+                className="rounded disabled:opacity-60"
               />
               Shared
             </label>
+            {!canManage && (
+              <span className="text-xs text-gray-500 border border-gray-700 rounded-full px-2.5 py-0.5 shrink-0">
+                View only
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {error && <span className="text-xs text-red-400">{error}</span>}
@@ -205,20 +222,23 @@ export default function DashboardBuilderPage() {
               onClick={() => navigate('/dashboards')}
               className="text-sm text-gray-300 border border-gray-700 hover:border-gray-500 px-4 py-1.5 rounded-lg transition-colors"
             >
-              Cancel
+              {canManage ? 'Cancel' : 'Back'}
             </button>
-            <button
-              onClick={handleSave}
-              disabled={saving || !name.trim()}
-              className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-1.5 rounded-lg disabled:opacity-50 transition-colors"
-            >
-              {saving ? 'Saving…' : 'Save'}
-            </button>
+            {canManage && (
+              <button
+                onClick={handleSave}
+                disabled={saving || !name.trim()}
+                className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-1.5 rounded-lg disabled:opacity-50 transition-colors"
+              >
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Widget palette */}
+      {/* Widget palette — create-only, hidden for view-only users */}
+      {canManage && (
       <div className="flex items-center gap-3 bg-gray-900 border-b border-gray-800 px-6 py-4 overflow-x-auto shrink-0">
         {WIDGET_TYPES.map((type) => {
           const meta = WIDGET_META[type]
@@ -242,6 +262,7 @@ export default function DashboardBuilderPage() {
           )
         })}
       </div>
+      )}
 
       {/* Canvas */}
       <div className="flex-1 p-6">
@@ -257,7 +278,9 @@ export default function DashboardBuilderPage() {
               rowHeight={30}
               margin={[12, 12]}
               draggableHandle=".widget-drag-handle"
-              isDroppable
+              isDraggable={canManage}
+              isResizable={canManage}
+              isDroppable={canManage}
               droppingItem={{ i: '__dropping-elem__', x: 0, y: 0, w: 4, h: 8 }}
               onDrop={handleDrop}
               onDropDragOver={() => ({})}
@@ -267,8 +290,8 @@ export default function DashboardBuilderPage() {
                 <div key={w.id}>
                   <WidgetShell
                     title={WIDGET_META[w.widgetType].label}
-                    onConfigure={() => setConfiguringId(w.id)}
-                    onRemove={() => handleRemove(w.id)}
+                    onConfigure={canManage ? () => setConfiguringId(w.id) : undefined}
+                    onRemove={canManage ? () => handleRemove(w.id) : undefined}
                   >
                     {renderWidget(w.widgetType, w.config)}
                   </WidgetShell>

@@ -58,6 +58,20 @@ function RequireAdminAuth({ children }: { children: React.ReactNode }) {
   return <Navigate to="/agent" replace />
 }
 
+// Gates a route behind one specific permission, not just "is generically an admin" —
+// RequireAdminAuth only checks that a user has ANY admin-ish permission, so it can't stop a user
+// with e.g. only blocklist.manage from reaching a reports.view-gated page by URL. Falls back to
+// /admin (itself RequireAdminAuth-gated) rather than /agent, so a user who still has some other
+// admin permission lands on the dashboard instead of being bounced all the way out of the admin
+// area for lacking just this one permission.
+function RequirePermission({ permission, children }: { permission: string; children: React.ReactNode }) {
+  const token = useAuthStore((s) => s.token)
+  const hasPermission = useAuthStore((s) => s.hasPermission)
+  if (!token) return <Navigate to="/login" replace />
+  if (hasPermission(permission)) return <>{children}</>
+  return <Navigate to="/admin" replace />
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -288,30 +302,32 @@ export default function App() {
         {/* Supervisor Dashboards — moved out of the agent portal (Session 92); linked from the
             admin dashboard's Reporting section instead of the agent shell's top bar. Route paths
             kept as /dashboards, not /admin/dashboards, to avoid touching every internal
-            navigate() call in DashboardsPage/DashboardBuilderPage — access control is what
-            changed (RequireAuth → RequireAdminAuth), not the URL shape. */}
+            navigate() call in DashboardsPage/DashboardBuilderPage. Gated by the specific
+            reports.view permission (not just RequireAdminAuth's "any admin permission" check) —
+            mutating actions (create/edit/delete a dashboard) are further gated by reports.manage
+            inside the pages themselves, same convention as AdminBlockListPage's canManage. */}
         <Route
           path="/dashboards"
           element={
-            <RequireAdminAuth>
+            <RequirePermission permission="reports.view">
               <DashboardsPage />
-            </RequireAdminAuth>
+            </RequirePermission>
           }
         />
         <Route
           path="/dashboard-builder"
           element={
-            <RequireAdminAuth>
+            <RequirePermission permission="reports.view">
               <DashboardBuilderPage />
-            </RequireAdminAuth>
+            </RequirePermission>
           }
         />
         <Route
           path="/dashboard-builder/:id"
           element={
-            <RequireAdminAuth>
+            <RequirePermission permission="reports.view">
               <DashboardBuilderPage />
-            </RequireAdminAuth>
+            </RequirePermission>
           }
         />
 

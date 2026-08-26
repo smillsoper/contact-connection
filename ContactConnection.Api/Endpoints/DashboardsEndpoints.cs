@@ -8,7 +8,7 @@ public static class DashboardsEndpoints
 {
     public static void MapDashboardsEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/v1/dashboards").RequireAuthorization();
+        var group = app.MapGroup("/api/v1/dashboards");
 
         group.MapPost("/", async (
             CreateDashboardRequest req,
@@ -34,7 +34,7 @@ public static class DashboardsEndpoints
             await dashboards.SaveChangesAsync(ct);
 
             return Results.Created($"/api/v1/dashboards/{dashboard.Id}", dashboard.ToResponse());
-        });
+        }).RequireAuthorization("ReportsManage");
 
         group.MapGet("/", async (
             IDashboardRepository dashboards,
@@ -50,7 +50,7 @@ public static class DashboardsEndpoints
 
             var list = await dashboards.GetVisibleAsync(tenantContext.Current.Id, agentId, ct);
             return Results.Ok(list.Select(d => d.ToResponse()));
-        });
+        }).RequireAuthorization("ReportsView");
 
         group.MapGet("/{id:guid}", async (
             Guid id,
@@ -65,7 +65,7 @@ public static class DashboardsEndpoints
                 return Results.NotFound();
 
             return Results.Ok(dashboard.ToDetailResponse());
-        });
+        }).RequireAuthorization("ReportsView");
 
         group.MapPut("/{id:guid}", async (
             Guid id,
@@ -84,7 +84,7 @@ public static class DashboardsEndpoints
             await dashboards.SaveChangesAsync(ct);
 
             return Results.Ok(dashboard.ToDetailResponse());
-        });
+        }).RequireAuthorization("ReportsManage");
 
         group.MapDelete("/{id:guid}", async (
             Guid id,
@@ -102,7 +102,7 @@ public static class DashboardsEndpoints
             await dashboards.SaveChangesAsync(ct);
 
             return Results.NoContent();
-        });
+        }).RequireAuthorization("ReportsManage");
     }
 
     private static object ToResponse(this Dashboard d) => new

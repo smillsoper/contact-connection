@@ -127,6 +127,20 @@ builder.Services.AddAuthorization(options =>
             (ctx.User.FindFirst("permissions")?.Value ?? "")
                 .Split(',', StringSplitOptions.RemoveEmptyEntries)
                 .Contains(Permission.BlocklistManage)));
+    // Supervisor Dashboards (Session 92) — the "reports.*" permissions already existed in the
+    // catalog and were already granted to the built-in Supervisor role, but were never actually
+    // enforced anywhere. Wiring them here closes that gap now that the feature has its own
+    // admin-dashboard entry point.
+    options.AddPolicy("ReportsView", policy =>
+        policy.RequireAssertion(ctx =>
+            (ctx.User.FindFirst("permissions")?.Value ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Contains(Permission.ReportsView)));
+    options.AddPolicy("ReportsManage", policy =>
+        policy.RequireAssertion(ctx =>
+            (ctx.User.FindFirst("permissions")?.Value ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Contains(Permission.ReportsManage)));
     options.AddPolicy("MfaPending", policy =>
         policy.RequireClaim("role", "mfa_pending"));
 });

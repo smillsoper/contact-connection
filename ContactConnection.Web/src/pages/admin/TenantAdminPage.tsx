@@ -9,6 +9,10 @@ interface NavCard {
   path?: string
   onClick?: () => void
   live: boolean
+  /** Card is hidden entirely (not just disabled) unless the current user holds this permission.
+   * Omit for cards that should stay visible to any admin — the existing/default behavior for
+   * every card that predates per-permission gating. */
+  requiredPermission?: string
 }
 
 interface NavSection {
@@ -52,7 +56,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     heading: 'Reporting',
     cards: [
-      { title: 'Supervisor Dashboards', desc: 'Build and view live/historical widget dashboards — calls handled, AHT, conversion, and more.', path: '/dashboards', live: true },
+      { title: 'Supervisor Dashboards', desc: 'Build and view live/historical widget dashboards — calls handled, AHT, conversion, and more.', path: '/dashboards', live: true, requiredPermission: 'reports.view' },
     ],
   },
   {
@@ -68,6 +72,18 @@ const NAV_SECTIONS: NavSection[] = [
 
 export default function TenantAdminPage() {
   const { firstName } = useAuthStore()
+  const hasPermission = useAuthStore((s) => s.hasPermission)
+
+  // Cards without a requiredPermission stay visible to any admin (unchanged default behavior);
+  // a card with one is hidden — not just disabled — unless the current user's role grants it.
+  // Sections that end up with zero visible cards are dropped entirely so a "Reporting" heading
+  // never renders over nothing.
+  const visibleSections = NAV_SECTIONS
+    .map((section) => ({
+      ...section,
+      cards: section.cards.filter((c) => !c.requiredPermission || hasPermission(c.requiredPermission)),
+    }))
+    .filter((section) => section.cards.length > 0)
 
   return (
     <AdminShell>
@@ -84,7 +100,7 @@ export default function TenantAdminPage() {
 
         {/* Sectioned navigation grid */}
         <div className="space-y-8">
-          {NAV_SECTIONS.map((section) => (
+          {visibleSections.map((section) => (
             <div key={section.heading}>
               <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">
                 {section.heading}

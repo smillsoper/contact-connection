@@ -54,13 +54,16 @@ export const useAuthStore = create<AuthState>()(
   ),
 )
 
-// Map landing page keys to routes
+// Map landing page keys to routes. "reports" is a pre-existing key name (LandingPage.Reports on
+// the backend) that predates the Supervisor Dashboards feature and never had a real destination
+// — found dangling (pointing at a /reports route that was never built) while wiring role-based
+// gating for dashboards in Session 92; repointed at the actual live feature it now corresponds to.
 export const LANDING_ROUTES: Record<string, string> = {
   agent_portal:    '/agent',
   admin_dashboard: '/admin',
   flows:           '/flows',
   telephony:       '/admin/telephony',
-  reports:         '/reports',
+  reports:         '/dashboards',
 }
 
 export function getLandingRoute(landingPage: string | null): string {

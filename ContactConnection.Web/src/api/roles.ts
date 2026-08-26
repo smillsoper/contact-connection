@@ -35,8 +35,8 @@ export const PERMISSION_LABELS: Record<string, string> = {
   'integrations.manage':   'Manage Integrations',
   'supervisor.monitor':    'Live Call Monitoring',
   'supervisor.override':   'Override Commitments',
-  'reports.view':          'View Reports',
-  'reports.manage':        'Manage Reports',
+  'reports.view':          'View Supervisor Dashboards',
+  'reports.manage':        'Manage Supervisor Dashboards',
   'blocklist.view':        'View Block List',
   'blocklist.manage':      'Manage Block List',
 }
@@ -49,7 +49,7 @@ export const PERMISSION_GROUPS: Record<string, string[]> = {
   'Call Records': ['calls.view', 'calls.export'],
   Integrations: ['integrations.view', 'integrations.manage'],
   Supervisor:  ['supervisor.monitor', 'supervisor.override'],
-  Reports:     ['reports.view', 'reports.manage'],
+  Reporting:   ['reports.view', 'reports.manage'],
   Blocklist:   ['blocklist.view', 'blocklist.manage'],
 }
 
@@ -58,7 +58,7 @@ export const LANDING_PAGE_LABELS: Record<string, string> = {
   admin_dashboard: 'Admin Dashboard',
   flows:           'Flow Designer',
   telephony:       'Telephony',
-  reports:         'Reports',
+  reports:         'Supervisor Dashboards',
 }
 
 export const rolesApi = {

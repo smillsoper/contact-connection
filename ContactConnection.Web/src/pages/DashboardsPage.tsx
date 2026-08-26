@@ -1,9 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { dashboardsApi, type DashboardSummary } from '../api/dashboards'
+import { useAuthStore } from '../stores/authStore'
 
 export default function DashboardsPage() {
   const navigate = useNavigate()
+  // reports.view (checked at the route level) gets you here to look; creating/deleting a
+  // dashboard needs reports.manage too — same convention as AdminBlockListPage's canManage.
+  const canManage = useAuthStore((s) => s.hasPermission('reports.manage'))
   const [dashboards, setDashboards] = useState<DashboardSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -53,12 +57,14 @@ export default function DashboardsPage() {
             </button>
             <span className="text-sm font-semibold text-white">Supervisor Dashboards</span>
           </div>
-          <button
-            onClick={() => navigate('/dashboard-builder')}
-            className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-1.5 rounded-lg transition-colors"
-          >
-            + New Dashboard
-          </button>
+          {canManage && (
+            <button
+              onClick={() => navigate('/dashboard-builder')}
+              className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-1.5 rounded-lg transition-colors"
+            >
+              + New Dashboard
+            </button>
+          )}
         </div>
       </div>
 
@@ -74,12 +80,14 @@ export default function DashboardsPage() {
         ) : dashboards.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-40 gap-3">
             <p className="text-gray-500 text-sm">No dashboards yet.</p>
-            <button
-              onClick={() => navigate('/dashboard-builder')}
-              className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-1.5 rounded-lg transition-colors"
-            >
-              Create your first dashboard
-            </button>
+            {canManage && (
+              <button
+                onClick={() => navigate('/dashboard-builder')}
+                className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-1.5 rounded-lg transition-colors"
+              >
+                Create your first dashboard
+              </button>
+            )}
           </div>
         ) : (
           <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
@@ -116,13 +124,15 @@ export default function DashboardsPage() {
                         >
                           Open
                         </button>
-                        <button
-                          onClick={() => handleDelete(d.id, d.name)}
-                          disabled={deletingId === d.id}
-                          className="text-xs text-red-400 hover:text-red-300 border border-red-900 hover:border-red-700 rounded px-2.5 py-1 disabled:opacity-50 transition-colors"
-                        >
-                          {deletingId === d.id ? 'Deleting…' : 'Delete'}
-                        </button>
+                        {canManage && (
+                          <button
+                            onClick={() => handleDelete(d.id, d.name)}
+                            disabled={deletingId === d.id}
+                            className="text-xs text-red-400 hover:text-red-300 border border-red-900 hover:border-red-700 rounded px-2.5 py-1 disabled:opacity-50 transition-colors"
+                          >
+                            {deletingId === d.id ? 'Deleting…' : 'Delete'}
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
