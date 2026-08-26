@@ -23,6 +23,47 @@ namespace ContactConnection.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("ContactConnection.Domain.Entities.CredentialAuditEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("action");
+
+                    b.Property<Guid>("ActorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("actor_id");
+
+                    b.Property<string>("ActorName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("actor_name");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("KeyName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("key_name");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("KeyName", "CreatedAt")
+                        .HasDatabaseName("ix_credential_audit_entries_key_name_created_at");
+
+                    b.ToTable("credential_audit_entries", "public");
+                });
+
             modelBuilder.Entity("ContactConnection.Domain.Entities.DataType", b =>
                 {
                     b.Property<Guid>("Id")
@@ -317,6 +358,10 @@ namespace ContactConnection.Infrastructure.Migrations
                         .HasColumnType("jsonb")
                         .HasColumnName("query_params");
 
+                    b.Property<int?>("RateLimitPerMinute")
+                        .HasColumnType("integer")
+                        .HasColumnName("rate_limit_per_minute");
+
                     b.Property<string>("RequestBodyTemplate")
                         .HasColumnType("text")
                         .HasColumnName("request_body_template");
@@ -426,6 +471,13 @@ namespace ContactConnection.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("jsonb")
                         .HasColumnName("response_mapping");
+
+                    b.Property<string>("SensitiveResponseFields")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasDefaultValue("[]")
+                        .HasColumnName("sensitive_response_fields");
 
                     b.Property<int>("SortOrder")
                         .ValueGeneratedOnAdd()

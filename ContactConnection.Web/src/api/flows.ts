@@ -1,6 +1,7 @@
 import { api } from './client'
 import type { FlowNodeState, StartSessionRequest, AdvanceSessionRequest } from '../types/flow'
 import type { ContactConnectionFlowDefinition } from '../types/designer'
+import type { EntityVersionSummary } from './versioning'
 
 export interface FlowSummary {
   id: string
@@ -132,4 +133,10 @@ export const flowsApi = {
   publish: (id: string) => api.post<FlowDetail>(`/api/v1/flows/${id}/publish`),
 
   delete: (id: string) => api.delete<void>(`/api/v1/flows/${id}`),
+
+  // Version history — newest first; revert applies the snapshot and records it as a new version
+  listVersions: (id: string) => api.get<EntityVersionSummary[]>(`/api/v1/flows/${id}/versions`),
+
+  revert: (id: string, versionNumber: number) =>
+    api.post<FlowDetail>(`/api/v1/flows/${id}/versions/${versionNumber}/revert`, {}),
 }

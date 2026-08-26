@@ -106,6 +106,8 @@ public static class FlowSessionsEndpoints
         IHttpClientFactory httpFactory,
         IOAuth2TokenCache tokenCache,
         IVendorResilienceExecutor resilience,
+        IOutboundRateLimiter rateLimiter,
+        IMtlsHttpClientProvider mtlsProvider,
         TenantContext tenantContext,
         CancellationToken ct)
     {
@@ -124,6 +126,7 @@ public static class FlowSessionsEndpoints
         Func<string, CancellationToken, Task<string?>>? getCredential = null;
         var resolvedDefinitionId = Guid.Empty;
         var resolvedIsRetrySafe = false;
+        int? resolvedRateLimitPerMinute = null;
 
         var tenantEp = await tenantEndpointRepo.GetPreferredBySubTypeAsync(ApiSubType.AddressValidation, ct)
                        ?? (await tenantEndpointRepo.GetBySubTypeAsync(ApiSubType.AddressValidation, ct)).FirstOrDefault();
@@ -143,6 +146,7 @@ public static class FlowSessionsEndpoints
                 getCredential       = (key, token) => tenantCredStore.GetAsync(key, token);
                 resolvedDefinitionId = tenantDef.Id;
                 resolvedIsRetrySafe  = tenantEp.IsRetrySafe;
+                resolvedRateLimitPerMinute = tenantDef.RateLimitPerMinute;
             }
         }
 
@@ -172,6 +176,7 @@ public static class FlowSessionsEndpoints
                     getCredential       = (key, token) => portalCredStore.GetAsync(key, token);
                     resolvedDefinitionId = portalDef.Id;
                     resolvedIsRetrySafe  = portalEp.IsRetrySafe;
+                    resolvedRateLimitPerMinute = portalDef.RateLimitPerMinute;
                 }
             }
         }
@@ -218,7 +223,7 @@ public static class FlowSessionsEndpoints
 
         var response = await ApiEndpointTestHelper.RunTestAsync(
             baseUrl!, authConfig!, testReq, getCredential, httpFactory, ct, tokenCache,
-            resilience, resolvedDefinitionId, resolvedIsRetrySafe);
+            resilience, resolvedDefinitionId, resolvedIsRetrySafe, rateLimiter, resolvedRateLimitPerMinute, mtlsProvider);
 
         if (response.Error is not null)
             return Results.Ok(new AddressValidationResult("error", "API Error", response.Error, null, null));
@@ -246,6 +251,8 @@ public static class FlowSessionsEndpoints
         IHttpClientFactory httpFactory,
         IOAuth2TokenCache tokenCache,
         IVendorResilienceExecutor resilience,
+        IOutboundRateLimiter rateLimiter,
+        IMtlsHttpClientProvider mtlsProvider,
         TenantContext tenantContext,
         CancellationToken ct)
     {
@@ -264,6 +271,7 @@ public static class FlowSessionsEndpoints
         Func<string, CancellationToken, Task<string?>>? getCredential = null;
         var resolvedDefinitionId = Guid.Empty;
         var resolvedIsRetrySafe = false;
+        int? resolvedRateLimitPerMinute = null;
 
         var tenantEp = await tenantEndpointRepo.GetPreferredBySubTypeAsync(ApiSubType.ZipCodeLookup, ct)
                        ?? (await tenantEndpointRepo.GetBySubTypeAsync(ApiSubType.ZipCodeLookup, ct)).FirstOrDefault();
@@ -283,6 +291,7 @@ public static class FlowSessionsEndpoints
                 getCredential       = (key, token) => tenantCredStore.GetAsync(key, token);
                 resolvedDefinitionId = tenantDef.Id;
                 resolvedIsRetrySafe  = tenantEp.IsRetrySafe;
+                resolvedRateLimitPerMinute = tenantDef.RateLimitPerMinute;
             }
         }
 
@@ -311,6 +320,7 @@ public static class FlowSessionsEndpoints
                     getCredential       = (key, token) => portalCredStore.GetAsync(key, token);
                     resolvedDefinitionId = portalDef.Id;
                     resolvedIsRetrySafe  = portalEp.IsRetrySafe;
+                    resolvedRateLimitPerMinute = portalDef.RateLimitPerMinute;
                 }
             }
         }
@@ -333,7 +343,7 @@ public static class FlowSessionsEndpoints
 
         var response = await ApiEndpointTestHelper.RunTestAsync(
             baseUrl!, authConfig!, testReq, getCredential, httpFactory, ct, tokenCache,
-            resilience, resolvedDefinitionId, resolvedIsRetrySafe);
+            resilience, resolvedDefinitionId, resolvedIsRetrySafe, rateLimiter, resolvedRateLimitPerMinute, mtlsProvider);
 
         if (response.Error is not null) return Results.Ok(empty);
 
@@ -358,6 +368,8 @@ public static class FlowSessionsEndpoints
         IHttpClientFactory httpFactory,
         IOAuth2TokenCache tokenCache,
         IVendorResilienceExecutor resilience,
+        IOutboundRateLimiter rateLimiter,
+        IMtlsHttpClientProvider mtlsProvider,
         TenantContext tenantContext,
         CancellationToken ct)
     {
@@ -365,7 +377,7 @@ public static class FlowSessionsEndpoints
 
         var empty = new AutocompleteAddressResult([]);
 
-        var (baseUrl, authConfig, endpointPath, httpMethod, queryParams, headers, requestBodyTemplate, responseMapping, getCredential, definitionId, isRetrySafe) =
+        var (baseUrl, authConfig, endpointPath, httpMethod, queryParams, headers, requestBodyTemplate, responseMapping, getCredential, definitionId, isRetrySafe, rateLimitPerMinute) =
             await ResolveApiEndpoint(ApiSubType.RealtimeAddressAutocomplete,
                 tenantDefRepo, tenantEndpointRepo, tenantPrefRepo, tenantCredStore,
                 portalDefRepo, portalEndpointRepo, portalCredStore, ct);
@@ -389,7 +401,7 @@ public static class FlowSessionsEndpoints
 
         var response = await ApiEndpointTestHelper.RunTestAsync(
             baseUrl!, authConfig!, testReq, getCredential, httpFactory, ct, tokenCache,
-            resilience, definitionId, isRetrySafe);
+            resilience, definitionId, isRetrySafe, rateLimiter, rateLimitPerMinute, mtlsProvider);
 
         if (response.Error is not null) return Results.Ok(empty);
 
@@ -414,12 +426,14 @@ public static class FlowSessionsEndpoints
         IHttpClientFactory httpFactory,
         IOAuth2TokenCache tokenCache,
         IVendorResilienceExecutor resilience,
+        IOutboundRateLimiter rateLimiter,
+        IMtlsHttpClientProvider mtlsProvider,
         TenantContext tenantContext,
         CancellationToken ct)
     {
         if (tenantContext.Current is null) return Results.Unauthorized();
 
-        var (baseUrl, authConfig, _, _, _, _, _, responseMapping, getCredential, definitionId, isRetrySafe) =
+        var (baseUrl, authConfig, _, _, _, _, _, responseMapping, getCredential, definitionId, isRetrySafe, rateLimitPerMinute) =
             await ResolveApiEndpoint(ApiSubType.RealtimeAddressAutocomplete,
                 tenantDefRepo, tenantEndpointRepo, tenantPrefRepo, tenantCredStore,
                 portalDefRepo, portalEndpointRepo, portalCredStore, ct);
@@ -455,7 +469,7 @@ public static class FlowSessionsEndpoints
 
         var response = await ApiEndpointTestHelper.RunTestAsync(
             baseUrl!, authConfig!, testReq, getCredential, httpFactory, ct, tokenCache,
-            resilience, definitionId, isRetrySafe);
+            resilience, definitionId, isRetrySafe, rateLimiter, rateLimitPerMinute, mtlsProvider);
 
         if (response.Error is not null)
             return Results.Ok(new AutocompleteSelectionResult(null, response.Error));
@@ -475,7 +489,8 @@ public static class FlowSessionsEndpoints
     // Shared helper — resolves tenant→portal API endpoint for a given sub-type
     private static async Task<(string? BaseUrl, string? AuthConfig, string? Path, string? HttpMethod,
         string? QueryParams, string? Headers, string? RequestBodyTemplate, string? ResponseMapping,
-        Func<string, CancellationToken, Task<string?>>? GetCredential, Guid DefinitionId, bool IsRetrySafe)>
+        Func<string, CancellationToken, Task<string?>>? GetCredential, Guid DefinitionId, bool IsRetrySafe,
+        int? RateLimitPerMinute)>
         ResolveApiEndpoint(
             string subType,
             ITenantApiDefinitionRepository tenantDefRepo,
@@ -492,6 +507,7 @@ public static class FlowSessionsEndpoints
         Func<string, CancellationToken, Task<string?>>? getCredential = null;
         var definitionId = Guid.Empty;
         var isRetrySafe = false;
+        int? rateLimitPerMinute = null;
 
         var tenantEp = await tenantEndpointRepo.GetPreferredBySubTypeAsync(subType, ct)
                        ?? (await tenantEndpointRepo.GetBySubTypeAsync(subType, ct)).FirstOrDefault();
@@ -506,6 +522,7 @@ public static class FlowSessionsEndpoints
                 body = tenantEp.RequestBodyTemplate; responseMapping = tenantEp.ResponseMapping;
                 getCredential = (key, token) => tenantCredStore.GetAsync(key, token);
                 definitionId = def.Id; isRetrySafe = tenantEp.IsRetrySafe;
+                rateLimitPerMinute = def.RateLimitPerMinute;
             }
         }
 
@@ -529,11 +546,12 @@ public static class FlowSessionsEndpoints
                     body = portalEp.RequestBodyTemplate; responseMapping = portalEp.ResponseMapping;
                     getCredential = (key, token) => portalCredStore.GetAsync(key, token);
                     definitionId = def.Id; isRetrySafe = portalEp.IsRetrySafe;
+                    rateLimitPerMinute = def.RateLimitPerMinute;
                 }
             }
         }
 
-        return (baseUrl, authConfig, path, httpMethod, queryParams, headers, body, responseMapping, getCredential, definitionId, isRetrySafe);
+        return (baseUrl, authConfig, path, httpMethod, queryParams, headers, body, responseMapping, getCredential, definitionId, isRetrySafe, rateLimitPerMinute);
     }
 }
 

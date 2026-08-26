@@ -16,6 +16,10 @@ import {
   testPortalAuth,
   testPortalEndpoint,
   getPortalTtsProviders,
+  listPortalApiDefinitionVersions,
+  revertPortalApiDefinition,
+  listPortalApiEndpointVersions,
+  revertPortalApiEndpoint,
 } from '../../api/portal'
 
 const portalApi: DetailApi = {
@@ -34,6 +38,10 @@ const portalApi: DetailApi = {
   testEndpoint: testPortalEndpoint,
   listTtsProviders: getPortalTtsProviders,
   listPagePath: '/portal/api-definitions',
+  listDefinitionVersions: listPortalApiDefinitionVersions,
+  revertDefinition: revertPortalApiDefinition,
+  listEndpointVersions: listPortalApiEndpointVersions,
+  revertEndpoint: revertPortalApiEndpoint,
 }
 
 export default function PortalApiDefinitionDetailPage() {

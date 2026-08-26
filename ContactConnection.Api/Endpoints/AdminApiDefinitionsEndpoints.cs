@@ -69,6 +69,7 @@ public static class AdminApiDefinitionsEndpoints
 
         var def = TenantApiDefinition.Create(request.ApiCategory, request.Name, request.HttpMethod, request.BaseUrl, request.Description, request.Provider, request.TimeoutSeconds ?? 30);
         if (request.AuthConfig is not null) def.SetAuthConfig(request.AuthConfig);
+        if (request.RateLimitPerMinute is > 0) def.SetRateLimit(request.RateLimitPerMinute);
         await repo.AddAsync(def, ct);
         await repo.SaveChangesAsync(ct);
         await versions.SnapshotAsync(
@@ -122,6 +123,7 @@ public static class AdminApiDefinitionsEndpoints
         if (request.RequestBodyTemplate is not null) def.SetRequestBodyTemplate(request.RequestBodyTemplate);
         if (request.ResponseMapping is not null) def.SetResponseMapping(request.ResponseMapping);
         if (request.AuthConfig is not null) def.SetAuthConfig(request.AuthConfig);
+        if (request.RateLimitPerMinute is not null) def.SetRateLimit(request.RateLimitPerMinute > 0 ? request.RateLimitPerMinute : null);
 
         await repo.SaveChangesAsync(ct);
         await versions.SnapshotAsync(
@@ -174,7 +176,8 @@ public static class AdminApiDefinitionsEndpoints
 
     private static string BuildSnapshot(TenantApiDefinition d) => JsonSerializer.Serialize(new ApiDefinitionSnapshot(
         d.ApiCategory, d.Provider, d.Name, d.Description, d.HttpMethod, d.BaseUrl, d.TimeoutSeconds,
-        d.Headers, d.QueryParams, d.RequestBodyTemplate, d.ResponseMapping, d.AuthConfig, d.IsActive));
+        d.Headers, d.QueryParams, d.RequestBodyTemplate, d.ResponseMapping, d.AuthConfig, d.IsActive,
+        d.RateLimitPerMinute));
 
     private static void ApplySnapshot(TenantApiDefinition d, ApiDefinitionSnapshot s)
     {
@@ -185,6 +188,7 @@ public static class AdminApiDefinitionsEndpoints
         d.SetRequestBodyTemplate(s.RequestBodyTemplate);
         d.SetResponseMapping(s.ResponseMapping);
         d.SetAuthConfig(s.AuthConfig);
+        d.SetRateLimit(s.RateLimitPerMinute);
         if (s.IsActive) d.Activate(); else d.Deactivate();
     }
 
@@ -241,6 +245,7 @@ public static class AdminApiDefinitionsEndpoints
         d.ResponseMapping,
         d.AuthConfig,
         d.IsActive,
+        d.RateLimitPerMinute,
         d.CreatedAt,
         d.UpdatedAt,
     };
@@ -255,7 +260,10 @@ public record CreateApiDefinitionRequest(
     string? Description,
     string? Provider,
     int? TimeoutSeconds,
-    string? AuthConfig);
+    string? AuthConfig,
+    /// <summary>Outbound requests/minute allowed against this definition, or null for unlimited
+    /// (the default — an opt-in protection, matching IsRetrySafe's default-off pattern).</summary>
+    int? RateLimitPerMinute = null);
 
 public record UpdateApiDefinitionRequest(
     string Name,
@@ -269,4 +277,8 @@ public record UpdateApiDefinitionRequest(
     string? QueryParams,
     string? RequestBodyTemplate,
     string? ResponseMapping,
-    string? AuthConfig);
+    string? AuthConfig,
+    /// <summary>Same "null = don't touch" convention as Provider above: omit to leave the current
+    /// limit alone, pass 0 to explicitly clear back to unlimited, or a positive number to set a
+    /// new limit.</summary>
+    int? RateLimitPerMinute = null);

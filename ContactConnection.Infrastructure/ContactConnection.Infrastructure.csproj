@@ -30,4 +30,11 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Lets ContactConnection.Infrastructure.Tests construct the internal service classes
+         (VendorResilienceExecutor, TenantVersionHistoryService, etc.) directly instead of only
+         through their public interfaces — see API_HARDENING_CHECKLIST.md Tier 2. -->
+    <InternalsVisibleTo Include="ContactConnection.Infrastructure.Tests" />
+  </ItemGroup>
+
 </Project>

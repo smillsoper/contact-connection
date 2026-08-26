@@ -35,6 +35,7 @@ import EndNode from '../components/designer/nodes/EndNode'
 
 import type { NodeData, ContactConnectionNodeType, ContactConnectionFlowDefinition, FlowOption } from '../types/designer'
 import { defaultNodeData } from '../types/designer'
+import VersionHistoryPanel from '../components/versioning/VersionHistoryPanel'
 
 const nodeTypes = {
   script: ScriptNode,
@@ -203,6 +204,7 @@ function DesignerCanvas({
   const [saving, setSaving] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [statusMsg, setStatusMsg] = useState('')
+  const [showHistory, setShowHistory] = useState(false)
 
   // Option-picker modal for select-type input nodes
   const [pendingConn, setPendingConn] = useState<Connection | null>(null)
@@ -268,10 +270,10 @@ function DesignerCanvas({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [setNodes, setEdges])  // stable setters — refs handle current values
 
-  // Load existing flow
-  useEffect(() => {
-    if (!initialFlowId) return
-    flowsApi.getDetail(initialFlowId).then((detail) => {
+  // Load an existing flow's current definition into the canvas — used on mount and again after
+  // a version-history revert (the revert response carries the newly-active definition).
+  const loadFlow = useCallback((id: string) => {
+    return flowsApi.getDetail(id).then((detail) => {
       setFlowName(detail.name)
       if (detail.flow_type === 'telephony') setFlowType('telephony')
       if (detail.flow_direction) setFlowDirection(detail.flow_direction as 'inbound' | 'outbound')
@@ -286,7 +288,14 @@ function DesignerCanvas({
         // definition not yet set — start with empty canvas
       }
     })
-  }, [initialFlowId, setNodes, setEdges])
+  }, [setNodes, setEdges])
+
+  // Load existing flow
+  useEffect(() => {
+    if (!initialFlowId) return
+    loadFlow(initialFlowId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialFlowId])
 
   // When an option is picked in the modal, complete the pending edge.
   // Removes any existing edge for this option first (re-wire case).
@@ -531,6 +540,14 @@ function DesignerCanvas({
             <span className="text-sm text-gray-400 italic">{statusMsg}</span>
           )}
           <div className="ml-auto flex items-center gap-2">
+            {flowId && (
+              <button
+                className="px-4 py-1.5 text-sm border border-gray-700 rounded text-gray-300 hover:bg-gray-800 transition-colors"
+                onClick={() => setShowHistory(true)}
+              >
+                History
+              </button>
+            )}
             <button
               className="px-4 py-1.5 text-sm border border-gray-700 rounded text-gray-300 hover:bg-gray-800 disabled:opacity-50 transition-colors"
               onClick={onSave}
@@ -669,6 +686,19 @@ function DesignerCanvas({
           </div>
         )
       })()}
+
+      {showHistory && flowId && (
+        <VersionHistoryPanel
+          title="Flow Version History"
+          subtitle={flowName}
+          listVersions={() => flowsApi.listVersions(flowId)}
+          onRevert={async (versionNumber) => {
+            await flowsApi.revert(flowId, versionNumber)
+            await loadFlow(flowId)
+          }}
+          onClose={() => setShowHistory(false)}
+        />
+      )}
     </div>
   )
 }

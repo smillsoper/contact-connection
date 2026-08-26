@@ -3,7 +3,7 @@
 // not as plain-text values — matching the "safe storage" intent.
 import { useState, useEffect } from 'react'
 
-export type AuthType = 'none' | 'api_key' | 'basic' | 'bearer' | 'oauth2' | 'hmac'
+export type AuthType = 'none' | 'api_key' | 'basic' | 'bearer' | 'oauth2' | 'hmac' | 'aws_sigv4' | 'mtls'
 
 export interface AuthConfigNone { type: 'none' }
 export interface AuthConfigApiKey {
@@ -42,6 +42,30 @@ export interface AuthConfigHmac {
   secretKey: string
   headerName: string
   includeTimestamp: boolean
+  /** What string actually gets signed, using the same {{ns.field}} tag syntax as the request
+   *  body/headers/query params — lets the signed payload pull in fields the vendor requires
+   *  (order id, a specific total, the caller's phone number, …) whether or not those fields are
+   *  also present in the outgoing request body. Blank = sign the request's actual outgoing body. */
+  payloadTemplate: string
+}
+
+export interface AuthConfigAwsSigV4 {
+  type: 'aws_sigv4'
+  accessKeyIdKey: string
+  secretAccessKeyKey: string
+  /** Optional — only needed for temporary STS credentials. Blank = long-term access key pair. */
+  sessionTokenKey: string
+  region: string
+  service: string
+}
+
+export interface AuthConfigMtls {
+  type: 'mtls'
+  /** Credential key pointing to a base64-encoded PKCS#12 (.pfx) blob containing both the client
+   *  certificate and its private key. */
+  certKey: string
+  /** Optional — credential key for the PFX's password. Blank if the .pfx has no password. */
+  certPasswordKey: string
 }
 
 export type AuthConfig =
@@ -51,6 +75,8 @@ export type AuthConfig =
   | AuthConfigBearer
   | AuthConfigOAuth2
   | AuthConfigHmac
+  | AuthConfigAwsSigV4
+  | AuthConfigMtls
 
 export function parseAuthConfig(json: string): AuthConfig {
   try {
@@ -115,7 +141,23 @@ export function serializeAuthConfig(state: AuthFormState): string {
         secretKey: state.hmacSecretKey,
         headerName: state.hmacHeaderName,
         includeTimestamp: state.hmacIncludeTimestamp,
+        payloadTemplate: state.hmacPayloadTemplate,
       } satisfies AuthConfigHmac)
+    case 'aws_sigv4':
+      return JSON.stringify({
+        type: 'aws_sigv4',
+        accessKeyIdKey: state.sigv4AccessKeyIdKey,
+        secretAccessKeyKey: state.sigv4SecretAccessKeyKey,
+        sessionTokenKey: state.sigv4SessionTokenKey,
+        region: state.sigv4Region,
+        service: state.sigv4Service,
+      } satisfies AuthConfigAwsSigV4)
+    case 'mtls':
+      return JSON.stringify({
+        type: 'mtls',
+        certKey: state.mtlsCertKey,
+        certPasswordKey: state.mtlsCertPasswordKey,
+      } satisfies AuthConfigMtls)
     default:
       return JSON.stringify({ type: 'none' })
   }
@@ -152,6 +194,16 @@ export interface AuthFormState {
   hmacSecretKey: string
   hmacHeaderName: string
   hmacIncludeTimestamp: boolean
+  hmacPayloadTemplate: string
+  // AWS SigV4
+  sigv4AccessKeyIdKey: string
+  sigv4SecretAccessKeyKey: string
+  sigv4SessionTokenKey: string
+  sigv4Region: string
+  sigv4Service: string
+  // mTLS
+  mtlsCertKey: string
+  mtlsCertPasswordKey: string
 }
 
 export const BLANK_AUTH_STATE: AuthFormState = {
@@ -179,6 +231,14 @@ export const BLANK_AUTH_STATE: AuthFormState = {
   hmacSecretKey: '',
   hmacHeaderName: 'X-Signature',
   hmacIncludeTimestamp: true,
+  hmacPayloadTemplate: '',
+  sigv4AccessKeyIdKey: '',
+  sigv4SecretAccessKeyKey: '',
+  sigv4SessionTokenKey: '',
+  sigv4Region: '',
+  sigv4Service: '',
+  mtlsCertKey: '',
+  mtlsCertPasswordKey: '',
 }
 
 export function authStateFromConfig(json: string): AuthFormState {
@@ -215,6 +275,22 @@ export function authStateFromConfig(json: string): AuthFormState {
         hmacSecretKey: cfg.secretKey,
         hmacHeaderName: cfg.headerName,
         hmacIncludeTimestamp: cfg.includeTimestamp,
+        hmacPayloadTemplate: cfg.payloadTemplate ?? '',
+      }
+    case 'aws_sigv4':
+      return {
+        ...base,
+        sigv4AccessKeyIdKey: cfg.accessKeyIdKey,
+        sigv4SecretAccessKeyKey: cfg.secretAccessKeyKey,
+        sigv4SessionTokenKey: cfg.sessionTokenKey ?? '',
+        sigv4Region: cfg.region,
+        sigv4Service: cfg.service,
+      }
+    case 'mtls':
+      return {
+        ...base,
+        mtlsCertKey: cfg.certKey,
+        mtlsCertPasswordKey: cfg.certPasswordKey ?? '',
       }
     default:
       return base
@@ -228,6 +304,8 @@ const AUTH_METHODS = [
   { value: 'bearer', label: 'Bearer Token' },
   { value: 'oauth2', label: 'OAuth2' },
   { value: 'hmac', label: 'HMAC Signature' },
+  { value: 'aws_sigv4', label: 'AWS Signature V4' },
+  { value: 'mtls', label: 'Mutual TLS (Client Certificate)' },
 ]
 
 const HTTP_METHODS = ['POST', 'GET', 'PUT', 'PATCH']
@@ -840,6 +918,21 @@ export default function AuthConfigForm({ state, onChange, knownCredentials, onAd
             hint="Key reference to stored credential"
             {...credProps}
           />
+          <div>
+            <label className="block text-gray-400 text-xs font-medium mb-1">Signed Payload Template</label>
+            <textarea
+              value={state.hmacPayloadTemplate}
+              onChange={(e) => set({ hmacPayloadTemplate: e.target.value })}
+              placeholder="Leave blank to sign the outgoing request body as-is"
+              rows={2}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 font-mono focus:outline-none focus:border-indigo-500"
+            />
+            <p className="text-gray-600 text-xs mt-1">
+              Optional. Same {'{{namespace.field}}'} tags as the request body/headers/query params — use this
+              when the vendor's expected signature is built from specific fields (e.g. order id +
+              total) rather than the literal outgoing body. Blank signs the actual request body.
+            </p>
+          </div>
           <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
@@ -849,6 +942,86 @@ export default function AuthConfigForm({ state, onChange, knownCredentials, onAd
             />
             <span className="text-gray-300 text-sm">Include request timestamp in signature</span>
           </label>
+        </div>
+      )}
+
+      {/* ── AWS Signature V4 ── */}
+      {state.authType === 'aws_sigv4' && (
+        <div className="border border-gray-700 rounded-lg p-3 space-y-3 bg-gray-800/30">
+          <div className="grid grid-cols-2 gap-3">
+            <CredentialKeyField
+              label="Access Key ID Credential Key"
+              value={state.sigv4AccessKeyIdKey}
+              onChange={(v) => set({ sigv4AccessKeyIdKey: v })}
+              placeholder="e.g. aws_access_key_id"
+              hint="Key reference to stored credential"
+              {...credProps}
+            />
+            <CredentialKeyField
+              label="Secret Access Key Credential Key"
+              value={state.sigv4SecretAccessKeyKey}
+              onChange={(v) => set({ sigv4SecretAccessKeyKey: v })}
+              placeholder="e.g. aws_secret_access_key"
+              hint="Key reference to stored credential"
+              {...credProps}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field
+              label="Region"
+              value={state.sigv4Region}
+              onChange={(v) => set({ sigv4Region: v })}
+              placeholder="us-east-1"
+            />
+            <Field
+              label="Service"
+              value={state.sigv4Service}
+              onChange={(v) => set({ sigv4Service: v })}
+              placeholder="execute-api"
+              hint="AWS service code, e.g. execute-api, s3, lambda"
+            />
+          </div>
+          <CredentialKeyField
+            label="Session Token Credential Key (optional)"
+            value={state.sigv4SessionTokenKey}
+            onChange={(v) => set({ sigv4SessionTokenKey: v })}
+            placeholder="e.g. aws_session_token"
+            hint="Only needed for temporary STS credentials — leave blank for a long-term access key pair"
+            {...credProps}
+          />
+          <p className="text-gray-600 text-xs">
+            Signs the host, date, and (when set) session token headers per AWS Signature Version 4.
+            The request's own body/query params are unaffected — this only adds the
+            Authorization/X-Amz-Date headers.
+          </p>
+        </div>
+      )}
+
+      {/* ── Mutual TLS ── */}
+      {state.authType === 'mtls' && (
+        <div className="border border-gray-700 rounded-lg p-3 space-y-3 bg-gray-800/30">
+          <CredentialKeyField
+            label="Client Certificate (PFX) Credential Key"
+            value={state.mtlsCertKey}
+            onChange={(v) => set({ mtlsCertKey: v })}
+            placeholder="e.g. vendor_client_cert"
+            hint="Key reference to stored credential"
+            {...credProps}
+          />
+          <CredentialKeyField
+            label="Certificate Password Credential Key (optional)"
+            value={state.mtlsCertPasswordKey}
+            onChange={(v) => set({ mtlsCertPasswordKey: v })}
+            placeholder="e.g. vendor_client_cert_password"
+            hint="Leave blank if the .pfx has no password"
+            {...credProps}
+          />
+          <p className="text-gray-600 text-xs">
+            The credential's stored value must be the client certificate's .pfx (PKCS#12) file,
+            base64-encoded as one string — it bundles the certificate and its private key together.
+            Identity for this auth type comes entirely from the TLS handshake, so no
+            Authorization-style header is added to the request.
+          </p>
         </div>
       )}
 

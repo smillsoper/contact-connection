@@ -97,6 +97,7 @@ public static class AdminApiEndpointsEndpoints
         if (request.Headers is not null) endpoint.SetHeaders(request.Headers);
         if (request.ResponseMapping is not null) endpoint.SetResponseMapping(request.ResponseMapping);
         if (request.IsRetrySafe is not null) endpoint.SetRetrySafe(request.IsRetrySafe.Value);
+        if (request.SensitiveResponseFields is not null) endpoint.SetSensitiveResponseFields(request.SensitiveResponseFields);
 
         await repo.AddAsync(endpoint, ct);
         await repo.SaveChangesAsync(ct);
@@ -149,6 +150,7 @@ public static class AdminApiEndpointsEndpoints
         if (request.Headers is not null) endpoint.SetHeaders(request.Headers);
         if (request.ResponseMapping is not null) endpoint.SetResponseMapping(request.ResponseMapping);
         if (request.IsRetrySafe is not null) endpoint.SetRetrySafe(request.IsRetrySafe.Value);
+        if (request.SensitiveResponseFields is not null) endpoint.SetSensitiveResponseFields(request.SensitiveResponseFields);
 
         await repo.SaveChangesAsync(ct);
         await versions.SnapshotAsync(
@@ -204,7 +206,8 @@ public static class AdminApiEndpointsEndpoints
 
     private static string BuildSnapshot(TenantApiEndpoint e) => JsonSerializer.Serialize(new ApiEndpointSnapshot(
         e.ApiSubType, e.Name, e.Description, e.Path, e.HttpMethod, e.RequestBodyTemplate,
-        e.QueryParams, e.Headers, e.ResponseMapping, e.SortOrder, e.IsPreferred, e.IsActive, e.IsRetrySafe));
+        e.QueryParams, e.Headers, e.ResponseMapping, e.SortOrder, e.IsPreferred, e.IsActive, e.IsRetrySafe,
+        e.SensitiveResponseFields));
 
     // ApiSubType is deliberately not reverted — UpdateSubType needs the parent definition's
     // ApiCategory, which this revert path doesn't load, and sub-type changes post-creation are
@@ -217,6 +220,7 @@ public static class AdminApiEndpointsEndpoints
         e.SetHeaders(s.Headers);
         e.SetResponseMapping(s.ResponseMapping);
         e.SetRetrySafe(s.IsRetrySafe);
+        e.SetSensitiveResponseFields(s.SensitiveResponseFields);
         if (s.IsActive) e.Activate(); else e.Deactivate();
         if (s.IsPreferred) e.SetPreferred(); else e.ClearPreferred();
     }
@@ -244,6 +248,7 @@ public static class AdminApiEndpointsEndpoints
         ITenantApiDefinitionRepository defRepo,
         ITenantCredentialStore credStore,
         IHttpClientFactory httpFactory,
+        IMtlsHttpClientProvider mtlsProvider,
         TenantContext tenantContext,
         CancellationToken ct)
     {
@@ -257,7 +262,8 @@ public static class AdminApiEndpointsEndpoints
             request,
             (key, token) => credStore.GetAsync(key, token),
             httpFactory,
-            ct);
+            ct,
+            mtlsProvider);
     }
 
     private static async Task<IResult> Delete(
@@ -292,6 +298,7 @@ public static class AdminApiEndpointsEndpoints
         e.IsPreferred,
         e.IsActive,
         e.IsRetrySafe,
+        e.SensitiveResponseFields,
         e.CreatedAt,
         e.UpdatedAt,
     };

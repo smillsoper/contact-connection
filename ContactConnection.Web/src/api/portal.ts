@@ -1,4 +1,6 @@
 import { usePortalAuthStore } from '../stores/portalAuthStore'
+import type { EntityVersionSummary } from './versioning'
+import type { CredentialAuditEntrySummary } from './credentialAudit'
 
 // Raw fetch with portal auth token — no tenant header needed
 async function portalFetch<T>(
@@ -188,6 +190,10 @@ export interface ApiDefinitionRecord {
   responseMapping: string
   authConfig: string
   isActive: boolean
+  /** Outbound requests/minute allowed against this definition, or null for unlimited. Every
+   * tenant using this Portal definition (a platform-default credential) shares this same budget —
+   * see API_HARDENING_CHECKLIST.md Tier 2. */
+  rateLimitPerMinute: number | null
   createdAt: string
   updatedAt: string | null
 }
@@ -201,6 +207,7 @@ export interface CreateApiDefinitionData {
   provider?: string
   timeoutSeconds?: number
   authConfig?: string
+  rateLimitPerMinute?: number
 }
 
 export interface UpdateApiDefinitionData {
@@ -216,6 +223,9 @@ export interface UpdateApiDefinitionData {
   requestBodyTemplate?: string
   responseMapping?: string
   authConfig?: string
+  /** Omit to leave unchanged, 0 to clear back to unlimited, or a positive number to set a new
+   * limit — same convention the backend uses. */
+  rateLimitPerMinute?: number
 }
 
 export async function listPortalApiDefinitions(): Promise<ApiDefinitionRecord[]> {
@@ -226,10 +236,19 @@ export async function getPortalApiDefinition(id: string): Promise<ApiDefinitionR
   return portalFetch<ApiDefinitionRecord>(`/api/v1/portal/api-definitions/${id}`)
 }
 
+interface TtsProviderInfo {
+  key: string
+  requiredCredentialFields: string[]
+}
+
 /** Live-registered ITtsStreamProvider keys (e.g. "azure", "elevenlabs") — the valid Provider
- *  values for a definition backing a TtsStreaming endpoint. See TtsProviderValidation. */
+ *  values for a definition backing a TtsStreaming endpoint. See TtsProviderValidation. The
+ *  backend returns full {key, requiredCredentialFields} objects (see TtsProvidersEndpoints and
+ *  the Admin-side listAdminTtsProviders) — this caller only needs the keys, so it unwraps here
+ *  rather than leaking the object shape into DetailApi.listTtsProviders (typed string[]). */
 export async function getPortalTtsProviders(): Promise<string[]> {
-  return portalFetch<string[]>('/api/v1/portal/tts-providers')
+  const providers = await portalFetch<TtsProviderInfo[]>('/api/v1/portal/tts-providers')
+  return providers.map((p) => p.key)
 }
 
 export async function createPortalApiDefinition(data: CreateApiDefinitionData): Promise<ApiDefinitionRecord> {
@@ -258,26 +277,39 @@ export async function deletePortalApiDefinition(id: string): Promise<void> {
   return portalFetch<void>(`/api/v1/portal/api-definitions/${id}`, { method: 'DELETE' })
 }
 
+export async function listPortalApiDefinitionVersions(id: string): Promise<EntityVersionSummary[]> {
+  return portalFetch<EntityVersionSummary[]>(`/api/v1/portal/api-definitions/${id}/versions`)
+}
+
+export async function revertPortalApiDefinition(id: string, versionNumber: number): Promise<ApiDefinitionRecord> {
+  return portalFetch<ApiDefinitionRecord>(`/api/v1/portal/api-definitions/${id}/versions/${versionNumber}/revert`, { method: 'POST' })
+}
+
 // ─── Portal Credentials ──────────────────────────────────────────────────────
 
 export interface CredentialSummary {
   keyName: string
   updatedOn: string | null
+  expiresOn: string | null
 }
 
 export async function listPortalCredentials(): Promise<CredentialSummary[]> {
   return portalFetch<CredentialSummary[]>('/api/v1/portal/credentials')
 }
 
-export async function setPortalCredential(keyName: string, value: string): Promise<void> {
+export async function setPortalCredential(keyName: string, value: string, expiresOn?: string | null): Promise<void> {
   return portalFetch<void>(`/api/v1/portal/credentials/${keyName}`, {
     method: 'PUT',
-    body: JSON.stringify({ value }),
+    body: JSON.stringify({ value, expiresOn: expiresOn || null }),
   })
 }
 
 export async function deletePortalCredential(keyName: string): Promise<void> {
   return portalFetch<void>(`/api/v1/portal/credentials/${keyName}`, { method: 'DELETE' })
+}
+
+export async function listPortalCredentialAudit(keyName: string): Promise<CredentialAuditEntrySummary[]> {
+  return portalFetch<CredentialAuditEntrySummary[]>(`/api/v1/portal/credentials/${keyName}/audit`)
 }
 
 // ─── Portal API Endpoints ────────────────────────────────────────────────────
@@ -298,6 +330,7 @@ export interface ApiEndpointRecord {
   isPreferred: boolean
   isActive: boolean
   isRetrySafe: boolean
+  sensitiveResponseFields: string
   createdAt: string
   updatedAt: string | null
 }
@@ -314,6 +347,7 @@ export interface CreateApiEndpointData {
   headers?: string
   responseMapping?: string
   isRetrySafe?: boolean
+  sensitiveResponseFields?: string
 }
 
 export interface UpdateApiEndpointData {
@@ -328,6 +362,7 @@ export interface UpdateApiEndpointData {
   headers?: string
   responseMapping?: string
   isRetrySafe?: boolean
+  sensitiveResponseFields?: string
 }
 
 export async function listPortalApiEndpoints(definitionId: string): Promise<ApiEndpointRecord[]> {
@@ -352,6 +387,14 @@ export async function setPreferredPortalApiEndpoint(definitionId: string, endpoi
   return portalFetch<ApiEndpointRecord>(`/api/v1/portal/api-definitions/${definitionId}/endpoints/${endpointId}/set-preferred`, { method: 'POST' })
 }
 
+export async function listPortalApiEndpointVersions(definitionId: string, endpointId: string): Promise<EntityVersionSummary[]> {
+  return portalFetch<EntityVersionSummary[]>(`/api/v1/portal/api-definitions/${definitionId}/endpoints/${endpointId}/versions`)
+}
+
+export async function revertPortalApiEndpoint(definitionId: string, endpointId: string, versionNumber: number): Promise<ApiEndpointRecord> {
+  return portalFetch<ApiEndpointRecord>(`/api/v1/portal/api-definitions/${definitionId}/endpoints/${endpointId}/versions/${versionNumber}/revert`, { method: 'POST' })
+}
+
 export async function deletePortalApiEndpoint(definitionId: string, endpointId: string): Promise<void> {
   return portalFetch<void>(`/api/v1/portal/api-definitions/${definitionId}/endpoints/${endpointId}`, { method: 'DELETE' })
 }
@@ -364,6 +407,7 @@ export interface EndpointTestPayload {
   requestBodyTemplate?: string
   namespace: string
   testData: Record<string, string>
+  sensitiveResponseFields?: string[]
 }
 
 export interface EndpointTestResult {

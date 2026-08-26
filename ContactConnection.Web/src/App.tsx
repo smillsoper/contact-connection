@@ -23,6 +23,7 @@ import AdminApiDefinitionsPage from './pages/admin/AdminApiDefinitionsPage'
 import AdminApiDefinitionDetailPage from './pages/admin/AdminApiDefinitionDetailPage'
 import AdminApiPreferencesPage from './pages/admin/AdminApiPreferencesPage'
 import AdminCredentialsPage from './pages/admin/AdminCredentialsPage'
+import AdminWebhooksPage from './pages/admin/AdminWebhooksPage'
 import TelephonyPage from './pages/admin/TelephonyPage'
 import SipGatewaysPage from './pages/admin/SipGatewaysPage'
 import AdminBlockListPage from './pages/admin/AdminBlockListPage'
@@ -265,6 +266,14 @@ export default function App() {
           element={
             <RequireAdminAuth>
               <AdminCredentialsPage />
+            </RequireAdminAuth>
+          }
+        />
+        <Route
+          path="/admin/webhooks"
+          element={
+            <RequireAdminAuth>
+              <AdminWebhooksPage />
             </RequireAdminAuth>
           }
         />

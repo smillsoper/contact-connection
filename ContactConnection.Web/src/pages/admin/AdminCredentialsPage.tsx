@@ -4,8 +4,11 @@ import {
   listAdminCredentials,
   setAdminCredential,
   deleteAdminCredential,
+  listAdminCredentialAudit,
   type CredentialSummary,
 } from '../../api/adminCredentials'
+import CredentialAuditPanel from '../../components/versioning/CredentialAuditPanel'
+import CredentialExpiryBadge, { expiryLevel } from '../../components/versioning/CredentialExpiryBadge'
 
 type ModalMode = 'add' | 'edit' | null
 
@@ -18,11 +21,14 @@ export default function AdminCredentialsPage() {
   const [editKey, setEditKey] = useState('')
   const [formKey, setFormKey] = useState('')
   const [formValue, setFormValue] = useState('')
+  const [formExpiresOn, setFormExpiresOn] = useState('')
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
+
+  const [auditKey, setAuditKey] = useState<string | null>(null)
 
   async function load() {
     setLoading(true)
@@ -41,6 +47,7 @@ export default function AdminCredentialsPage() {
   function openAdd() {
     setFormKey('')
     setFormValue('')
+    setFormExpiresOn('')
     setFormError(null)
     setModalMode('add')
   }
@@ -48,6 +55,10 @@ export default function AdminCredentialsPage() {
   function openEdit(keyName: string) {
     setEditKey(keyName)
     setFormValue('')
+    // Prefill from the current secret's expiry — SetAsync creates a new Key Vault secret version,
+    // so an unset expiresOn on rotation would silently drop the existing expiry date.
+    const current = items.find((i) => i.keyName === keyName)
+    setFormExpiresOn(current?.expiresOn ? current.expiresOn.slice(0, 10) : '')
     setFormError(null)
     setModalMode('edit')
   }
@@ -60,7 +71,7 @@ export default function AdminCredentialsPage() {
     setSaving(true)
     setFormError(null)
     try {
-      await setAdminCredential(key, formValue)
+      await setAdminCredential(key, formValue, formExpiresOn || null)
       setModalMode(null)
       await load()
     } catch (e) {
@@ -108,6 +119,22 @@ export default function AdminCredentialsPage() {
           </div>
         )}
 
+        {(() => {
+          const expiring = items.filter((i) => expiryLevel(i.expiresOn) === 'warning')
+          const expired = items.filter((i) => expiryLevel(i.expiresOn) === 'expired')
+          if (expiring.length === 0 && expired.length === 0) return null
+          return (
+            <div className="mb-4 p-3 bg-amber-900/30 border border-amber-700/60 text-amber-300 rounded text-sm">
+              {expired.length > 0 && (
+                <div>{expired.length} credential{expired.length === 1 ? '' : 's'} expired: {expired.map((i) => i.keyName).join(', ')}</div>
+              )}
+              {expiring.length > 0 && (
+                <div>{expiring.length} credential{expiring.length === 1 ? '' : 's'} expiring within 30 days: {expiring.map((i) => i.keyName).join(', ')}</div>
+              )}
+            </div>
+          )
+        })()}
+
         {loading ? (
           <div className="text-gray-400 text-sm py-8 text-center">Loading…</div>
         ) : items.length === 0 ? (
@@ -122,6 +149,7 @@ export default function AdminCredentialsPage() {
                   <th className="px-4 py-3 font-medium">Key Name</th>
                   <th className="px-4 py-3 font-medium">Value</th>
                   <th className="px-4 py-3 font-medium">Last Updated</th>
+                  <th className="px-4 py-3 font-medium">Expires</th>
                   <th className="px-4 py-3" />
                 </tr>
               </thead>
@@ -136,7 +164,16 @@ export default function AdminCredentialsPage() {
                     <td className="px-4 py-3 text-gray-400">
                       {item.updatedOn ? new Date(item.updatedOn).toLocaleString() : '—'}
                     </td>
+                    <td className="px-4 py-3">
+                      <CredentialExpiryBadge expiresOn={item.expiresOn} />
+                    </td>
                     <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={() => setAuditKey(item.keyName)}
+                        className="text-gray-400 hover:text-gray-300 text-xs mr-4 transition-colors"
+                      >
+                        History
+                      </button>
                       <button
                         onClick={() => openEdit(item.keyName)}
                         className="text-indigo-400 hover:text-indigo-300 text-xs mr-4 transition-colors"
@@ -210,6 +247,21 @@ export default function AdminCredentialsPage() {
               </p>
             </div>
 
+            <div className="mb-6">
+              <label className="block text-sm text-gray-300 mb-1">Expires On (optional)</label>
+              <input
+                type="date"
+                value={formExpiresOn}
+                onChange={(e) => setFormExpiresOn(e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 text-white rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                {modalMode === 'edit'
+                  ? "Carried over from the current secret's expiry — clear it to remove the warning, or leave it to keep tracking the same date."
+                  : 'Vendor-issued secrets (e.g. Entra client secrets) often expire on a schedule — set this to get a warning before it lapses.'}
+              </p>
+            </div>
+
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => setModalMode(null)}
@@ -255,6 +307,14 @@ export default function AdminCredentialsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {auditKey !== null && (
+        <CredentialAuditPanel
+          keyName={auditKey}
+          listAudit={listAdminCredentialAudit}
+          onClose={() => setAuditKey(null)}
+        />
       )}
     </AdminShell>
   )

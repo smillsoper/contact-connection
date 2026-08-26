@@ -16,6 +16,12 @@ public class TenantApiDefinition
     public string ResponseMapping { get; private set; } = "{}";
     public string AuthConfig { get; private set; } = "{\"type\":\"none\"}";
     public bool IsActive { get; private set; }
+    /// <summary>Outbound calls per minute allowed against this definition, enforced per
+    /// definitionId (shared across every tenant using this row — the point for a Portal
+    /// definition backed by a platform-default credential). Null = unlimited (opt-in, matching
+    /// IsRetrySafe's default-off pattern — an existing definition's behavior never changes until
+    /// someone sets this). See API_HARDENING_CHECKLIST.md Tier 2.</summary>
+    public int? RateLimitPerMinute { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? UpdatedAt { get; private set; }
 
@@ -72,6 +78,14 @@ public class TenantApiDefinition
     public void SetRequestBodyTemplate(string? template) { RequestBodyTemplate = template; UpdatedAt = DateTimeOffset.UtcNow; }
     public void SetResponseMapping(string mappingJson) { ResponseMapping = mappingJson; UpdatedAt = DateTimeOffset.UtcNow; }
     public void SetAuthConfig(string authConfigJson) { AuthConfig = authConfigJson; UpdatedAt = DateTimeOffset.UtcNow; }
+
+    public void SetRateLimit(int? perMinute)
+    {
+        if (perMinute is <= 0) throw new ArgumentException("Rate limit must be null (unlimited) or a positive number of requests per minute.", nameof(perMinute));
+        RateLimitPerMinute = perMinute;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
     public void Activate() { IsActive = true; UpdatedAt = DateTimeOffset.UtcNow; }
     public void Deactivate() { IsActive = false; UpdatedAt = DateTimeOffset.UtcNow; }
 }

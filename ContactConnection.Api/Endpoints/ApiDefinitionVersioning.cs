@@ -8,9 +8,11 @@ namespace ContactConnection.Api.Endpoints;
 public record ApiDefinitionSnapshot(
     string ApiCategory, string? Provider, string Name, string? Description, string HttpMethod,
     string BaseUrl, int TimeoutSeconds, string Headers, string QueryParams,
-    string? RequestBodyTemplate, string ResponseMapping, string AuthConfig, bool IsActive);
+    string? RequestBodyTemplate, string ResponseMapping, string AuthConfig, bool IsActive,
+    int? RateLimitPerMinute = null);
 
 public record ApiEndpointSnapshot(
     string ApiSubType, string Name, string? Description, string Path, string? HttpMethod,
     string? RequestBodyTemplate, string QueryParams, string Headers, string ResponseMapping,
-    int SortOrder, bool IsPreferred, bool IsActive, bool IsRetrySafe);
+    int SortOrder, bool IsPreferred, bool IsActive, bool IsRetrySafe,
+    string SensitiveResponseFields = "[]");

@@ -69,6 +69,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IPortalApiEndpointRepository, PortalApiEndpointRepository>();
         services.AddScoped<ITenantApiEndpointRepository, TenantApiEndpointRepository>();
         services.AddScoped<ITenantApiPreferenceRepository, TenantApiPreferenceRepository>();
+        services.AddScoped<IWebhookEndpointRepository, WebhookEndpointRepository>();
+        services.AddScoped<IWebhookEventRepository, WebhookEventRepository>();
 
         services.AddScoped<ITenantInviteRepository, TenantInviteRepository>();
         services.AddScoped<ITenantAdminInviteRepository, TenantAdminInviteRepository>();
@@ -119,10 +121,25 @@ public static class ServiceCollectionExtensions
         // not be recreated per request/scope. Keyed internally per API Definition.
         services.AddSingleton<IVendorResilienceExecutor, VendorResilienceExecutor>();
 
+        // Outbound rate limiting — Redis-backed (not in-memory, unlike the circuit breaker above)
+        // because the whole point is a shared quota across every API instance, not just this one
+        // process. See API_HARDENING_CHECKLIST.md Tier 2.
+        services.AddSingleton<IOutboundRateLimiter, RedisOutboundRateLimiter>();
+
+        // mTLS client-certificate HttpClient cache — singleton so the cached clients' TLS
+        // connection pools persist for the process lifetime. See API_HARDENING_CHECKLIST.md Tier 3.
+        services.AddSingleton<IMtlsHttpClientProvider, MtlsHttpClientProvider>();
+
         // Version history — one IVersionHistoryService implementation per scope (tenant/portal
         // persist to different DbContexts), resolved via keyed DI at each call site.
         services.AddKeyedScoped<IVersionHistoryService, TenantVersionHistoryService>("tenant");
         services.AddKeyedScoped<IVersionHistoryService, PortalVersionHistoryService>("portal");
+
+        // Credential audit trail — same split, records THAT a credential Set/Delete happened
+        // (actor/timestamp/key/action), never the secret value. Independent of whether Key Vault
+        // is configured (it only ever runs after a store call already succeeded).
+        services.AddKeyedScoped<ICredentialAuditService, TenantCredentialAuditService>("tenant");
+        services.AddKeyedScoped<ICredentialAuditService, PortalCredentialAuditService>("portal");
 
         // DNS client for email validation (singleton — thread-safe, connection-pooled)
         services.AddSingleton<ILookupClient>(_ => new LookupClient(new LookupClientOptions

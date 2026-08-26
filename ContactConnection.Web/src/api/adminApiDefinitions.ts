@@ -1,4 +1,5 @@
 import { api } from './client'
+import type { EntityVersionSummary } from './versioning'
 
 export interface ApiDefinitionRecord {
   id: string
@@ -15,6 +16,10 @@ export interface ApiDefinitionRecord {
   responseMapping: string
   authConfig: string
   isActive: boolean
+  /** Outbound requests/minute allowed against this definition, or null for unlimited. See
+   * API_HARDENING_CHECKLIST.md Tier 2 — shared across every tenant using this definition when
+   * it's a Portal (platform-default) definition, so this is what protects a shared quota. */
+  rateLimitPerMinute: number | null
   createdAt: string
   updatedAt: string | null
 }
@@ -28,6 +33,7 @@ export interface CreateApiDefinitionData {
   provider?: string
   timeoutSeconds?: number
   authConfig?: string
+  rateLimitPerMinute?: number
 }
 
 export interface UpdateApiDefinitionData {
@@ -43,6 +49,9 @@ export interface UpdateApiDefinitionData {
   requestBodyTemplate?: string
   responseMapping?: string
   authConfig?: string
+  /** Omit to leave unchanged, 0 to clear back to unlimited, or a positive number to set a new
+   * limit — same convention the backend uses. */
+  rateLimitPerMinute?: number
 }
 
 export function listAdminApiDefinitions(): Promise<ApiDefinitionRecord[]> {
@@ -76,6 +85,14 @@ export function deleteAdminApiDefinition(id: string): Promise<void> {
   return api.delete<void>(`/api/v1/admin/api-definitions/${id}`)
 }
 
+export function listAdminApiDefinitionVersions(id: string): Promise<EntityVersionSummary[]> {
+  return api.get<EntityVersionSummary[]>(`/api/v1/admin/api-definitions/${id}/versions`)
+}
+
+export function revertAdminApiDefinition(id: string, versionNumber: number): Promise<ApiDefinitionRecord> {
+  return api.post<ApiDefinitionRecord>(`/api/v1/admin/api-definitions/${id}/versions/${versionNumber}/revert`, {})
+}
+
 // ─── Admin API Endpoints ─────────────────────────────────────────────────────
 
 export interface ApiEndpointRecord {
@@ -94,6 +111,7 @@ export interface ApiEndpointRecord {
   isPreferred: boolean
   isActive: boolean
   isRetrySafe: boolean
+  sensitiveResponseFields: string
   createdAt: string
   updatedAt: string | null
 }
@@ -110,6 +128,7 @@ export interface CreateApiEndpointData {
   headers?: string
   responseMapping?: string
   isRetrySafe?: boolean
+  sensitiveResponseFields?: string
 }
 
 export interface UpdateApiEndpointData {
@@ -123,6 +142,7 @@ export interface UpdateApiEndpointData {
   headers?: string
   responseMapping?: string
   isRetrySafe?: boolean
+  sensitiveResponseFields?: string
 }
 
 export function listAdminApiEndpoints(definitionId: string): Promise<ApiEndpointRecord[]> {
@@ -143,6 +163,115 @@ export function setPreferredAdminApiEndpoint(definitionId: string, endpointId: s
 
 export function deleteAdminApiEndpoint(definitionId: string, endpointId: string): Promise<void> {
   return api.delete<void>(`/api/v1/admin/api-definitions/${definitionId}/endpoints/${endpointId}`)
+}
+
+export function listAdminApiEndpointVersions(definitionId: string, endpointId: string): Promise<EntityVersionSummary[]> {
+  return api.get<EntityVersionSummary[]>(`/api/v1/admin/api-definitions/${definitionId}/endpoints/${endpointId}/versions`)
+}
+
+export function revertAdminApiEndpoint(definitionId: string, endpointId: string, versionNumber: number): Promise<ApiEndpointRecord> {
+  return api.post<ApiEndpointRecord>(`/api/v1/admin/api-definitions/${definitionId}/endpoints/${endpointId}/versions/${versionNumber}/revert`, {})
+}
+
+// ─── Inbound webhooks — standalone, mapped onto a canonical domain object. Not tied to any API
+// Definition/Endpoint. See API_HARDENING_CHECKLIST.md Tier 2. ──────────────────────────────────
+
+export interface WebhookEventRecord {
+  id: string
+  receivedAt: string
+  signatureValid: boolean
+  processingStatus: 'received' | 'processed' | 'duplicate' | 'rejected' | 'failed'
+  processingError: string | null
+  outcomeKey: string | null
+  processedAt: string | null
+}
+
+export interface AdminWebhook {
+  id: string
+  name: string
+  description: string | null
+  canonicalType: string
+  /** JSON-encoded WebhookMappingConfig — see CanonicalWebhookMappingEvaluator.cs for the shape. */
+  mappingConfig: string
+  path: string
+  tenantSubdomain: string
+  signatureHeaderName: string
+  signatureAlgorithm: string
+  includeTimestamp: boolean
+  timestampToleranceSeconds: number
+  isActive: boolean
+  createdAt: string
+  updatedAt: string | null
+  /** Only populated by create/regenerate-secret responses — shown to the admin once and never
+   * re-fetchable afterward. */
+  secret: string | null
+}
+
+export interface AdminWebhookSummary {
+  id: string
+  name: string
+  description: string | null
+  canonicalType: string
+  url: string
+  isActive: boolean
+  createdAt: string
+  updatedAt: string | null
+  lastEventAt: string | null
+  lastEventStatus: WebhookEventRecord['processingStatus'] | null
+}
+
+export interface CreateWebhookData {
+  name: string
+  canonicalType: string
+  description?: string
+  mappingConfig?: string
+  signatureHeaderName?: string
+  signatureAlgorithm?: string
+  includeTimestamp?: boolean
+  timestampToleranceSeconds?: number
+}
+
+export interface UpdateWebhookData {
+  name?: string
+  description?: string
+  mappingConfig?: string
+  signatureHeaderName?: string
+  signatureAlgorithm?: string
+  includeTimestamp?: boolean
+  timestampToleranceSeconds?: number
+  isActive?: boolean
+}
+
+export function listAdminWebhooks(): Promise<AdminWebhookSummary[]> {
+  return api.get<AdminWebhookSummary[]>('/api/v1/admin/webhooks')
+}
+
+export function createAdminWebhook(data: CreateWebhookData): Promise<AdminWebhook> {
+  return api.post<AdminWebhook>('/api/v1/admin/webhooks', data)
+}
+
+export function getAdminWebhook(id: string): Promise<AdminWebhook> {
+  return api.get<AdminWebhook>(`/api/v1/admin/webhooks/${id}`)
+}
+
+export function updateAdminWebhook(id: string, data: UpdateWebhookData): Promise<AdminWebhook> {
+  return api.patch<AdminWebhook>(`/api/v1/admin/webhooks/${id}`, data)
+}
+
+export function regenerateAdminWebhookSecret(id: string): Promise<AdminWebhook> {
+  return api.post<AdminWebhook>(`/api/v1/admin/webhooks/${id}/regenerate-secret`, {})
+}
+
+export function regenerateAdminWebhookToken(id: string): Promise<AdminWebhook> {
+  return api.post<AdminWebhook>(`/api/v1/admin/webhooks/${id}/regenerate-token`, {})
+}
+
+export function deleteAdminWebhook(id: string): Promise<void> {
+  return api.delete<void>(`/api/v1/admin/webhooks/${id}`)
+}
+
+export function listAdminWebhookEvents(id: string, take = 50): Promise<WebhookEventRecord[]> {
+  return api.get<WebhookEventRecord[]>(`/api/v1/admin/webhooks/${id}/events?take=${take}`)
 }
 
 // ─── Tenant API Preferences ──────────────────────────────────────────────────
@@ -218,6 +347,7 @@ export interface EndpointTestPayload {
   requestBodyTemplate?: string
   namespace: string
   testData: Record<string, string>
+  sensitiveResponseFields?: string[]
 }
 
 export interface EndpointTestResult {

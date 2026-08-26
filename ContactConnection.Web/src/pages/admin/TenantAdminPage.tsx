@@ -46,6 +46,7 @@ const NAV_SECTIONS: NavSection[] = [
       { title: 'API Definitions', desc: 'Connect external services and configure API endpoints.', path: '/admin/api-definitions', live: true },
       { title: 'API Preferences', desc: 'Choose platform or your own integration for each API type.', path: '/admin/api-preferences', live: true },
       { title: 'Credentials', desc: 'Store API keys, tokens, and secrets for integrations.', path: '/admin/credentials', live: true },
+      { title: 'Webhooks', desc: 'Every inbound webhook across your API Definitions — find, monitor, and manage them.', path: '/admin/webhooks', live: true },
     ],
   },
   {

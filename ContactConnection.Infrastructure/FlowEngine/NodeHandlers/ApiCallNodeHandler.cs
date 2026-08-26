@@ -39,7 +39,8 @@ public class ApiCallNodeHandler(
 
     private record CallTarget(
         Guid DefinitionId, string HttpMethod, string BaseUrl, string Path, string Headers, string QueryParams,
-        string? RequestBodyTemplate, string AuthConfig, int TimeoutSeconds, bool IsActive, bool IsRetrySafe);
+        string? RequestBodyTemplate, string AuthConfig, int TimeoutSeconds, bool IsActive, bool IsRetrySafe,
+        int? RateLimitPerMinute, string SensitiveResponseFields);
 
     public async Task<NodeResult> ExecuteAsync(
         JsonObject node, FlowExecutionContext ctx,
@@ -52,6 +53,7 @@ public class ApiCallNodeHandler(
 
         ApiDefinitionExecutionResult result;
         string transitionKey;
+        var targetSensitiveFields = "[]";
 
         if (string.IsNullOrEmpty(endpointIdStr) || !Guid.TryParse(endpointIdStr, out var endpointId))
         {
@@ -65,6 +67,7 @@ public class ApiCallNodeHandler(
             var target = scope == "portal"
                 ? await LoadPortalAsync(endpointId, ct)
                 : await LoadTenantAsync(endpointId, ct);
+            targetSensitiveFields = target?.SensitiveResponseFields ?? "[]";
 
             if (target is null)
             {
@@ -88,6 +91,7 @@ public class ApiCallNodeHandler(
                     : null;
                 var headers     = ResolveHeaders(target.Headers, varCtx);
                 var queryParams = ResolveQueryParams(target.QueryParams, varCtx);
+                var hmacPayload = ResolveHmacPayload(target.AuthConfig, varCtx);
 
                 Func<string, CancellationToken, Task<string?>> getCredential = scope == "portal"
                     ? portalCredentials.GetAsync
@@ -107,7 +111,9 @@ public class ApiCallNodeHandler(
                     TimeoutSeconds: timeoutOverride ?? target.TimeoutSeconds,
                     GetCredential: getCredential,
                     DefinitionId: target.DefinitionId,
-                    AllowRetryOnAmbiguousFailure: target.IsRetrySafe), ct);
+                    AllowRetryOnAmbiguousFailure: target.IsRetrySafe,
+                    RateLimitPerMinute: target.RateLimitPerMinute,
+                    HmacPayload: hmacPayload), ct);
 
                 transitionKey = result.TimedOut ? "timeout" : (!result.Success ? "error" : "success");
             }
@@ -115,8 +121,14 @@ public class ApiCallNodeHandler(
 
         if (!string.IsNullOrEmpty(outputVariable))
         {
-            ctx.FlowVars[outputVariable] = ApiResponseWrapper.BuildJson(result);
-            foreach (var (key, value) in ApiResponseWrapper.BuildFlat(result))
+            // Masked BEFORE it ever reaches flow variables — this is what actually lands in
+            // flow_sessions.variable_store, so masking has to happen here, not just at display
+            // time. targetSensitiveFields is empty ("[]") for every early-exit branch above
+            // (endpoint not found/inactive), where ResponseFieldMasker.Mask is a no-op anyway
+            // since those results never have a ResponseBody.
+            var maskedResult = ResponseFieldMasker.Mask(result, targetSensitiveFields);
+            ctx.FlowVars[outputVariable] = ApiResponseWrapper.BuildJson(maskedResult);
+            foreach (var (key, value) in ApiResponseWrapper.BuildFlat(maskedResult))
                 ctx.FlowVars[$"{outputVariable}.{key}"] = value;
         }
 
@@ -135,7 +147,8 @@ public class ApiCallNodeHandler(
         if (def is null) return null;
         return new CallTarget(
             def.Id, endpoint.HttpMethod ?? def.HttpMethod, def.BaseUrl, endpoint.Path, endpoint.Headers, endpoint.QueryParams,
-            endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive, endpoint.IsRetrySafe);
+            endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive, endpoint.IsRetrySafe,
+            def.RateLimitPerMinute, endpoint.SensitiveResponseFields);
     }
 
     private async Task<CallTarget?> LoadPortalAsync(Guid endpointId, CancellationToken ct)
@@ -146,7 +159,25 @@ public class ApiCallNodeHandler(
         if (def is null) return null;
         return new CallTarget(
             def.Id, endpoint.HttpMethod ?? def.HttpMethod, def.BaseUrl, endpoint.Path, endpoint.Headers, endpoint.QueryParams,
-            endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive, endpoint.IsRetrySafe);
+            endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive, endpoint.IsRetrySafe,
+            def.RateLimitPerMinute, endpoint.SensitiveResponseFields);
+    }
+
+    /// <summary>Extracts the hmac auth type's optional payloadTemplate (if any) and resolves it
+    /// through the same variable resolver as the request body/headers/query params — so the
+    /// signed string can pull in fields the vendor requires even when they aren't part of the
+    /// outgoing body. Returns null when the auth type isn't "hmac" or no template is configured,
+    /// meaning ApiDefinitionExecutor falls back to signing the actual request body.</summary>
+    private string? ResolveHmacPayload(string authConfigJson, VariableContext varCtx)
+    {
+        try
+        {
+            var root = JsonNode.Parse(authConfigJson)?.AsObject();
+            if (root is null || root["type"]?.GetValue<string>() != "hmac") return null;
+            var template = root["payloadTemplate"]?.GetValue<string>();
+            return string.IsNullOrEmpty(template) ? null : Resolver.Resolve(template, varCtx);
+        }
+        catch { return null; } // malformed auth config JSON — same "treat as absent" tolerance as headers/query params
     }
 
     private Dictionary<string, string> ResolveHeaders(string json, VariableContext varCtx)

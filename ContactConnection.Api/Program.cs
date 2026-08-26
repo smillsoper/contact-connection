@@ -177,6 +177,7 @@ app.MapAdminApiEndpointsEndpoints();
 app.MapAdminApiPreferencesEndpoints();
 app.MapAdminCredentialsEndpoints();
 app.MapAdminTtsProvidersEndpoints();
+app.MapAdminWebhooksEndpoints();
 
 // Portal (platform administration)
 app.MapPortalAuthEndpoints();
@@ -194,6 +195,9 @@ app.MapTenantAdminInviteEndpoints();
 // FreeSWITCH internal endpoints (no bearer auth — internal network only)
 app.MapFreeSwitchDirectoryEndpoints();
 app.MapTtsStreamRelayEndpoints();
+
+// Inbound vendor webhooks (public — authenticated via per-endpoint HMAC signature, not bearer JWT)
+app.MapWebhooksEndpoints();
 
 // SignalR hubs
 app.MapHub<FlowHub>("/hubs/flow");

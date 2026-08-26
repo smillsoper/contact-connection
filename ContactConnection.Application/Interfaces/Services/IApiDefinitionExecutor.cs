@@ -29,7 +29,16 @@ public record ApiDefinitionExecutionRequest(
     /// always true for GET/HEAD/PUT/DELETE; for POST/PATCH, only when the endpoint's own
     /// IsRetrySafe flag is set. A pure connection-level failure (request never reached the
     /// vendor) is retried regardless of this flag. See API_HARDENING_CHECKLIST.md Tier 1.</summary>
-    bool AllowRetryOnAmbiguousFailure = false);
+    bool AllowRetryOnAmbiguousFailure = false,
+    /// <summary>The definition's own configured outbound rate limit (requests/minute), or null
+    /// for unlimited. See API_HARDENING_CHECKLIST.md Tier 2.</summary>
+    int? RateLimitPerMinute = null,
+    /// <summary>Only meaningful when AuthConfigJson's type is "hmac". The already-resolved string
+    /// to sign — the caller resolves the auth config's payloadTemplate (if any) through its own
+    /// variable-resolution mechanism before constructing this request, exactly like Url/Headers/
+    /// Body are resolved, since this executor does no templating of its own. Null means "no
+    /// payloadTemplate configured" — the hmac case signs Body instead.</summary>
+    string? HmacPayload = null);
 
 public record ApiDefinitionExecutionResult(
     bool Success,

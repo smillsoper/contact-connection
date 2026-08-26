@@ -1068,6 +1068,47 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                     b.ToTable("clients", (string)null);
                 });
 
+            modelBuilder.Entity("ContactConnection.Domain.Entities.CredentialAuditEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("action");
+
+                    b.Property<Guid>("ActorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("actor_id");
+
+                    b.Property<string>("ActorName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("actor_name");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("KeyName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("key_name");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("KeyName", "CreatedAt")
+                        .HasDatabaseName("ix_credential_audit_entries_key_name_created_at");
+
+                    b.ToTable("credential_audit_entries", (string)null);
+                });
+
             modelBuilder.Entity("ContactConnection.Domain.Entities.CustomFieldDefinition", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2601,6 +2642,10 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .HasColumnType("jsonb")
                         .HasColumnName("query_params");
 
+                    b.Property<int?>("RateLimitPerMinute")
+                        .HasColumnType("integer")
+                        .HasColumnName("rate_limit_per_minute");
+
                     b.Property<string>("RequestBodyTemplate")
                         .HasColumnType("text")
                         .HasColumnName("request_body_template");
@@ -2711,6 +2756,13 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .HasColumnType("jsonb")
                         .HasColumnName("response_mapping");
 
+                    b.Property<string>("SensitiveResponseFields")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasDefaultValue("[]")
+                        .HasColumnName("sensitive_response_fields");
+
                     b.Property<int>("SortOrder")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
@@ -2774,6 +2826,154 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .HasDatabaseName("ix_tenant_api_preferences_api_sub_type");
 
                     b.ToTable("tenant_api_preferences", (string)null);
+                });
+
+            modelBuilder.Entity("ContactConnection.Domain.Entities.WebhookEndpoint", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("CanonicalType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("canonical_type");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("description");
+
+                    b.Property<bool>("IncludeTimestamp")
+                        .HasColumnType("boolean")
+                        .HasColumnName("include_timestamp");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("MappingConfig")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasDefaultValue("{}")
+                        .HasColumnName("mapping_config");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("SignatureAlgorithm")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("signature_algorithm");
+
+                    b.Property<string>("SignatureHeaderName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("signature_header_name");
+
+                    b.Property<int>("TimestampToleranceSeconds")
+                        .HasColumnType("integer")
+                        .HasColumnName("timestamp_tolerance_seconds");
+
+                    b.Property<string>("Token")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("token");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CanonicalType")
+                        .HasDatabaseName("ix_webhook_endpoints_canonical_type");
+
+                    b.HasIndex("Token")
+                        .IsUnique()
+                        .HasDatabaseName("ix_webhook_endpoints_token");
+
+                    b.ToTable("webhook_endpoints", (string)null);
+                });
+
+            modelBuilder.Entity("ContactConnection.Domain.Entities.WebhookEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("BodyHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("body_hash");
+
+                    b.Property<string>("ContentType")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("content_type");
+
+                    b.Property<string>("OutcomeKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("outcome_key");
+
+                    b.Property<DateTimeOffset?>("ProcessedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("processed_at");
+
+                    b.Property<string>("ProcessingError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("processing_error");
+
+                    b.Property<string>("ProcessingStatus")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("processing_status");
+
+                    b.Property<string>("RawBody")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("raw_body");
+
+                    b.Property<DateTimeOffset>("ReceivedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("received_at");
+
+                    b.Property<bool>("SignatureValid")
+                        .HasColumnType("boolean")
+                        .HasColumnName("signature_valid");
+
+                    b.Property<Guid>("WebhookEndpointId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("webhook_endpoint_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WebhookEndpointId")
+                        .HasDatabaseName("ix_webhook_events_webhook_endpoint_id");
+
+                    b.HasIndex("WebhookEndpointId", "BodyHash")
+                        .IsUnique()
+                        .HasDatabaseName("ix_webhook_events_endpoint_body_hash");
+
+                    b.ToTable("webhook_events", (string)null);
                 });
 
             modelBuilder.Entity("product_attribute_assignments", b =>
@@ -2975,6 +3175,15 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                     b.Navigation("Child");
 
                     b.Navigation("Parent");
+                });
+
+            modelBuilder.Entity("ContactConnection.Domain.Entities.WebhookEvent", b =>
+                {
+                    b.HasOne("ContactConnection.Domain.Entities.WebhookEndpoint", null)
+                        .WithMany()
+                        .HasForeignKey("WebhookEndpointId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("product_attribute_assignments", b =>

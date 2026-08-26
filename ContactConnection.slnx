@@ -6,4 +6,6 @@
   <Project Path="ContactConnection.Worker/ContactConnection.Worker.csproj" />
   <Project Path="tests/ContactConnection.Domain.Tests/ContactConnection.Domain.Tests.csproj" />
   <Project Path="tests/ContactConnection.Application.Tests/ContactConnection.Application.Tests.csproj" />
+  <Project Path="tests/ContactConnection.Infrastructure.Tests/ContactConnection.Infrastructure.Tests.csproj" />
+  <Project Path="tests/ContactConnection.Api.Tests/ContactConnection.Api.Tests.csproj" />
 </Solution>

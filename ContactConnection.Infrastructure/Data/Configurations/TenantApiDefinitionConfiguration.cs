@@ -25,6 +25,7 @@ public class TenantApiDefinitionConfiguration : IEntityTypeConfiguration<TenantA
         builder.Property(d => d.ResponseMapping).HasColumnName("response_mapping").HasColumnType("jsonb").IsRequired();
         builder.Property(d => d.AuthConfig).HasColumnName("auth_config").HasColumnType("jsonb").IsRequired();
         builder.Property(d => d.IsActive).HasColumnName("is_active").IsRequired();
+        builder.Property(d => d.RateLimitPerMinute).HasColumnName("rate_limit_per_minute");
         builder.Property(d => d.CreatedAt).HasColumnName("created_at").IsRequired();
         builder.Property(d => d.UpdatedAt).HasColumnName("updated_at");
 

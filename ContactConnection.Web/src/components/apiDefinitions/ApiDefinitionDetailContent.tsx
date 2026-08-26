@@ -6,6 +6,9 @@ import AuthConfigForm, {
   serializeAuthConfig,
 } from './AuthConfigForm'
 import type { AuthTestResult } from '../../api/adminApiDefinitions'
+import type { EntityVersionSummary } from '../../api/versioning'
+import VersionHistoryPanel from '../versioning/VersionHistoryPanel'
+import JsonTree from '../shared/JsonTree'
 import {
   API_CATEGORIES,
   API_CATEGORY_LABELS,
@@ -34,6 +37,10 @@ export interface ApiDefinitionRecord {
   responseMapping: string
   authConfig: string
   isActive: boolean
+  /** Outbound requests/minute allowed against this definition, or null for unlimited. A Portal
+   *  definition's limit is shared across every tenant using it — see
+   *  API_HARDENING_CHECKLIST.md Tier 2. */
+  rateLimitPerMinute: number | null
   createdAt: string
   updatedAt: string | null
 }
@@ -54,6 +61,10 @@ export interface ApiEndpointRecord {
   isPreferred: boolean
   isActive: boolean
   isRetrySafe: boolean
+  /** JSON array of dot-separated response field paths (e.g. ["ssn","customer.dob"]) redacted
+   *  before the response is shown in the Test panel or persisted by a live api_call node. See
+   *  API_HARDENING_CHECKLIST.md Tier 3. */
+  sensitiveResponseFields: string
   createdAt: string
   updatedAt: string | null
 }
@@ -66,6 +77,7 @@ export interface EndpointTestPayload {
   requestBodyTemplate?: string
   namespace: string
   testData: Record<string, string>
+  sensitiveResponseFields?: string[]
 }
 
 export interface EndpointTestResult {
@@ -88,6 +100,9 @@ export interface DetailApi {
     provider?: string
     timeoutSeconds?: number
     authConfig?: string
+    /** Omit to leave unchanged, 0 to clear back to unlimited, or a positive number to set a new
+     *  limit. */
+    rateLimitPerMinute?: number
   }): Promise<ApiDefinitionRecord>
   activateDefinition(id: string): Promise<ApiDefinitionRecord>
   deactivateDefinition(id: string): Promise<ApiDefinitionRecord>
@@ -100,10 +115,18 @@ export interface DetailApi {
   setCredential(keyName: string, value: string): Promise<void>
   testAuth(authConfig: string): Promise<AuthTestResult>
   testEndpoint(definitionId: string, payload: EndpointTestPayload): Promise<EndpointTestResult>
-  /** Live-registered TTS streaming provider keys — Portal only (see TtsProviderValidation).
-   *  Omitted on the tenant Admin side, where this picker doesn't apply. */
+  /** Live-registered TTS streaming provider keys (see TtsProviderValidation) — wired on both
+   *  Admin and Portal, since a tenant registering their own TTS vendor account is subject to the
+   *  same constraint as the platform catalog. Optional only because it's resolved via a
+   *  useEffect that tolerates a missing implementation, not because either side omits it. */
   listTtsProviders?(): Promise<string[]>
   listPagePath: string
+  // Version history — every write is retained forever; revert applies a past snapshot and
+  // records it as a brand-new version (see API_HARDENING_CHECKLIST.md Tier 1).
+  listDefinitionVersions(id: string): Promise<EntityVersionSummary[]>
+  revertDefinition(id: string, versionNumber: number): Promise<ApiDefinitionRecord>
+  listEndpointVersions(definitionId: string, endpointId: string): Promise<EntityVersionSummary[]>
+  revertEndpoint(definitionId: string, endpointId: string, versionNumber: number): Promise<ApiEndpointRecord>
 }
 
 interface EndpointFormData {
@@ -118,6 +141,7 @@ interface EndpointFormData {
   headers?: string
   responseMapping?: string
   isRetrySafe?: boolean
+  sensitiveResponseFields?: string
 }
 
 interface DefFormState {
@@ -128,6 +152,7 @@ interface DefFormState {
   description: string
   provider: string
   timeoutSeconds: string
+  rateLimitPerMinute: string
   auth: AuthFormState
 }
 
@@ -293,6 +318,9 @@ interface EndpointForm {
   payloadBody: string
   responseMapping: ResponseMappingConfig
   isRetrySafe: boolean
+  /** One dot-separated field path per line (e.g. "ssn", "customer.dob") — see
+   *  pathsToJson/jsonToPaths for the JSON array round-trip. */
+  sensitiveResponseFields: string
 }
 
 const BLANK_KV: KVRow[] = [{ key: '', value: '' }]
@@ -310,6 +338,23 @@ const BLANK_ENDPOINT_FORM: EndpointForm = {
   payloadBody: '',
   responseMapping: { outcomes: [] },
   isRetrySafe: false,
+  sensitiveResponseFields: '',
+}
+
+/** One path per line (blank lines ignored) <-> JSON array of dot-separated paths. */
+function pathsToArray(text: string): string[] {
+  return text.split('\n').map((l) => l.trim()).filter(Boolean)
+}
+function pathsToJson(text: string): string {
+  return JSON.stringify(pathsToArray(text))
+}
+function jsonToPaths(json: string): string {
+  try {
+    const arr = JSON.parse(json)
+    return Array.isArray(arr) ? arr.join('\n') : ''
+  } catch {
+    return ''
+  }
 }
 
 function kvToJson(rows: KVRow[]): string {
@@ -512,91 +557,6 @@ function VarChip({ tag, label, example, copied, onCopy }: VarChipProps) {
         : <span className="text-gray-600 group-hover:text-gray-400 text-xs shrink-0 mt-0.5">⎘</span>
       }
     </button>
-  )
-}
-
-// ── JsonNode (recursive response tree) ────────────────────────────────────
-
-interface JsonNodeProps {
-  name: string
-  value: unknown
-  path: string
-  depth: number
-  copiedPath: string | null
-  onCopy: (path: string) => void
-}
-
-function JsonNode({ name, value, path, depth, copiedPath, onCopy }: JsonNodeProps) {
-  const [expanded, setExpanded] = useState(true)
-  const isObj = value !== null && typeof value === 'object'
-
-  if (isObj) {
-    const isArr = Array.isArray(value)
-    const entries: [string, unknown, string][] = isArr
-      ? (value as unknown[]).map((v, i) => [`[${i}]`, v, `${path}[${i}]`])
-      : Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, v, path ? `${path}.${k}` : k])
-
-    if (depth === 0) {
-      return (
-        <div className="w-full overflow-hidden">
-          {entries.map(([k, v, childPath]) => (
-            <JsonNode key={k} name={k} value={v} path={childPath} depth={1} copiedPath={copiedPath} onCopy={onCopy} />
-          ))}
-        </div>
-      )
-    }
-
-    return (
-      <div className="pl-3 border-l border-gray-800/50 overflow-hidden">
-        <div className="flex items-center overflow-hidden group/arr">
-          <button
-            onClick={() => setExpanded(e => !e)}
-            className="flex items-center gap-1 py-0.5 flex-1 min-w-0 text-left hover:bg-gray-800/30 rounded-l px-0.5 overflow-hidden"
-          >
-            <span className="text-gray-600 text-[10px] w-3 shrink-0">{expanded ? '▾' : '▸'}</span>
-            <span className="font-mono text-gray-300 text-xs truncate">{name}</span>
-            <span className="text-gray-600 text-[10px] ml-0.5 shrink-0">{isArr ? `[${(value as unknown[]).length}]` : `{}`}</span>
-          </button>
-          {isArr && path && (
-            <button
-              onClick={() => onCopy(path)}
-              title={`Copy array path: ${path}`}
-              className={`shrink-0 px-1 py-0.5 text-[10px] transition-colors ${copiedPath === path ? 'text-emerald-400' : 'text-gray-700 group-hover/arr:text-gray-500 hover:text-gray-300'}`}
-            >
-              {copiedPath === path ? '✓' : '⎘'}
-            </button>
-          )}
-        </div>
-        {expanded && entries.map(([k, v, childPath]) => (
-          <JsonNode key={k} name={k} value={v} path={childPath} depth={depth + 1} copiedPath={copiedPath} onCopy={onCopy} />
-        ))}
-      </div>
-    )
-  }
-
-  const displayVal = value === null ? 'null' : String(value)
-  const valColor = value === null ? 'text-gray-600'
-    : typeof value === 'number' ? 'text-sky-400'
-    : typeof value === 'boolean' ? 'text-emerald-400'
-    : 'text-amber-300'
-
-  return (
-    <div className="pl-3 border-l border-gray-800/50 overflow-hidden">
-      <button
-        onClick={() => onCopy(path)}
-        title={`Copy path: ${path}`}
-        className="flex items-center gap-1 py-0.5 w-full text-left hover:bg-indigo-900/20 rounded px-0.5 group overflow-hidden"
-      >
-        <span className="text-gray-600 text-[10px] w-3 shrink-0" />
-        <span className="font-mono text-gray-400 text-xs shrink-0 max-w-[45%] truncate">{name}:</span>
-        <span className={`font-mono text-xs ml-1 flex-1 min-w-0 truncate ${valColor}`} title={displayVal}>
-          {displayVal.length > 22 ? displayVal.slice(0, 22) + '…' : displayVal}
-        </span>
-        <span className={`text-[10px] shrink-0 ${copiedPath === path ? 'text-emerald-400' : 'text-gray-700 group-hover:text-gray-500'}`}>
-          {copiedPath === path ? '✓' : '⎘'}
-        </span>
-      </button>
-    </div>
   )
 }
 
@@ -1069,7 +1029,7 @@ function ResponseMappingPanel({ config, onChange, sourceContext, subType, testRu
               </div>
             </div>
             <div className="flex-1 overflow-y-auto px-2 py-2">
-              <JsonNode name="" value={capturedBody} path="" depth={0} copiedPath={copiedPath} onCopy={handleCopyPath} />
+              <JsonTree name="" value={capturedBody} path="" depth={0} copiedPath={copiedPath} onCopy={handleCopyPath} />
             </div>
           </div>
         )}
@@ -1409,7 +1369,7 @@ function ResponseMappingPanel({ config, onChange, sourceContext, subType, testRu
         </div>
         <div className="flex-1 overflow-y-auto overflow-x-hidden px-2 py-2">
           {activeOutcome?.capturedResponse?.body != null ? (
-            <JsonNode
+            <JsonTree
               name="response"
               value={activeOutcome.capturedResponse.body}
               path=""
@@ -1457,6 +1417,8 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
   const [defSaving, setDefSaving] = useState(false)
   const [defFormError, setDefFormError] = useState<string | null>(null)
   const [togglingActive, setTogglingActive] = useState(false)
+  const [showDefHistory, setShowDefHistory] = useState(false)
+  const [historyEndpointId, setHistoryEndpointId] = useState<string | null>(null)
 
   // Endpoint modal
   const [endpointModal, setEndpointModal] = useState<'create' | 'edit' | null>(null)
@@ -1493,6 +1455,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
         requestBodyTemplate: endpointForm.requestBodyTemplate || undefined,
         namespace: endpointSourceContext.namespace,
         testData: endpointForm.testData,
+        sensitiveResponseFields: pathsToArray(endpointForm.sensitiveResponseFields),
       })
       setTestResult(result)
     } catch (e: unknown) {
@@ -1514,6 +1477,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
         requestBodyTemplate: endpointForm.requestBodyTemplate || undefined,
         namespace: endpointSourceContext.namespace,
         testData: endpointForm.testData,
+        sensitiveResponseFields: pathsToArray(endpointForm.sensitiveResponseFields),
       })
       let parsedBody: unknown = result.body
       try { if (result.body) parsedBody = JSON.parse(result.body) } catch { /* keep raw */ }
@@ -1550,6 +1514,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
         requestBodyTemplate: endpointForm.payloadBody || undefined,
         namespace: endpointSourceContext.namespace,
         testData: {},
+        sensitiveResponseFields: pathsToArray(endpointForm.sensitiveResponseFields),
       })
       setTestResult(result)
     } catch (e: unknown) {
@@ -1578,6 +1543,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
         requestBodyTemplate: substituteVarTags(endpointForm.requestBodyTemplate, values) || undefined,
         namespace: 'general',
         testData: {},
+        sensitiveResponseFields: pathsToArray(endpointForm.sensitiveResponseFields),
       })
       setTestResult(result)
     } catch (e: unknown) {
@@ -1599,6 +1565,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
         requestBodyTemplate: endpointForm.payloadBody || undefined,
         namespace: endpointSourceContext.namespace,
         testData: {},
+        sensitiveResponseFields: pathsToArray(endpointForm.sensitiveResponseFields),
       })
       let parsedBody: unknown = result.body
       try { if (result.body) parsedBody = JSON.parse(result.body) } catch { /* keep raw */ }
@@ -1667,6 +1634,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
       description: def.description ?? '',
       provider: def.provider ?? '',
       timeoutSeconds: String(def.timeoutSeconds),
+      rateLimitPerMinute: def.rateLimitPerMinute ? String(def.rateLimitPerMinute) : '',
       auth: authStateFromConfig(def.authConfig),
     })
     setDefFormError(null)
@@ -1695,6 +1663,10 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
         provider: defForm.provider.trim() || undefined,
         timeoutSeconds: parseInt(defForm.timeoutSeconds) || 30,
         authConfig: serializeAuthConfig(defForm.auth),
+        // Always sent explicitly (never omitted) since this is a full edit form reflecting the
+        // definition's current state — an empty field means "clear to unlimited" (0), not "leave
+        // whatever's on the server alone".
+        rateLimitPerMinute: defForm.rateLimitPerMinute.trim() ? (parseInt(defForm.rateLimitPerMinute) || 0) : 0,
       })
       setDef(updated)
       setShowDefModal(false)
@@ -1740,6 +1712,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
       payloadBody: '',
       responseMapping: parseResponseMapping(ep.responseMapping),
       isRetrySafe: ep.isRetrySafe,
+      sensitiveResponseFields: jsonToPaths(ep.sensitiveResponseFields),
     })
     setEditingEndpointId(ep.id)
     setEndpointFormError(null)
@@ -1767,6 +1740,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
         headers: kvToJson(endpointForm.headers),
         responseMapping: JSON.stringify(endpointForm.responseMapping),
         isRetrySafe: endpointForm.isRetrySafe,
+        sensitiveResponseFields: pathsToJson(endpointForm.sensitiveResponseFields),
       }
       if (endpointModal === 'edit' && editingEndpointId) {
         const updated = await api.updateEndpoint(definitionId, editingEndpointId, data)
@@ -1860,6 +1834,12 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
               }
               <span className="text-gray-600">·</span>
               <span className="text-gray-500 text-xs">{def.timeoutSeconds}s timeout</span>
+              {def.rateLimitPerMinute && (
+                <>
+                  <span className="text-gray-600">·</span>
+                  <span className="text-gray-500 text-xs">{def.rateLimitPerMinute}/min limit</span>
+                </>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -1873,6 +1853,12 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
               }`}
             >
               {togglingActive ? '…' : def.isActive ? 'Deactivate' : 'Activate'}
+            </button>
+            <button
+              onClick={() => setShowDefHistory(true)}
+              className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-sm font-medium px-3 py-1.5 rounded-lg transition-colors"
+            >
+              History
             </button>
             <button
               onClick={openEditDef}
@@ -1956,6 +1942,12 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                             Set Preferred
                           </button>
                         )}
+                        <button
+                          onClick={() => setHistoryEndpointId(ep.id)}
+                          className="text-gray-400 hover:text-gray-300 text-xs font-medium transition-colors"
+                        >
+                          History
+                        </button>
                         <button
                           onClick={() => openEditEndpoint(ep)}
                           className="text-indigo-400 hover:text-indigo-300 text-xs font-medium transition-colors"
@@ -2085,6 +2077,21 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                     className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
                   />
                 </div>
+              </div>
+              <div>
+                <label className="block text-gray-400 text-xs font-medium mb-1.5">Rate limit (requests/min)</label>
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="Unlimited"
+                  value={defForm.rateLimitPerMinute}
+                  onChange={(e) => setDefForm((f) => f ? { ...f, rateLimitPerMinute: e.target.value } : f)}
+                  className="w-40 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                />
+                <p className="text-gray-500 text-xs mt-1">
+                  Leave blank for unlimited. If this definition is used by more than one tenant (a
+                  Portal default), this budget applies to their combined traffic, not each one separately.
+                </p>
               </div>
               <div>
                 <p className="text-gray-400 text-xs font-medium uppercase tracking-wide mb-2">Authentication</p>
@@ -2289,6 +2296,22 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                         </div>
                       )
                     })()}
+                    <div>
+                      <label className="block text-gray-400 text-xs font-medium mb-1.5">Sensitive Response Fields</label>
+                      <textarea
+                        value={endpointForm.sensitiveResponseFields}
+                        onChange={(e) => setEndpointForm((f) => ({ ...f, sensitiveResponseFields: e.target.value }))}
+                        placeholder={'ssn\ncustomer.dob\npayment.cardNumber'}
+                        rows={3}
+                        spellCheck={false}
+                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 font-mono focus:outline-none focus:border-indigo-500 resize-none"
+                      />
+                      <p className="text-gray-600 text-xs mt-1">
+                        One dot-separated field path per line. Matching values are replaced with{' '}
+                        <span className="text-gray-400 font-mono">[REDACTED]</span> before the response is shown in
+                        the Test panel below and before a live flow ever stores it. Optional — blank means no masking.
+                      </p>
+                    </div>
                   </div>
                 )}
 
@@ -2691,6 +2714,32 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
             </div>
           </div>
         </>
+      )}
+
+      {showDefHistory && (
+        <VersionHistoryPanel
+          title="Definition Version History"
+          subtitle={def.name}
+          listVersions={() => api.listDefinitionVersions(definitionId)}
+          onRevert={async (versionNumber) => {
+            const updated = await api.revertDefinition(definitionId, versionNumber)
+            setDef(updated)
+          }}
+          onClose={() => setShowDefHistory(false)}
+        />
+      )}
+
+      {historyEndpointId && (
+        <VersionHistoryPanel
+          title="Endpoint Version History"
+          subtitle={endpoints.find((ep) => ep.id === historyEndpointId)?.name}
+          listVersions={() => api.listEndpointVersions(definitionId, historyEndpointId)}
+          onRevert={async (versionNumber) => {
+            const updated = await api.revertEndpoint(definitionId, historyEndpointId, versionNumber)
+            setEndpoints((prev) => prev.map((ep) => (ep.id === historyEndpointId ? updated : ep)))
+          }}
+          onClose={() => setHistoryEndpointId(null)}
+        />
       )}
     </div>
   )

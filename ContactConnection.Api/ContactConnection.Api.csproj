@@ -24,4 +24,11 @@
     <ProjectReference Include="..\ContactConnection.Infrastructure\ContactConnection.Infrastructure.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Lets ContactConnection.Api.Tests construct/call the internal helper classes
+         (ApiEndpointTestHelper, ActorResolver, etc.) directly — see
+         API_HARDENING_CHECKLIST.md Tier 2. -->
+    <InternalsVisibleTo Include="ContactConnection.Api.Tests" />
+  </ItemGroup>
+
 </Project>

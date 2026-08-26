@@ -10,7 +10,7 @@ internal class KeyVaultPortalCredentialStore : KeyVaultCredentialStoreBase, IPor
     public KeyVaultPortalCredentialStore(SecretClient client) : base(client) { }
 
     Task<string?> IPortalCredentialStore.GetAsync(string keyName, CancellationToken ct) => GetAsync(keyName, ct);
-    Task IPortalCredentialStore.SetAsync(string keyName, string value, CancellationToken ct) => SetAsync(keyName, value, ct);
+    Task IPortalCredentialStore.SetAsync(string keyName, string value, DateTimeOffset? expiresOn, CancellationToken ct) => SetAsync(keyName, value, expiresOn, ct);
     Task IPortalCredentialStore.DeleteAsync(string keyName, CancellationToken ct) => DeleteAsync(keyName, ct);
     Task<IReadOnlyList<CredentialSummary>> IPortalCredentialStore.ListAsync(CancellationToken ct) => ListAsync(ct);
 }

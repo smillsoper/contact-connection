@@ -48,9 +48,9 @@ internal class CachedTenantCredentialStore(
         return value;
     }
 
-    public async Task SetAsync(string keyName, string value, CancellationToken ct = default)
+    public async Task SetAsync(string keyName, string value, DateTimeOffset? expiresOn = null, CancellationToken ct = default)
     {
-        await inner.SetAsync(keyName, value, ct);
+        await inner.SetAsync(keyName, value, expiresOn, ct);
         await CredentialCacheSupport.EvictAsync(
             redis.GetDatabase(), Key(tenantContext.Current?.Subdomain ?? "unknown", keyName));
     }
