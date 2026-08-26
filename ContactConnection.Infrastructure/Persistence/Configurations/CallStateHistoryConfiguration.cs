@@ -21,6 +21,7 @@ public class CallStateHistoryConfiguration : IEntityTypeConfiguration<CallStateH
         b.Property(x => x.Detail).HasColumnName("detail").HasMaxLength(500);
         b.Property(x => x.AbandonType).HasColumnName("abandon_type").HasMaxLength(30);
         b.Property(x => x.AbandonLength).HasColumnName("abandon_length").HasMaxLength(10);
+        b.Property(x => x.MetServiceLevel).HasColumnName("met_service_level");
         b.Property(x => x.EnteredAt).HasColumnName("entered_at").IsRequired();
         b.Property(x => x.CreatedAt).HasColumnName("created_at").IsRequired();
 

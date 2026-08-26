@@ -25,6 +25,8 @@ public class CampaignConfiguration : IEntityTypeConfiguration<Campaign>
         builder.Property(c => c.DialMode).HasColumnName("dial_mode").HasMaxLength(20).IsRequired();
         builder.Property(c => c.CallerIdNumber).HasColumnName("caller_id_number").HasMaxLength(30);
         builder.Property(c => c.Priority).HasColumnName("priority");
+        builder.Property(c => c.RingStrategy).HasColumnName("ring_strategy").HasMaxLength(30).IsRequired();
+        builder.Property(c => c.RingTopN).HasColumnName("ring_top_n");
         builder.Property(c => c.AfterCallWorkSeconds).HasColumnName("after_call_work_seconds");
         builder.Property(c => c.MaxQueueSize).HasColumnName("max_queue_size");
         builder.Property(c => c.QueueTimeoutSeconds).HasColumnName("queue_timeout_seconds");

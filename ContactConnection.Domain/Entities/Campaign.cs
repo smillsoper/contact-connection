@@ -28,6 +28,12 @@ public class Campaign
     // Campaign-level routing priority (1–10; higher = preferred when agent eligible for multiple)
     public int Priority { get; private set; } = 5;
 
+    // How a queued call is delivered to agents — see CampaignRingStrategy.
+    public string RingStrategy { get; private set; } = CampaignRingStrategy.RingAll;
+
+    // Only meaningful when RingStrategy == RingTopNByProficiency — how many top-ranked agents to ring.
+    public int RingTopN { get; private set; } = 3;
+
     // After-call work time agents must complete before going ready again
     public int AfterCallWorkSeconds { get; private set; } = 30;
 
@@ -101,7 +107,9 @@ public class Campaign
         int shortAbandonThresholdSeconds,
         bool queueAccelerationEnabled,
         int queueAccelerationIntervalSeconds,
-        int queueAccelerationPriorityBoost)
+        int queueAccelerationPriorityBoost,
+        string ringStrategy,
+        int ringTopN)
     {
         Name                                 = name.Trim();
         Description                          = description?.Trim();
@@ -117,6 +125,8 @@ public class Campaign
         QueueAccelerationEnabled             = queueAccelerationEnabled;
         QueueAccelerationIntervalSeconds     = Math.Max(1, queueAccelerationIntervalSeconds);
         QueueAccelerationPriorityBoost       = Math.Max(1, queueAccelerationPriorityBoost);
+        RingStrategy                         = CampaignRingStrategy.IsValid(ringStrategy) ? ringStrategy : CampaignRingStrategy.RingAll;
+        RingTopN                             = Math.Max(1, ringTopN);
         UpdatedAt                            = DateTimeOffset.UtcNow;
     }
 
@@ -153,4 +163,25 @@ public static class CampaignDialMode
 
     public static bool IsValid(string value) =>
         value is Manual or Progressive or Predictive;
+}
+
+/// <summary>
+/// How a queued call is delivered to agents on this campaign.
+/// RingAll — broadcast to every eligible available agent simultaneously, first click wins.
+///   The original/default behavior — good fit for a shared main tenant line.
+/// AutoAnswerBestAgent — the system selects the single best eligible available agent (by
+///   effective proficiency, tie-broken by longest idle) and force-delivers the call: the
+///   agent's softphone auto-answers with no manual click. Best fit for most tenant-client
+///   campaigns where a specific best-qualified agent should get the call, not a click-race.
+/// RingTopNByProficiency — rings only the top RingTopN ranked eligible agents simultaneously,
+///   first click wins among that subset. A middle ground between the two.
+/// </summary>
+public static class CampaignRingStrategy
+{
+    public const string RingAll = "ring_all";
+    public const string AutoAnswerBestAgent = "auto_answer_best_agent";
+    public const string RingTopNByProficiency = "ring_top_n_by_proficiency";
+
+    public static bool IsValid(string value) =>
+        value is RingAll or AutoAnswerBestAgent or RingTopNByProficiency;
 }

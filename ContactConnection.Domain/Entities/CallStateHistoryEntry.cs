@@ -24,6 +24,11 @@ public class CallStateHistoryEntry
     /// <summary>Only set when AbandonType == AbandonType.InQueue.</summary>
     public string? AbandonLength { get; private set; }
 
+    /// <summary>Whether this call was answered within Campaign.ServiceLevelThresholdSeconds of
+    /// entering the queue. Null when not applicable (e.g. the call never queued — a direct-
+    /// extension bridge — or this row isn't the Active/answered transition).</summary>
+    public bool? MetServiceLevel { get; private set; }
+
     public DateTimeOffset EnteredAt { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
 
@@ -38,22 +43,24 @@ public class CallStateHistoryEntry
         Guid? agentId,
         string? detail,
         string? abandonType,
-        string? abandonLength)
+        string? abandonLength,
+        bool? metServiceLevel = null)
     {
         return new CallStateHistoryEntry
         {
-            Id            = Guid.NewGuid(),
-            TenantId      = tenantId,
-            CallRecordId  = callRecordId,
-            Sequence      = sequence,
-            State         = state,
-            CampaignId    = campaignId,
-            AgentId       = agentId,
-            Detail        = detail,
-            AbandonType   = abandonType,
-            AbandonLength = abandonLength,
-            EnteredAt     = DateTimeOffset.UtcNow,
-            CreatedAt     = DateTimeOffset.UtcNow,
+            Id              = Guid.NewGuid(),
+            TenantId        = tenantId,
+            CallRecordId    = callRecordId,
+            Sequence        = sequence,
+            State           = state,
+            CampaignId      = campaignId,
+            AgentId         = agentId,
+            Detail          = detail,
+            AbandonType     = abandonType,
+            AbandonLength   = abandonLength,
+            MetServiceLevel = metServiceLevel,
+            EnteredAt       = DateTimeOffset.UtcNow,
+            CreatedAt       = DateTimeOffset.UtcNow,
         };
     }
 }
@@ -74,6 +81,12 @@ public static class CallAbandonType
     public const string PreQueue        = "pre_queue";
     public const string InQueue         = "in_queue";
     public const string CallbackAbandon = "callback_abandon";
+
+    /// <summary>Evicted from queue after waiting past Campaign.QueueTimeoutSeconds.</summary>
+    public const string QueueTimeout = "queue_timeout";
+
+    /// <summary>Rejected from entering the queue — Campaign.MaxQueueSize already reached.</summary>
+    public const string QueueFull = "queue_full";
 }
 
 public static class CallAbandonLength

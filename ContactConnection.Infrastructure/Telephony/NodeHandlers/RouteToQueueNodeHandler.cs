@@ -11,15 +11,15 @@ public class RouteToQueueNodeHandler : ITelephonyNodeHandler
     public string NodeType => "tf_route_to_queue";
 
     private readonly ITenantDbContextFactory _factory;
-    private readonly IAgentStateStore _stateStore;
     private readonly ICallStateHistoryRecorder _callStateRecorder;
+    private readonly EligibleAgentRanker _ranker;
 
     public RouteToQueueNodeHandler(
-        ITenantDbContextFactory factory, IAgentStateStore stateStore, ICallStateHistoryRecorder callStateRecorder)
+        ITenantDbContextFactory factory, ICallStateHistoryRecorder callStateRecorder, EligibleAgentRanker ranker)
     {
         _factory           = factory;
-        _stateStore        = stateStore;
         _callStateRecorder = callStateRecorder;
+        _ranker            = ranker;
     }
 
     public async Task<TelephonyNodeResult> ExecuteAsync(
@@ -39,37 +39,13 @@ public class RouteToQueueNodeHandler : ITelephonyNodeHandler
         // and can answer via the existing screen-pop flow.
         await using var db = _factory.Create(ctx.TenantSchemaName);
 
-        // Collect all directly assigned active agents
-        var agentIds = await db.AgentCampaignAssignments
-            .Where(a => a.CampaignId == ctx.CampaignId && a.IsActive)
-            .Select(a => a.AgentId)
-            .ToListAsync(ct);
-
-        // Add agents from active group assignments
-        var groupIds = await db.GroupCampaignAssignments
-            .Where(g => g.CampaignId == ctx.CampaignId)
-            .Select(g => g.GroupId)
-            .ToListAsync(ct);
-
-        if (groupIds.Count > 0)
-        {
-            var groupAgentIds = await db.AgentGroupMembers
-                .Where(m => groupIds.Contains(m.GroupId))
-                .Select(m => m.AgentId)
-                .ToListAsync(ct);
-            agentIds.AddRange(groupAgentIds);
-        }
-
-        // Filter to agents who are currently in Available state.
-        // Agents who have never set a state (null) default to Unavailable at login,
-        // so they are excluded until they explicitly go Available.
-        var availableAgentIds = new List<Guid>();
-        foreach (var agentId in agentIds.Distinct())
-        {
-            var state = await _stateStore.GetAsync(ctx.TenantId, agentId, ct);
-            if (state?.Code == AgentStateCodes.Available)
-                availableAgentIds.Add(agentId);
-        }
+        // Ranked (proficiency DESC, longest-idle tie-break), currently-Available eligible agents.
+        // Step 4 of the ring-strategy work will truncate this per campaign.RingStrategy; for now
+        // (Step 2) every agent still gets stored, preserving today's ring-all behavior exactly —
+        // this step only replaces the eligible-agent-building logic itself with the shared,
+        // bug-fixed helper.
+        var ranked = await _ranker.GetRankedEligibleAgentsAsync(db, ctx.TenantId, ctx.CampaignId, ct: ct);
+        var availableAgentIds = ranked.Select(r => r.AgentId).ToList();
 
         // Store the eligible agent IDs so the caller's CHANNEL_HANGUP can clean up,
         // and so the screen pop is targeted.

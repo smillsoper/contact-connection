@@ -221,6 +221,12 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICallStateHistoryRepository, CallStateHistoryRepository>();
         services.AddScoped<ICallStateHistoryRecorder, CallStateHistoryRecorder>();
 
+        // Ranks a campaign's eligible agents (proficiency DESC, longest-idle tie-break) — shared
+        // by RouteToQueueNodeHandler and QueuePollingService. Scoped for consistency with the
+        // other per-request telephony services above, even though its only dependency
+        // (IAgentStateStore) is itself a singleton.
+        services.AddScoped<EligibleAgentRanker>();
+
         // Email
         services.AddSingleton<IEmailService, ResendEmailService>();
         services.AddHttpClient("Resend");

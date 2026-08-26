@@ -17,5 +17,6 @@ public interface ICallStateHistoryRecorder
         string? detail,
         string? abandonType = null,
         string? abandonLength = null,
+        bool? metServiceLevel = null,
         CancellationToken ct = default);
 }

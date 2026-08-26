@@ -102,7 +102,8 @@ public static class CampaignsEndpoints
             req.Name, req.Description,
             req.Direction, req.DialMode, req.Priority, req.AfterCallWorkSeconds, req.CallerIdNumber,
             req.MaxQueueSize, req.QueueTimeoutSeconds, req.ServiceLevelThresholdSeconds, req.ShortAbandonThresholdSeconds,
-            req.QueueAccelerationEnabled, req.QueueAccelerationIntervalSeconds, req.QueueAccelerationPriorityBoost);
+            req.QueueAccelerationEnabled, req.QueueAccelerationIntervalSeconds, req.QueueAccelerationPriorityBoost,
+            req.RingStrategy, req.RingTopN);
         await repo.SaveChangesAsync(ct);
         return Results.Ok(ToSummaryResponse(campaign));
     }
@@ -353,6 +354,7 @@ public static class CampaignsEndpoints
         c.Direction, c.DialMode, c.CallerIdNumber, c.Priority, c.AfterCallWorkSeconds,
         c.MaxQueueSize, c.QueueTimeoutSeconds, c.ServiceLevelThresholdSeconds, c.ShortAbandonThresholdSeconds,
         c.QueueAccelerationEnabled, c.QueueAccelerationIntervalSeconds, c.QueueAccelerationPriorityBoost,
+        c.RingStrategy, c.RingTopN,
         Client = c.Client is null ? null : new { c.Client.Id, c.Client.Name },
         c.CreatedAt, c.UpdatedAt
     };
@@ -363,6 +365,7 @@ public static class CampaignsEndpoints
         c.Direction, c.DialMode, c.CallerIdNumber, c.Priority, c.AfterCallWorkSeconds,
         c.MaxQueueSize, c.QueueTimeoutSeconds, c.ServiceLevelThresholdSeconds, c.ShortAbandonThresholdSeconds,
         c.QueueAccelerationEnabled, c.QueueAccelerationIntervalSeconds, c.QueueAccelerationPriorityBoost,
+        c.RingStrategy, c.RingTopN,
         Client = c.Client is null ? null : new { c.Client.Id, c.Client.Name },
         PhoneNumbers     = c.PhoneNumbers.Select(p => new { p.Id, p.Number, p.Label, p.IsActive, p.FlowId, p.TelephonyFlowId }),
         AgentAssignments = c.AgentAssignments.Where(a => a.IsActive).Select(ToAssignmentResponse),
@@ -393,7 +396,9 @@ public record UpdateCampaignRequest(
     int ShortAbandonThresholdSeconds = 10,
     bool QueueAccelerationEnabled = false,
     int QueueAccelerationIntervalSeconds = 60,
-    int QueueAccelerationPriorityBoost = 1);
+    int QueueAccelerationPriorityBoost = 1,
+    string RingStrategy = "ring_all",
+    int RingTopN = 3);
 public record SetCampaignFlowRequest(Guid FlowId);
 public record AssignAgentRequest(Guid AgentId, int Proficiency = 50);
 public record BulkAssignAgentsRequest(List<BulkAgentEntry> Agents);

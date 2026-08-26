@@ -22,6 +22,7 @@ public class CallStateHistoryRecorder(
         string? detail,
         string? abandonType = null,
         string? abandonLength = null,
+        bool? metServiceLevel = null,
         CancellationToken ct = default)
     {
         var sequence = (int)await _redis.StringIncrementAsync($"callstate:seq:{callRecordId}");
@@ -29,7 +30,7 @@ public class CallStateHistoryRecorder(
             await _redis.KeyExpireAsync($"callstate:seq:{callRecordId}", TimeSpan.FromHours(24));
 
         var entry = CallStateHistoryEntry.Create(
-            tenantId, callRecordId, sequence, state, campaignId, agentId, detail, abandonType, abandonLength);
+            tenantId, callRecordId, sequence, state, campaignId, agentId, detail, abandonType, abandonLength, metServiceLevel);
 
         await repository.AddAsync(entry, tenantSchemaName, ct);
 

@@ -1,6 +1,7 @@
 using ContactConnection.Api.Hubs;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Infrastructure.Data;
+using ContactConnection.Infrastructure.Telephony;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
@@ -23,20 +24,17 @@ public sealed class QueuePollingService : BackgroundService
     private static readonly TimeSpan RingKeyTtl    = TimeSpan.FromSeconds(30);
 
     private readonly ITelephonyCallSessionStore _sessionStore;
-    private readonly IAgentStateStore _stateStore;
     private readonly IHubContext<FlowHub, IFlowHubClient> _hub;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<QueuePollingService> _logger;
 
     public QueuePollingService(
         ITelephonyCallSessionStore sessionStore,
-        IAgentStateStore stateStore,
         IHubContext<FlowHub, IFlowHubClient> hub,
         IServiceScopeFactory scopeFactory,
         ILogger<QueuePollingService> logger)
     {
         _sessionStore = sessionStore;
-        _stateStore   = stateStore;
         _hub          = hub;
         _scopeFactory = scopeFactory;
         _logger       = logger;
@@ -78,48 +76,25 @@ public sealed class QueuePollingService : BackgroundService
             "QueuePoller: processing queued session {Uuid} — campaign={CampaignId} tenant={TenantId} schema={Schema}",
             session.ChannelUuid, session.CampaignId, session.TenantId, session.TenantSchemaName);
 
-        // Load all agents assigned to this campaign (direct + group)
+        // Ranked (proficiency DESC, longest-idle tie-break), currently-Available eligible agents
+        // for this campaign (direct + active group assignments) — shared with
+        // RouteToQueueNodeHandler via EligibleAgentRanker. Step 4 of the ring-strategy work will
+        // apply strategy-aware truncation/exclusion here; for now this only replaces the inline
+        // eligible-agent-building logic with the shared, bug-fixed helper (preserves today's
+        // ring-all-in-arbitrary-order behavior exactly).
         using var scope = _scopeFactory.CreateScope();
         var dbFactory   = scope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
+        var ranker      = scope.ServiceProvider.GetRequiredService<EligibleAgentRanker>();
         await using var db = dbFactory.Create(session.TenantSchemaName);
 
-        var agentIds = await db.AgentCampaignAssignments
-            .Where(a => a.CampaignId == session.CampaignId && a.IsActive)
-            .Select(a => a.AgentId)
-            .ToListAsync(ct);
+        var ranked = await ranker.GetRankedEligibleAgentsAsync(db, session.TenantId, session.CampaignId, ct: ct);
 
         _logger.LogInformation(
-            "QueuePoller: {Uuid} — {Count} directly assigned agent(s): [{Agents}]",
-            session.ChannelUuid, agentIds.Count, string.Join(", ", agentIds));
+            "QueuePoller: {Uuid} — {Count} ranked eligible agent(s): [{Agents}]",
+            session.ChannelUuid, ranked.Count, string.Join(", ", ranked.Select(r => r.AgentId)));
 
-        var groupIds = await db.GroupCampaignAssignments
-            .Where(g => g.CampaignId == session.CampaignId)
-            .Select(g => g.GroupId)
-            .ToListAsync(ct);
-
-        if (groupIds.Count > 0)
+        foreach (var agentId in ranked.Select(r => r.AgentId))
         {
-            var groupAgentIds = await db.AgentGroupMembers
-                .Where(m => groupIds.Contains(m.GroupId))
-                .Select(m => m.AgentId)
-                .ToListAsync(ct);
-            agentIds.AddRange(groupAgentIds);
-
-            _logger.LogInformation(
-                "QueuePoller: {Uuid} — {Count} group agent(s) added, total={Total}",
-                session.ChannelUuid, groupAgentIds.Count, agentIds.Count);
-        }
-
-        foreach (var agentId in agentIds.Distinct())
-        {
-            var state = await _stateStore.GetAsync(session.TenantId, agentId, ct);
-
-            _logger.LogInformation(
-                "QueuePoller: {Uuid} — agent {AgentId} state={State}",
-                session.ChannelUuid, agentId, state?.Code ?? "(null)");
-
-            if (state?.Code != AgentStateCodes.Available) continue;
-
             // Per-agent ring key — prevents duplicate pops within the TTL window.
             // After 30 seconds the key expires and the call is re-offered automatically.
             var ringKey = RingKey(session.ChannelUuid, agentId);
