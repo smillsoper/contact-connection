@@ -102,6 +102,7 @@
 | 90 | 2026-08-25 | 9:19 AM PDT | 9:59 AM PDT | 40 min | ~9836 min |
 | 91 | 2026-08-25 | 9:59 AM PDT | 11:30 AM PDT | 91 min | ~9927 min |
 | 92 | 2026-08-25 – 2026-08-26 | 11:30 AM PDT | 12:17 PM PDT | 1487 min (~24h47m, incl. overnight gap) | ~11414 min |
+| 93 | 2026-08-27 | 7:30 AM PDT | 10:29 AM PDT | 179 min | ~11593 min |
 
 ---
 
@@ -4003,3 +4004,36 @@ Incidental fix, unrelated to this feature: `shortAbandonThresholdSeconds` was co
 2. `ServiceLevelThresholdSeconds` data is now captured (`MetServiceLevel` on `call_state_history`) but has no dashboard widget yet — a natural fit for the Supervisor Dashboards system from Part 1 of this session.
 3. Backend API authorization for `DashboardsEndpoints`/`DashboardWidgetsEndpoints` is still plain `.RequireAuthorization()` with no admin-only policy layered under the new `ReportsView`/`ReportsManage` policies — flagged in Session 92 Part 1 as out of scope for a frontend nav move, worth revisiting if broader access-control hardening continues.
 4. `FlowEngine` still has zero automated test coverage (carried over from Session 90/91).
+
+## Session 93 — Domain Migration (contactconnection.cc → contactconnection.io) + Telnyx Onboarding Unblocked
+
+**Date:** 2026-08-27
+**Start:** 7:30 AM PDT
+**End:** 10:29 AM PDT
+**Duration:** 179 min
+**Cumulative Total:** ~11593 min
+
+### What Was Done
+
+No feature code this session — an infrastructure/domain migration driven by a hard external blocker, plus a live telephony verification of Session 92's work.
+
+**Diagnosed the recurring `ERR_SSL_PROTOCOL_ERROR`.** User had been hitting intermittent `ERR_SSL_PROTOCOL_ERROR` reaching `*.contactconnection.cc` through the Cloudflare tunnel for weeks, had already switched the tunnel to `--protocol http2` (Session 89) and was mid-way through updating `cloudflared`, still failing. Ran it down from the shell: `cloudflared` itself was healthy (4 stable http2 edge connections, 0 restarts). `curl http://admin.contactconnection.cc/` returned a **302 to `https://block.charter-prod.hosted.cujo.io/warn.html`** — Charter/Spectrum's CUJO-based network security filter. Confirmed it's **SNI-based interception on the local connection**: `openssl s_client` to the same Cloudflare edge IP `104.21.14.183:443` returns a valid Cloudflare cert for SNI `example.com` but `ssl3_get_record:wrong version number` (the server-side twin of `ERR_SSL_PROTOCOL_ERROR`) for SNI `admin.contactconnection.cc`. DNS (incl. 1.1.1.1 DoH) resolves fine — the block is purely at the HTTP/TLS-SNI layer on the Spectrum gateway. Root cause: the brand-new `.cc` domain's low reputation trips CUJO's threat-intel — the same reputational class of problem as Telnyx already blacklisting `.cc`. Immediate workaround: **Cloudflare WARP** on the dev machine routes past the ISP filter (verified: `wrong version number` → `HTTP/2 200` once WARP was up). Real fix is domain migration, which became this session's work. Recorded to memory (`project_isp_blocks_domain.md`).
+
+**Executed the `.cc` → `.io` migration — web / portal / email tier.** `.com` was unavailable (GoDaddy squatting it at $1500 — declined); registered **`contactconnection.io`** ($50/yr) as the best fallback.
+
+- **Cloudflare:** added `contactconnection.io` as a zone, delegated NS at the registrar (verified propagation into the `.io` registry via `a0.nic.io` directly — the domain went from NXDOMAIN to delegated mid-session). Added tunnel public-hostname routes on the existing single `cc_cloudflared` instance mirroring the `.cc` pair: `*.contactconnection.io` → `host.docker.internal:5173`, `softphone.contactconnection.io` → `:7080`. Manually added the wildcard `*` CNAME → tunnel (proxied) since the route wizard can't auto-create wildcards (the Error-522 lesson from an earlier session). SSL mode Full (strict). **`.cc` routes kept live in parallel** — nothing removed.
+- **Entra ID:** added and verified `contactconnection.io` as a custom domain (apex TXT `MS=ms41129611`). Added SPA redirect URI `https://admin.contactconnection.io/portal/auth/callback` to app registration `ad33c007-8cf4-4ba5-bcfd-3ccb4907115c`, keeping the `.cc` URI alongside. **No app-registration rebuild** — the app is identified by client/tenant GUIDs, not a domain, and `EntraIdTokenValidator` validates issuer/audience purely by GUID. **Portal + tenant login verified working end-to-end on `.io`.**
+- **M365 mail:** added apex MX (`contactconnection-io.mail.protection.outlook.com`), SPF (`v=spf1 include:spf.protection.outlook.com ~all`), `autodiscover` CNAME, and DKIM `selector1/2._domainkey` CNAMEs in Cloudflare — caught and fixed a copy-paste error where `selector2._domainkey` pointed at the `selector1-` target (verified corrected value at the authoritative Cloudflare NS). Enabled DKIM signing. Switched the user's UPN + primary SMTP to `stephen@contactconnection.io` (kept the `.onmicrosoft.com` address as a fallback alias).
+- **Resend:** added `contactconnection.io`; all records (`resend._domainkey` DKIM, `send` subdomain MX + SPF) verified byte-exact at the authoritative NS well before Resend's own poller flipped it to Verified — the apex SPF was left untouched (Resend authenticates on the `send.` subdomain and aligns to the apex via its own DKIM).
+- **Code (9 files, branch `domain-migration-cc-to-io`, commit `35c86f4`):** `appsettings.json` `App:BaseUrl` + `Resend:FromAddress` → `.io`; `.io` fallback literals in `ResendEmailService.cs`, `AdminAgentsEndpoints.cs` (and its previously-hardcoded tenant login URL now derives from `new Uri(baseUrl).Host`, matching `PortalTenantsEndpoints`), `OnboardingEndpoints.cs`, `PortalTenantsEndpoints.cs` (×3); `vite.config.ts` `allowedHosts` and `subdomain.ts` `PLATFORM_DOMAINS` add `.io` alongside `.cc`; `WebhookMappingEditor.tsx` now derives the platform domain from `window.location` instead of a hardcoded string; `docker-compose.yml` tunnel-route comments updated for both domains. API + Infrastructure builds and web `tsc -b` all clean (0 errors; the one build blip was just the running `dotnet watch` holding the `.pdb` lock). Branch pushed, **fast-forward merged into `session-92-supervisor-dashboard-flow-engine-build`**, and both branches pushed to origin (the session-92 branch had never been pushed — now backed up remotely).
+
+**Telnyx onboarding — DONE.** Registered a Telnyx account successfully using `stephen@contactconnection.io`. This was the entire point of the migration — the `.cc` domain on the business email had been rejected at signup, blocking onboarding entirely. Cleared.
+
+**Live telephony verification of Session 92's ring-strategy work.** User ran a real end-to-end test against actual SIP endpoints: dialed the internal test number from a second agent's softphone via cell phone, with the main test agent left **Unavailable** to confirm the telephony call flow's queue-message loop plays and repeats. On flipping the main agent to **Available**, the call was **auto-answered with zero clicks**, the whisper announcement played, and the script screen-pop appeared. Clean end-to-end — this validates the `AutoAnswerBestAgent` delivery path (Session 92 Part 2, Step 6: server-initiated delivery + `ReceiveAutoConnecting` pre-arm + JsSIP auto-answer reuse) against real carrier → FreeSWITCH → browser softphone, closing the "needs a real browser softphone to observe" carry-over from Session 92's next-session notes for that mode.
+
+### Next Session — pick up here
+1. **Telnyx setup** — user's chosen next focus: get the Telnyx account fully configured/squared away (connection, number, SIP credentials) before any further feature work.
+2. **CRM flow work** — not touched this session; still pending alongside the remaining telephony flow work.
+3. **Telephony SIP config still on `.cc`** — deferred by design: `freeswitch/conf/sip_profiles/external.xml` `ext-sip-ip`/`ext-rtp-ip` = `sip.contactconnection.cc`, and `ContactConnection.Web/.env.local` `VITE_SIP_WS_URL` (gitignored). Move these to `sip.contactconnection.io` / `softphone.contactconnection.io` as part of the telephony session (needs matching Cloudflare DNS + Telnyx config + FreeSWITCH container rebuild). `FreeSwitchEslService.cs:19` `.cc` reference is an illustrative comment only — the parser splits on `.` and is domain-agnostic.
+4. **Retire `.cc`** — after a validation period running clean on `.io`: drop the parallel `.cc` entries in `vite.config.ts` / `subdomain.ts`, delete the `.cc` tunnel routes + DNS + the old Entra redirect URI, and decide whether to let the `.cc` registration lapse.
+5. Carry-overs still open from prior sessions: `QueueTimeoutSeconds`/`MaxQueueSize` genuine live proof (held-open real SIP call); `ServiceLevelThresholdSeconds` dashboard widget; `DashboardsEndpoints`/`DashboardWidgetsEndpoints` backend authz hardening; `FlowEngine` zero test coverage.
