@@ -70,7 +70,7 @@ public static class PortalTenantsEndpoints
             {
                 try
                 {
-                    var baseUrl = configuration["App:BaseUrl"] ?? "https://contactconnection.cc";
+                    var baseUrl = configuration["App:BaseUrl"] ?? "https://contactconnection.io";
                     var onboardingUrl = $"{baseUrl}/onboarding/{inviteToken}";
                     var loginUrl = $"https://{tenant.Subdomain}.{new Uri(baseUrl).Host}/login";
                     await email.SendAsync(
@@ -181,7 +181,7 @@ public static class PortalTenantsEndpoints
 
         try
         {
-            var baseUrl = configuration["App:BaseUrl"] ?? "https://contactconnection.cc";
+            var baseUrl = configuration["App:BaseUrl"] ?? "https://contactconnection.io";
             var onboardingUrl = $"{baseUrl}/onboarding/{invite.Token}";
             var loginUrl = $"https://{tenant.Subdomain}.{new Uri(baseUrl).Host}/login";
             await email.SendAsync(
@@ -255,7 +255,7 @@ public static class PortalTenantsEndpoints
 
         try
         {
-            var baseUrl = configuration["App:BaseUrl"] ?? "https://contactconnection.cc";
+            var baseUrl = configuration["App:BaseUrl"] ?? "https://contactconnection.io";
             var acceptUrl = $"{baseUrl}/admin-invite/{invite.Token}";
             var loginUrl = $"https://{tenant.Subdomain}.{new Uri(baseUrl).Host}/login";
             await email.SendAsync(

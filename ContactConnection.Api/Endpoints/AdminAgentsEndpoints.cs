@@ -56,7 +56,7 @@ public static class AdminAgentsEndpoints
         };
         var roleName = role?.Name ?? "Agent";
 
-        var baseUrl = configuration["App:BaseUrl"] ?? "https://contactconnection.cc";
+        var baseUrl = configuration["App:BaseUrl"] ?? "https://contactconnection.io";
         var logger = loggerFactory.CreateLogger("AdminAgents");
         var sent = new List<string>();
         var failed = new List<string>();
@@ -72,7 +72,7 @@ public static class AdminAgentsEndpoints
             try
             {
                 var acceptUrl = $"{baseUrl}/admin-invite/{invite.Token}";
-                var loginUrl = $"https://{tenant.Subdomain}.contactconnection.cc/login";
+                var loginUrl = $"https://{tenant.Subdomain}.{new Uri(baseUrl).Host}/login";
                 await email.SendAsync(
                     invite.Email,
                     TenantAdminInviteEmail.Subject(tenant.Name, roleName),

@@ -13,7 +13,7 @@ export default defineConfig(({ mode }) => ({
   server: {
     port: 5173,
     host: true,
-    allowedHosts: ['.cc.local', '.contactconnection.cc'],
+    allowedHosts: ['.cc.local', '.contactconnection.cc', '.contactconnection.io'],
     proxy: {
       '/api': {
         target: 'http://localhost:5135',

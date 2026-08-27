@@ -23,7 +23,7 @@ public class ResendEmailService : IEmailService
         _apiKey = configuration["Resend:ApiKey"]
             ?? throw new InvalidOperationException("Resend:ApiKey is not configured.");
         _fromAddress = configuration["Resend:FromAddress"]
-            ?? "ContactConnection <noreply@contactconnection.cc>";
+            ?? "ContactConnection <noreply@contactconnection.io>";
     }
 
     public async Task SendAsync(string to, string subject, string htmlBody, CancellationToken ct = default)

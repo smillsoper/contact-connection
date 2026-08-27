@@ -1,4 +1,4 @@
-const PLATFORM_DOMAINS = ['contactconnection.cc', 'cc.local']
+const PLATFORM_DOMAINS = ['contactconnection.cc', 'contactconnection.io', 'cc.local']
 
 /**
  * Returns the tenant subdomain for the current page.

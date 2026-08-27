@@ -93,10 +93,11 @@ services:
       - freeswitch
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    # Published routes (Cloudflare Zero Trust dashboard) both target host.docker.internal:
-    #   softphone.contactconnection.cc -> host.docker.internal:7080 (FreeSWITCH WS, host-published)
-    #   *.contactconnection.cc         -> host.docker.internal:5173 (Vite dev server, `npm run dev`)
-    # nginx (port 80) is not currently in either route's path.
+    # Published routes (Cloudflare Zero Trust dashboard) all target host.docker.internal.
+    # Same tunnel serves both domains during the .cc -> .io migration:
+    #   softphone.contactconnection.{cc,io} -> host.docker.internal:7080 (FreeSWITCH WS, host-published)
+    #   *.contactconnection.{cc,io}         -> host.docker.internal:5173 (Vite dev server, `npm run dev`)
+    # nginx (port 80) is not currently in any route's path.
     # --protocol http2: default QUIC (UDP) transport was dropping all 4 edge connections
     # simultaneously every ~90 min (`timeout: no recent network activity`, all connIndex 0-3 at
     # once) on this Windows/Docker Desktop/WSL2 host, surfacing to the browser as

@@ -282,7 +282,10 @@ export default function WebhookMappingEditor({ webhookId, onClose, onSaved }: Pr
     } catch (e) { setError((e as Error).message) } finally { setSaving(false) }
   }
 
-  const fullUrl = webhook ? `https://${webhook.tenantSubdomain}.contactconnection.cc${webhook.path}` : ''
+  // Platform domain is whatever this admin UI is served from, minus its own subdomain
+  // (admin.contactconnection.io -> contactconnection.io). Falls back to the raw host on localhost.
+  const platformDomain = window.location.hostname.split('.').slice(1).join('.') || window.location.hostname
+  const fullUrl = webhook ? `https://${webhook.tenantSubdomain}.${platformDomain}${webhook.path}` : ''
 
   function PickButton({ field }: { field: string }) {
     return (
