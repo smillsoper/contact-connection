@@ -103,6 +103,7 @@
 | 91 | 2026-08-25 | 9:59 AM PDT | 11:30 AM PDT | 91 min | ~9927 min |
 | 92 | 2026-08-25 – 2026-08-26 | 11:30 AM PDT | 12:17 PM PDT | 1487 min (~24h47m, incl. overnight gap) | ~11414 min |
 | 93 | 2026-08-27 | 7:30 AM PDT | 10:29 AM PDT | 179 min | ~11593 min |
+| 94 | 2026-08-28 | 7:21 AM PDT | 9:32 AM PDT | 131 min | ~11724 min |
 
 ---
 
@@ -4037,3 +4038,43 @@ No feature code this session — an infrastructure/domain migration driven by a 
 3. **Telephony SIP config still on `.cc`** — deferred by design: `freeswitch/conf/sip_profiles/external.xml` `ext-sip-ip`/`ext-rtp-ip` = `sip.contactconnection.cc`, and `ContactConnection.Web/.env.local` `VITE_SIP_WS_URL` (gitignored). Move these to `sip.contactconnection.io` / `softphone.contactconnection.io` as part of the telephony session (needs matching Cloudflare DNS + Telnyx config + FreeSWITCH container rebuild). `FreeSwitchEslService.cs:19` `.cc` reference is an illustrative comment only — the parser splits on `.` and is domain-agnostic.
 4. **Retire `.cc`** — after a validation period running clean on `.io`: drop the parallel `.cc` entries in `vite.config.ts` / `subdomain.ts`, delete the `.cc` tunnel routes + DNS + the old Entra redirect URI, and decide whether to let the `.cc` registration lapse.
 5. Carry-overs still open from prior sessions: `QueueTimeoutSeconds`/`MaxQueueSize` genuine live proof (held-open real SIP call); `ServiceLevelThresholdSeconds` dashboard widget; `DashboardsEndpoints`/`DashboardWidgetsEndpoints` backend authz hardening; `FlowEngine` zero test coverage.
+
+## Session 94 — Telnyx SIP Trunk Live + Real-Carrier Inbound Call Pipeline
+
+**Date:** 2026-08-28
+**Start:** 7:21 AM PDT
+**End:** 9:32 AM PDT
+**Duration:** 131 min
+**Cumulative Total:** ~11724 min
+
+### What Was Done
+
+Brought a real Telnyx SIP trunk up on FreeSWITCH and drove a live PSTN call from a cell phone all the way through the platform to an agent. Everything works except the final caller↔agent audio bridge, which is the explicit carry-over into next session.
+
+**Telnyx portal.** Funded the account ($20). Bought one local Oregon DID **+15419196582** and assigned it to the SIP Connection. Configured a **Credentials-type SIP Connection** `contactconnection-freeswitch` (Connection ID `3035911411885671529`), username `userstephen58892`; created + attached an Outbound Voice Profile; AnchorSite "Latency"; Inbound + Outbound number format both E.164; DTMF RFC 2833. Documented the Level 1 trial limits that matter: **both inbound and outbound are locked to one verified external number**, hard **2-concurrent-channel** cap, 10-min call cap, trial DID reclaimed ~30 days after purchase. Level 2 verification is still blocked on the LLC's federal EIN (with the business partner). None of the trial limits blocked this session's work.
+
+**FreeSWITCH trunk (`freeswitch/conf/`).**
+- `sip_profiles/external.xml`: new `telnyx` gateway — register to `sip.telnyx.com`, credential digest auth, `ping=25` (SIP OPTIONS keepalive to hold the router's UDP NAT pinhole open), `expire-seconds=120`, `context=public`. Changed `ext-sip-ip`/`ext-rtp-ip` from `sip.contactconnection.cc` to **`stun:stun.telnyx.com`** so FreeSWITCH discovers its own dynamic residential public IP at startup/re-register instead of depending on a DNS record that would need constant updating.
+- `dialplan/public.xml`: **E.164 normalization** — Telnyx delivers the called number as bare `15419196582` (no leading `+`), but every stored DID and all DID→tenant resolution is exact-string against full E.164. New `inbound-to-cc-nanp` extension matches `^\+?1?(\d{10})$` and sets `cc_did=+1$1`; `inbound-to-cc-other` catch-all passes anything else through unmodified.
+- `autoload_configs/switch.conf.xml` + `docker-compose.yml`: pinned RTP to `16384-16393` (10 ports — exactly what the user's router can single-port-forward; enough for the 2-call trial cap, and Telnyx does symmetric RTP so the forwarded range is really just insurance).
+- `freeswitch.xml` + new `vars_local.example.xml` + `.gitignore`: `freeswitch.xml` now includes a gitignored `vars_local.xml` that sets `$${telnyx_sip_password}` (the SIP Connection password, kept out of git).
+- **Registration verified live** on both sides: `sofia status gateway telnyx` → `State: REGED / Status: UP`, Contact showing the real public IP `47.42.165.101` (STUN worked); Telnyx portal "Check registration status" → Registered, matching UA string. Router forwards: UDP 5080 + UDP 16384–16393; confirmed not behind CGNAT.
+
+**API.**
+- `EslBackgroundService.HandleChannelParkAsync`: now reads the dialplan-normalized `variable_cc_did` (falls back to the raw `Caller-Destination-Number`), and matches the DID against a set of `+`/`1`/last-10 equivalents rather than an exact string — the old code only handled *stored-without-`+`* vs *incoming-with-`+`*, the opposite of what Telnyx sends, so every branch missed and the call was dropped as "no tenant resolved."
+- `ScriptPopNodeHandler`: injects `TenantContext` + `ITenantRepository` and does `_tenantContext.Current ??= await _tenantRepo.GetByIdAsync(ctx.TenantId, ct)` immediately before calling the nested CRM `FlowEngine.StartAsync`. On the server-initiated (ESL / auto-answer) path there is no `TenantResolutionMiddleware` to populate the scoped `TenantContext`, so `FlowRepository`→`ScopedTenantDbContextFactory` threw `No tenant resolved` and the script pop silently failed. `??=` keeps the HTTP manual-pickup path (middleware already set it) a no-op. **Confirmed fixed live** — `ScriptPopNodeHandler: started CRM session … for agent …` and the CRM script rendered in the agent panel on the auto-answer path.
+
+**Commit:** `676c935` "Telephony: Telnyx SIP trunk + real-carrier inbound call pipeline" on `session-92-supervisor-dashboard-flow-engine-build` (9 files). Not pushed.
+
+**Live verification.** Real inbound calls from a cell phone to +15419196582: carrier → Telnyx → FreeSWITCH external profile → `public` dialplan (`cc_did=+15419196582`) → park → `EslBackgroundService` resolves tenant/campaign → `TelephonyFlowEngine` runs `Test Campaign 1 - Inbound Call Flow` (block-list → answer → time-of-day → route-to-queue → play) → `QueuePollingService` auto-answer arbitration selects the agent → agent softphone auto-answers → `tf_script_pop` starts the CRM session and it renders → `tf_whisper` plays the announcement on the agent leg → `CHANNEL_BRIDGE` fires. Earlier in the session two calls also produced **two-way audio** end to end; after the fixes + several restarts, the bridge audio stopped working (see below).
+
+**Environmental papercuts (cost real time this session).**
+- Repeated `dotnet watch` rebuild failures with `CS2012: Cannot open ContactConnection.Infrastructure.pdb … used by another process` — stale MSBuild worker nodes, VBCSCompiler, and a **2-day-old `vstest.console` host** were holding the assembly. `dotnet build-server shutdown` + killing the stale test host cleared it. This silently ran the API on **pre-fix code** through several test calls before it was noticed.
+- Every `CHANNEL_HANGUP` logs `… no call_disconnected event fired, no agent-state restore, no session cleanup for this uuid` — orphaned telephony sessions accumulate in Redis (`QueuePoller: 1 session(s) in Redis` never drains). `redis-cli FLUSHDB` between test runs is currently a manual necessity.
+
+### Next Session — pick up here (EXPLICIT)
+1. **THE bug: auto-answer delivery bridges the caller to a media-less agent leg.** After a clean reset (Redis flushed, FreeSWITCH restarted, agent fully logged out/in, softphone confirmed Available/registered) the result is reproducible: telephony flow runs, agent auto-answers, whisper is heard, **CRM script pops** — but the caller is **never bridged for audio**; the caller stays in the `tf_play` hold-music queue loop (confirmed by ear on the cell). The API log shows `QueuePollingService: auto-answer delivery to agent … failed: "Your softphone could not be reached …" — trying next candidate`, then a retry that produces a `CHANNEL_BRIDGE caller ↔ <agent-uuid>` event against a leg with no working media. Suspect `QueuedCallDeliveryService`'s whisper-path originate to the WebRTC/JsSIP agent endpoint: it isn't waiting for the agent leg to actually answer + establish media (DTLS-SRTP/ICE) before firing the bridge, and/or the caller channel's hold-music playback isn't stopped on bridge so its media stays on the loop. Start by instrumenting the delivery: was the agent endpoint REGED at delivery time, did the originate get a real answer, what's the media state of `<agent-uuid>` when `CHANNEL_BRIDGE` fires.
+2. Orphaned-Redis-session cleanup on `CHANNEL_HANGUP` (the `no session cleanup for this uuid` path) — small, and it's making every test run start dirty.
+3. Telephony `.cc` → `.io` still pending: `.env.local` `VITE_SIP_WS_URL` → `wss://softphone.contactconnection.io` (+ add that tunnel route); the `external.xml` STUN change already removed the `sip.contactconnection.cc` dependency.
+4. Level 2 Telnyx verification once the partner locates the EIN — lifts the verified-number restriction and the 2-channel cap.
+5. Prior carry-overs unchanged: `.cc` retirement after a validation window; `QueueTimeoutSeconds`/`MaxQueueSize` held-open live proof; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; `FlowEngine` test coverage.
