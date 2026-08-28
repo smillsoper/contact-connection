@@ -42,6 +42,9 @@ logs/
 ## FreeSWITCH local secrets (copy from vars_local.example.xml)
 freeswitch/conf/vars_local.xml
 
+## FreeSWITCH tenant-uploaded audio (runtime assets, not source)
+freeswitch/sounds/tenant_*/
+
 ## Docker volumes (local data — not source)
 postgres_data/
 

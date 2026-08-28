@@ -104,6 +104,7 @@
 | 92 | 2026-08-25 – 2026-08-26 | 11:30 AM PDT | 12:17 PM PDT | 1487 min (~24h47m, incl. overnight gap) | ~11414 min |
 | 93 | 2026-08-27 | 7:30 AM PDT | 10:29 AM PDT | 179 min | ~11593 min |
 | 94 | 2026-08-28 | 7:21 AM PDT | 9:32 AM PDT | 131 min | ~11724 min |
+| 95 | 2026-08-28 | 9:37 AM PDT | 10:21 AM PDT | 44 min | ~11768 min |
 
 ---
 
@@ -4076,5 +4077,49 @@ Brought a real Telnyx SIP trunk up on FreeSWITCH and drove a live PSTN call from
 1. **THE bug: auto-answer delivery bridges the caller to a media-less agent leg.** After a clean reset (Redis flushed, FreeSWITCH restarted, agent fully logged out/in, softphone confirmed Available/registered) the result is reproducible: telephony flow runs, agent auto-answers, whisper is heard, **CRM script pops** — but the caller is **never bridged for audio**; the caller stays in the `tf_play` hold-music queue loop (confirmed by ear on the cell). The API log shows `QueuePollingService: auto-answer delivery to agent … failed: "Your softphone could not be reached …" — trying next candidate`, then a retry that produces a `CHANNEL_BRIDGE caller ↔ <agent-uuid>` event against a leg with no working media. Suspect `QueuedCallDeliveryService`'s whisper-path originate to the WebRTC/JsSIP agent endpoint: it isn't waiting for the agent leg to actually answer + establish media (DTLS-SRTP/ICE) before firing the bridge, and/or the caller channel's hold-music playback isn't stopped on bridge so its media stays on the loop. Start by instrumenting the delivery: was the agent endpoint REGED at delivery time, did the originate get a real answer, what's the media state of `<agent-uuid>` when `CHANNEL_BRIDGE` fires.
 2. Orphaned-Redis-session cleanup on `CHANNEL_HANGUP` (the `no session cleanup for this uuid` path) — small, and it's making every test run start dirty.
 3. Telephony `.cc` → `.io` still pending: `.env.local` `VITE_SIP_WS_URL` → `wss://softphone.contactconnection.io` (+ add that tunnel route); the `external.xml` STUN change already removed the `sip.contactconnection.cc` dependency.
+4. Level 2 Telnyx verification once the partner locates the EIN — lifts the verified-number restriction and the 2-channel cap.
+5. Prior carry-overs unchanged: `.cc` retirement after a validation window; `QueueTimeoutSeconds`/`MaxQueueSize` held-open live proof; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; `FlowEngine` test coverage.
+
+---
+
+## Session 95 — Caller↔Agent Bridge Race Fixed (Whisper Path) + Delivery Hardening
+
+**Date:** 2026-08-28
+**Start:** 9:37 AM PDT
+**End:** 10:21 AM PDT
+**Duration:** 44 min
+**Cumulative Total:** ~11768 min
+
+### What Was Done
+
+Picked up Session 94's explicit carry-over — the auto-answer delivery bridging the caller to a media-less agent leg / leaving the caller stuck in the hold-music loop. Instrumented the delivery path first, then a single live call surfaced the real mechanism, and the fix is now live-verified.
+
+**Root cause (found via the new instrumentation).** On the whisper delivery path, the caller↔agent bridge happens by resuming the *caller's* telephony flow into `tf_end`, whose handler does `uuid_break {caller}` then `uuid_bridge {caller} {agent}`. But the caller's `tf_play` loop state machine (`_play_media_arg`, `_play_next_end_of_stream`, …) was still live in the session — the caller had been sitting in `tf_play_1` (queue announcement) → `tf_play_2` (MOH loop) while queued. The `uuid_break` fires a `PLAYBACK_STOP` on the caller leg that is **indistinguishable from the hold file ending naturally**, so `HandlePlaybackStopAsync` read it as an `end_of_stream` transition and advanced the caller flow into `tf_play_2`, **re-broadcasting music-on-hold over the just-bridged agent**. Whether audio then came through depended on a race: if `HandleChannelBridgeAsync` still saw `_play_media_arg` it cleared it and broke the MOH; Session 94 lost that race and wedged the caller on hold with no audio. Today's first live call won it (worked), but the trace showed the `PlaybackStop → tf_play_2 → broadcasting danza-espanola…wav loop=True` sequence firing right between `tf_end` and `CHANNEL_BRIDGE` — the smoking gun.
+
+**The fix.** `EslBackgroundService.HandleWhisperPlaybackStopAsync` now calls `ClearPlayVars(session)` (alongside the existing `_whisper_*` cleanup) before resuming into `tf_end`. With the `_play_*` vars gone, the `uuid_break`'s `PLAYBACK_STOP` hits the existing `!session.Vars.ContainsKey("_play_media_arg")` guard and is a no-op instead of a flow transition. **Live-verified:** the post-fix call (after `dotnet watch` hot-reloaded the change mid-session) went straight `WhisperPlaybackStop → resume tf_end_2 → segment complete → CHANNEL_BRIDGE` with no `tf_play_2` and no second `PlayNodeHandler` broadcast. Clean two-way audio deterministically, not by luck.
+
+**Delivery hardening (same commit).**
+- `EslClient.OriginateAndParkAsync` now pre-assigns the agent leg UUID via `origination_uuid=` in the originate vars and `uuid_kill`s that leg on any originate failure. A half-built agent leg (browser answered, media never came up, park raced) no longer lingers as a zombie — which was the source of the orphan `CHANNEL_HANGUP … no session cleanup for this uuid` spam. It also means the caller always knows the leg UUID even on failure. On success it returns that same UUID (matches the `+OK` body).
+- `HandleHangupByTenantScanAsync`: when the `CallRecord` it finds is already finalized (`CallEndAt` set), the hangup is the *second* leg of a bridged call tearing down — the first leg's hangup already fired `call_disconnected`, restored agent state, and deleted the session. Now logged at Debug and skipped instead of re-completing the record and emitting the scary warning. Genuine orphans (no session, record not yet complete) were bumped from `LogInformation` to `LogWarning` so they actually stand out.
+
+**Instrumentation added (kept — cheap, useful).**
+- `EslBackgroundService` subscribes to `CHANNEL_ANSWER` and logs it (flags the whisper/agent leg via `variable_cc_whisper`).
+- New `IEslCommander.GetChannelVarAsync` (`uuid_getvar`, in `EslClient`) — reads a channel var for diagnostics, null on `_undef_`/`-ERR`/gone.
+- Per-leg snapshot (`exists`, `read_codec`/`write_codec`/`rtp_use_codec_name`, `rtp_audio_in/out_packet_count`) logged at `CHANNEL_BRIDGE` and at whisper-stop. Note: `rtp_audio_in/out_packet_count` come back `(null)` via `uuid_getvar` even on a working call — not useful; codec negotiation (`opus`/`opus`) is the signal that survived.
+- `QueuedCallDeliveryService`: structured `Delivery:` logging through the whole path (entry → whisper vs simple-bridge → originate UUID/error → `agent_selected` fired + script-pop? → bridge), and a real `ILogger<EslClient>` passed into its short-lived `EslClient` so `-ERR` responses surface.
+
+**Housekeeping.** `.gitignore` now excludes `freeswitch/sounds/tenant_*/` (tenant-uploaded audio — runtime assets, not source; the `tenant_test_tenant/` dir had been sitting untracked).
+
+**Build/tests.** Api project compiles clean (0 `CS` errors; only the `dotnet watch` file-lock on `.pdb`/`.exe` during a side build). `ContactConnection.Infrastructure.Tests` — 165 passed. `ContactConnection.Api.Tests` couldn't run (its build transitively copies the running `ContactConnection.Api.exe`); it holds only the pure-static `QueuePollingServiceArbitrationTests`, unaffected.
+
+**Commits (branch `session-92-supervisor-dashboard-flow-engine-build`, not pushed):**
+- `aeef774` — "Telephony: fix caller↔agent bridge race on whisper path + delivery hardening" (4 files)
+- `.gitignore` + DevLog entry (this commit)
+
+### Next Session — pick up here
+
+1. **Whisper path is fixed and live-verified — but the simple-bridge path** (`BridgeToAgentAsync`, used only when the flow has no `agent_selected` branch) was not exercised this session and could have the same `uuid_break`-vs-hold-loop race. If a no-whisper flow shows a wedged caller, apply the same `ClearPlayVars` treatment (or a guard in `HandlePlaybackStopAsync` keyed on `_assigned_agent_id`).
+2. Redis still shows `QueuePoller: 1 session(s) in Redis` that never drains after a completed call — the `zombie agent leg` source is now killed, but a stale *caller/CRM* session key can still linger; `redis-cli FLUSHDB` between test runs remains a manual step for now.
+3. Telephony `.cc` → `.io`: `.env.local` `VITE_SIP_WS_URL` → `wss://softphone.contactconnection.io` (+ tunnel route). `external.xml` STUN change already removed the `sip.contactconnection.cc` dependency.
 4. Level 2 Telnyx verification once the partner locates the EIN — lifts the verified-number restriction and the 2-channel cap.
 5. Prior carry-overs unchanged: `.cc` retirement after a validation window; `QueueTimeoutSeconds`/`MaxQueueSize` held-open live proof; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; `FlowEngine` test coverage.
