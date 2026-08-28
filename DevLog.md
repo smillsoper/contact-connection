@@ -105,6 +105,7 @@
 | 93 | 2026-08-27 | 7:30 AM PDT | 10:29 AM PDT | 179 min | ~11593 min |
 | 94 | 2026-08-28 | 7:21 AM PDT | 9:32 AM PDT | 131 min | ~11724 min |
 | 95 | 2026-08-28 | 9:37 AM PDT | 10:21 AM PDT | 44 min | ~11768 min |
+| 96 | 2026-08-28 | 10:24 AM PDT | 11:21 AM PDT | 57 min | ~11825 min |
 
 ---
 
@@ -4123,3 +4124,43 @@ Picked up Session 94's explicit carry-over — the auto-answer delivery bridging
 3. Telephony `.cc` → `.io`: `.env.local` `VITE_SIP_WS_URL` → `wss://softphone.contactconnection.io` (+ tunnel route). `external.xml` STUN change already removed the `sip.contactconnection.cc` dependency.
 4. Level 2 Telnyx verification once the partner locates the EIN — lifts the verified-number restriction and the 2-channel cap.
 5. Prior carry-overs unchanged: `.cc` retirement after a validation window; `QueueTimeoutSeconds`/`MaxQueueSize` held-open live proof; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; `FlowEngine` test coverage.
+
+---
+
+## Session 96 — Inbound-Side Gap Inventory + Multi-Call / Queue-Acceleration Live Verification
+
+**Date:** 2026-08-28
+**Start:** 10:24 AM PDT
+**End:** 11:21 AM PDT
+**Duration:** 57 min
+**Cumulative Total:** ~11825 min
+
+### What Was Done
+
+No app-code changes. This session was an inbound-side status pass plus live verification of three things that had been built but never proven with real calls: 2 concurrent inbound calls, cross-campaign arbitration, and Queue Acceleration reordering. Plus visual confirmation that Session 95's orphan-hangup log-noise fix actually took after an API restart.
+
+**Inbound-side gap inventory (asked: "what's lingering besides Telnyx L2?").** Walked the pipeline and the code:
+- *Config / migration:* `.env.local` `VITE_SIP_WS_URL` still `wss://softphone.contactconnection.cc` — the `.io` Cloudflare tunnel route (`softphone.contactconnection.io` → host:7080) and DNS are already in place (verified in the Zero Trust dashboard + agent softphone registering fine from `test-tenant.contactconnection.io`), so this is just the env var + eventual `.cc` retirement.
+- *Reliability:* simple-bridge delivery path (no `agent_selected` branch) still unexercised; stale-Redis-session drain still open (`QueuePoller: 1 session(s) in Redis` holds at 1 after calls complete — a single old orphan, not a climbing leak; `redis-cli FLUSHDB` clears it).
+- *Feature gaps in the inbound flow:* **call recording is not wired at all** (`recording_url` is a schema field only; `recordings_dir` set in FreeSWITCH vars but nothing ever issues `uuid_record`/`record_session`); **no `tf_voicemail` node** (ARCHITECTURE §7 lists `voicemail` — after-hours/overflow currently just play a message and hang up); **no callback lifecycle** (`callback_abandon` reserved in the call-state model, nothing built); **no `tf_transfer` flow node** (agent-initiated SIP transfer exists in the softphone UI, but not warm-transfer-to-queue); **DNC registry** is still a phone-node placeholder (block list `tf_check_block_list` does work); RTP port range pinned to 10 ports (fine for the 2-channel trial, needs widening for production concurrency).
+
+**Test fixture seeded (DB only, no repo file).** test-tenant had a single inbound campaign, so acceleration reordering couldn't be demonstrated (one campaign = every queued call gets the same boost, order is just FIFO). Seeded a second inbound `auto_answer_best_agent` campaign directly in `tenant_test_tenant`:
+- `campaigns` row `c2c2c2c2-0000-0000-0000-000000000002` — "Test Campaign 2 - Low Priority (Accel Test)", **priority 1**, acceleration ON (**interval 5s, boost 2**), reuses inbound flow `8386ec2d`.
+- `public.phone_number_routing` — internal DID **`8001112222`** → that campaign.
+- `agent_campaign_assignments` — agents 1000 + 1002 assigned to it.
+- These rows are **left in place** as a permanent dev fixture for future queue-acceleration testing. The one-off seed script lived in scratchpad and was deleted.
+
+**Live verification (real calls: cell → `+15419196582`, plus internal softphone dialing `8001234567` / `8001112222` via the `did-inbound-test` dialplan entry):**
+- **2 concurrent inbound calls** — both parked, both queued (`QueuePoller: 2 session(s) in Redis, 2 queued`), no session cross-contamination. One delivered, the other correctly held (`2 session(s), 1 queued`) until the agent freed + ACW, then delivered.
+- **Cross-campaign arbitration** — `OrderByArbitrationPriority` ran across both `auto_answer_best_agent` campaigns; `claimedThisTick` kept the just-freed agent out of the second pass.
+- **Queue Acceleration reordering** — confirmed by live observation on the acceleration-ON run: the low-base-priority Campaign 2 call, after ~20s wait, was delivered *ahead* of the freshly-arrived priority-5 Campaign 1 call. Acceleration-OFF baseline run delivered the priority-5 call first, as expected. (Confirmed by watching the delivery order during the test, not captured in a single pasted log.)
+- **Session 95 whisper-bridge fix under 2-call load** — every bridged call went `WhisperPlaybackStop → resume tf_end_2 → CHANNEL_BRIDGE` with no `PlaybackStop → tf_play_2` re-broadcast. Held.
+- **Session 95 orphan-hangup log-noise fix** — was NOT active in the running process at session start (the `HandleHangupByTenantScanAsync` `CallEndAt`-guard change from `aeef774` had never hot-reloaded). After a full API restart, the second leg of a bridged call hanging up now hits the guard → single `LogDebug` (filtered at `info` level) instead of the two `warn`-level "no call_disconnected event fired, no agent-state restore, no session cleanup for this uuid" lines. **Carry-over #2 (orphan-hangup log noise) is closed.**
+
+### Next Session — pick up here
+
+1. **Stale Redis session that never drains** — `QueuePoller: 1 session(s) in Redis, 0 queued` persists after all calls complete. Steady at 1 (not a leak), but find which key isn't being `DeleteAsync`'d and why. `redis-cli FLUSHDB` is the current manual workaround.
+2. **`.env.local` `VITE_SIP_WS_URL` → `wss://softphone.contactconnection.io`** — Cloudflare side is done; just flip the env var and re-verify softphone registration, then the `.cc` softphone route can be retired.
+3. **Simple-bridge delivery path** (`BridgeToAgentAsync`, no-whisper flows) still unexercised — same `uuid_break`-vs-hold-loop race may be latent.
+4. **Inbound feature gaps**, roughly by value/effort: call recording (nothing depends on it, compliance-critical), then voicemail node, transfer-to-queue node, callback lifecycle, DNC registry lookup.
+5. Prior carry-overs unchanged: Level 2 Telnyx verification (EIN); `.cc` retirement; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; `FlowEngine` test coverage.
