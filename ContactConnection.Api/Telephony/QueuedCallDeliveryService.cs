@@ -33,7 +33,9 @@ public class QueuedCallDeliveryService(
     IHubContext<FlowHub, IFlowHubClient> hub,
     IAgentStateStore stateStore,
     ICallStateHistoryRecorder callStateRecorder,
-    IConfiguration config)
+    IConfiguration config,
+    ILogger<QueuedCallDeliveryService> logger,
+    ILogger<EslClient> eslLogger)
 {
     public async Task<DeliveryResult> DeliverAsync(
         Guid tenantId, string tenantSchema, string tenantSubdomain,
@@ -53,6 +55,10 @@ public class QueuedCallDeliveryService(
 
         var callerUuid = record.ContactIdExternal;
 
+        logger.LogInformation(
+            "Delivery: call {CallRecordId} → agent {AgentId} (ext {Ext}), callerUuid={CallerUuid}",
+            callRecordId, agentId, agent.SipExtension, callerUuid);
+
         // Assign this agent to the call record and create the interaction
         record.SetAgent(agentId);
         var interaction = record.AddInteraction(InteractionType.CustomerService);
@@ -67,18 +73,25 @@ public class QueuedCallDeliveryService(
         var port = int.Parse(config["FreeSWITCH:EslPort"] ?? "8021");
         var pass = config["FreeSWITCH:EslPassword"] ?? "ClueCon";
 
-        await using var esl = new EslClient();
+        await using var esl = new EslClient(eslLogger);
         await esl.ConnectAsync(host, port, pass, ct);
 
         // Check whether the telephony flow has an agent_selected event branch
         var session          = await sessionStore.GetAsync(callerUuid, ct);
         var hasAgentSelected = session?.EventHandlers.ContainsKey("agent_selected") == true;
+        logger.LogInformation(
+            "Delivery: call {CallRecordId} path={Path} (session={HasSession})",
+            callRecordId, hasAgentSelected ? "whisper/agent_selected" : "simple-bridge", session is not null);
 
         if (hasAgentSelected)
         {
             // Originate to agent with auto-answer and park — bridge happens later via TelEndNodeHandler
             var (agentUuid, originateError) = await esl.OriginateAndParkAsync(
                 agent.SipExtension, tenantSubdomain, record.CallerId ?? "Unknown", ct);
+
+            logger.LogInformation(
+                "Delivery: call {CallRecordId} originate → agentUuid={AgentUuid} error={Error}",
+                callRecordId, agentUuid, originateError);
 
             if (agentUuid is null)
             {
@@ -117,6 +130,10 @@ public class QueuedCallDeliveryService(
                     Esl           = esl,
                 }, ct);
 
+            logger.LogInformation(
+                "Delivery: call {CallRecordId} agent_selected fired — crmScriptPop={HasScriptPop}",
+                callRecordId, agentSelectedResult.CrmFlowSession is not null);
+
             // Push CRM script pop immediately if tf_script_pop ran in the agent_selected branch
             // (e.g. before or after whisper so agent has the script while the whisper plays).
             if (agentSelectedResult.CrmFlowSession is not null)
@@ -145,6 +162,9 @@ public class QueuedCallDeliveryService(
                 new AgentStateEntry(AgentStateCodes.OnCall, "On Call", null, DateTimeOffset.UtcNow), ct);
             await hub.Clients.Group($"agent:{agentId}").ReceiveAgentStateChange(AgentStateCodes.OnCall, "On Call", null);
 
+            logger.LogInformation(
+                "Delivery: call {CallRecordId} simple-bridge → BridgeToAgentAsync(caller={CallerUuid}, ext={Ext})",
+                callRecordId, callerUuid, agent.SipExtension);
             await esl.BridgeToAgentAsync(callerUuid, agent.SipExtension, tenantSubdomain, record.CallerId ?? "Unknown", ct);
 
             return new DeliveryResult(true, null);

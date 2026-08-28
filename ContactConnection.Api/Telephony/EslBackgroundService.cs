@@ -77,7 +77,7 @@ public sealed class EslBackgroundService : BackgroundService
         // PLAYBACK_STOP (resumes the flow); ::error covers vendor/relay failures so the flow
         // still advances instead of leaving the caller on a channel that will never resume.
         await esl.SubscribeAsync(
-            "CHANNEL_PARK CHANNEL_HANGUP CHANNEL_HANGUP_COMPLETE CHANNEL_BRIDGE CHANNEL_UNBRIDGE PLAYBACK_STOP " +
+            "CHANNEL_PARK CHANNEL_ANSWER CHANNEL_HANGUP CHANNEL_HANGUP_COMPLETE CHANNEL_BRIDGE CHANNEL_UNBRIDGE PLAYBACK_STOP " +
             "CUSTOM mod_audio_stream::connect mod_audio_stream::disconnect mod_audio_stream::error", ct);
 
         _logger.LogInformation("ESL connected to FreeSWITCH at {Host}:{Port}", host, port);
@@ -96,6 +96,9 @@ public sealed class EslBackgroundService : BackgroundService
             {
                 case "CHANNEL_PARK":
                     await HandleChannelParkAsync(vars, esl, ct);
+                    break;
+                case "CHANNEL_ANSWER":
+                    HandleChannelAnswerLog(vars);
                     break;
                 case "CHANNEL_HANGUP":
                 case "CHANNEL_HANGUP_COMPLETE":
@@ -360,6 +363,23 @@ public sealed class EslBackgroundService : BackgroundService
     }
 
     /// <summary>
+    /// Diagnostic-only: CHANNEL_ANSWER tells us exactly when a leg answered. For the
+    /// agent/caller bridge bug we care most about the whisper agent leg (cc_whisper=true) —
+    /// this pins down whether the originate produced a real answer and how it lines up in
+    /// time with the whisper broadcast and the eventual CHANNEL_BRIDGE.
+    /// </summary>
+    private void HandleChannelAnswerLog(Dictionary<string, string> vars)
+    {
+        var uuid      = vars.GetValueOrDefault("Unique-ID") ?? "";
+        var isWhisper = vars.GetValueOrDefault("variable_cc_whisper") == "true";
+        var name      = vars.GetValueOrDefault("Channel-Name") ?? "";
+        var callState = vars.GetValueOrDefault("Channel-Call-State") ?? "";
+        _logger.LogInformation(
+            "CHANNEL_ANSWER {Uuid} whisper={IsWhisper} name={Name} callState={CallState}",
+            uuid, isWhisper, name, callState);
+    }
+
+    /// <summary>
     /// Resolves the live call session for a hangup/unbridge event. FreeSWITCH reports these
     /// events against whichever leg triggered them — for a bridged call that can be either the
     /// original caller/parked leg (which the session is keyed under, set at CHANNEL_PARK) or the
@@ -553,6 +573,13 @@ public sealed class EslBackgroundService : BackgroundService
         var other = vars.GetValueOrDefault("Bridge-B-Unique-ID") ?? vars.GetValueOrDefault("Other-Leg-Unique-ID") ?? "";
         _logger.LogInformation("CHANNEL_BRIDGE {Uuid} ↔ {Other}", uuid, other);
 
+        // Diagnostic snapshot of both legs at the moment of bridge — the agent/caller bridge bug
+        // shows CHANNEL_BRIDGE firing against an agent leg with no working media, so capture the
+        // answer state + RTP counters for each side here.
+        await LogBridgeLegStateAsync(esl, "A/" + uuid, uuid, ct);
+        if (!string.IsNullOrEmpty(other))
+            await LogBridgeLegStateAsync(esl, "B/" + other, other, ct);
+
         var bridgeSession = await _sessionStore.GetAsync(uuid, ct);
         if (bridgeSession is null) return;
 
@@ -648,6 +675,22 @@ public sealed class EslBackgroundService : BackgroundService
         {
             await _sessionStore.SaveAsync(bridgeSession, ct);
         }
+    }
+
+    /// <summary>Diagnostic: snapshot a bridge leg's existence, negotiated codec, and RTP media
+    /// counters. Null/absent packet counts (or a channel that no longer exists) are the tell for
+    /// the "bridged to a media-less agent leg" bug.</summary>
+    private async Task LogBridgeLegStateAsync(EslClient esl, string label, string uuid, CancellationToken ct)
+    {
+        var exists     = await esl.GetChannelVarAsync(uuid, "uuid", ct);
+        var readCodec  = await esl.GetChannelVarAsync(uuid, "read_codec", ct);
+        var writeCodec = await esl.GetChannelVarAsync(uuid, "write_codec", ct);
+        var rtpCodec   = await esl.GetChannelVarAsync(uuid, "rtp_use_codec_name", ct);
+        var rtpIn      = await esl.GetChannelVarAsync(uuid, "rtp_audio_in_packet_count", ct);
+        var rtpOut     = await esl.GetChannelVarAsync(uuid, "rtp_audio_out_packet_count", ct);
+        _logger.LogInformation(
+            "CHANNEL_BRIDGE leg {Label}: exists={Exists} read={ReadCodec} write={WriteCodec} rtpCodec={RtpCodec} rtpInPkts={RtpIn} rtpOutPkts={RtpOut}",
+            label, exists is not null, readCodec, writeCodec, rtpCodec, rtpIn, rtpOut);
     }
 
     /// <summary>
@@ -862,6 +905,7 @@ public sealed class EslBackgroundService : BackgroundService
         string agentUuid, string callerUuid, EslClient esl, CancellationToken ct)
     {
         _logger.LogInformation("WhisperPlaybackStop: agent={AgentUuid} caller={CallerUuid}", agentUuid, callerUuid);
+        await LogBridgeLegStateAsync(esl, "whisper-agent/" + agentUuid, agentUuid, ct);
 
         // Remove the reverse mapping — whisper is done
         await _sessionStore.DeleteKeyAsync($"whisper:{agentUuid}", ct);
@@ -874,6 +918,15 @@ public sealed class EslBackgroundService : BackgroundService
         // Clear whisper state vars
         var keysToRemove = session.Vars.Keys.Where(k => k.StartsWith("_whisper_")).ToList();
         foreach (var k in keysToRemove) session.Vars.Remove(k);
+
+        // Also kill the caller's hold-music play-loop state. The caller has been sitting in a
+        // tf_play loop (announcement → MOH) while queued; we're about to resume into tf_end,
+        // whose uuid_break on the caller leg is indistinguishable from that hold file ending
+        // naturally. If _play_* vars survive, HandlePlaybackStopAsync treats that break as an
+        // end_of_stream transition and advances the caller flow into the next tf_play —
+        // re-broadcasting music-on-hold over the just-bridged agent (intermittently wedging
+        // the caller on hold, per Session 94). Clearing here makes that PLAYBACK_STOP a no-op.
+        ClearPlayVars(session);
         await _sessionStore.SaveAsync(session, ct);
 
         if (!string.IsNullOrEmpty(nextNodeId))
@@ -929,9 +982,22 @@ public sealed class EslBackgroundService : BackgroundService
                 r => r.ContactIdExternal == channelUuid, ct);
             if (record is null) continue;
 
+            // Already finalized — this is the second leg of a bridged call hanging up. The
+            // first leg's hangup resolved the session (via Other-Leg-Unique-ID), fired
+            // call_disconnected, completed the record, restored agent state, and deleted the
+            // session; the safety-net hangup then tore this leg down too. Nothing left to do,
+            // and it's not an orphan worth warning about.
+            if (record.CallEndAt is not null)
+            {
+                _logger.LogDebug(
+                    "CHANNEL_HANGUP {Uuid} cause={Cause}: CallRecord {RecordId} already finalized by its bridge partner — nothing to do",
+                    channelUuid, cause, record.Id);
+                return;
+            }
+
             record.Complete();
             await db.SaveChangesAsync(ct);
-            _logger.LogInformation(
+            _logger.LogWarning(
                 "CHANNEL_HANGUP {Uuid} cause={Cause} → CallRecord {RecordId} completed (tenant scan, tenant={Tenant}) — " +
                 "no call_disconnected event fired, no agent-state restore, no session cleanup for this uuid",
                 channelUuid, cause, record.Id, tenant.Subdomain);

@@ -13,6 +13,11 @@ public interface IEslCommander
     Task SetChannelVarAsync(string uuid, string name, string value, CancellationToken ct = default);
     /// <summary>uuid_break to stop any current playback on a channel without hanging it up.</summary>
     Task BreakChannelAsync(string uuid, CancellationToken ct = default);
+    /// <summary>
+    /// uuid_getvar — reads a channel variable for diagnostics (answer state, RTP packet counts,
+    /// etc.). Returns null if the channel is gone or the variable is unset (FreeSWITCH "_undef_").
+    /// </summary>
+    Task<string?> GetChannelVarAsync(string uuid, string name, CancellationToken ct = default);
     /// <summary>uuid_broadcast to play media on one leg of a parked/bridged channel.</summary>
     Task BroadcastAsync(string uuid, string mediaArg, CancellationToken ct = default);
     /// <summary>uuid_bridge to connect two already-established parked channels.</summary>

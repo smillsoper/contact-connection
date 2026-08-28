@@ -142,6 +142,16 @@ public sealed class EslClient(ILogger<EslClient>? logger = null) : IAsyncDisposa
     public Task BreakChannelAsync(string uuid, CancellationToken ct = default) =>
         SendApiAsync($"uuid_break {uuid} all", ct);
 
+    /// <summary>uuid_getvar — diagnostic read of a channel variable. Null when the channel is
+    /// gone or the variable is unset (FreeSWITCH returns "_undef_").</summary>
+    public async Task<string?> GetChannelVarAsync(string uuid, string name, CancellationToken ct = default)
+    {
+        var body = await SendApiBodyAsync($"uuid_getvar {uuid} {name}", ct);
+        if (string.IsNullOrWhiteSpace(body)) return null;
+        body = body.Trim();
+        return body is "_undef_" || body.StartsWith("-ERR", StringComparison.Ordinal) ? null : body;
+    }
+
     /// <summary>Send any raw ESL api command and return the response body. For test/diagnostic use.</summary>
     public Task<string?> RunCommandAsync(string command, CancellationToken ct = default) =>
         SendApiBodyAsync(command, ct);
@@ -168,14 +178,32 @@ public sealed class EslClient(ILogger<EslClient>? logger = null) : IAsyncDisposa
         if (string.IsNullOrEmpty(contact) || contact.StartsWith("-ERR"))
             return (null, $"sofia_contact {extension}@{domain} → {contact ?? "(null)"}");
 
-        var vars = $"{{originate_timeout=30,sip_auto_answer=true,sip_h_Alert-Info=answer-after=0," +
+        // Pre-assign the agent leg's UUID so we can (a) reliably identify it later and
+        // (b) uuid_kill it if the originate fails partway (browser answered but media never
+        // came up, park raced, etc.) — otherwise that half-built leg lingers in FreeSWITCH
+        // as a zombie, later firing an orphan CHANNEL_HANGUP with no session to clean up.
+        var agentUuid = Guid.NewGuid().ToString();
+
+        var vars = $"{{origination_uuid={agentUuid},originate_timeout=30,sip_auto_answer=true," +
+                   $"sip_h_Alert-Info=answer-after=0," +
                    $"effective_caller_id_number={callerNumber},effective_caller_id_name={callerNumber}," +
                    $"cc_whisper=true}}";
         var response = await SendApiBodyAsync($"originate {vars}{contact} &park()", ct);
 
-        return response?.StartsWith("+OK") == true
-            ? (response["+OK".Length..].Trim(), null)
-            : (null, $"sofia_contact={contact} originate → {response ?? "(null)"}");
+        if (response?.StartsWith("+OK") == true)
+        {
+            logger?.LogInformation(
+                "OriginateAndParkAsync: agent leg {AgentUuid} up ({Ext}@{Domain}), response={Response}",
+                agentUuid, extension, domain, response.Trim());
+            return (agentUuid, null);
+        }
+
+        // Best-effort cleanup of the pre-assigned leg in case it was partially created.
+        await SendApiAsync($"uuid_kill {agentUuid} ORIGINATOR_CANCEL", ct);
+        logger?.LogWarning(
+            "OriginateAndParkAsync: originate failed for {Ext}@{Domain} — killed pre-assigned leg {AgentUuid}. sofia_contact={Contact} response={Response}",
+            extension, domain, agentUuid, contact, response ?? "(null)");
+        return (null, $"sofia_contact={contact} originate → {response ?? "(null)"}");
     }
 
     public ValueTask DisposeAsync()
