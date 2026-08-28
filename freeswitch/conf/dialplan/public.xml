@@ -10,14 +10,31 @@
   -->
   <context name="public">
 
-    <extension name="inbound-to-cc">
+    <!--
+      NANP calls: normalize the called number to full E.164 (+1XXXXXXXXXX).
+      Carriers differ on whether the Request-URI carries a leading "+" and/or
+      "1" (Telnyx sends bare "15419196582"), but the platform stores every DID
+      as full E.164 and DID->tenant resolution is an exact string match.
+    -->
+    <extension name="inbound-to-cc-nanp">
+      <condition field="destination_number" expression="^\+?1?(\d{10})$">
+        <action application="set"  data="cc_inbound=true"/>
+        <action application="set"  data="cc_did=+1$1"/>
+        <action application="set"  data="cc_caller_id=${caller_id_number}"/>
+        <action application="set"  data="cc_caller_name=${caller_id_name}"/>
+        <!-- Park the call — ESL service takes over from here -->
+        <action application="park"/>
+      </condition>
+    </extension>
+
+    <!-- Anything else (short codes, international, malformed) — pass the called
+         number through unmodified so the ESL service can still log/handle it. -->
+    <extension name="inbound-to-cc-other">
       <condition field="destination_number" expression=".*">
-        <!-- Tag this channel so the ESL service knows it's an inbound external call -->
         <action application="set"  data="cc_inbound=true"/>
         <action application="set"  data="cc_did=${destination_number}"/>
         <action application="set"  data="cc_caller_id=${caller_id_number}"/>
         <action application="set"  data="cc_caller_name=${caller_id_name}"/>
-        <!-- Park the call — ESL service takes over from here -->
         <action application="park"/>
       </condition>
     </extension>

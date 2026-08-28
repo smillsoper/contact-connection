@@ -4,6 +4,11 @@
   <!-- Global variables — loaded before everything else -->
   <X-PRE-PROCESS cmd="include" data="vars.xml"/>
 
+  <!-- Local secrets/overrides — gitignored, not present in fresh checkouts.
+       Copy vars_local.example.xml to vars_local.xml and fill in real values
+       (e.g. the Telnyx SIP trunk password). -->
+  <X-PRE-PROCESS cmd="include" data="vars_local.xml"/>
+
   <!-- Module configuration (autoload_configs/*.xml) -->
   <section name="configuration" description="Module configuration">
     <X-PRE-PROCESS cmd="include" data="autoload_configs/*.xml"/>

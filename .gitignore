@@ -39,6 +39,9 @@ logs/
 .env
 .env.*
 
+## FreeSWITCH local secrets (copy from vars_local.example.xml)
+freeswitch/conf/vars_local.xml
+
 ## Docker volumes (local data — not source)
 postgres_data/
 

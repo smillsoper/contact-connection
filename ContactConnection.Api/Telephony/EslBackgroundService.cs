@@ -120,7 +120,11 @@ public sealed class EslBackgroundService : BackgroundService
     private async Task HandleChannelParkAsync(
         Dictionary<string, string> vars, EslClient esl, CancellationToken ct)
     {
-        var destination  = vars.GetValueOrDefault("Caller-Destination-Number") ?? "";
+        // Prefer cc_did — the public dialplan normalizes the called number to full
+        // E.164 there. Fall back to the raw channel field for non-dialplan paths
+        // (e.g. direct agent-extension parks).
+        var destination  = vars.GetValueOrDefault("variable_cc_did")
+                        ?? vars.GetValueOrDefault("Caller-Destination-Number") ?? "";
         var channelUuid  = vars.GetValueOrDefault("Unique-ID") ?? "";
 
         if (string.IsNullOrEmpty(destination) || string.IsNullOrEmpty(channelUuid)) return;
@@ -164,14 +168,18 @@ public sealed class EslBackgroundService : BackgroundService
         var callStateRecorder = scope.ServiceProvider.GetRequiredService<ICallStateHistoryRecorder>();
 
         // ── DID routing: check if destination matches a provisioned phone number ──
-        // Normalize: strip leading + so "+18005551234" matches "18005551234" or "8005551234"
-        var destNorm = destination.TrimStart('+');
+        // Carriers vary on whether the dialed number carries a leading "+" and/or "1",
+        // and stored DIDs may be in any of those forms — match on a set of equivalent
+        // representations rather than an exact string.
+        var digits = new string(destination.Where(char.IsDigit).ToArray());
+        var last10 = digits.Length >= 10 ? digits[^10..] : digits;
+        var didForms = new[]
+        {
+            destination, digits, "+" + digits,
+            last10, "1" + last10, "+1" + last10,
+        };
         var routing = await platformDb.PhoneNumberRoutings
-            .FirstOrDefaultAsync(r => r.IsActive && (
-                r.Number == destination ||
-                r.Number == destNorm ||
-                "+" + r.Number == destination ||
-                "1" + r.Number == destNorm), ct);
+            .FirstOrDefaultAsync(r => r.IsActive && didForms.Contains(r.Number), ct);
 
         if (routing is not null)
         {

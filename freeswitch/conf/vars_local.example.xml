@@ -1,0 +1,15 @@
+<include>
+  <!--
+    LOCAL SECRETS / OVERRIDES — template.
+
+    Copy this file to `vars_local.xml` (same directory) and fill in real
+    values. `vars_local.xml` is gitignored and is included by freeswitch.xml
+    right after vars.xml, so anything set here overrides the global defaults.
+
+    telnyx_sip_password — the password for the Telnyx SIP Connection
+    "contactconnection-freeswitch" (Voice > SIP Connections >
+    Authentication and routing). Referenced as $${telnyx_sip_password} by the
+    `telnyx` gateway in sip_profiles/external.xml.
+  -->
+  <X-PRE-PROCESS cmd="set" data="telnyx_sip_password=REPLACE_WITH_TELNYX_SIP_CONNECTION_PASSWORD"/>
+</include>

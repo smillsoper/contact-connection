@@ -1,8 +1,12 @@
 <configuration name="switch.conf" description="Core Configuration">
   <settings>
-    <!-- Restrict RTP to the port range exposed in docker-compose.
-         11 ports = 5 concurrent calls max — sufficient for dev/testing. -->
+    <!-- Restrict RTP to the port range exposed in docker-compose and
+         individually forwarded on the router (16384-16393, 10 ports).
+         Enough for the Telnyx trial's 2-concurrent-call cap plus headroom;
+         Telnyx does symmetric RTP so the return path latches to the sent
+         source. Widen this + docker-compose + router forwards together if
+         real concurrency is needed post-trial. -->
     <param name="rtp-start-port" value="16384"/>
-    <param name="rtp-end-port"   value="16394"/>
+    <param name="rtp-end-port"   value="16393"/>
   </settings>
 </configuration>

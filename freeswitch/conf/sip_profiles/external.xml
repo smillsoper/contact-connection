@@ -23,11 +23,14 @@
 
     <param name="sip-port"            value="$${external_sip_port}"/>
     <param name="sip-ip"              value="$${local_ip_v4}"/>
-    <param name="ext-sip-ip"          value="sip.contactconnection.cc"/>
+    <!-- Residential connection has a dynamic public IP — STUN lets FreeSWITCH
+         discover it at startup and on re-register, so there is no DNS record
+         to keep in sync when the ISP rotates the address. -->
+    <param name="ext-sip-ip"          value="stun:stun.telnyx.com"/>
     <param name="sip-server-name"     value="ContactConnection"/>
 
     <param name="rtp-ip"              value="$${local_ip_v4}"/>
-    <param name="ext-rtp-ip"          value="sip.contactconnection.cc"/>
+    <param name="ext-rtp-ip"          value="stun:stun.telnyx.com"/>
 
     <param name="hold-music"          value="$${hold_music}"/>
     <param name="manage-presence"     value="false"/>
@@ -39,19 +42,29 @@
 
   <gateways>
     <!--
-      Add SIP trunk gateways here.  Example:
-
-      <gateway name="my-sip-trunk">
-        <param name="username"       value="TRUNK_USERNAME"/>
-        <param name="password"       value="TRUNK_PASSWORD"/>
-        <param name="realm"          value="sip.provider.com"/>
-        <param name="proxy"          value="sip.provider.com"/>
-        <param name="from-domain"    value="sip.provider.com"/>
-        <param name="register"       value="true"/>
-        <param name="retry-seconds"  value="30"/>
-        <param name="expire-seconds" value="600"/>
-        <param name="codec-prefs"    value="$${outbound_codec_prefs}"/>
-      </gateway>
+      Telnyx SIP trunk — Credential Connection "contactconnection-freeswitch"
+      (Connection ID 3035911411885671529). The password is set as
+      $${telnyx_sip_password} in the gitignored vars_local.xml (see
+      vars_local.example.xml). Inbound calls arriving on this gateway use the
+      "public" dialplan context, which parks them for the ESL service.
     -->
+    <gateway name="telnyx">
+      <param name="username"           value="userstephen58892"/>
+      <param name="password"           value="$${telnyx_sip_password}"/>
+      <param name="realm"              value="sip.telnyx.com"/>
+      <param name="proxy"              value="sip.telnyx.com"/>
+      <param name="from-domain"        value="sip.telnyx.com"/>
+      <param name="register"           value="true"/>
+      <param name="register-transport" value="udp"/>
+      <param name="expire-seconds"     value="120"/>
+      <param name="retry-seconds"      value="30"/>
+      <!-- SIP OPTIONS keepalive every 25s — holds the router's UDP NAT pinhole
+           open so Telnyx's inbound INVITEs keep reaching the registered Contact
+           regardless of the home router's NAT timeout. -->
+      <param name="ping"               value="25"/>
+      <param name="caller-id-in-from"  value="true"/>
+      <param name="codec-prefs"        value="$${outbound_codec_prefs}"/>
+      <param name="context"            value="public"/>
+    </gateway>
   </gateways>
 </profile>

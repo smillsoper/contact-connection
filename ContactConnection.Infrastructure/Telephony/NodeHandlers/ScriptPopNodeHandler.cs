@@ -1,6 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
+using ContactConnection.Application.Services;
 using ContactConnection.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -21,12 +23,20 @@ public class ScriptPopNodeHandler : ITelephonyNodeHandler
     public string NodeType => "tf_script_pop";
 
     private readonly ITenantDbContextFactory _factory;
+    private readonly ITenantRepository _tenantRepo;
+    private readonly TenantContext _tenantContext;
     private readonly ILogger<ScriptPopNodeHandler> _logger;
 
-    public ScriptPopNodeHandler(ITenantDbContextFactory factory, ILogger<ScriptPopNodeHandler> logger)
+    public ScriptPopNodeHandler(
+        ITenantDbContextFactory factory,
+        ITenantRepository tenantRepo,
+        TenantContext tenantContext,
+        ILogger<ScriptPopNodeHandler> logger)
     {
-        _factory = factory;
-        _logger  = logger;
+        _factory       = factory;
+        _tenantRepo    = tenantRepo;
+        _tenantContext = tenantContext;
+        _logger        = logger;
     }
 
     public async Task<TelephonyNodeResult> ExecuteAsync(
@@ -76,6 +86,12 @@ public class ScriptPopNodeHandler : ITelephonyNodeHandler
                 ctx.ChannelUuid, ctx.CampaignId);
             return new TelephonyNodeResult(nextNodeId, "no_flow");
         }
+
+        // The nested CRM FlowEngine resolves its DbContext via the scoped TenantContext,
+        // which TenantResolutionMiddleware only populates on the HTTP request path. On the
+        // server-initiated (ESL / auto-answer) path it is unset — populate it from ctx so
+        // FlowRepository can open the tenant schema.
+        _tenantContext.Current ??= await _tenantRepo.GetByIdAsync(ctx.TenantId, ct);
 
         try
         {

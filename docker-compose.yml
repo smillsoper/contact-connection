@@ -44,7 +44,7 @@ services:
       - "7080:7080/tcp"              # WS  — WebRTC softphone, plain (local dev)
       - "7443:7443/tcp"              # WSS — WebRTC softphone, TLS (production)
       - "127.0.0.1:8021:8021/tcp"    # ESL — .NET Worker connects here (loopback only, never public)
-      - "16384-16394:16384-16394/udp" # RTP media
+      - "16384-16393:16384-16393/udp" # RTP media (matches switch.conf.xml + router port-forwards)
     volumes:
       - ./freeswitch/conf:/etc/freeswitch
       - ./freeswitch/sounds:/usr/share/freeswitch/sounds/contactconnection
