@@ -403,6 +403,22 @@ public sealed class EslBackgroundService : BackgroundService
     /// </summary>
     private async Task HandleChannelHangupAsync(Dictionary<string, string> vars, EslClient esl, CancellationToken ct)
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            await HandleChannelHangupCoreAsync(vars, esl, ct);
+        }
+        finally
+        {
+            if (sw.ElapsedMilliseconds > 1000)
+                _logger.LogWarning(
+                    "HandleChannelHangupAsync SLOW: {Uuid} event={Event} took {Ms}ms — ESL event loop was stalled this long",
+                    vars.GetValueOrDefault("Unique-ID"), vars.GetValueOrDefault("Event-Name"), sw.ElapsedMilliseconds);
+        }
+    }
+
+    private async Task HandleChannelHangupCoreAsync(Dictionary<string, string> vars, EslClient esl, CancellationToken ct)
+    {
         var channelUuid = vars.GetValueOrDefault("Unique-ID");
         if (string.IsNullOrEmpty(channelUuid)) return;
 

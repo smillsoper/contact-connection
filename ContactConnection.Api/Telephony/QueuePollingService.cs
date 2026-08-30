@@ -78,10 +78,15 @@ public sealed class QueuePollingService : BackgroundService
 
         var queued = sessions.Where(s => s.Vars.GetValueOrDefault("_queued") == "true").ToList();
 
+        // "session(s)" here = every live TelephonyCallSession in Redis: queued callers PLUS
+        // calls already delivered/bridged to an agent (delivery removes _queued from the
+        // session, so an in-progress call is a non-queued session — not a leak). Session 97
+        // verified via per-call tracing that sessions are deleted promptly on hangup; a
+        // non-queued count simply reflects active calls.
         if (sessions.Count > 0)
             _logger.LogInformation(
-                "QueuePoller: {Total} session(s) in Redis, {Queued} queued",
-                sessions.Count, queued.Count);
+                "QueuePoller: {Queued} queued, {Active} active call(s) ({Total} session(s) in Redis)",
+                queued.Count, sessions.Count - queued.Count, sessions.Count);
 
         if (queued.Count == 0) return;
 
