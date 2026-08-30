@@ -106,6 +106,7 @@
 | 94 | 2026-08-28 | 7:21 AM PDT | 9:32 AM PDT | 131 min | ~11724 min |
 | 95 | 2026-08-28 | 9:37 AM PDT | 10:21 AM PDT | 44 min | ~11768 min |
 | 96 | 2026-08-28 | 10:24 AM PDT | 11:21 AM PDT | 57 min | ~11825 min |
+| 97 | 2026-08-29 – 2026-08-30 | 11:25 AM PDT | 9:50 AM PDT | ~175 min actual work (11:25 AM–1:30 PM 8/29 + ~50 min on 8/30; overnight gap excluded) | ~12000 min |
 
 ---
 
@@ -4164,3 +4165,45 @@ No app-code changes. This session was an inbound-side status pass plus live veri
 3. **Simple-bridge delivery path** (`BridgeToAgentAsync`, no-whisper flows) still unexercised — same `uuid_break`-vs-hold-loop race may be latent.
 4. **Inbound feature gaps**, roughly by value/effort: call recording (nothing depends on it, compliance-critical), then voicemail node, transfer-to-queue node, callback lifecycle, DNC registry lookup.
 5. Prior carry-overs unchanged: Level 2 Telnyx verification (EIN); `.cc` retirement; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; `FlowEngine` test coverage.
+
+---
+
+## Session 97 — Stale-Redis-Session Investigation (No Leak) + IVR Menu Node Added to Gap List
+
+**Date:** 2026-08-29 – 2026-08-30
+**Start:** 2026-08-29 11:25 AM PDT
+**End:** 2026-08-30 9:50 AM PDT
+**Duration:** ~175 min actual work (11:25 AM–1:30 PM 8/29, then ~50 min on 8/30; overnight gap excluded)
+**Cumulative Total:** ~12000 min
+
+### What Was Done
+
+Continued the inbound-side pass, starting with the "stale Redis session that never drains" carry-over (#2 from Session 96). **Conclusion: there is no leak.** The carry-over was a misread of truncated log pastes.
+
+**Investigation.** Added two diagnostics: (a) `QueuePollingService` logs the identity + var-key list of every *non-queued* session each poll tick; (b) `HandleChannelHangupAsync` wrapped in a `>1s` stopwatch canary (the ESL read loop is single-threaded — a slow hangup handler stalls all telephony events). Killed the user's `dotnet watch`, ran a fresh one under Claude's control (logging to a file), and had the user drive 7 live calls (varying which leg hung up) while Claude read the full untruncated log.
+
+**Findings — all 7 calls clean:**
+- 0 `SLOW` warnings — `HandleChannelHangupAsync` never blocked; the "handler stalls 20–30s between the `call_disconnected` re-save and the final `DeleteAsync`" theory is dead.
+- 0 tenant-scan / "no call_disconnected" fallbacks — every hangup resolved via the session-found path and `DeleteAsync`'d the session.
+- For every call, the **last** `non-queued session lingering` line preceded that call's `CHANNEL_HANGUP … completed` line — i.e. every one of the 87 warnings fired **during a live bridged call**, never after hangup.
+- `redis-cli KEYS 'telephony:session:*'` → **0** keys after all 7 calls.
+
+**Root of the confusion.** When a queued call is delivered, `QueuedCallDeliveryService.DeliverAsync` removes `_queued` from the session. So an in-progress/bridged call *is* a non-queued `TelephonyCallSession` in Redis — not a leak. The log line `QueuePoller: 1 session(s) in Redis, 0 queued` that was flagged in Sessions 95–96 was simply the **active call**, read out of log excerpts where the call's own `CHANNEL_PARK`/`CHANNEL_HANGUP` boundaries weren't visible.
+
+**Changes (commit `1f274ad`).**
+- `QueuePollingService` — poll line reworded to `QueuePoller: {queued} queued, {active} active call(s) ({total} session(s) in Redis)` so a non-queued session no longer reads as "something stuck". Noisy per-tick diagnostic removed.
+- `EslBackgroundService` — kept the `HandleChannelHangupAsync` `>1s` stopwatch canary as cheap permanent insurance (`HandleChannelHangupCoreAsync` holds the body). Never fired in testing.
+
+**IVR Menu node added to the inbound gap list.** `tf_dtmf` collects a digit string but is not an IVR menu: a real menu node needs play-prompt → collect → validate against defined options → branch-per-option → re-prompt on invalid → timeout handling → max-attempts fallback → optional barge-in. Flagged as high-value.
+
+### Updated inbound gap list
+
+call recording (nothing wired) · **IVR menu node** · voicemail node · callback lifecycle · transfer-to-queue node · DNC registry lookup · `.env.local` `.io` softphone var · RTP port range widening. *(Stale-Redis-session removed — verified not a bug.)*
+
+### Next Session — pick up here
+
+1. **`.env.local` `VITE_SIP_WS_URL` → `wss://softphone.contactconnection.io`** — Cloudflare tunnel + DNS already in place (agent softphone registers fine from `test-tenant.contactconnection.io`); flip the env var, re-verify registration, then retire the `.cc` softphone route.
+2. **Simple-bridge delivery path** (`BridgeToAgentAsync`, no-whisper flows) still unexercised — the Session 95 `uuid_break`-vs-hold-loop race may be latent there.
+3. **Inbound feature build**, by value/effort: call recording first (compliance-critical, nothing depends on it), then IVR menu node, voicemail node, transfer-to-queue node, callback lifecycle, DNC registry lookup.
+4. Prior carry-overs unchanged: Level 2 Telnyx verification (EIN); `.cc` retirement; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; `FlowEngine` test coverage.
+5. Weekend/holiday branch of the time-of-day node in `Test Campaign 1 - Inbound Call Flow` was re-pointed to the queue node mid-session (2026-08-30 is a Saturday) — harmless test-data tweak, noted so it isn't a mystery later.
