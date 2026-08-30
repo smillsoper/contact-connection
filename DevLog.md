@@ -107,6 +107,7 @@
 | 95 | 2026-08-28 | 9:37 AM PDT | 10:21 AM PDT | 44 min | ~11768 min |
 | 96 | 2026-08-28 | 10:24 AM PDT | 11:21 AM PDT | 57 min | ~11825 min |
 | 97 | 2026-08-29 – 2026-08-30 | 11:25 AM PDT | 9:50 AM PDT | ~175 min actual work (11:25 AM–1:30 PM 8/29 + ~50 min on 8/30; overnight gap excluded) | ~12000 min |
+| 98 | 2026-08-30 | 10:05 AM PDT | 10:18 AM PDT | 13 min | ~12013 min |
 
 ---
 
@@ -4207,3 +4208,46 @@ call recording (nothing wired) · **IVR menu node** · voicemail node · callbac
 3. **Inbound feature build**, by value/effort: call recording first (compliance-critical, nothing depends on it), then IVR menu node, voicemail node, transfer-to-queue node, callback lifecycle, DNC registry lookup.
 4. Prior carry-overs unchanged: Level 2 Telnyx verification (EIN); `.cc` retirement; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; `FlowEngine` test coverage.
 5. Weekend/holiday branch of the time-of-day node in `Test Campaign 1 - Inbound Call Flow` was re-pointed to the queue node mid-session (2026-08-30 is a Saturday) — harmless test-data tweak, noted so it isn't a mystery later.
+
+---
+
+## Session 98 — Softphone WS `.cc` → `.io` Flip, Validated End-to-End
+
+**Date:** 2026-08-30
+**Start:** 10:05 AM PDT
+**End:** 10:18 AM PDT
+**Duration:** 13 min
+**Cumulative Total:** ~12013 min
+
+### What Was Done
+
+Flipped the agent softphone's SIP WebSocket endpoint from `.cc` to `.io` and validated it with a live call.
+
+- **`ContactConnection.Web/.env.local`**: `VITE_SIP_WS_URL=wss://softphone.contactconnection.io` (was `.cc`). Also updated the doc comment in `.env` and added a commented `VITE_SIP_WS_URL` line to `.env.local.example`. **All three files are gitignored — nothing committed.** URL resolution logic ([SoftphonePanel.tsx](ContactConnection.Web/src/components/SoftphonePanel.tsx) `getSipWsUrl`): `localhost` → `ws://localhost:7080`; else `VITE_SIP_WS_URL` if set; else `wss://<hostname>/sip-ws`.
+- **Registration verified** via `fs_cli` (needs the rotated ESL password from the container's `event_socket.conf.xml`, `pCCuZrc/…`, not `ClueCon`): `sofia status profile internal reg` → one active `1000@test-tenant` WS registration, `Registered(WS-NAT)`, `Ping-Status: Reachable`.
+- **Live call end-to-end over the `.io` path** (Claude ran the API under `dotnet watch` in the background, read the log): `CHANNEL_PARK` → queue → `Delivery` (whisper) → `OriginateAndParkAsync +OK` (INVITE delivered, auto-answered) → `CHANNEL_ANSWER` → script pop → `WhisperPlaybackStop → tf_end_2 → CHANNEL_BRIDGE` (both legs opus, user confirmed two-way audio) → `CHANNEL_HANGUP … completed` (session-found) → ACW → `CHANNEL_UNBRIDGE`. **0** `telephony:session:*` keys in Redis afterward, no `SLOW` warnings, no errors. The Session 97 poll-line reword shows correctly: `QueuePoller: 0 queued, 1 active call(s)`.
+- **Aside:** the FreeSWITCH container clock is drifting (registration `EXP` showed 8/28 while it was 8/30) — a `docker restart cc_freeswitch` sometime would fix it; harmless for now.
+
+**Telephony `.cc` retirement is now unblocked** — after a validation window, the `softphone.contactconnection.cc → host:7080` route can be deleted from the Cloudflare Zero Trust dashboard.
+
+### Inbound gap list — current status (for the next chat)
+
+| Item | Status |
+|---|---|
+| ~~Stale Redis session leak~~ | **Closed Session 97** — not a bug (active bridged call = non-queued session; deleted promptly on hangup, verified 7 calls) |
+| ~~`.env.local` `.io` softphone var~~ | **Done Session 98** — flipped + validated end-to-end; `.cc` route retire pending a validation window |
+| **Call recording** | Not started. Nothing wired at all (`recording_url` is a schema field only; `recordings_dir` set in FS vars, no `uuid_record`/`record_session` anywhere). Compliance-critical, nothing depends on it → **do first**. |
+| **IVR menu node** | Not started. `tf_dtmf` only collects a digit string. Real node needs: play prompt → collect → validate vs defined options → branch-per-option → re-prompt on invalid → timeout handling → max-attempts fallback → optional barge-in. High value. |
+| **Voicemail node** (`tf_voicemail`) | Not started. ARCHITECTURE §7 lists it. After-hours/overflow currently just play a message + hang up. |
+| **Transfer-to-queue node** (`tf_transfer`) | Not started. Agent-initiated SIP transfer exists in the softphone UI, but not warm-transfer-to-queue as a flow node. |
+| **Callback lifecycle** | Not started. `callback_abandon` reserved in the call-state model; request → schedule → outbound attempt → completed/abandoned/expired all unbuilt. |
+| **DNC registry lookup** | Not started. Phone-node `doNotCall` is a placeholder. (Block list `tf_check_block_list` does work.) |
+| **RTP port range** | Pinned to 10 ports (16384–16393) — fine for the 2-channel Telnyx trial, needs widening for production concurrency. |
+| **Simple-bridge delivery path** | Still unexercised — the Session 95 `uuid_break`-vs-hold-loop race may be latent for no-whisper (`BridgeToAgentAsync`) flows. |
+
+### Next Session — pick up here
+
+1. Start the **inbound feature build**: **call recording** first (highest value/effort ratio — compliance-critical, self-contained), then **IVR menu node**.
+2. Quick win available: exercise the **simple-bridge delivery path** to confirm the Session 95 fix covers it (or apply the same `ClearPlayVars` treatment).
+3. Optional cleanup: retire the Cloudflare `softphone.contactconnection.cc` route once satisfied with the `.io` validation window; `docker restart cc_freeswitch` to fix container clock drift.
+4. Prior carry-overs unchanged: Level 2 Telnyx verification (EIN); `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; `FlowEngine` test coverage.
