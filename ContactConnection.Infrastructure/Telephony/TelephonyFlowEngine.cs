@@ -126,7 +126,20 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
         // Propagate any vars written during the main branch back to the session
         foreach (var (k, v) in ctx.Vars)
             session.Vars[k] = v;
+        ApplyPendingSessionMutations(session);
         await _sessionStore.SaveAsync(session, ct);
+    }
+
+    /// <summary>
+    /// Node handlers can't persist session-level fields directly (the engine re-saves its own
+    /// session copy after the node runs, clobbering a handler's separate write). Instead they
+    /// leave a sentinel var and the engine applies it here before every post-execution save.
+    /// tf_transfer's "campaign_queue" destination uses <c>_switch_campaign_id</c>.
+    /// </summary>
+    private static void ApplyPendingSessionMutations(TelephonyCallSession session)
+    {
+        if (session.Vars.Remove("_switch_campaign_id", out var cid) && Guid.TryParse(cid, out var newCampaignId))
+            session.CampaignId = newCampaignId;
     }
 
     // ── Audio playback continuation (PLAYBACK_STOP) ───────────────────────────
@@ -187,7 +200,70 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
 
         foreach (var (k, v) in ctx.Vars)
             session.Vars[k] = v;
+        ApplyPendingSessionMutations(session);
         await _sessionStore.SaveAsync(session, ct);
+    }
+
+    // ── Flow handoff (tf_transfer → telephony_flow) ──────────────────────────
+
+    public async Task<bool> SwitchFlowAsync(
+        string channelUuid, Guid targetFlowId, IEslCommander esl, CancellationToken ct = default)
+    {
+        var session = await _sessionStore.GetAsync(channelUuid, ct);
+        if (session is null)
+        {
+            _logger.LogWarning("TelephonyFlowEngine.SwitchFlowAsync: no session for channel {Uuid}", channelUuid);
+            return false;
+        }
+
+        await using var db = _factory.Create(session.TenantSchemaName);
+        var flow = await db.Flows.FirstOrDefaultAsync(
+            f => f.Id == targetFlowId && f.IsActive && f.FlowType == FlowType.Telephony, ct);
+        if (flow is null)
+        {
+            _logger.LogWarning(
+                "TelephonyFlowEngine.SwitchFlowAsync [{Uuid}]: target flow {FlowId} not found / not an active telephony flow",
+                channelUuid, targetFlowId);
+            return false;
+        }
+
+        if (!TryParseDefinition(flow, out _, out var nodes, out var entryNodeId) || nodes is null)
+            return false;
+
+        session.FlowId             = flow.Id;
+        session.FlowDefinitionJson = flow.Definition;
+        session.EventHandlers      = ScanEventHandlers(nodes);
+        await _sessionStore.SaveAsync(session, ct);
+
+        var ctx = new TelephonyFlowContext
+        {
+            ChannelUuid       = session.ChannelUuid,
+            CallerNumber      = session.CallerNumber,
+            DestinationNumber = session.DestinationNumber,
+            TenantId          = session.TenantId,
+            CampaignId        = session.CampaignId,
+            CallRecordId      = session.CallRecordId,
+            TenantSubdomain   = session.TenantSubdomain,
+            TenantSchemaName  = session.TenantSchemaName,
+            TenantTimezone    = session.TenantTimezone,
+            Esl               = esl,
+        };
+        foreach (var (k, v) in session.Vars)
+            ctx.Vars[k] = v;
+
+        ctx.Trace = new TelephonyFlowTrace { FlowId = flow.Id, FlowName = flow.Name, StartedAt = DateTimeOffset.UtcNow };
+
+        _logger.LogInformation(
+            "TelephonyFlowEngine.SwitchFlowAsync [{Uuid}]: → flow '{FlowName}' ({FlowId}) entry={Entry}",
+            channelUuid, flow.Name, flow.Id, entryNodeId);
+
+        await ExecuteFromNodeAsync(ctx, flow.Id, flow.Name, nodes, entryNodeId!, ct);
+
+        foreach (var (k, v) in ctx.Vars)
+            session.Vars[k] = v;
+        ApplyPendingSessionMutations(session);
+        await _sessionStore.SaveAsync(session, ct);
+        return true;
     }
 
     // ── Event branch execution ────────────────────────────────────────────────
@@ -277,6 +353,7 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
         // branch (e.g. agent_selected). Either way the caller of FireEventAsync is the only
         // thing that should act on it.
         session.Vars.Remove("_crm_session_json");
+        ApplyPendingSessionMutations(session);
         await _sessionStore.SaveAsync(session, ct);
 
         // Extract CRM session state if tf_script_pop fired during the branch
@@ -353,6 +430,13 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
                 await RecordStepAsync(ctx, flowId, currentNodeId, nodeType, null, null, null, terminationReason, ct);
                 break;
             }
+
+            // The flow definition keys nodes by id; individual node objects don't carry their own
+            // id. Handlers that need it (tf_voicemail stashing _vm_node_id for the deferred
+            // vm_done email lookup, tf_record for RecordingEvent traceability) read node["nodeId"],
+            // so stamp it on the parsed node before dispatch. This mutates only the per-execution
+            // parsed copy — session.FlowDefinitionJson keeps the original string.
+            nodeObj["nodeId"] = currentNodeId;
 
             _logger.LogInformation(
                 "TelephonyFlowEngine [{Uuid}]: → {NodeId} ({NodeType})",

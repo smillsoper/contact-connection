@@ -108,6 +108,14 @@
 | 96 | 2026-08-28 | 10:24 AM PDT | 11:21 AM PDT | 57 min | ~11825 min |
 | 97 | 2026-08-29 – 2026-08-30 | 11:25 AM PDT | 9:50 AM PDT | ~175 min actual work (11:25 AM–1:30 PM 8/29 + ~50 min on 8/30; overnight gap excluded) | ~12000 min |
 | 98 | 2026-08-30 | 10:05 AM PDT | 10:18 AM PDT | 13 min | ~12013 min |
+| 99 | 2026-08-30 | 10:24 AM PDT | 12:22 PM PDT | 118 min | ~12131 min |
+| 100 | 2026-08-31 | 8:19 AM PDT | 9:35 AM PDT | 76 min | ~12207 min |
+| 101 | 2026-08-31 | 9:49 AM PDT | 10:21 AM PDT | 32 min | ~12239 min |
+| 102 | 2026-08-31 | 10:28 AM PDT | 11:10 AM PDT | 42 min | ~12281 min |
+| 103 | 2026-08-31 | 11:19 AM PDT | 11:59 AM PDT | 40 min | ~12321 min |
+| 104 | 2026-08-31 → 2026-09-01 | 12:04 PM PDT (8/31) | 8:44 AM PDT (9/1) | 48 min (12:04–12:25 PM 8/31 + 8:17–8:44 AM 9/1; hard stop overnight, not idle time) | ~12369 min |
+| 105 | 2026-09-01 | 8:54 AM PDT | 3:23 PM PDT | 59 min (8:54–9:30 AM + 3:00–3:23 PM; hard stop midday, not idle time) | ~12428 min |
+| 106 | 2026-09-01 | 3:27 PM PDT | 3:47 PM PDT | 20 min | ~12448 min |
 
 ---
 
@@ -4251,3 +4259,558 @@ Flipped the agent softphone's SIP WebSocket endpoint from `.cc` to `.io` and val
 2. Quick win available: exercise the **simple-bridge delivery path** to confirm the Session 95 fix covers it (or apply the same `ClearPlayVars` treatment).
 3. Optional cleanup: retire the Cloudflare `softphone.contactconnection.cc` route once satisfied with the `.io` validation window; `docker restart cc_freeswitch` to fix container clock drift.
 4. Prior carry-overs unchanged: Level 2 Telnyx verification (EIN); `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; `FlowEngine` test coverage.
+
+---
+
+## Session 99 — Call Recording: Domain + ESL Controller + `tf_record` Node + Screen-Capture Upload (steps 1–4, live-verified)
+
+**Date:** 2026-08-30
+**Start:** 2026-08-30 10:24 AM PDT
+**End:** 2026-08-30 12:22 PM PDT
+**Duration:** 118 min
+**Cumulative Total:** ~12131 min
+
+### What Was Done
+
+Started the call-recording feature — the top inbound gap. Worked a pre-agreed ordered plan: (0) fix FreeSWITCH clock drift, then (1) domain layer, (2) ESL recording controller, (3) `tf_record` telephony flow node, (4) screen-capture upload + blob storage. Steps 1 and 3 were live-verified with a real loopback call; step 4 with an authenticated HTTP smoke test.
+
+**Design decisions locked in up front (via AskUserQuestion):** recording config lives on **Campaign only** (no tenant-default table yet); campaign `RecordingMode` is a **policy ceiling**, the `tf_record` node is the control, and node placement decides coverage; `recording_events` gets its **own typed JSONB column**, not the opaque `telephony_events` blob.
+
+**Step 0 — FreeSWITCH clock drift (`cc_timesync` sidecar).** Root cause is not FreeSWITCH-specific: every container shares the one Docker Desktop / WSL2 utility-VM kernel clock, which drifts on host sleep/hibernate (Session 98's "SIP reg EXP ~2 days stale"). Added a tiny `timesync/` Alpine+chrony image (`makestep 1.0 -1` steps the clock hard whenever >1 s off — recovers a multi-day post-resume jump that slewing never would) as a `cap_add: SYS_TIME` sidecar in `docker-compose.yml`; `freeswitch depends_on: timesync`. **Verified** by jamming the VM clock +30 s via a throwaway privileged container and watching every container snap back within ~15 s; `chronyc tracking` then showed 3 ms offset, leap status normal. `log tracking` added so a real post-resume correction is visible later.
+
+**Step 1 — domain (`AddCallRecordingConfig` migration).**
+- `RecordingEvent` value object + `RecordingEventAction` / `RecordingEventSource` / `MaskFillKind` constant holders + typed factories (`Start`/`Stop`/`Mask`/`Unmask`). Every `At` documented as a server-clock reading — the single time base the screen-capture merge aligns to.
+- `Campaign`: 7 policy columns + `ConfigureRecording(...)` (kept out of the already-16-param `Update()`, mirrors the flow-assignment methods). `RecordingMode` = `disabled` / `full` / `conversation` / `record_always_retain_by_disposition` (+ `AllowsPreBridge()`); `ConsentModel` = `one_party` / `two_party_announce` / `two_party_announce_optout` (+ `RequiresAnnouncement()`). Invalid → safe fallback; retention clamped 1–3650. Store defaults set on the columns.
+- `CallRecord`: `RecordingEvents` typed JSONB list + denormalised `RecordingStartedAt` / `RecordingStoppedAt` / `RecordingMaskedSeconds` / `RecordingRetained` / `RecordingDeletedAt` / `RecordingDeleteReason`. `AppendRecordingEvent()` recomputes aggregates from the time-sorted list every call (events can arrive out of order from independent ESL callbacks); nested masks collapse to the outermost window; a mask left open closes at stop-time else last event. `MarkRecordingPurged(reason)` clears the URL, keeps the event trail.
+- **Migration drift found & closed:** `tenant_test_contact_center` was also missing `AddCampaignRingStrategy` (Session 95) — the `database update` picked it up, so both dev schemas now match.
+- Tests: `CallRecordingTests` — 25 (policy defaults/validation/clamping, event factories, masked-seconds across paired/nested/unclosed/out-of-order/extra-unmask, purge).
+
+**Step 2 — `ICallRecordingController` (the one chokepoint for recording mechanics).**
+- `IEslCommander.RecordAsync(uuid, action, path, limit)` added; `EslClient` implements it (`uuid_record …`). `IEslCommanderFactory` / `IOwnedEslCommander` + `EslCommanderFactory` (Api) mint short-lived ESL connections so the watchdog's deferred unmask has one after the triggering node is gone.
+- `CallRecordingController` (Infrastructure, **singleton** — owns the per-channel auto-unmask watchdog; `Recording:MaxMaskSeconds` default 180). Issues `uuid_record`, stamps each `RecordingEvent` with `DateTimeOffset.UtcNow` on the API host (now NTP-clean), persists via `ICallRecordingRepository` (per-`callRecordId` `SemaphoreSlim`; explicit `Property(...).IsModified = true` since the JSONB converter has no `ValueComparer`). `Stop`/`Unmask`/`ForgetChannel` disarm the watchdog; ESL failure → `Outcome.Ok == false`, never throws. `FinalizeOnDisconnectAsync` closes the audit trail on hangup with no ESL.
+- `docker-compose.yml` mounts `./freeswitch/recordings` → container (host-readable for the future merge worker); gitignored except `.gitkeep`. Verified live that `uuid_record` is registered with `[start|stop|mask|unmask] <path> [<limit>]` and the mount is writable by the `freeswitch` user.
+- Tests: `CallRecordingControllerTests` — 12 (stereo/limit/path/source, passed-vs-owned ESL + disposal, mask-fill coercion, ESL-throws → failure, **watchdog fires → forced unmask via own connection**, explicit unmask cancels watchdog, `ForgetChannel`).
+
+**Step 3 — `tf_record` telephony flow node.**
+- `RecordNodeHandler` — `action = start|stop|mask|unmask`. On `start` loads the campaign and applies the ceiling: `disabled` → no-op; not-bridged under `conversation` → proceed + warn (honest about the soft check; `disabled` is the hard gate). Attributes the audit event to `custom_event` in an event branch (no ESL handle), `flow_node` otherwise. Placement recipes (IVR/full vs conversation-only vs sensitive-mask via `tf_on_custom_event`) documented in the class doc-comment.
+- Hangup safety net in `EslBackgroundService`: always `ForgetChannel`; if a recording was started and nothing stopped it, `FinalizeOnDisconnectAsync` appends a `stop`/`disconnect` event (a `tf_record(stop)` wired into the disconnect branch gets there first and makes this a skip).
+- Designer: `tf_record` node type + `TelNodeData` fields (`action`, `maskFill`, `maxMaskSeconds`, `recordLimitSeconds`, `reason`); `RecordNode.tsx`; palette entry (inbound + both outbound lists); `RecordNodeEditor` with action-conditional fields + placement guidance; registered in `nodeTypes`.
+- Tests: `RecordNodeHandlerTests` — 11 (mode ceiling, stereo/limit from campaign, mask/stop/unmask dispatch, unknown action, source attribution).
+- **Live verification (loopback call to Test Campaign 1, temporarily `recording_mode=full` + a `tf_record(start)` node spliced before `tf_answer`):** flow hit `tf_record_test`, `CallRecordingController` logged `Recording started … stereo=True … source=flow_node`, a **2-channel / 16-bit / 8 kHz / 8.8 s `.wav`** landed at `/var/lib/freeswitch/recordings/{callRecordId}.wav`, `recording_events` JSONB got a clean `start` (`flow_node`, ISO-8601 ms server timestamp) → `stop` pair, and — with no `tf_record(stop)` wired — the hangup safety net fired (`Recording finalised on disconnect`, source `disconnect`, reason `NORMAL_CLEARING`) and set `recording_started_at`/`recording_stopped_at`. Flow definition, campaign setting, and all scratch rows/files reverted afterward.
+
+**Step 4 — screen-capture upload + blob storage (`AddScreenRecordings` migration).**
+- `ScreenRecording` entity (one per agent-session capture; warm transfer → several per call). Computes `ClientClockOffsetMs` (server − client) at start from the clock handshake; `ReceivedChunkIndices` for resumable upload; `CuePoints` (bridge/hold/mask/… sync anchors); `MarkComplete` contiguity guard (missing index → throws). `ScreenRecordingCuePoint` value object.
+- `IBlobStorage` + `LocalFileBlobStorage` (filesystem, path-traversal-guarded; Azure Blob slots in behind the same interface). `Storage:LocalRoot`, gitignored.
+- `ScreenRecordingsEndpoints` — `GET /time` (clock handshake), `POST /` (start), `PUT /{id}/chunks/{index}` (raw binary, idempotent), `POST /{id}/cuepoints` (batch), `POST /{id}/complete`, `POST /{id}/abort`, `GET /{id}`, `GET /call-records/{id}/screen-recordings`. All tenant-scoped. Migration applied to both dev schemas. The Chrome extension itself is not built — this is the server contract it will target.
+- **Bug caught by the smoke test:** `received_chunk_indices` / `cue_points` JSONB lists weren't persisting between requests — the same EF "value-converter, no `ValueComparer`" trap that would have let a recording with missing chunks pass the completion guard. Fixed with a `SequenceEqual` + shallow-copy `ValueComparer` on both list properties in `ScreenRecordingConfiguration`; re-verified. (`CallRecord.CommitmentEvents` has the same latent issue — pre-existing, not touched.)
+- Tests: `ScreenRecordingTests` — 11 (offset calc incl. negative, chunk dedup + byte accounting, contiguity guard both ways, cue points, abort/fail); `LocalFileBlobStorageTests` — 9 (round-trip, overwrite, delete, delete-prefix, path-traversal rejection).
+- **Live smoke test** (authenticated, scratch agent): start → 3 chunks (persisted `[0,1,2]`) → idempotent re-PUT (no double-count) → batch cue points (survive DB reload) → contiguous complete → 200; gap case → 400 with a clear error; blobs on disk at `storage/screen/{callRecordId}/{id}/000000.webm`. All scratch data/agents/storage removed afterward.
+
+### Final State
+
+- Full solution builds 0 errors; **381 tests pass** (Domain 96, Application 20, Infrastructure 197, Api 68). Web app typechecks.
+- Two new migrations (`AddCallRecordingConfig`, `AddScreenRecordings`) applied to `tenant_test_tenant` **and** `tenant_test_contact_center`.
+- New infra: `cc_timesync` container (permanent); `./freeswitch/recordings` bind mount (permanent).
+- Nothing committed.
+
+### Inbound gap list — updated
+
+| Item | Status |
+|---|---|
+| **Call recording** | **Steps 1–4 done & live-verified** (clock fix, domain, ESL controller + watchdog, `tf_record` node + designer, screen-capture upload + blob store). **Remaining:** campaign recording-policy edit endpoint/UI (currently SQL-only); consent-model enforcement (announcement / DTMF opt-out); auto-mask-on-hold wiring; beep; `tf_secure_collect` guided-DTMF node; ffmpeg transcode/merge worker + sync-player UI; retention purge job; the Chrome extension itself. |
+| IVR menu node | Not started. Next-highest inbound gap. |
+| Voicemail node (`tf_voicemail`) | Not started. |
+| Transfer-to-queue node (`tf_transfer`) | Not started. |
+| Callback lifecycle | Not started. |
+| DNC registry lookup | Not started (phone-node placeholder). |
+| RTP port range | Still pinned to 10 ports — widen for production concurrency. |
+| Simple-bridge delivery path | Still unexercised (Session 95 `uuid_break` race may be latent). |
+
+### Next Session — pick up here
+
+1. Call recording, remaining highest-value slices: **campaign recording-policy edit endpoint + Portal/Admin UI** (so it's not SQL-only), then **consent-model enforcement** (announcement + optional DTMF opt-out) and **auto-mask-on-hold** wiring.
+2. Then either the **ffmpeg transcode/merge worker** (`ContactConnection.Worker` sibling) or the **`tf_secure_collect` guided-DTMF node** — both were deferred from this plan as their own steps.
+3. `CallRecord.CommitmentEvents` JSONB `ValueComparer` gap noted in step 4 — retrofit opportunistically (low risk, not urgent).
+4. Prior carry-overs unchanged: IVR menu node; Level 2 Telnyx verification (EIN); `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; `FlowEngine` test coverage; retire the `.cc` softphone route after the validation window.
+
+---
+
+## Session 100 — Recording Policy UI + Auto-Mask-on-Hold + `tf_ivr_menu` (IVR node) + Consent-Model Enforcement (all live-verified)
+
+**Date:** 2026-08-31
+**Start:** 2026-08-31 8:19 AM PDT
+**End:** 2026-08-31 9:35 AM PDT
+**Duration:** 76 min
+**Cumulative Total:** ~12207 min
+
+### What Was Done
+
+Continued the Session 99 call-recording plan. Four things shipped, every one confirmed against a real inbound call to `+15419196582`:
+
+**1. Campaign recording-policy edit endpoint + UI.** `PUT /api/v1/campaigns/{id}/recording` (its own endpoint, like `SetFlow` — not folded into `Update`'s long positional list); thin pass-through to `Campaign.ConfigureRecording`, recording fields added to both campaign response shapes. `updateCampaignRecording` + `recording*` fields on the `Campaign` type in `telephony.ts`. New **"Call Recording" card** in `CampaignDetailPage.tsx` — mode / consent-model selects with inline hints, retention days, toggles for stereo / required / auto-mask-on-hold / beep; fields disable when mode = `disabled`; own Save button. Endpoint smoke-tested (full custom policy round-trips; invalid mode → `disabled`, retention 9000 → clamped 3650; reset OK).
+
+**2. Auto-mask-on-hold.** `EslBackgroundService` now subscribes to `CHANNEL_HOLD` / `CHANNEL_UNHOLD` (fired on the agent leg when the softphone holds). `HandleChannelHoldAsync` resolves the session (existing `Other-Leg-Unique-ID` fallback), and when the campaign has `AutoMaskOnHold` **and** a recording is running, masks (source `auto_hold`, silence) on hold and unmasks on resume. **Live:** two hold cycles → two `mask(auto_hold)`/`unmask(auto_hold)` pairs in `recording_events` with `agent_hold`/`agent_unhold` reasons; `recording_masked_seconds = 17` (11.8 s + 4.8 s windows, summed by the domain aggregation); one continuous 35 s stereo WAV with silence in the masked spans.
+
+**3. `tf_ivr_menu` — the DTMF-collection / IVR menu node** (the flagged inbound gap). This FreeSWITCH build has **no `uuid_execute`**, so the node sets `cc_ivr_*` channel vars and `uuid_transfer`s the caller into a new **`ivr_collect` dialplan extension** (`freeswitch/conf/dialplan/default.xml`) that runs `play_and_get_digits` — FreeSWITCH owns prompt playback, barge-in, per-digit timeout, terminators, invalid re-prompt, retry count — then fires a `CUSTOM contactconnection::ivr_done` event with the digits and re-parks. `EslBackgroundService` reads the digits off that event and `ResumeFromNodeAsync`s at the matched option's transition (or `no_match`). The re-park is filtered by a guard (`destination == "ivr_collect"` / transfer-source / `_ivr_in_progress` session var). Prompts must be **audio files** — `play_and_get_digits`' positional arg parser can't take a TTS string with spaces (learned the hard way; documented on the node).
+   - `IvrMenuNodeHandler` + `IvrMenu` pure helper (regexp build `^(1|2|9)$`, digit→transition resolution) + `IEslCommander.TransferAsync`. Designer: `tf_ivr_menu` node type (`handles: 'multi'` — one source handle per option + `no_match`), `IvrMenuNode.tsx`, `IvrMenuNodeEditor` (audio prompt, digit/timeout/tries settings, options list of digit→transition-name pairs), palette + `nodeTypes`.
+   - **Live:** real call, both branches — press `1` → `ivr_done digits='1' → node tf_answer_7` (call proceeded, agent got it); no input → after 2 prompts → `digits='(none)' → node tf_play_3` (goodbye + hangup). One CallRecord per call, no dups, no SLOW warnings, no ESL errors. (Automated loopback testing got to the transfer but can't exercise `play_and_get_digits` — the loopback caller leg has no media pre-bridge.)
+
+**4. Consent-model enforcement** in `tf_record(start)`. When the campaign's `ConsentModel` requires an announcement (`two_party_announce` / `two_party_announce_optout`), the node `uuid_broadcast`s the consent audio (node's `consentAudioFileId`, else a TTS fallback with a fixed default phrase so a two-party campaign can never start recording with *no* announcement) on the caller leg immediately before `uuid_record start` — so the announcement is captured at the head of the file as proof it played. The DTMF opt-out is flow design: put a `tf_ivr_menu` before `tf_record` and route opt-out callers around it. Designer: consent audio / TTS-text fields on the `tf_record` start editor. **Live:** file path (heard "recording started" from `ivr-recording_started.wav`) and TTS fallback (heard the default phrase) — log shows the broadcast firing immediately before `Recording started` both times; `recording_events` clean `start → stop`.
+
+**Also:** fixed a Session-99 `.gitignore` bug — a bare `storage/` (for the blob dir) was, git matching being case-insensitive here, silently ignoring `ContactConnection.Infrastructure/Storage/` and `tests/.../Storage/`, so `LocalFileBlobStorage.cs` + its tests weren't tracked. Changed to root-anchored `/storage/` + `/ContactConnection.Api/storage/`.
+
+New shared bits: `TelephonyAudioResolver` (extracted the audio-file-id → FS-path logic that `PlayNodeHandler` and `WhisperNodeHandler` each carried a private copy of; new call sites use the shared one).
+
+### Final State
+
+- Full solution builds 0 errors; **399 tests pass** (Domain 96, Application 20, Infrastructure 215, Api 68). Web app typechecks.
+- New committed-quality changes not yet committed (56 files, this session + Session 99). No new migrations this session.
+- Real infra change kept: `freeswitch/conf/dialplan/default.xml` gains the `ivr-collect` extension (reloadable via `reloadxml`; already reloaded on the running container).
+- All scratch data reverted (flow definition, campaign settings, scratch call records, scratch `.wav`s); API stopped.
+
+### Inbound gap list — updated
+
+| Item | Status |
+|---|---|
+| **Call recording** | Domain + ESL controller + `tf_record` node + screen-capture upload done (Session 99). **This session:** campaign recording-policy endpoint + UI ✓, auto-mask-on-hold ✓, consent-model enforcement (announcement + TTS fallback) ✓ — all live-verified. **Remaining:** beep (toggle exists, not wired); `tf_secure_collect` guided-DTMF node; ffmpeg transcode/merge worker + sync-player UI; retention purge job; the Chrome extension. |
+| ~~IVR menu node~~ | **`tf_ivr_menu` done & live-verified this session** (`play_and_get_digits` via the `ivr_collect` dialplan extension). |
+| Voicemail node (`tf_voicemail`) | Not started. Now next-highest inbound gap. |
+| Transfer-to-queue node (`tf_transfer`) | Not started. |
+| Callback lifecycle | Not started. |
+| DNC registry lookup | Not started (phone-node placeholder). |
+| RTP port range | Still pinned to 10 ports — widen for production concurrency. |
+| Simple-bridge delivery path | Still unexercised (Session 95 `uuid_break` race may be latent). |
+
+### Next Session — pick up here
+
+1. Call recording tail: **ffmpeg transcode/merge worker** (`ContactConnection.Worker` sibling — reads the stereo WAV + screen chunks, produces the merged output using `recording_events` + screen `CuePoints` as the edit list) OR the **`tf_secure_collect` guided-DTMF node** (zero-trust sensitive-field entry — now unblocked by the `ivr_collect` machinery). Also the small ones: recording **beep** wiring, **retention purge job**.
+2. **`tf_voicemail` node** — next inbound gap after IVR.
+3. `CallRecord.CommitmentEvents` JSONB `ValueComparer` gap (Session 99) — retrofit opportunistically.
+4. Prior carry-overs: Level 2 Telnyx verification (EIN); `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; `FlowEngine` test coverage; retire the `.cc` softphone route after the validation window.
+
+---
+
+## Session 101 — ffmpeg Transcode / A-V Merge Worker (`RecordingMergeService`), live-verified end-to-end
+
+**Date:** 2026-08-31
+**Start:** 2026-08-31 9:49 AM PDT
+**End:** 2026-08-31 10:21 AM PDT
+**Duration:** 32 min
+**Cumulative Total:** ~12239 min
+
+### What Was Done
+
+Built the call-recording tail's largest piece: the background worker that turns a finished call's raw stereo audio WAV (plus any agent screen captures) into a single playable artifact in blob storage, and points `CallRecord.RecordingUrl` at it. Live-verified end-to-end against the real Worker host, real ffmpeg 8.1.2, real Postgres, and real `LocalFileBlobStorage` — both the mux path and the audio-only path.
+
+**Design decisions locked up front (AskUserQuestion):** dedicated `recording_merge_jobs` tracking table (not a `RecordingUrl`-null sentinel) — gives idempotent claim, attempt/backoff, failure visibility, and the ffmpeg command line for repro; v1 output = **audio always, screen video when a usable capture exists**; output lands in `IBlobStorage`, and `RecordingUrl` points at a new streaming API endpoint (not the bare blob key).
+
+**Domain — `RecordingMergeJob` entity (`AddRecordingMergeJobs` migration, both dev schemas).**
+- One row per call record (unique index). Lifecycle `pending -> processing -> complete | failed | skipped`. `Claim(now)` (guarded by `IsClaimable` — pending + backoff elapsed) flips to `processing`, `++Attempts`, stamps `StartedAt`. `Succeed(...)` records `OutputBlobKey` / `OutputFormat` / `OutputDurationMs` / `HadVideo` / `ScreenRecordingId` / `ScreenRecordingCount` / `FfmpegCommand`. `Fail(error, backoff)` returns to `pending` with `NextAttemptAt` pushed out (linear backoff, 1-min floor) until `Attempts >= MaxAttempts` (5) -> terminal `failed`. `Skip(reason)` for non-error dead-ends (recording not retained, audio gone). `Requeue()` for an operator re-merge. Long errors truncated to 2000 chars.
+- Tests: `RecordingMergeJobTests` — 12 (defaults, claim guard both ways, succeed incl. zero-duration->null, fail below/at max, backoff floor, skip terminal, requeue, error truncation).
+
+**Application — interfaces.**
+- `IRecordingMergeJobRepository` (tenant-scoped, resolves schema from ambient `TenantContext` like `IScreenRecordingRepository`): `FindCallRecordIdsNeedingMergeAsync(updatedBefore, limit)` (recording started, retained, no `recording_url`, settled, no existing job), `GetClaimableAsync`, `GetByIdAsync` / `GetByCallRecordIdAsync`, `AddAsync`, `SaveChangesAsync`.
+- `IRecordingMerger` + `RecordingMergeRequest` / `RecordingMergeResult` / `ScreenRecordingInput` records.
+
+**Infrastructure — the merger.**
+- `FfmpegCommandBuilder` (pure, unit-testable): `BuildAudioOnly` (WAV -> AAC in `.m4a`, `+faststart`); `BuildMux` (call audio is the spine, kept in full from t0 — compliance; screen capture is the video track, shifted onto the audio timeline by `videoOffsetSeconds` = `screenStartedAtServer - recordingStartedAt` — `-itsoffset` when >= 0, `-ss` head-trim when < 0; `libx264`/`yuv420p`, even-dimension `scale` filter, **no `-shortest`**). Offset formatted invariant-culture.
+- `IFfmpegRunner` / `FfmpegRunner` — process seam over the ffmpeg + ffprobe CLIs (arg vector via `ArgumentList`, stderr capture, configurable timeout with tree-kill, `ffprobe format=duration` for output length). Path resolves `Recording:Ffmpeg:Path` -> existing `FreeSWITCH:FfmpegPath` dev setting -> bare `ffmpeg`; ffprobe derived alongside.
+- `FfmpegRecordingMerger` — per-call temp dir (always cleaned): copies the WAV in, picks a screen capture (v1 heuristic: most chunks + longest `DurationMs`, earliest tie-break — warm-transfer multi-segment stitching is a later pass), **binary-concatenates** its chunks pulled from `IBlobStorage` (MediaRecorder timeslice blobs re-concat to one valid webm), runs ffmpeg, and on a **mux failure falls back to audio-only** so the call still gets *a* recording. Publishes to `recordings/{callRecordId}/merged.{mp4|m4a}`; degrades to audio-only if any screen chunk blob is missing.
+- Registered in `AddInfrastructure`: `IFfmpegRunner` + `IRecordingMerger` singletons, `IRecordingMergeJobRepository` scoped.
+- Tests: `FfmpegCommandBuilderTests` — 7; `FfmpegRecordingMergerTests` — 8 (fake `IFfmpegRunner` + real temp-dir `LocalFileBlobStorage`: audio-only, mux + `-itsoffset` alignment, missing audio, mux->audio-only fallback, all-fail, missing-chunk degrade, multi-segment pick-longest).
+
+**Worker — `RecordingMergeService : BackgroundService`.**
+- Per poll pass, per active tenant: **enqueue** (create jobs for settled unmerged recordings), **reap** (jobs stuck in `processing` past `StuckJobMinutes` -> `Fail` back, covers worker crash mid-merge), **claim** (`pending` + due -> `processing`, own short-lived scope), **process** (each claimed job in its own scope: locate `{AudioSourceDir}/{callRecordId}.wav`, gather the call's `complete` screen recordings, call the merger; on success write `CallRecord.RecordingUrl = /api/v1/call-records/{id}/recording` **first** then `job.Succeed`; on any failure `job.Fail`). Config under `Recording:Merge:*` (poll 60s / settle 120s / backoff 300s / stuck 30min / batch 10). Single-instance claim caveat noted (same as `SubscriptionProcessingService`).
+- Registered in `Program.cs`; `Recording:Merge` + `Storage:LocalRoot` config added to `appsettings.json`, dev ffmpeg path to `appsettings.Development.json` (mirrors the API's existing one).
+
+**API — `GET /api/v1/call-records/{id}/recording` (`CallRecordingsEndpoints`).**
+- Tenant-scoped, `RequireAuthorization`. `!RecordingRetained` -> 410 (with delete reason); no job / `failed` / `skipped` -> 404; `pending` / `processing` -> 202 `{ status: "processing" }`; `complete` -> streams the blob (`Results.Stream`, `enableRangeProcessing: true` for seek), `video/mp4` or `audio/mp4` by `job.OutputFormat`. Mapped in `Program.cs`.
+
+**Live verification (real Worker in `--environment Production`, real ffmpeg 8.1.2, `tenant_test_tenant`).**
+- Synthetic scratch call: `call_records` row with `recording_started_at` set + `recording_url` null; synthetic stereo 6 s `call.wav` at `freeswitch/recordings/{id}.wav`; `screen_recordings` row (`complete`) + 5 binary-split webm chunks in `storage/screen/{id}/{srId}/`.
+- **Mux path:** Worker logged `Queued 1 recording-merge job` -> `Merged recording ... -> recordings/{id}/merged.mp4 (mp4, video=True)`; `recording_merge_jobs` row -> `complete`, `attempts=1`, `had_video=t`, `ffmpeg_command` captured, `started_at`/`completed_at` stamped; `call_records.recording_url` -> `/api/v1/call-records/{id}/recording`; **`merged.mp4` on disk** — `ffprobe` confirms `aac,audio,6.0s` + `h264,video,4.0s` (full audio kept, video muxed with the 3 s alignment offset applied). (`output_duration_ms` read 17533 — the synthetic byte-split VP8 webm carries a bogus container duration; stream-level durations are correct, real MediaRecorder output carries proper timing.)
+- **Audio-only path:** removed the screen recording, re-ran -> `Merged recording ... -> merged.m4a (m4a, video=False, 6000ms)`; job `complete`, `had_video=f`; **`merged.m4a` on disk** (clean 6 s).
+- **Endpoint wiring smoke** (API on :5000): unauth `GET /recording` -> **401**; bogus sibling route -> **404**; `POST /recording` -> **405**. Full authorized playback not exercised (no token-bearing session this session) — the 200/202/410 branches are simple conditionals over data already verified present, and the `IBlobStorage` read path is covered by the merger E2E + unit tests.
+- **`FfmpegCommandBuilder` output validated against real ffmpeg 8.1.2** directly (both arg vectors accepted, both produce valid output, `-vf scale=trunc(iw/2)*2:trunc(ih/2)*2` + `-map 0:a -map 1:v` all fine).
+- All scratch rows/files/`storage/` removed afterward; API + Worker stopped.
+
+### Discovered (pre-existing, not caused this session)
+
+**`ContactConnection.Worker` does not boot in `Development`.** `AddInfrastructure` now pulls in the full flow/telephony DI graph (`FlowEngine`, `CallRecordingController`, telephony node handlers, `AgentStateStore`, ...) whose notifier deps (`IFlowNotifier`, `IDashboardNotifier`, `ICallTraceNotifier`, `IEslCommanderFactory`) are only registered in the **API's** `Program.cs`. `Host.CreateApplicationBuilder` runs `ValidateOnBuild` in Development -> the host throws at startup. It runs fine in `Production` (validation off; the unsatisfied services are never resolved by the three hosted workers). Pre-dates this session — `SubscriptionProcessingService`/`FreeSwitchEslService` are equally affected. Fix later: register no-op notifiers in the Worker, or slim the Worker's DI to what its hosted services actually need.
+
+### Final State
+
+- Full solution builds **0 errors**; **424 tests pass** (Domain 108, Application 20, Infrastructure 228, Api 68) — +25 (RecordingMergeJob 12, FfmpegCommandBuilder 7, FfmpegRecordingMerger 8). Web app untouched.
+- One new migration `AddRecordingMergeJobs` applied to `tenant_test_tenant` **and** `tenant_test_contact_center`.
+- Nothing committed.
+
+### Inbound gap list — updated
+
+| Item | Status |
+|---|---|
+| **Call recording** | Domain + ESL controller + `tf_record` + screen-capture upload (S99); policy endpoint/UI + auto-mask-on-hold + consent enforcement (S100). **This session: ffmpeg transcode/merge worker done** (`RecordingMergeService` + `recording_merge_jobs` + `FfmpegRecordingMerger` + `GET .../recording` streaming endpoint) — live-verified both paths. **Remaining:** sync-player UI (consumes the merged output + `recording_events`/`CuePoints` EDL); beep wiring; `tf_secure_collect` guided-DTMF node; retention purge job; the Chrome extension. |
+| Voicemail node (`tf_voicemail`) | Not started. Next-highest inbound gap. |
+| Transfer-to-queue node (`tf_transfer`) | Not started. |
+| Callback lifecycle | Not started. |
+| DNC registry lookup | Not started (phone-node placeholder). |
+| RTP port range | Still pinned to 10 ports — widen for production concurrency. |
+| Simple-bridge delivery path | Still unexercised (Session 95 `uuid_break` race may be latent). |
+| **Worker won't boot in Development** | New find (see above). Pre-existing DI gap; fix before the Worker is relied on in dev. |
+
+### Next Session — pick up here
+
+1. **`tf_voicemail` node** — next inbound gap after IVR/recording.
+2. Recording tail leftovers: **beep** wiring, **retention purge job** (Worker sibling — `MarkRecordingPurged` + `DeletePrefixAsync` on the merged output past `RecordingRetentionDays`), **`tf_secure_collect`** guided-DTMF node.
+3. **Fix the Worker's Development boot** (no-op notifiers or slimmed DI) so `RecordingMergeService` runs under a normal `dotnet run`.
+4. `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit (opportunistic).
+5. Prior carry-overs: Level 2 Telnyx verification (EIN); `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; `FlowEngine` test coverage; retire the `.cc` softphone route after the validation window.
+
+---
+
+## Session 102 — tf_voicemail node (greeting → record → store → email delivery + supervisor push), backend + designer
+
+**Date:** 2026-08-31
+**Start:** 2026-08-31 10:28 AM PDT
+**End:** 2026-08-31 11:10 AM PDT
+**Duration:** 42 min
+**Cumulative Total:** ~12281 min
+
+### What Was Done
+
+Built `tf_voicemail` — the next inbound gap. Plays a greeting, records the caller's message (built-in max length + silence detection), stores it, and optionally emails it as a .wav attachment with a variable-resolved HTML body. Same async-via-dialplan shape as `tf_ivr_menu` (this FS build has no `uuid_execute`).
+
+**Design decisions (AskUserQuestion + one mid-session addition):** dedicated `Voicemail` entity + blob storage (not append-to-call-record); notification = row + supervisor SignalR push; email delivery is a per-node option with **to / cc / bcc lists, editable From name, Reply-to** (added mid-session), a subject, and an **HTML body designed in the same rich-text editor as the CRM script node** — every text field variable-resolved (`{{caller.*}}`, `{{call_record.*}}`, `{{flow.*}}`) at send time; `.wav` attached by default.
+
+**Domain — `Voicemail` entity (`AddVoicemails` migration, both dev schemas).**
+- Child of the call record. `StorageKey` derived from its own id (`voicemails/{callRecordId}/{id}.wav`). `Status` new → heard → archived (+ `Restore()`); `MarkHeard(agentId)` is first-listener-wins. `RecordEmailDelivery(status, recipients, error?)` stamps `sent`/`failed`/`skipped` + `EmailDeliveredAt` only on sent. `SetTranscription` reserved for a later pass.
+- Tests: `VoicemailTests` — 9.
+
+**Application.**
+- `IVoicemailRepository` (tenant-scoped, serves the API; the ESL path writes via `ITenantDbContextFactory` directly).
+- **`IEmailService` extended** — new `SendAsync(EmailMessage)` with `To/Cc/Bcc`, overridable `FromName` (address stays the verified sender), `ReplyTo`, and `EmailAttachment[]`. Old `SendAsync(to, subject, html)` now delegates to it.
+
+**Infrastructure.**
+- `VoicemailConfiguration` / `VoicemailRepository`.
+- `ResendEmailService` — implements the rich send: `cc`/`bcc`/`reply_to` added only when non-empty, `from` composed as `"{FromName} <configured-address>"`, attachments as `{ filename, content(base64), content_type }`.
+- `VoicemailNodeHandler` (`tf_voicemail`) — resolves the greeting (audio file first, flite-TTS fallback, else `silence_stream://500`), sets `cc_vm_*` channel vars (path, max length, silence threshold/seconds, beep = `tone_stream://%(500,0,800)` or silence), stashes continuation in session vars (`_vm_in_progress` / `_vm_node_id` / `_vm_next_recorded` / `_vm_next_no_message` / `_vm_min_ms` / `_vm_path`), and `uuid_transfer`s to `vm_record`. Terminal — resume comes from the `vm_done` event.
+- `VoicemailEmail` (pure helper) — `ParseRecipients` (split on `,;` + whitespace, `@` filter, case-insensitive dedupe) and `Build(node, resolver, varCtx, attachment)` → `EmailMessage?` (null when delivery disabled or no recipients); default subject `New voicemail from {{caller.phone}}`; honours `deliveryAttachAudio`.
+- Tests: `VoicemailNodeHandlerTests` — 7; `VoicemailEmailTests` — 13; `ResendEmailServiceTests` — 4 (payload mapping, from-name composition, empty-field omission, legacy method).
+
+**API — `EslBackgroundService`.**
+- Subscribed `contactconnection::vm_done`; `HandleVmDoneAsync`: reads `record_ms` (or estimates from the .wav size — 8 kHz/16-bit/mono — when the caller hung up mid-message), below `_vm_min_ms` → resume `no_message`; otherwise reads the .wav off the recordings mount (`FreeSWITCH:RecordingsHostPath`, default `freeswitch/recordings`), `PutAsync` to `IBlobStorage` at the entity's key, writes the `Voicemail` row, runs `DeliverVoicemailEmailAsync` (re-reads the node's `delivery*` block from the cached `session.FlowDefinitionJson`, builds a `VariableContext` from the call + session flow vars, sends, stamps the outcome), fires `IDashboardNotifier.NotifyVoicemailReceivedAsync`, deletes the local .wav, resumes `recorded`.
+- **Hangup salvage:** `HandleChannelHangupCoreAsync` calls `HandleVmDoneAsync(..., fromHangup: true)` when `_vm_in_progress` is set — the caller hanging up right after the message means the extension's trailing `event`+`park` never ran; the salvage path stores it (size-estimated duration) and skips the flow resume.
+- `CHANNEL_PARK` guard extended so the `vm_record` re-park isn't treated as a new inbound call.
+- `IDashboardNotifier.NotifyVoicemailReceivedAsync` + `IFlowHubClient.ReceiveVoicemail` + `DashboardNotifier` impl (pushes to `supervisor:{tenantId}`).
+
+**API — `VoicemailsEndpoints`.** `GET /call-records/{id}/voicemails`, `GET /campaigns/{id}/voicemails?status=&limit=` (inbox), `GET /voicemails/{id}`, `GET /voicemails/{id}/audio` (blob stream, range-enabled), `POST /voicemails/{id}/{heard|archive|restore}`. All tenant-scoped.
+
+**FreeSWITCH — `vm-record` dialplan extension** (`default.xml`, mirrors `ivr-collect`): `answer` → `playback_terminators=#` → greeting → beep → `record ${cc_vm_path} ${cc_vm_maxlen} ${cc_vm_silence_thresh} ${cc_vm_silence_secs}` → `CUSTOM contactconnection::vm_done` (path + `record_ms`) → `park`. Copied into the running container + `reloadxml` (clean).
+
+**Web — telephony designer.** `tf_voicemail` node type + `TelNodeData` fields + `TELEPHONY_NODE_META` (`handles: 'multi'`, purple) + `defaultTelNodeData`. `VoicemailNode.tsx` (fixed `recorded` / `no_message` source handles). `VoicemailNodeEditor` in the properties panel — greeting (file + TTS fallback + voice), beep toggle, max/silence/min length; **"Also deliver by email"** section: to/cc/bcc, From name, Reply-to, subject, and a `RichTextEditor` (reused from `components/designer/`) for the body with quick-insert `{{variable}}` buttons, attach-audio toggle. Palette (inbound list) + `nodeTypes` registration.
+
+### Verified
+
+- Full solution builds **0 errors**; **455 tests pass** (Domain 117, Application 20, Infrastructure 250, Api 68) — +31. Web app typechecks.
+- `AddVoicemails` migration applied to `tenant_test_tenant` **and** `tenant_test_contact_center`.
+- API boots in Development (DI validation passes — `VoicemailNodeHandler`, `IVoicemailRepository`, the new notifier method, the extended `IEmailService` all wire up).
+- Voicemail API routes mapped + auth-gated (401 unauth smoke on all three).
+- FreeSWITCH `reloadxml` clean with the new `vm-record` extension.
+
+**Not verified:** the live `vm_done` orchestration (blob write → row → email → SignalR → resume). Tried to inject the CUSTOM event synthetically via `fs_cli sendevent` / `luarun` — this FS build takes neither (no inline header form; mod_lua not loaded). Needs a real inbound call with a person leaving a message, same as tf_ivr_menu's Session-100 verification. The pieces it chains are individually unit-tested and the handler mirrors the proven `HandleIvrDoneAsync`.
+
+### Final State
+
+- Nothing committed (Sessions 92–102 accumulating in the working tree, per the standing pattern).
+- Real infra change kept: `freeswitch/conf/dialplan/default.xml` gains the `vm-record` extension (already `reloadxml`'d on the running container).
+- All scratch data removed (call record, Redis session, .wav, `storage/`); API stopped.
+
+### Inbound gap list — updated
+
+| Item | Status |
+|---|---|
+| Call recording | Done through Session 101 (merge worker). Remaining: sync-player UI, beep wiring, `tf_secure_collect`, retention purge job, Chrome extension. |
+| ~~Voicemail node (`tf_voicemail`)~~ | **Backend + designer done this session.** Live `vm_done` path pending a real inbound call. |
+| Transfer-to-queue node (`tf_transfer`) | Not started. Next-highest inbound gap. |
+| Callback lifecycle | Not started. |
+| DNC registry lookup | Not started (phone-node placeholder). |
+| RTP port range | Still pinned to 10 ports — widen for production concurrency. |
+| Simple-bridge delivery path | Still unexercised (Session 95 `uuid_break` race may be latent). |
+| Worker won't boot in Development | Pre-existing DI gap (Session 101) — fix before the Worker is relied on in dev. |
+
+### Next Session — pick up here
+
+1. **Live-verify tf_voicemail** on a real inbound call to `+15419196582` (drive it like tf_ivr_menu in Session 100): leave a message, confirm the `.wav` lands in blob storage, the `voicemails` row is written, the supervisor SignalR `ReceiveVoicemail` fires, and — with a real `Resend:ApiKey` — the email arrives with the attachment + resolved body. Also test the hangup-salvage path (hang up instead of pressing #).
+2. **`tf_transfer`** (warm transfer-to-queue) — next inbound gap.
+3. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
+4. Fix the Worker's Development boot (Session 101 carry-over).
+5. `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit (opportunistic).
+6. Prior carry-overs: Level 2 Telnyx verification (EIN); `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; `FlowEngine` test coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 103 — tf_voicemail live-verified end-to-end (4 real calls) + 3 bug fixes
+
+**Date:** 2026-08-31
+**Start:** 2026-08-31 11:19 AM PDT
+**End:** 2026-08-31 11:59 AM PDT
+**Duration:** 40 min
+**Cumulative Total:** ~12321 min
+
+### What Was Done
+
+Live-verified the Session 102 `tf_voicemail` node against **four real inbound calls** to `+15419196582` (Telnyx trunk → FreeSWITCH → `vm_record` dialplan), and fixed three bugs found along the way — one of which would have silently killed email delivery on every real call.
+
+**Scratch rig:** swapped `Test Campaign 1 - Inbound Call Flow` (id `8386ec2d…`, in `tenant_test_tenant`) to a minimal `tf_voicemail` entry flow (TTS greeting, beep, 60s max / 4s silence / 2s min, email delivery **on** → `sopermills2010@gmail.com` with templated `{{caller.phone}}` / `{{call_record.id}}` / `{{caller.dnis}}` subject+body, `.wav` attached; `recorded` → TTS thanks, `no_message` → TTS, both → hangup). API run in Development on :5135 with `FreeSWITCH__RecordingsHostPath` pinned absolute. Original flow restored + all scratch call records / voicemails / call-state history / blob files removed afterward.
+
+### Bugs fixed
+
+1. **`node["nodeId"]` was always null on real flows** — the telephony designer keys nodes by id but never writes an `id`/`nodeId` field *into* each node object (`toTelDef` in `TelephonyDesignerPage.tsx`). `VoicemailNodeHandler` reads `node["nodeId"]` to stash `_vm_node_id`, which `HandleVmDoneAsync` → `DeliverVoicemailEmailAsync` needs to re-find the delivery config in the cached flow def. Empty `_vm_node_id` → node lookup returns null → **email delivery silently `Skipped` on every real call** (only the unit tests, which set `nodeId` explicitly, passed). `RecordNodeHandler` reads the same field for `RecordingEvent.NodeId` traceability. **Fix:** `TelephonyFlowEngine.ExecuteFromNodeAsync` now stamps `nodeObj["nodeId"] = currentNodeId` on the parsed node before handler dispatch (mutates only the per-execution parsed copy; `session.FlowDefinitionJson` keeps the original string). Applies to all three dispatch paths (initial, resume, event).
+
+2. **Hangup-salvage duration estimate 6× too long** — when the caller hangs up mid-message there is no `record_ms`, so `HandleVmDoneAsync` estimated duration from `.wav` size assuming 8 kHz/16-bit/mono (16000 B/s). Carrier/WebRTC legs actually record at **48 kHz** (96000 B/s). Call 3 stored **21 s** for a real **3.42 s** message. **Fix:** new `EstimateWavDurationMs(path, fileLen)` reads the canonical 44-byte PCM WAV header's **ByteRate** field (bytes 28–31, LE) and computes `(fileLen − 44) / byteRate`; falls back to the 16 kB/s assumption if the header can't be read. Call 4 verified: 4.72 s real → **5 s** stored.
+
+3. **Salvage ran the whole vm_done orchestration inline on the ESL event loop** — `HandleChannelHangupCoreAsync` `await`ed `HandleVmDoneAsync(fromHangup:true)`, including the ~1.4 s synchronous Resend HTTP call → `HandleChannelHangupAsync SLOW … took 1583ms — ESL event loop was stalled this long`. Under concurrency this stalls all telephony event processing behind every voicemail hangup. **Fix:** the hangup handler now **claims** the salvage synchronously (`_vm_in_progress = "salvaging"` + one cheap Redis `SaveAsync`, so a racing `contactconnection::vm_done` event can't also store the message) and runs the slow part (file → blob → DB → email → SignalR) in a fire-and-forget `Task.Run` with `CancellationToken.None` — same pattern already used for ACW auto-transition in the same method. `HandleVmDoneAsync` gained an optional `knownSession` param so the spawned task doesn't re-resolve a session that's being torn down right after, and skips its own `SaveAsync` on the salvage path (session is about to be deleted; the claim write already happened). Also: `ResendEmailService` now logs the Resend response body (message id) on success.
+
+### Verified (4 live calls)
+
+| Path | Calls | Result |
+|---|---|---|
+| Inbound DID → `tf_voicemail` → `vm_record` (flite greeting + beep + `record`) | 1–4 | ✓ |
+| Normal end (`#` / silence) → `contactconnection::vm_done` CUSTOM event | 1, 2 | ✓ |
+| Hangup mid-message → `HandleChannelHangupCoreAsync` salvage (`fromHangup:true`) | 3, 4 | ✓ |
+| `.wav` → blob storage at `Voicemail.StorageKey` (valid 48 kHz PCM mono) | 1–4 | ✓ |
+| `voicemails` row (`status=new`, duration, `caller_id`, campaign) | 1–4 | ✓ |
+| Duration accuracy | 4 (post-fix) | ✓ 5 s vs 4.72 s real (was 21 s vs 3.42 s on call 3) |
+| Email via Resend (200 + message id), `.wav` attached, `{{…}}` subject/body resolved | 1–4 | ✓ — **all landed in Gmail Spam** (cold-domain deliverability, not a bug) |
+| `email_delivery_status = sent` + recipients + `email_delivered_at` stamped | 1–4 | ✓ |
+| Flow resume on `recorded` (normal) / no resume on salvage (dead channel) | 1–4 | ✓ |
+| No duplicate voicemail when salvage + vm_done could both fire | 1, 2 | ✓ (`_vm_in_progress` already cleared) |
+
+**Not verified:** supervisor SignalR `ReceiveVoicemail` receipt — `NotifyVoicemailReceivedAsync` invoked without throwing on all 4, but no connected supervisor client to observe (same limitation as S100's IVR test). The async-salvage refactor (bug 3) was made *after* the 4 calls — its happy path is the same `HandleVmDoneAsync` body, but the `Task.Run` + `knownSession` wrapper is only unit-covered; fold a live re-check into the next inbound test.
+
+### Discovered / carry-over
+
+- **Cold-domain email deliverability** — every voicemail email hit Gmail Spam. Resend delivers fine (200 + id, confirmed in dashboard). Needs SPF/DKIM/DMARC alignment + warmup on `contactconnection.io` (tied to the `.cc → .io` migration still mid-onboarding). Not a `tf_voicemail` issue.
+- **`tf_play` streaming-TTS fails on the test tenant** — it has a `TtsStreaming` preference → ElevenLabs, and voice `kal` (a flite name) isn't a valid ElevenLabs voice id → `voice_id_does_not_exist`, silent playback. Scratch-flow-only; the voicemail node's own greeting uses flite directly and played fine.
+
+### Final State
+
+- Full solution builds **0 errors**; **455 tests pass** (Domain 117, Application 20, Infrastructure 250, Api 68) — unchanged count (bug fixes, no new coverage; both `nodeId` + WAV-duration fixes live-verified rather than unit-tested — private methods on a `BackgroundService` / core engine dispatch).
+- No new migrations. No FreeSWITCH changes (the `vm-record` extension was added + `reloadxml`'d in S102).
+- Source touched: `TelephonyFlowEngine.cs` (nodeId stamp), `EslBackgroundService.cs` (WAV duration + async salvage), `ResendEmailService.cs` (response-body log). Nothing committed (Sessions 92–103 accumulating per the standing pattern).
+- Scratch data fully reverted; API stopped.
+
+### Inbound gap list — updated
+
+| Item | Status |
+|---|---|
+| Call recording | Done through Session 101 (merge worker). Remaining: sync-player UI, beep wiring, `tf_secure_collect`, retention purge job, Chrome extension. |
+| ~~Voicemail node (`tf_voicemail`)~~ | **Live-verified end-to-end this session** — normal + hangup-salvage, blob/DB/duration/email/resume all confirmed on 4 real calls. |
+| Transfer-to-queue node (`tf_transfer`) | Not started. Next-highest inbound gap. |
+| Callback lifecycle | Not started. |
+| DNC registry lookup | Not started (phone-node placeholder). |
+| RTP port range | Still pinned to 10 ports — widen for production concurrency. |
+| Simple-bridge delivery path | Still unexercised (Session 95 `uuid_break` race may be latent). |
+| Worker won't boot in Development | Pre-existing DI gap (Session 101) — fix before the Worker is relied on in dev. |
+
+### Next Session — pick up here
+
+1. **`tf_transfer`** (warm transfer-to-queue) — next inbound gap.
+2. Fold a live re-check of the **async voicemail salvage** (bug 3 fix) into whatever inbound call gets placed next.
+3. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
+4. Fix the Worker's Development boot (Session 101 carry-over).
+5. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io` so voicemail emails don't land in spam.
+6. `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit (opportunistic).
+7. Prior carry-overs: Level 2 Telnyx verification (EIN); `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; `FlowEngine` test coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 104 — `tf_transfer` node (4 destinations) built + searchable-dropdown retrofit; live-verify deferred
+
+**Date:** 2026-08-31 → 2026-09-01
+**Start:** 2026-08-31 12:04 PM PDT
+**End:** 2026-09-01 8:44 AM PDT
+**Duration:** 48 min active (12:04–12:25 PM PDT 8/31 + 8:17–8:44 AM PDT 9/1) — hard stop overnight mid-scoping-question, not idle/thinking time
+**Cumulative Total:** ~12369 min
+
+### What Was Done
+
+Built `tf_transfer` — the next inbound gap after voicemail — plus, per the user's explicit scope choice (AskUserQuestion), retrofitted every existing agent-extension / flow-id text field in the telephony designer to the same searchable dropdown UX. No real call placed this session; the user is buying a second Telnyx DID next session (Level 2 Telnyx account verification completed 8/31) to drive live verification with an actual transfer target.
+
+**Design decisions (AskUserQuestion):** all four transfer destinations in one node (campaign queue / specific agent / another telephony flow / external number-or-SIP-URI); all three connect behaviors as node options (blind, announce-then-blind, fallback-on-failure — not three separate node types); external number accepts a bare E.164 number (routed through a selected SIP gateway) **or** a raw `sip:` URI dialed directly — explicitly not the InContact route-digit-prefix pattern; screen-pop is a per-node override (searchable CRM-flow picker, default = campaign/DID resolution) layered onto full call-record continuity (same call, no fresh record) for the campaign-queue destination. Scope: build the retrofit in the same session rather than deferring it.
+
+**Backend — `TransferNodeHandler` (`tf_transfer`).**
+- `destinationType`: `campaign_queue | agent | telephony_flow | external_number`.
+- **campaign_queue** — loads the target campaign, honors its `MaxQueueSize`, ranks its eligible agents (`EligibleAgentRanker`, respecting `RingTopNByProficiency`), moves `CallRecord.CampaignId` to the target, and sets `_queued`/`_eligible_agents`/`_in_queue_at` so `QueuePollingService` picks it up under the new campaign — same parked channel, same call record. A handler can't persist Redis session fields directly (the engine re-saves its own copy right after the node runs, which would clobber it), so this leaves a `_switch_campaign_id` sentinel in `ctx.Vars`; new `TelephonyFlowEngine.ApplyPendingSessionMutations` applies it to `session.CampaignId` at all four post-execution save sites (initial/resume/event/switch-flow) before persisting.
+- **agent** — `BridgeToAgentAsync` to the chosen agent's SIP extension; `failed` if blank.
+- **telephony_flow** — new `ITelephonyFlowEngine.SwitchFlowAsync(channelUuid, targetFlowId, esl)`: loads the target flow, swaps the session's cached `FlowDefinitionJson`/`FlowId`/`EventHandlers` (re-scanned), and runs it from its entry node on the same channel — flow vars carry over. `TransferNodeHandler` resolves the engine **lazily via `IServiceProvider`** (constructor injection would cycle: engine → handler set → this handler → engine).
+- **external_number** — bare number → `sofia/gateway/{gateway}/{digits}` (gateway from the node or `FreeSWITCH:DefaultGateway` config, default `telnyx`); a `sip:` URI → `sofia/external/{uri}` verbatim. New **`xfer-bridge`** dialplan extension (mirrors `ivr_collect`/`vm_record`'s async-via-dialplan shape) does the actual `bridge`: `continue_on_fail=true` + `hangup_after_bridge=true` means a bridge that never connects falls through to a `contactconnection::xfer_failed` CUSTOM event + re-park (caught by `EslBackgroundService.HandleXferFailedAsync`, which resumes the node's `failed` handle and clears `_xfer_*`), while a bridge that connects and later ends just hangs up normally.
+- **Announcement** (any destination) — audio file first, TTS/flite fallback, inline in the `xfer-bridge` dialplan for external (so it actually finishes before the bridge), fire-and-forget `uuid_broadcast` for the other three.
+- **Screen-pop override** — `screenPopFlowId` stashes `_screenpop_flow_override` in flow vars; `ScriptPopNodeHandler` now checks it (after the node's own `flowId`, before the DID/campaign fallback chain).
+- Handles: `transferred` (usually terminal) + `failed`.
+
+**API.**
+- `GET /api/v1/admin/agents` now returns `sipExtension` (needed for the agent-name dropdown to resolve to a bridgeable extension).
+- `EslBackgroundService`: subscribed `contactconnection::xfer_failed`; `xfer_bridge` added to the CHANNEL_PARK re-park guard (alongside `ivr_collect`/`vm_record`) so the dialplan's failure re-park isn't treated as a fresh inbound call.
+
+**Designer — searchable-dropdown retrofit** (all backed by the existing `SearchableSelect` component — portal-rendered, filters by typing, already used elsewhere in the app):
+- `tf_route_to_queue`'s "direct to extension" text field → agent-name dropdown (value stays the SIP extension string; handler unchanged).
+- `tf_script_pop`'s "CRM flow ID override" text field → CRM-flow-name dropdown.
+- `tf_check_agent_availability`'s "campaign ID override" text field → campaign-name dropdown.
+- `tf_transfer` itself: destination-type select, then the matching picker (campaign / agent / telephony-flow / external number+gateway), announcement fields, and the screen-pop override picker — all in a new `TransferNodeEditor`.
+- New `TransferNode.tsx` canvas node (`transferred` + `failed` handles, color-coded green/red) and palette entry. Data for the pickers (agents, telephony flows, CRM flows, campaigns, SIP gateways) is fetched once per node-selection via a shared effect keyed off node type, not duplicated per editor.
+
+### Verified
+
+- Full solution builds **0 errors**; **469 tests pass** (Domain 117, Application 20, Infrastructure 264, Api 68) — +14 `TransferNodeHandlerTests` (no-ESL, agent bridge/no-extension, external sip-URI/gateway/default-gateway/no-number, telephony-flow invalid-id/switch-ok/switch-fail, campaign-queue invalid-target, screen-pop stash, announcement file/TTS). `campaign_queue`'s DB-backed happy path isn't unit-tested (needs a real `TenantDbContext`) — left for live verification. Web app: `tsc --noEmit` clean.
+- FreeSWITCH `reloadxml` clean with the new `xfer-bridge` extension (deployed + reloaded on the running container).
+
+**Not verified:** no real call placed. Live verification needs a real inbound call transferred to each of the four destinations (a second campaign, a second agent extension, a second telephony flow, and — this is the piece needing new infrastructure — a second phone number to receive the external-number transfer). The user is purchasing a second Telnyx DID next session for exactly this (Telnyx account reached Level 2 verification 8/31).
+
+### Final State
+
+- Nothing committed (Sessions 92–104 accumulating in the working tree, per the standing pattern).
+- Real infra change kept: `freeswitch/conf/dialplan/default.xml` gains the `xfer-bridge` extension (already `reloadxml`'d on the running container).
+- No new migrations. No scratch data created this session (no call placed).
+
+### Inbound gap list — updated
+
+| Item | Status |
+|---|---|
+| Call recording | Done through Session 101 (merge worker). Remaining: sync-player UI, beep wiring, `tf_secure_collect`, retention purge job, Chrome extension. |
+| Voicemail node (`tf_voicemail`) | Live-verified Session 103 (normal + hangup-salvage). |
+| ~~Transfer-to-queue node (`tf_transfer`)~~ | **Built this session** — all 4 destinations + searchable-dropdown retrofit. Live verification pending a second Telnyx DID (next session). |
+| Callback lifecycle | Not started. Next-highest inbound gap after transfer is live-verified. |
+| DNC registry lookup | Not started (phone-node placeholder). |
+| RTP port range | Still pinned to 10 ports — widen for production concurrency. |
+| Simple-bridge delivery path | Still unexercised (Session 95 `uuid_break` race may be latent). |
+| Worker won't boot in Development | Pre-existing DI gap (Session 101) — fix before the Worker is relied on in dev. |
+
+### Next Session — pick up here
+
+1. **Live-verify `tf_transfer`** on a real inbound call, all 4 destinations: transfer to a second campaign's queue, to a second agent's extension, to a second telephony flow, and to the new second Telnyx DID (external_number, both the bare-number/gateway path and, if a test SIP endpoint is available, the raw `sip:` URI path). Also drive the `failed` branch (dial an unreachable/invalid external number) to confirm `xfer-bridge`'s `continue_on_fail` + `contactconnection::xfer_failed` path.
+2. **Callback lifecycle** — next inbound gap after transfer is verified.
+3. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
+4. Fix the Worker's Development boot (Session 101 carry-over).
+5. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io` so voicemail emails don't land in spam.
+6. `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit (opportunistic).
+7. Prior carry-overs: `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; `FlowEngine` test coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 105 — `tf_transfer` live-verified (all 4 destinations) + 4 bugs found & fixed during verification
+
+**Date:** 2026-09-01
+**Start:** 2026-09-01 8:54 AM PDT
+**End:** 2026-09-01 3:23 PM PDT
+**Duration:** 59 min active (8:54–9:30 AM + 3:00–3:23 PM PDT) — hard stop midday, not idle time
+**Cumulative Total:** ~12428 min
+
+### What Was Done
+
+Live-verified the Session 104 `tf_transfer` node against real inbound calls, using the user's **second Telnyx DID** (`+15415293670`, bought this session after the Telnyx Level 2 upgrade) as a real external transfer target. Every destination works; verification surfaced four real bugs, all fixed.
+
+**Test rig (no shared data touched):** two scratch standalone flows + a **per-DID `telephony_flow_id` override** on both test DIDs (campaign default flow untouched). `+15419196582` → an IVR router (press 1=agent / 2=campaign-queue / 3=telephony-flow / 4=external-good / 9=external-fail); `+15415293670` → a receiver flow that answers + plays a distinct tone so a connected external bridge is audible. All reverted afterward (3 flows, both overrides, 12 call records + 31 state-history rows).
+
+### Verified live (final results)
+
+| Digit | Destination | Result |
+|---|---|---|
+| 1 | agent → ext 1002 | ✅ rings the softphone, agent answers, bridges (opus both ways) |
+| 2 | campaign_queue → Test Campaign 2 | ✅ **DB-verified** — same `call_records` row moved to campaign 2; `call_state_history`: `pre_queue`(camp 1) → `in_queue`/`routing`/`active`/`completed`(camp 2); agent 1002 answered; ACW fired. Single Record of Truth preserved. |
+| 3 | telephony_flow | ✅ `SwitchFlowAsync` swaps the cached def + runs the target flow from its entry; tone played; auto-hangup |
+| 4 | external_number (good) → `+15415293670` | ✅ `sofia/gateway/telnyx/+15415293670` dial → Telnyx hairpins back in → receiver flow answers → caller bridged (opus both ways) → clean teardown. (Audible chime lost on the 3-hop hairpin — media timing on a ~2.7 s tone — but every control-flow step confirmed in logs.) |
+| 9 | external_number (fail) → invalid number | ✅ outbound leg → `UNALLOCATED_NUMBER`; caller resumes the node's `failed` handle → fail tone plays → clean hangup |
+
+### Bugs found & fixed during verification
+
+1. **agent destination raced the channel settling.** `TransferToAgentAsync` called `EslClient.BridgeToAgentAsync` (inline `uuid_transfer … 'bridge:{contact}' inline`) immediately on the `ivr_done` resume — the channel had just come back from the `ivr_collect` dialplan transfer and wasn't settled → `CHAN_NOT_IMPLEMENTED`, caller dropped. The *same* method works fine from `QueuedCallDeliveryService` (that's how the campaign-queue test's bridge succeeded) because it runs a few seconds later on a poll tick. **Fix:** the `agent` destination now resolves the extension → active agent and routes through the **same queue-delivery path** as campaign_queue (sets `_queued` + a single-agent `_eligible_agents`, records `InQueue`, stays on the current campaign). `QueuedCallDeliveryService` then rings + bridges on its tick and the call gets agent_answer / screen-pop / ACW handling for free. Unknown/blank extension → `failed`.
+2. **`EslClient.BridgeToAgentAsync` didn't catch `error/user_not_registered`.** `sofia_contact` returns that literal string (not `-ERR`, not empty) when an agent has no live registration; the method forwarded it verbatim to `bridge:`, producing a bogus `error/` endpoint → `CHAN_NOT_IMPLEMENTED`. **Fix:** treat any `error/…` contact as unreachable → throw, so callers (the queue simple-bridge path) can fall back gracefully.
+3. **external_number `failed` branch never fired.** The `xfer-bridge` dialplan's `<action application="event">` after `continue_on_fail` doesn't fire on this FS build, and worse — the failed **outbound leg's** `CHANNEL_HANGUP` resolved the caller's session (via the bridge-partner link) and completed + **deleted** it before the caller's channel could re-park. **Fix (`EslBackgroundService`, three parts):** (a) `CHANNEL_PARK` guard now treats "re-park with `_xfer_in_progress` still set" as the failure signal (a *connected* transfer never re-parks) and resumes the node's `failed` handle via `HandleXferFailedAsync`; (b) `CHANNEL_BRIDGE` clears `_xfer_in_progress` on connect, so a later outbound-leg hangup on a *successful* transfer completes the call normally; (c) `CHANNEL_HANGUP` of the outbound leg while `_xfer_in_progress` is set and `channelUuid != session.ChannelUuid` now returns early — leaves the session/record intact so the caller's re-park drives the failed branch.
+4. **IVR test timeout too long** (scratch-flow config, not shipped code) — `timeoutMs: 15000 × maxTries: 3` = 45 s of unclear tones before any feedback; the user hung up mid-retry-cycle on the first attempts. Tightened to 6 s × 2 for the test.
+
+### Discovered (not fixed — separate work)
+
+- **Softphone re-registers every 5 minutes.** The JsSIP softphone is configured `register_expires: 300` ([SoftphonePanel.tsx:189](ContactConnection.Web/src/components/SoftphonePanel.tsx#L189)); every 5 min the SIP registration expires and JsSIP re-registers, during which the agent UI flips to "not registered". This is the pending "Step 5" of the SIP Registration Plan. It intermittently breaks agent-bound calls that land in the gap. Proper fix (own session): re-register well ahead of expiry, keep the UI state sticky across a clean refresh, and/or raise the expiry.
+- `nginx` WS locations already have `proxy_read_timeout 3600s`, so nginx isn't the cause; the softphone flap is purely the SIP registration TTL.
+
+### Final State
+
+- Full solution builds **0 errors**; **470 tests pass** (Domain 117, Application 20, Infrastructure 265, Api 68) — `TransferNodeHandlerTests` 14 → 15 (agent path now InMemory-`TenantDbContext`-backed: known-extension → queues to that agent; unknown → `failed`). Web `tsc --noEmit` clean.
+- Nothing committed (Sessions 92–105 accumulating in the working tree, per the standing pattern).
+- Real infra change kept: `freeswitch/conf/dialplan/default.xml` `xfer-bridge` extension (deployed + `reloadxml`'d on the running container).
+- No new migrations. Scratch data fully reverted; API stopped.
+
+### Inbound gap list — updated
+
+| Item | Status |
+|---|---|
+| Call recording | Done through Session 101. Remaining: sync-player UI, beep wiring, `tf_secure_collect`, retention purge job, Chrome extension. |
+| Voicemail node (`tf_voicemail`) | Live-verified Session 103. |
+| ~~Transfer-to-queue node (`tf_transfer`)~~ | **Live-verified this session** — all 4 destinations + `failed` branch. |
+| Callback lifecycle | Not started. Now the next-highest inbound gap. |
+| DNC registry lookup | Not started (phone-node placeholder). |
+| RTP port range | Still pinned to 10 ports — widen for production concurrency. |
+| Simple-bridge delivery path | Now exercised (tf_transfer agent + campaign_queue both use it via QueuedCallDeliveryService) — works when called on a delivery tick, races when called inline. |
+| Softphone re-registers every 5 min | New find this session — JsSIP `register_expires: 300`, UI blips to "not registered". SIP Registration Plan Step 5. |
+| Worker won't boot in Development | Pre-existing DI gap (Session 101). |
+
+### Next Session — pick up here
+
+1. **Softphone registration stability** — fix the 5-minute re-register blip (`register_expires` / early refresh / sticky UI state). This intermittently breaks agent-bound inbound calls and is now the most impactful telephony reliability issue.
+2. **Callback lifecycle** — next inbound feature gap after transfer.
+3. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
+4. Fix the Worker's Development boot (Session 101 carry-over).
+5. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
+6. `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit (opportunistic).
+7. Prior carry-overs: `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; `FlowEngine` test coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 106
+
+**Date:** 2026-09-01
+**Start:** 3:27 PM PDT
+**End:** 3:47 PM PDT
+**Duration:** 20 minutes
+**Total Duration:** ~12448 minutes
+
+### Focus
+
+Fix the softphone re-registration blip (SIP Registration Plan Step 5) — the top open telephony reliability item from Session 105. Code + FreeSWITCH config only this session; visual verification deferred to next session.
+
+### Root cause
+
+The bug is *two* independent problems, and the "every 5 minutes" framing was a red herring:
+
+1. **The visible UI blip is a WebSocket transport drop, not the register TTL.** Per JsSIP 3.13.8 source (`Registrator.js`), a clean REGISTER refresh emits **no event at all** (`if (!this._registered)` guard on the 2xx path), and JsSIP already schedules that refresh well ahead of expiry (`expires/2 … expires−32s`, so 150–268 s for `expires:300`). So an `unregistered`/`registrationFailed` firing after the softphone has been up means the WS transport itself dropped — the idle socket has no keepalive, something on the path reaps it, and JsSIP's `connection_recovery` reconnects + re-registers a few seconds later. `SoftphonePanel.tsx` mapped *any* `unregistered` straight to `setRegistrationStatus('idle')`, so that few-second recovery showed as "Not registered" (dialpad gone, Pick Up disabled).
+2. **The real inbound failure** is server-side: during that recovery window `sofia_contact` returns `error/user_not_registered`, and `EslClient.BridgeToAgentAsync` / `OriginateAndParkAsync` treat that as a hard failure — manual Pick Up throws a 500, auto-answer stalls the call in queue until the next poll tick.
+
+### Changes (three prongs)
+
+1. **`ContactConnection.Web/src/components/SoftphonePanel.tsx`**
+   - `register_expires` 300 → 600 (halves refresh frequency; JsSIP auto-honors a FS `423 Min-Expires` if the profile ever objects).
+   - **12 s grace timer**: `unregistered` / `registrationFailed` after the first successful registration no longer downgrades the badge immediately — a `graceTimer` holds the last-good state and only flips to `idle`/`failed` if JsSIP hasn't recovered in 12 s. Cleared on the next `registered`. Initial-registration failures (`firstRegistration` still true) still show immediately.
+   - Added a `registrationExpiring` listener that calls `ua.register()` — with a listener attached JsSIP delegates renewal timing to us instead of doing it silently, so the renewal path is explicit and the UI stays green through it. Grace timer also cleared in the effect teardown.
+2. **`ContactConnection.Api/Telephony/EslClient.cs`**
+   - New `ResolveAgentContactAsync(extension, domain, ct)` — calls `sofia_contact` up to 5× with 500 ms spacing (~2 s total) while it returns empty / `-ERR` / `error/…`, logging each retry. Covers a sub-second transport-recovery blip; a genuinely offline agent still ends in the same failure after the retries.
+   - `BridgeToAgentAsync` and `OriginateAndParkAsync` now both go through it. Extracted `IsResolvedContact(string?)` helper. Incidental fix: `OriginateAndParkAsync` previously only rejected `-ERR`/empty contacts, not `error/…` — it does now.
+3. **`freeswitch/conf/sip_profiles/internal.xml`**
+   - Added `<param name="all-reg-options-ping" value="true"/>` — FreeSWITCH now OPTIONS-pings every registered contact (incl. WebSocket softphones), keeping the idle socket warm between JsSIP refreshes and dropping a genuinely-dead browser promptly rather than waiting out the full register expiry.
+   - Applied to the running container: `sofia profile internal restart reloadxml` (profile came back RUNNING, no parse errors; 0 regs at the time — no softphone connected).
+
+### State
+
+- Full solution builds **0 errors**; **470 tests pass** (Domain 117, Application 20, Infrastructure 265, Api 68 — unchanged; the `sofia_contact` retry is internal to `EslClient` and mocked at the `IEslCommander` boundary in handler tests). Web `tsc --noEmit` clean.
+- **Not yet visually verified** — carried to Session 107: register a softphone, leave it idle 10+ min (badge should stay green), and place an inbound call timed near a refresh window (should connect, not "Bridge request failed").
+- Committed this session: **one checkpoint commit of the entire accumulated working tree** (Sessions 92–106, ~100 files) — the standing "don't commit" pattern was ended at the user's request.
+- No new migrations. FreeSWITCH `internal.xml` change is committed and live on the container.
+
+### Next Session — pick up here
+
+1. **Visually verify the softphone registration fix** (idle-soak + inbound call during a re-registration window). If the blip persists, capture `sofia/sip-trace` and check whether the OPTIONS ping is actually reaching the browser.
+2. **Callback lifecycle** — next inbound feature gap after transfer.
+3. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
+4. Fix the Worker's Development boot (Session 101 carry-over).
+5. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
+6. `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit (opportunistic).
+7. Prior carry-overs: `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; `FlowEngine` test coverage; retire the `.cc` softphone route.

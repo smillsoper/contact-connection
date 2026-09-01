@@ -5,6 +5,7 @@ export type TelephonyNodeType =
   | 'tf_answer'
   | 'tf_hangup'
   | 'tf_route_to_queue'
+  | 'tf_transfer'
   | 'tf_play'
   | 'tf_time_of_day'
   | 'tf_branch'
@@ -18,6 +19,9 @@ export type TelephonyNodeType =
   | 'tf_general_api_call'
   // Signal / media actions
   | 'tf_dtmf'
+  | 'tf_ivr_menu'
+  | 'tf_record'
+  | 'tf_voicemail'
   // Agent-selected event branch actions
   | 'tf_whisper'
   // Event listener nodes — independent entry points that fire on lifecycle events
@@ -41,8 +45,18 @@ export interface TelNodeData extends Record<string, unknown> {
   checkVariable?: string
   // tf_check_agent_availability
   campaignId?: string
-  // tf_route_to_queue
+  // tf_route_to_queue (also the "agent" destination of tf_transfer) — stores the agent's SIP extension
   agentExtension?: string
+  // tf_transfer
+  destinationType?: 'campaign_queue' | 'agent' | 'telephony_flow' | 'external_number'
+  targetCampaignId?: string
+  targetTelephonyFlowId?: string
+  externalNumber?: string          // E.164 (+18005551234) or a full SIP URI (sip:user@host)
+  externalGatewayName?: string     // FreeSWITCH gateway name; blank = server default. Ignored for sip: URIs
+  announceAudioFileId?: string     // played to the caller before handoff; TTS fallback below
+  announceTtsText?: string
+  announceTtsVoice?: string
+  screenPopFlowId?: string         // CRM script flow the receiving agent gets instead of the campaign default
   // tf_play
   audioSource?: 'file' | 'tts'
   audioFileId?: string
@@ -85,6 +99,47 @@ export interface TelNodeData extends Record<string, unknown> {
   durationMs?: number
   interDigitGapMs?: number
   waitForCompletion?: boolean
+  // tf_ivr_menu — prompts are audio files (play_and_get_digits can't take a TTS string with spaces)
+  promptAudioFileId?: string
+  invalidAudioFileId?: string
+  minDigits?: number
+  maxDigits?: number
+  maxTries?: number
+  timeoutMs?: number
+  interDigitTimeoutMs?: number
+  terminators?: string
+  /** Each maps an exact DTMF entry to a named transition (its own source handle on the canvas). */
+  options?: { digit: string; transition: string; label?: string }[]
+  // tf_record
+  action?: 'start' | 'stop' | 'mask' | 'unmask'
+  maskFill?: 'silence' | 'tone' | 'comfort_noise'   // mask only
+  maxMaskSeconds?: number                            // mask only — auto-unmask watchdog override
+  recordLimitSeconds?: number                        // start only — 0 = unlimited
+  reason?: string                                    // audit context, e.g. "pan", "ssn"
+  // start only — two-party consent announcement, played before recording when the campaign's
+  // consent model requires it. Audio file first; TTS text is the fallback.
+  consentAudioFileId?: string
+  consentTtsText?: string
+  consentTtsVoice?: string
+  // tf_voicemail — greeting (audio file first, TTS fallback), record limits, optional email delivery
+  greetingAudioFileId?: string
+  greetingTtsText?: string
+  greetingTtsVoice?: string
+  beepEnabled?: boolean
+  maxLengthSeconds?: number
+  maxSilenceSeconds?: number
+  minLengthSeconds?: number
+  deliveryEmailEnabled?: boolean
+  /** to / cc / bcc are comma-separated and may contain {{variables}}, resolved at send time. */
+  deliveryEmailTo?: string
+  deliveryEmailCc?: string
+  deliveryEmailBcc?: string
+  deliveryEmailFromName?: string
+  deliveryEmailReplyTo?: string
+  deliveryEmailSubject?: string
+  /** HTML from the rich-text editor; {{caller.*}} / {{call_record.*}} / {{flow.*}} resolved at send time. */
+  deliveryEmailBodyHtml?: string
+  deliveryAttachAudio?: boolean
   // tf_whisper
   // (audioFileId reused from tf_play)
   // tf_on_custom_event
@@ -112,6 +167,12 @@ export interface TelephonyNodeDef {
   condition?: string
   eventName?: string
   flowId?: string
+  // tf_transfer (see TelNodeData for the rest — persisted via spread, this is just the common subset)
+  destinationType?: string
+  targetCampaignId?: string
+  targetTelephonyFlowId?: string
+  externalNumber?: string
+  screenPopFlowId?: string
   _pos?: { x: number; y: number }
   transitions: Record<string, string>
 }
@@ -165,6 +226,13 @@ export const TELEPHONY_NODE_META: Record<
     // 'default' (chain into e.g. hold music) always renders, same as before; 'on_timeout' is a
     // second, optional-to-wire handle for MaxQueueSize/QueueTimeoutSeconds overflow — see
     // RouteToQueueNode.tsx.
+    handles: 'multi',
+  },
+  tf_transfer: {
+    label: 'Transfer',
+    color: '#4338ca',
+    description: 'Hand the caller to another queue, agent, flow, or external number',
+    // 'transferred' (usually terminal) + 'failed' (handoff could not be set up) source handles.
     handles: 'multi',
   },
   tf_play: {
@@ -239,6 +307,24 @@ export const TELEPHONY_NODE_META: Record<
     description: 'Send a sequence of DTMF tones on the current call channel',
     handles: 'single',
   },
+  tf_ivr_menu: {
+    label: 'IVR Menu',
+    color: '#0d9488',
+    description: 'Play a prompt, collect DTMF, branch per option',
+    handles: 'multi',
+  },
+  tf_record: {
+    label: 'Record',
+    color: '#e11d48',
+    description: 'Start / stop / mask / unmask the call recording',
+    handles: 'single',
+  },
+  tf_voicemail: {
+    label: 'Voicemail',
+    color: '#9333ea',
+    description: 'Play a greeting, record the caller’s message, optionally email it',
+    handles: 'multi',
+  },
   tf_whisper: {
     label: 'Whisper',
     color: '#7c3aed',
@@ -292,6 +378,15 @@ export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
       return { label: 'Hang Up' }
     case 'tf_route_to_queue':
       return { label: 'Route to Queue', agentExtension: '' }
+    case 'tf_transfer':
+      return {
+        label: 'Transfer',
+        destinationType: 'campaign_queue',
+        targetCampaignId: '', agentExtension: '', targetTelephonyFlowId: '',
+        externalNumber: '', externalGatewayName: '',
+        announceAudioFileId: '', announceTtsText: '', announceTtsVoice: 'kal',
+        screenPopFlowId: '',
+      }
     case 'tf_play':
       return {
         label: 'Play Audio',
@@ -336,6 +431,27 @@ export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
       return { label: 'New API Call', apiEndpointId: '', apiDefinitionScope: 'tenant', apiDefinitionName: '', apiEndpointName: '', outputVariable: '', timeoutSeconds: 30 }
     case 'tf_dtmf':
       return { label: 'Send DTMF', digits: '', durationMs: 100, interDigitGapMs: 50, waitForCompletion: true }
+    case 'tf_ivr_menu':
+      return {
+        label: 'IVR Menu',
+        promptAudioFileId: '', invalidAudioFileId: '',
+        minDigits: 1, maxDigits: 1, maxTries: 3,
+        timeoutMs: 5000, interDigitTimeoutMs: 3000, terminators: '',
+        options: [{ digit: '1', transition: 'option_1' }],
+      }
+    case 'tf_record':
+      return { label: 'Record', action: 'start', maskFill: 'silence', recordLimitSeconds: 0 }
+    case 'tf_voicemail':
+      return {
+        label: 'Voicemail',
+        greetingAudioFileId: '', greetingTtsText: '', greetingTtsVoice: 'kal',
+        beepEnabled: true, maxLengthSeconds: 120, maxSilenceSeconds: 5, minLengthSeconds: 2,
+        deliveryEmailEnabled: false,
+        deliveryEmailTo: '', deliveryEmailCc: '', deliveryEmailBcc: '',
+        deliveryEmailFromName: '', deliveryEmailReplyTo: '',
+        deliveryEmailSubject: 'New voicemail from {{caller.phone}}',
+        deliveryEmailBodyHtml: '', deliveryAttachAudio: true,
+      }
     case 'tf_whisper':
       return { label: 'Whisper', audioFileId: '' }
     case 'tf_on_agent_selected':

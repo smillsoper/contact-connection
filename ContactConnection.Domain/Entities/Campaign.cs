@@ -51,6 +51,31 @@ public class Campaign
     public int QueueAccelerationIntervalSeconds { get; private set; } = 60;
     public int QueueAccelerationPriorityBoost { get; private set; } = 1;
 
+    // ── Call recording policy ────────────────────────────────────────────────
+    // This is the ceiling, not the mechanism: RecordingMode says what is permitted
+    // on this campaign; a tf_record node in the telephony flow does the actual
+    // start/stop/mask within that, and where it sits in the flow decides
+    // IVR-vs-conversation coverage. See ARCHITECTURE.md §13 / §14.
+    public string RecordingMode { get; private set; } = Entities.RecordingMode.Disabled;
+    public string ConsentModel { get; private set; } = Entities.ConsentModel.OneParty;
+
+    // If true and uuid_record fails to start, the call is not connected (apology + hangup)
+    // rather than proceeding un-recorded. For compliance-critical campaigns.
+    public bool RecordingRequired { get; private set; }
+
+    // Record caller and agent on separate channels — near-free, and required for
+    // clean downstream diarisation / selective redaction.
+    public bool RecordStereo { get; private set; } = true;
+
+    // Play a periodic audible tone while recording (jurisdiction-dependent).
+    public bool RecordingBeepEnabled { get; private set; }
+
+    // Automatically mask the recording whenever the agent places the caller on hold.
+    public bool AutoMaskOnHold { get; private set; }
+
+    // Retention window for finished recordings; drives the purge job (job itself is separate).
+    public int RecordingRetentionDays { get; private set; } = 90;
+
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
@@ -130,6 +155,31 @@ public class Campaign
         UpdatedAt                            = DateTimeOffset.UtcNow;
     }
 
+    /// <summary>
+    /// Sets this campaign's call-recording policy. Kept separate from <see cref="Update"/>
+    /// (which is already a long positional list) so recording config stays cohesive and
+    /// independently testable — same reasoning as the dedicated flow-assignment methods.
+    /// Invalid enum values fall back to the safe default; numeric inputs are clamped.
+    /// </summary>
+    public void ConfigureRecording(
+        string recordingMode,
+        string consentModel,
+        bool recordingRequired,
+        bool recordStereo,
+        bool recordingBeepEnabled,
+        bool autoMaskOnHold,
+        int recordingRetentionDays)
+    {
+        RecordingMode          = Entities.RecordingMode.IsValid(recordingMode) ? recordingMode : Entities.RecordingMode.Disabled;
+        ConsentModel           = Entities.ConsentModel.IsValid(consentModel) ? consentModel : Entities.ConsentModel.OneParty;
+        RecordingRequired      = recordingRequired;
+        RecordStereo           = recordStereo;
+        RecordingBeepEnabled   = recordingBeepEnabled;
+        AutoMaskOnHold         = autoMaskOnHold;
+        RecordingRetentionDays = Math.Clamp(recordingRetentionDays, 1, 3650);
+        UpdatedAt              = DateTimeOffset.UtcNow;
+    }
+
     public void AssignFlow(Guid flowId)         { FlowId = flowId;         UpdatedAt = DateTimeOffset.UtcNow; }
     public void RemoveFlow()                    { FlowId = null;           UpdatedAt = DateTimeOffset.UtcNow; }
     public void AssignInboundFlow(Guid flowId)  { InboundFlowId = flowId;  UpdatedAt = DateTimeOffset.UtcNow; }
@@ -153,6 +203,49 @@ public static class CampaignDirection
 {
     public const string Inbound  = "inbound";
     public const string Outbound = "outbound";
+}
+
+/// <summary>
+/// The recording ceiling for a campaign. A tf_record node still drives the actual
+/// start/stop/mask — this only bounds what it's allowed to do.
+/// Disabled — no recording on this campaign; a tf_record start node is a no-op.
+/// Full — recording may run from call arrival (IVR, hold, queue, bridge) to disconnect.
+/// Conversation — recording may only run once the caller is bridged to an agent.
+/// RecordAlwaysRetainByDisposition — always record the whole call; the end-of-call
+///   disposition decides whether the file is kept, kept-short, or discarded.
+/// </summary>
+public static class RecordingMode
+{
+    public const string Disabled                        = "disabled";
+    public const string Full                            = "full";
+    public const string Conversation                    = "conversation";
+    public const string RecordAlwaysRetainByDisposition = "record_always_retain_by_disposition";
+
+    public static bool IsValid(string value) =>
+        value is Disabled or Full or Conversation or RecordAlwaysRetainByDisposition;
+
+    /// <summary>True when recording is permitted before the caller is bridged to an agent.</summary>
+    public static bool AllowsPreBridge(string value) =>
+        value is Full or RecordAlwaysRetainByDisposition;
+}
+
+/// <summary>
+/// OneParty — record without an announcement (one-party-consent jurisdictions).
+/// TwoPartyAnnounce — an announcement must play before recording begins/retains.
+/// TwoPartyAnnounceOptout — announcement plays and the caller may decline recording
+///   via DTMF (declining stops/suppresses recording or routes to a non-recorded path).
+/// </summary>
+public static class ConsentModel
+{
+    public const string OneParty               = "one_party";
+    public const string TwoPartyAnnounce       = "two_party_announce";
+    public const string TwoPartyAnnounceOptout = "two_party_announce_optout";
+
+    public static bool IsValid(string value) =>
+        value is OneParty or TwoPartyAnnounce or TwoPartyAnnounceOptout;
+
+    public static bool RequiresAnnouncement(string value) =>
+        value is TwoPartyAnnounce or TwoPartyAnnounceOptout;
 }
 
 public static class CampaignDialMode

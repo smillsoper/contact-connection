@@ -58,6 +58,10 @@ builder.Services.AddSingleton<IDashboardNotifier, DashboardNotifier>();
 // initiated RingStrategy.AutoAnswerBestAgent delivery (no HTTP round trip).
 builder.Services.AddScoped<QueuedCallDeliveryService>();
 
+// Mints short-lived ESL connections for the call-recording watchdog (ICallRecordingController,
+// registered in AddInfrastructure) — its forced unmask fires after the triggering node is gone.
+builder.Services.AddSingleton<IEslCommanderFactory, EslCommanderFactory>();
+
 // ESL background service — connects to FreeSWITCH and handles CHANNEL_PARK / CHANNEL_HANGUP
 builder.Services.AddHostedService<EslBackgroundService>();
 
@@ -165,6 +169,9 @@ app.MapAuthEndpoints();
 app.MapAgentsEndpoints();
 app.MapTenantsEndpoints();
 app.MapCallRecordsEndpoints();
+app.MapCallRecordingsEndpoints();
+app.MapScreenRecordingsEndpoints();
+app.MapVoicemailsEndpoints();
 app.MapProductsEndpoints();
 app.MapCategoriesEndpoints();
 app.MapAttributesEndpoints();

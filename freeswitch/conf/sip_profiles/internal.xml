@@ -37,6 +37,13 @@
     <param name="disable-register"    value="false"/>
     <param name="watchdog-enabled"    value="false"/>
 
+    <!-- OPTIONS-ping every registered contact (incl. WebSocket softphones) so an idle
+         ws socket stays warm between JsSIP REGISTER refreshes. Without this the socket
+         gets reaped mid-session and the agent misses inbound calls during the browser's
+         re-registration blip. A contact that fails the ping is dropped promptly, so a
+         genuinely dead browser is cleared without waiting out the full register expiry. -->
+    <param name="all-reg-options-ping" value="true"/>
+
     <!-- Plain WebSocket for local dev (no cert required) -->
     <param name="ws-binding"          value=":7080"/>
     <!-- Secure WebSocket for external clients (Cloudflare tunnel terminates public TLS;

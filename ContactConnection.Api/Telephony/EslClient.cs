@@ -10,7 +10,7 @@ namespace ContactConnection.Api.Telephony;
 /// Handles auth handshake, event subscription, and line-by-line event reading.
 /// Also implements IEslCommander so it can be injected into telephony node handlers.
 /// </summary>
-public sealed class EslClient(ILogger<EslClient>? logger = null) : IAsyncDisposable, IEslCommander
+public sealed class EslClient(ILogger<EslClient>? logger = null) : IOwnedEslCommander
 {
     private TcpClient? _tcp;
     private StreamReader? _reader;
@@ -120,12 +120,49 @@ public sealed class EslClient(ILogger<EslClient>? logger = null) : IAsyncDisposa
         // Resolve the agent's registered WebRTC contact URI — this is the sofia profile +
         // full SIP contact with fs_path for WebSocket routing, e.g.:
         // sofia/internal/sip:abc@host.invalid;transport=ws;fs_path=sip:abc@172.x.x.x:port;transport=ws
-        var contact = await SendApiBodyAsync($"sofia_contact {extension}@{domain}", ct);
-        if (string.IsNullOrEmpty(contact) || contact.StartsWith("-ERR"))
+        var contact = await ResolveAgentContactAsync(extension, domain, ct);
+        // sofia_contact returns "error/user_not_registered" (not "-ERR", not empty) when the
+        // agent has no live registration — forwarding that verbatim to bridge: yields a bogus
+        // "error/" endpoint and FreeSWITCH drops the caller with CHAN_NOT_IMPLEMENTED. Treat any
+        // "error/…" contact, empty, or "-ERR" as "not reachable" so callers can fall back.
+        if (!IsResolvedContact(contact))
             throw new InvalidOperationException(
-                $"Agent {extension}@{domain} is not registered in FreeSWITCH. sofia_contact returned: {contact}");
+                $"Agent {extension}@{domain} is not reachable in FreeSWITCH. sofia_contact returned: {contact}");
 
         await SendApiAsync($"uuid_transfer {uuid} 'bridge:{contact}' inline", ct);
+    }
+
+    /// <summary>True when sofia_contact returned a usable contact URI (not empty, "-ERR", or "error/…").</summary>
+    private static bool IsResolvedContact(string? contact) =>
+        !string.IsNullOrEmpty(contact)
+        && !contact.StartsWith("-ERR", StringComparison.Ordinal)
+        && !contact.StartsWith("error/", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Resolve the agent's registered SIP contact, retrying briefly through a transient
+    /// registration gap. JsSIP refreshes its REGISTER mid-session; if the WebSocket transport
+    /// is reaped between refreshes there's a sub-second window where the browser re-registers
+    /// and sofia_contact returns "error/user_not_registered". Without this, an inbound bridge
+    /// landing in that window drops the caller. ~2s of retries covers the recovery blip; a
+    /// genuinely offline agent still ends in the same failure after the retries.
+    /// </summary>
+    private async Task<string?> ResolveAgentContactAsync(string extension, string domain, CancellationToken ct)
+    {
+        const int attempts = 5;
+        string? contact = null;
+        for (var i = 0; i < attempts; i++)
+        {
+            contact = await SendApiBodyAsync($"sofia_contact {extension}@{domain}", ct);
+            if (IsResolvedContact(contact)) return contact;
+            if (i < attempts - 1)
+            {
+                logger?.LogWarning(
+                    "sofia_contact {Ext}@{Domain} → '{Contact}' (attempt {N}/{Total}) — retrying through possible re-registration gap",
+                    extension, domain, contact, i + 1, attempts);
+                await Task.Delay(500, ct);
+            }
+        }
+        return contact;
     }
 
     private async Task<string?> SendApiBodyAsync(string command, CancellationToken ct)
@@ -165,6 +202,16 @@ public sealed class EslClient(ILogger<EslClient>? logger = null) : IAsyncDisposa
     public Task SendDtmfAsync(string uuid, string digits, int durationMs, CancellationToken ct = default) =>
         SendApiAsync($"uuid_send_dtmf {uuid} {digits}@{durationMs}", ct);
 
+    public Task TransferAsync(string uuid, string destination, string dialplan, string context, CancellationToken ct = default) =>
+        SendApiAsync($"uuid_transfer {uuid} {destination} {dialplan} {context}", ct);
+
+    public Task RecordAsync(string uuid, string action, string path, int limitSeconds = 0, CancellationToken ct = default) =>
+        SendApiAsync(
+            limitSeconds > 0
+                ? $"uuid_record {uuid} {action} {path} {limitSeconds}"
+                : $"uuid_record {uuid} {action} {path}",
+            ct);
+
     public Task StartAudioStreamAsync(string uuid, string wssUrl, string mixType, string sampleRateLabel, string metadata, CancellationToken ct = default) =>
         SendApiAsync($"uuid_audio_stream {uuid} start {wssUrl} {mixType} {sampleRateLabel} {metadata}", ct);
 
@@ -174,8 +221,8 @@ public sealed class EslClient(ILogger<EslClient>? logger = null) : IAsyncDisposa
     /// <returns>(uuid, null) on success; (null, errorDetail) on failure so callers can log the cause.</returns>
     public async Task<(string? Uuid, string? Error)> OriginateAndParkAsync(string extension, string domain, string callerNumber, CancellationToken ct = default)
     {
-        var contact = await SendApiBodyAsync($"sofia_contact {extension}@{domain}", ct);
-        if (string.IsNullOrEmpty(contact) || contact.StartsWith("-ERR"))
+        var contact = await ResolveAgentContactAsync(extension, domain, ct);
+        if (!IsResolvedContact(contact))
             return (null, $"sofia_contact {extension}@{domain} → {contact ?? "(null)"}");
 
         // Pre-assign the agent leg's UUID so we can (a) reliably identify it later and

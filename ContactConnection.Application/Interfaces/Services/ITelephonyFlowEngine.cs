@@ -11,6 +11,15 @@ public interface ITelephonyFlowEngine
     Task ResumeFromNodeAsync(string channelUuid, string nodeId, IEslCommander esl, CancellationToken ct = default);
 
     /// <summary>
+    /// Hands the live call to a different telephony flow: swaps the cached definition / event
+    /// handlers on the session and runs the target flow from its entry node against the same
+    /// parked channel. Shared flow vars carry over. Used by the tf_transfer node's
+    /// "telephony_flow" destination. Returns false if the target flow is missing / not an active
+    /// telephony flow / has no entry node.
+    /// </summary>
+    Task<bool> SwitchFlowAsync(string channelUuid, Guid targetFlowId, IEslCommander esl, CancellationToken ct = default);
+
+    /// <summary>
     /// Fires a named lifecycle event, executing the matching event-listener branch in the
     /// telephony flow that is live for this channel. Returns the CRM flow session if a
     /// tf_script_pop node fired during the branch.

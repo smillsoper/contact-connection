@@ -40,6 +40,16 @@ export interface Campaign {
   ringStrategy: string
   /** Only meaningful when ringStrategy === 'ring_top_n_by_proficiency'. */
   ringTopN: number
+  // Call-recording policy (the ceiling the tf_record node + ESL recording controller enforce)
+  /** 'disabled' | 'full' | 'conversation' | 'record_always_retain_by_disposition' */
+  recordingMode: string
+  /** 'one_party' | 'two_party_announce' | 'two_party_announce_optout' */
+  consentModel: string
+  recordingRequired: boolean
+  recordStereo: boolean
+  recordingBeepEnabled: boolean
+  autoMaskOnHold: boolean
+  recordingRetentionDays: number
   client?: { id: string; name: string }
   createdAt: string
   updatedAt: string
@@ -170,6 +180,16 @@ export const updateCampaign = (id: string, data: {
   ringStrategy: string
   ringTopN: number
 }) => api.put<Campaign>(`/api/v1/campaigns/${id}`, data)
+
+export const updateCampaignRecording = (id: string, data: {
+  recordingMode: string
+  consentModel: string
+  recordingRequired: boolean
+  recordStereo: boolean
+  recordingBeepEnabled: boolean
+  autoMaskOnHold: boolean
+  recordingRetentionDays: number
+}) => api.put<Campaign>(`/api/v1/campaigns/${id}/recording`, data)
 
 export const setCampaignFlow = (id: string, flowId: string) =>
   api.put<Campaign>(`/api/v1/campaigns/${id}/flow`, { flowId })

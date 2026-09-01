@@ -33,6 +33,62 @@
       </condition>
     </extension>
 
+    <!-- IVR digit collection for the tf_ivr_menu node.
+         EslBackgroundService sets cc_ivr_* channel vars then
+         `uuid_transfer <uuid> ivr_collect XML default` into here. play_and_get_digits does the
+         prompt / barge-in / per-digit timeout / invalid re-prompt / retry; we then emit a
+         CUSTOM event with the collected digits and re-park (the re-park is ignored by the
+         CHANNEL_PARK handler via the _ivr_in_progress session var). -->
+    <extension name="ivr-collect">
+      <condition field="destination_number" expression="^ivr_collect$">
+        <action application="answer"/>
+        <action application="play_and_get_digits"
+                data="${cc_ivr_min} ${cc_ivr_max} ${cc_ivr_tries} ${cc_ivr_timeout} ${cc_ivr_term} ${cc_ivr_prompt} ${cc_ivr_invalid} cc_ivr_result ${cc_ivr_regex} ${cc_ivr_digit_timeout}"/>
+        <action application="event"
+                data="Event-Name=CUSTOM,Event-Subclass=contactconnection::ivr_done,cc_ivr_digits=${cc_ivr_result}"/>
+        <action application="park"/>
+      </condition>
+    </extension>
+
+    <!-- Voicemail capture for the tf_voicemail node. EslBackgroundService sets cc_vm_* channel
+         vars then `uuid_transfer <uuid> vm_record XML default` into here. playback plays the
+         greeting + beep; record does the message capture (built-in max length + silence
+         detection); we then emit a CUSTOM event with the recorded path + length and re-park (the
+         re-park is ignored by the CHANNEL_PARK handler via the _vm_in_progress session var, same
+         as ivr_collect). '#' ends the message early. If the caller hangs up mid-message the
+         trailing event never fires — HandleChannelHangupAsync salvages the .wav instead. -->
+    <extension name="vm-record">
+      <condition field="destination_number" expression="^vm_record$">
+        <action application="answer"/>
+        <action application="set" data="playback_terminators=#"/>
+        <action application="playback" data="${cc_vm_greeting}"/>
+        <action application="playback" data="${cc_vm_beep}"/>
+        <action application="record"
+                data="${cc_vm_path} ${cc_vm_maxlen} ${cc_vm_silence_thresh} ${cc_vm_silence_secs}"/>
+        <action application="event"
+                data="Event-Name=CUSTOM,Event-Subclass=contactconnection::vm_done,cc_vm_recorded_path=${cc_vm_path},cc_vm_recorded_ms=${record_ms}"/>
+        <action application="park"/>
+      </condition>
+    </extension>
+
+    <!-- Blind transfer target for the tf_transfer node's external_number destination.
+         TransferNodeHandler sets cc_xfer_dest (a sofia/gateway/… or sofia/external/sip:… dial
+         string) + cc_xfer_announce, then `uuid_transfer <uuid> xfer_bridge XML default`.
+         continue_on_fail: a bridge that never connects falls through to the CUSTOM event + park
+         so EslBackgroundService can follow the node's `failed` handle. hangup_after_bridge: a
+         bridge that DID connect and then ended hangs the call up instead of re-parking. -->
+    <extension name="xfer-bridge">
+      <condition field="destination_number" expression="^xfer_bridge$">
+        <action application="set" data="continue_on_fail=true"/>
+        <action application="set" data="hangup_after_bridge=true"/>
+        <action application="playback" data="${cc_xfer_announce}"/>
+        <action application="bridge" data="${cc_xfer_dest}"/>
+        <action application="event"
+                data="Event-Name=CUSTOM,Event-Subclass=contactconnection::xfer_failed,cc_xfer_cause=${originate_disposition}"/>
+        <action application="park"/>
+      </condition>
+    </extension>
+
     <!-- DID inbound (dev/test): 10+ digit numbers routed through telephony call flow engine.
          Park WITHOUT answer so ESL can reject pre-answer (busy/unavailable/declined).
          In production, inbound DIDs arrive on the external profile (port 5080) and are

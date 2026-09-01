@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import AdminShell from '../../components/admin/AdminShell'
 import SearchableSelect from '../../components/SearchableSelect'
 import {
-  getCampaign, updateCampaign, setCampaignFlow, removeCampaignFlow,
+  getCampaign, updateCampaign, updateCampaignRecording, setCampaignFlow, removeCampaignFlow,
   setCampaignInboundFlow, removeCampaignInboundFlow,
   setCampaignOutboundFlow, removeCampaignOutboundFlow,
   activateCampaign, pauseCampaign, deactivateCampaign,
@@ -410,6 +410,152 @@ function SettingsForm({ campaign, flows, onSaved }: SettingsFormProps) {
           className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg px-5 py-2 text-sm font-medium transition-colors"
         >
           {saving ? 'Saving…' : 'Save settings'}
+        </button>
+        {saved && <span className="text-emerald-400 text-sm">Saved</span>}
+        {saveError && <span className="text-red-400 text-sm">{saveError}</span>}
+      </div>
+    </div>
+  )
+}
+
+// ── Call recording settings ──────────────────────────────────────────────────
+
+const RECORDING_MODES: { value: string; label: string; hint: string }[] = [
+  { value: 'disabled', label: 'Disabled', hint: 'No recording on this campaign. A tf_record(start) node is a no-op.' },
+  { value: 'full', label: 'Full / IVR', hint: 'Recording may run from call arrival (IVR, hold, queue) through the agent conversation to disconnect.' },
+  { value: 'conversation', label: 'Conversation only', hint: 'Recording may only run once the caller is bridged to an agent.' },
+  { value: 'record_always_retain_by_disposition', label: 'Always record, retain by disposition', hint: 'Record every call; the end-of-call disposition decides whether the file is kept.' },
+]
+
+const CONSENT_MODELS: { value: string; label: string; hint: string }[] = [
+  { value: 'one_party', label: 'One-party consent', hint: 'Record without an announcement.' },
+  { value: 'two_party_announce', label: 'Two-party — announce', hint: 'An announcement must play before recording begins.' },
+  { value: 'two_party_announce_optout', label: 'Two-party — announce + opt-out', hint: 'Announcement plays and the caller may decline recording via DTMF.' },
+]
+
+interface RecordingSettingsFormProps {
+  campaign: CampaignDetail
+  onSaved: (updated: CampaignDetail) => void
+}
+
+function RecordingSettingsForm({ campaign, onSaved }: RecordingSettingsFormProps) {
+  const [recordingMode, setRecordingMode] = useState(campaign.recordingMode ?? 'disabled')
+  const [consentModel, setConsentModel] = useState(campaign.consentModel ?? 'one_party')
+  const [recordingRequired, setRecordingRequired] = useState(campaign.recordingRequired ?? false)
+  const [recordStereo, setRecordStereo] = useState(campaign.recordStereo ?? true)
+  const [recordingBeepEnabled, setRecordingBeepEnabled] = useState(campaign.recordingBeepEnabled ?? false)
+  const [autoMaskOnHold, setAutoMaskOnHold] = useState(campaign.autoMaskOnHold ?? false)
+  const [retentionDays, setRetentionDays] = useState(campaign.recordingRetentionDays ?? 90)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+
+  const enabled = recordingMode !== 'disabled'
+  const inputCls = 'w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500'
+  const labelCls = 'block text-xs text-gray-400 mb-1'
+
+  const Toggle = ({ on, set, label, hint }: { on: boolean; set: (v: boolean) => void; label: string; hint: string }) => (
+    <div className="flex items-start gap-3">
+      <button
+        type="button"
+        onClick={() => set(!on)}
+        className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer items-center rounded-full transition-colors mt-0.5 ${on ? 'bg-indigo-600' : 'bg-gray-700'}`}
+      >
+        <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${on ? 'translate-x-5' : 'translate-x-1'}`} />
+      </button>
+      <div>
+        <span className="text-sm text-gray-300 font-medium">{label}</span>
+        <p className="text-xs text-gray-500 mt-0.5 leading-snug">{hint}</p>
+      </div>
+    </div>
+  )
+
+  async function handleSave() {
+    setSaving(true); setSaveError(null); setSaved(false)
+    try {
+      const updated = await updateCampaignRecording(campaign.id, {
+        recordingMode, consentModel, recordingRequired, recordStereo,
+        recordingBeepEnabled, autoMaskOnHold,
+        recordingRetentionDays: retentionDays,
+      })
+      onSaved({ ...campaign, ...updated })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+      <h2 className="text-white text-sm font-semibold mb-1">Call Recording</h2>
+      <p className="text-xs text-gray-500 mb-5">
+        This is the policy ceiling. A <span className="font-mono">tf_record</span> node in the telephony
+        flow does the actual start/stop/mask; where it sits decides coverage.
+      </p>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className={labelCls}>Recording mode</label>
+          <select className={inputCls} value={recordingMode} onChange={(e) => setRecordingMode(e.target.value)}>
+            {RECORDING_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+          </select>
+          <p className="text-xs text-gray-500 mt-1 leading-snug">
+            {RECORDING_MODES.find((m) => m.value === recordingMode)?.hint}
+          </p>
+        </div>
+
+        <div>
+          <label className={labelCls}>Consent model</label>
+          <select
+            className={`${inputCls} disabled:opacity-50`}
+            value={consentModel}
+            disabled={!enabled}
+            onChange={(e) => setConsentModel(e.target.value)}
+          >
+            {CONSENT_MODELS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+          </select>
+          <p className="text-xs text-gray-500 mt-1 leading-snug">
+            {CONSENT_MODELS.find((m) => m.value === consentModel)?.hint}
+          </p>
+        </div>
+
+        <div>
+          <label className={labelCls}>Retention (days)</label>
+          <input
+            type="number" min={1} max={3650} value={retentionDays}
+            disabled={!enabled}
+            onChange={(e) => setRetentionDays(Number(e.target.value))}
+            className={`${inputCls} disabled:opacity-50`}
+          />
+          <p className="text-xs text-gray-500 mt-1 leading-snug">How long finished recordings are kept before the purge job removes them.</p>
+        </div>
+
+        <div className={`space-y-4 md:col-span-2 ${enabled ? '' : 'opacity-50 pointer-events-none'}`}>
+          <Toggle on={recordStereo} set={setRecordStereo}
+            label="Stereo capture"
+            hint="Caller and agent on separate channels — near-free, and needed for clean transcription / selective redaction later." />
+          <Toggle on={recordingRequired} set={setRecordingRequired}
+            label="Recording required"
+            hint="If recording can't start, play an apology and don't connect the call rather than proceeding un-recorded." />
+          <Toggle on={autoMaskOnHold} set={setAutoMaskOnHold}
+            label="Auto-mask on hold"
+            hint="Automatically mask the recording whenever the agent places the caller on hold." />
+          <Toggle on={recordingBeepEnabled} set={setRecordingBeepEnabled}
+            label="Periodic beep"
+            hint="Play an audible tone at intervals while recording (required in some jurisdictions)." />
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3 mt-6 pt-4 border-t border-gray-800">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg px-5 py-2 text-sm font-medium transition-colors"
+        >
+          {saving ? 'Saving…' : 'Save recording policy'}
         </button>
         {saved && <span className="text-emerald-400 text-sm">Saved</span>}
         {saveError && <span className="text-red-400 text-sm">{saveError}</span>}
@@ -1016,6 +1162,10 @@ export default function CampaignDetailPage() {
           <SettingsForm
             campaign={campaign}
             flows={flows}
+            onSaved={(updated) => setCampaign(updated)}
+          />
+          <RecordingSettingsForm
+            campaign={campaign}
             onSaved={(updated) => setCampaign(updated)}
           />
           <AgentsSection

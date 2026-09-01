@@ -45,6 +45,16 @@ freeswitch/conf/vars_local.xml
 ## FreeSWITCH tenant-uploaded audio (runtime assets, not source)
 freeswitch/sounds/tenant_*/
 
+## FreeSWITCH call recordings (runtime data, not source — keep the dir, drop the media)
+freeswitch/recordings/*
+!freeswitch/recordings/.gitkeep
+
+## Local blob storage (screen-capture chunks, merged output — runtime data).
+## Root-anchored: a bare "storage/" also matches source dirs like tests/.../Storage/
+## (git ignore matching is case-insensitive on this platform).
+/storage/
+/ContactConnection.Api/storage/
+
 ## Docker volumes (local data — not source)
 postgres_data/
 

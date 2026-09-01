@@ -26,6 +26,7 @@ import RejectNode from '../components/telephony-designer/nodes/RejectNode'
 import AnswerNode from '../components/telephony-designer/nodes/AnswerNode'
 import HangupNode from '../components/telephony-designer/nodes/HangupNode'
 import RouteToQueueNode from '../components/telephony-designer/nodes/RouteToQueueNode'
+import TransferNode from '../components/telephony-designer/nodes/TransferNode'
 import PlayNode from '../components/telephony-designer/nodes/PlayNode'
 import TimeOfDayNode from '../components/telephony-designer/nodes/TimeOfDayNode'
 import TelBranchNode from '../components/telephony-designer/nodes/TelBranchNode'
@@ -41,6 +42,9 @@ import OnAgentAnswerNode from '../components/telephony-designer/nodes/OnAgentAns
 import OnCallDisconnectedNode from '../components/telephony-designer/nodes/OnCallDisconnectedNode'
 import OnCustomEventNode from '../components/telephony-designer/nodes/OnCustomEventNode'
 import DtmfNode from '../components/telephony-designer/nodes/DtmfNode'
+import IvrMenuNode from '../components/telephony-designer/nodes/IvrMenuNode'
+import RecordNode from '../components/telephony-designer/nodes/RecordNode'
+import VoicemailNode from '../components/telephony-designer/nodes/VoicemailNode'
 import WhisperNode from '../components/telephony-designer/nodes/WhisperNode'
 import GeneralApiCallNode from '../components/telephony-designer/nodes/GeneralApiCallNode'
 
@@ -77,6 +81,7 @@ const nodeTypes = {
   tf_answer: AnswerNode,
   tf_hangup: HangupNode,
   tf_route_to_queue: RouteToQueueNode,
+  tf_transfer: TransferNode,
   tf_play: PlayNode,
   tf_time_of_day: TimeOfDayNode,
   tf_branch: TelBranchNode,
@@ -88,6 +93,9 @@ const nodeTypes = {
   tf_cancel_dial: CancelDialNode,
   tf_script_pop: ScriptPopNode,
   tf_dtmf: DtmfNode,
+  tf_ivr_menu: IvrMenuNode,
+  tf_record: RecordNode,
+  tf_voicemail: VoicemailNode,
   tf_whisper: WhisperNode,
   tf_general_api_call: GeneralApiCallNode,
   tf_on_agent_selected: OnAgentSelectedNode,

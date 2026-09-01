@@ -1,9 +1,13 @@
+using System.Buffers.Binary;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using ContactConnection.Api.Hubs;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
 using ContactConnection.Domain.Entities;
+using ContactConnection.Domain.ValueObjects;
 using ContactConnection.Infrastructure.Data;
+using ContactConnection.Infrastructure.Telephony;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
@@ -77,8 +81,10 @@ public sealed class EslBackgroundService : BackgroundService
         // PLAYBACK_STOP (resumes the flow); ::error covers vendor/relay failures so the flow
         // still advances instead of leaving the caller on a channel that will never resume.
         await esl.SubscribeAsync(
-            "CHANNEL_PARK CHANNEL_ANSWER CHANNEL_HANGUP CHANNEL_HANGUP_COMPLETE CHANNEL_BRIDGE CHANNEL_UNBRIDGE PLAYBACK_STOP " +
-            "CUSTOM mod_audio_stream::connect mod_audio_stream::disconnect mod_audio_stream::error", ct);
+            "CHANNEL_PARK CHANNEL_ANSWER CHANNEL_HANGUP CHANNEL_HANGUP_COMPLETE CHANNEL_BRIDGE CHANNEL_UNBRIDGE " +
+            "CHANNEL_HOLD CHANNEL_UNHOLD PLAYBACK_STOP " +
+            "CUSTOM mod_audio_stream::connect mod_audio_stream::disconnect mod_audio_stream::error " +
+            "contactconnection::ivr_done contactconnection::vm_done contactconnection::xfer_failed", ct);
 
         _logger.LogInformation("ESL connected to FreeSWITCH at {Host}:{Port}", host, port);
 
@@ -113,6 +119,12 @@ public sealed class EslBackgroundService : BackgroundService
                 case "CHANNEL_UNBRIDGE":
                     await HandleChannelUnbridgeAsync(vars, esl, ct);
                     break;
+                case "CHANNEL_HOLD":
+                    await HandleChannelHoldAsync(vars, esl, mask: true, ct);
+                    break;
+                case "CHANNEL_UNHOLD":
+                    await HandleChannelHoldAsync(vars, esl, mask: false, ct);
+                    break;
                 case "CUSTOM":
                     await HandleCustomEventAsync(vars, esl, ct);
                     break;
@@ -135,6 +147,50 @@ public sealed class EslBackgroundService : BackgroundService
         // Whisper channels created by AnswerQueuedCall carry cc_whisper=true.
         // Skip them — they are internal bridge legs, not new inbound calls.
         if (vars.GetValueOrDefault("variable_cc_whisper") == "true") return;
+
+        // A tf_ivr_menu node uuid_transfers the caller into the ivr_collect extension, which
+        // re-parks when play_and_get_digits finishes. That re-park is not a new inbound call —
+        // the contactconnection::ivr_done event drives the flow resume. Identify it by FreeSWITCH's
+        // own transfer bookkeeping (destination + transfer source), not just the session var —
+        // HandleIvrDoneAsync may have already cleared _ivr_in_progress by the time this fires.
+        var transferSource = vars.GetValueOrDefault("variable_transfer_source")
+                          ?? vars.GetValueOrDefault("Caller-Transfer-Source") ?? "";
+        var rawDestination = vars.GetValueOrDefault("Caller-Destination-Number") ?? "";
+        var ivrSession = await _sessionStore.GetAsync(channelUuid, ct);
+        if (destination == "ivr_collect"
+            || rawDestination == "ivr_collect"
+            || transferSource.Contains("ivr_collect")
+            || ivrSession?.Vars.GetValueOrDefault("_ivr_in_progress") == "true")
+        {
+            _logger.LogInformation("CHANNEL_PARK {Uuid}: returned from IVR collection — not a new call", channelUuid);
+            return;
+        }
+
+        // Same idea for tf_voicemail: the vm_record extension re-parks after recording;
+        // contactconnection::vm_done drives the resume, not a fresh inbound.
+        if (destination == "vm_record"
+            || rawDestination == "vm_record"
+            || transferSource.Contains("vm_record")
+            || ivrSession?.Vars.GetValueOrDefault("_vm_in_progress") == "true")
+        {
+            _logger.LogInformation("CHANNEL_PARK {Uuid}: returned from voicemail recording — not a new call", channelUuid);
+            return;
+        }
+
+        // Same idea for tf_transfer's external_number destination: the xfer_bridge extension only
+        // re-parks the caller when the bridge FAILED to connect (a successful bridge goes straight
+        // to CHANNEL_BRIDGE and never comes back here). So a re-park with _xfer_in_progress still
+        // set IS the failure signal — resume on the node's `failed` handle. HandleXferFailedAsync
+        // is idempotent with the contactconnection::xfer_failed event path (first to clear wins).
+        if (destination == "xfer_bridge"
+            || rawDestination == "xfer_bridge"
+            || transferSource.Contains("xfer_bridge")
+            || ivrSession?.Vars.GetValueOrDefault("_xfer_in_progress") == "true")
+        {
+            _logger.LogInformation("CHANNEL_PARK {Uuid}: returned from failed external transfer — resuming failed branch", channelUuid);
+            await HandleXferFailedAsync(vars, esl, ct);
+            return;
+        }
 
         // Skip outbound channels — when testing with "fs_cli originate ... &park()", FreeSWITCH
         // fires CHANNEL_PARK for both the originate A-leg (outbound) and the loopback B-leg
@@ -398,6 +454,389 @@ public sealed class EslBackgroundService : BackgroundService
     }
 
     /// <summary>
+    /// The ivr_collect dialplan extension finished play_and_get_digits for a tf_ivr_menu node and
+    /// emitted this custom event with the result. Resolve the digits to a transition and resume.
+    /// </summary>
+    private async Task HandleIvrDoneAsync(
+        Dictionary<string, string> vars, EslClient esl, CancellationToken ct)
+    {
+        var uuid = vars.GetValueOrDefault("Unique-ID");
+        if (string.IsNullOrEmpty(uuid)) return;
+
+        var session = await ResolveSessionAsync(uuid, vars, ct);
+        if (session is null || session.Vars.GetValueOrDefault("_ivr_in_progress") != "true") return;
+
+        // The collected digits ride on the event: our custom cc_ivr_digits header, or the
+        // channel var it's set from (variable_cc_ivr_result, auto-included on channel events).
+        // Empty = no valid entry (timed out / retries exhausted) → falls through to no_match.
+        // Do NOT fall back to uuid_getvar here — reading an api reply from inside an event
+        // handler races the queued CHANNEL_PARK the extension's trailing park() emits.
+        var digits = vars.GetValueOrDefault("cc_ivr_digits");
+        if (string.IsNullOrEmpty(digits))
+            digits = vars.GetValueOrDefault("variable_cc_ivr_result");
+
+        Dictionary<string, string> optionMap;
+        try
+        {
+            optionMap = JsonSerializer.Deserialize<Dictionary<string, string>>(
+                session.Vars.GetValueOrDefault("_ivr_options", "{}")) ?? new();
+        }
+        catch (JsonException)
+        {
+            optionMap = new();
+        }
+
+        var noMatch = session.Vars.GetValueOrDefault("_ivr_no_match");
+        var target = IvrMenu.ResolveTarget(digits, optionMap, string.IsNullOrEmpty(noMatch) ? null : noMatch);
+
+        session.Vars.Remove("_ivr_in_progress");
+        session.Vars.Remove("_ivr_options");
+        session.Vars.Remove("_ivr_no_match");
+        await _sessionStore.SaveAsync(session, ct);
+
+        _logger.LogInformation(
+            "ivr_done {Uuid}: digits='{Digits}' → node {Target}",
+            uuid, digits ?? "(none)", target ?? "(dead-end)");
+
+        if (string.IsNullOrEmpty(target)) return;
+
+        using var scope = _scopeFactory.CreateScope();
+        await scope.ServiceProvider
+            .GetRequiredService<ITelephonyFlowEngine>()
+            .ResumeFromNodeAsync(session.ChannelUuid, target, esl, ct);
+    }
+
+    /// <summary>
+    /// The vm_record dialplan extension finished recording a caller message for a tf_voicemail
+    /// node and emitted this custom event. Below the minimum length → resume on <c>no_message</c>.
+    /// Otherwise: move the .wav into blob storage, write the <see cref="Voicemail"/> row, run the
+    /// node's optional email delivery (variable-resolved subject/body, .wav attached), push a
+    /// supervisor SignalR notification, and resume on <c>recorded</c>.
+    /// </summary>
+    private async Task HandleVmDoneAsync(
+        Dictionary<string, string> vars, EslClient esl, CancellationToken ct,
+        bool fromHangup = false, TelephonyCallSession? knownSession = null)
+    {
+        var uuid = vars.GetValueOrDefault("Unique-ID");
+        if (string.IsNullOrEmpty(uuid)) return;
+
+        // The hangup-salvage caller hands us the session it already resolved and claimed (see
+        // HandleChannelHangupCoreAsync) — re-resolving here would race the session teardown that
+        // runs right after. The contactconnection::vm_done event path resolves + guards normally.
+        var session = knownSession ?? await ResolveSessionAsync(uuid, vars, ct);
+        if (session is null) return;
+        if (knownSession is null && session.Vars.GetValueOrDefault("_vm_in_progress") != "true") return;
+
+        // Recorded length: our custom header first, then FreeSWITCH's own record_ms / record_seconds.
+        var recordedMs = ParseFirstInt(
+            vars.GetValueOrDefault("cc_vm_recorded_ms"),
+            vars.GetValueOrDefault("variable_record_ms"));
+        if (recordedMs == 0 &&
+            int.TryParse(vars.GetValueOrDefault("variable_record_seconds"), out var recSecs))
+            recordedMs = recSecs * 1000;
+
+        var containerPath = session.Vars.GetValueOrDefault("_vm_path")
+                            ?? vars.GetValueOrDefault("cc_vm_recorded_path")
+                            ?? string.Empty;
+        var nodeId          = session.Vars.GetValueOrDefault("_vm_node_id") ?? string.Empty;
+        var nextRecorded    = session.Vars.GetValueOrDefault("_vm_next_recorded");
+        var nextNoMessage   = session.Vars.GetValueOrDefault("_vm_next_no_message");
+        var minMs           = int.TryParse(session.Vars.GetValueOrDefault("_vm_min_ms"), out var m) ? m : 0;
+
+        foreach (var k in new[] { "_vm_in_progress", "_vm_node_id", "_vm_next_recorded", "_vm_next_no_message", "_vm_min_ms", "_vm_path" })
+            session.Vars.Remove(k);
+        // Salvage path: the session is about to be deleted by the hangup handler and was already
+        // claimed there (_vm_in_progress = "salvaging"), so persisting the cleared copy would only
+        // race that delete and risk resurrecting the key. The event path still needs the save.
+        if (!fromHangup)
+            await _sessionStore.SaveAsync(session, ct);
+
+        var hostPath = HostRecordingPath(containerPath);
+        var fileLen  = !string.IsNullOrEmpty(hostPath) && File.Exists(hostPath) ? new FileInfo(hostPath).Length : 0;
+
+        // Caller hung up mid-message: no record_ms header arrives. Estimate from the .wav —
+        // read the actual byte-rate out of its header (FreeSWITCH records at the channel rate,
+        // which on carrier/WebRTC legs is 48 kHz, not the 8 kHz a hard-coded constant assumed).
+        if (recordedMs == 0 && fileLen > 44)
+            recordedMs = EstimateWavDurationMs(hostPath!, fileLen);
+
+        // ── Too short / nothing recorded → no_message ───────────────────────────
+        if (recordedMs < minMs || fileLen == 0)
+        {
+            _logger.LogInformation(
+                "vm_done {Uuid}: no usable message (ms={Ms}, min={Min}, file={File}, bytes={Bytes}) → no_message",
+                uuid, recordedMs, minMs, hostPath ?? "(none)", fileLen);
+            TryDeleteFile(hostPath);
+            if (!fromHangup) await ResumeAsync(session.ChannelUuid, nextNoMessage, esl, ct);
+            return;
+        }
+
+        var durationSeconds = (int)Math.Round(recordedMs / 1000.0);
+
+        using var scope = _scopeFactory.CreateScope();
+        var sp          = scope.ServiceProvider;
+        var dbFactory   = sp.GetRequiredService<ITenantDbContextFactory>();
+        var blobs       = sp.GetRequiredService<IBlobStorage>();
+
+        var voicemail = Voicemail.Create(
+            session.TenantId, session.CallRecordId, session.CampaignId, session.CallerNumber, durationSeconds);
+
+        byte[] audio;
+        try
+        {
+            audio = await File.ReadAllBytesAsync(hostPath!, ct);
+            await using var ms = new MemoryStream(audio, writable: false);
+            await blobs.PutAsync(voicemail.StorageKey, ms, "audio/wav", ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "vm_done {Uuid}: failed to move recording into blob storage from {Path}", uuid, hostPath);
+            if (!fromHangup) await ResumeAsync(session.ChannelUuid, nextNoMessage, esl, ct);
+            return;
+        }
+
+        await using (var db = dbFactory.Create(session.TenantSchemaName))
+        {
+            db.Voicemails.Add(voicemail);
+            await db.SaveChangesAsync(ct);
+        }
+
+        _logger.LogInformation(
+            "vm_done {Uuid}: voicemail {VmId} stored ({Secs}s) for call {CallId}",
+            uuid, voicemail.Id, durationSeconds, session.CallRecordId);
+
+        // ── Optional email delivery ────────────────────────────────────────────
+        await DeliverVoicemailEmailAsync(sp, dbFactory, session, nodeId, voicemail, audio, ct);
+
+        // ── Supervisor SignalR push ───────────────────────────────────────────
+        try
+        {
+            await sp.GetRequiredService<IDashboardNotifier>().NotifyVoicemailReceivedAsync(
+                session.TenantId, session.CampaignId, voicemail.Id, session.CallRecordId,
+                session.CallerNumber, durationSeconds, voicemail.CreatedAt, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "vm_done {Uuid}: supervisor notification failed", uuid);
+        }
+
+        TryDeleteFile(hostPath);
+        if (!fromHangup) await ResumeAsync(session.ChannelUuid, nextRecorded, esl, ct);
+    }
+
+    /// <summary>
+    /// Resolves the tf_voicemail node's delivery block from the cached flow definition, renders
+    /// its templated fields against a variable context built from the call, and sends via
+    /// <see cref="IEmailService"/> with the message .wav attached. The outcome
+    /// (sent / failed / skipped) is stamped on the voicemail row.
+    /// </summary>
+    private async Task DeliverVoicemailEmailAsync(
+        IServiceProvider sp, ITenantDbContextFactory dbFactory, TelephonyCallSession session,
+        string nodeId, Voicemail voicemail, byte[] audio, CancellationToken ct)
+    {
+        string status;
+        string? recipients = null;
+        string? error = null;
+        try
+        {
+            JsonObject? node = null;
+            if (!string.IsNullOrEmpty(nodeId) && !string.IsNullOrEmpty(session.FlowDefinitionJson))
+                node = JsonNode.Parse(session.FlowDefinitionJson)?["nodes"]?[nodeId]?.AsObject();
+
+            if (node is null)
+            {
+                status = VoicemailEmailStatus.Skipped;
+            }
+            else
+            {
+                var resolver = sp.GetRequiredService<IVariableResolver>();
+                var varCtx   = await BuildVoicemailVarContextAsync(dbFactory, session, ct);
+                var attachment = new EmailAttachment($"voicemail-{session.CallRecordId}.wav", audio, "audio/wav");
+
+                var message = VoicemailEmail.Build(node, resolver, varCtx, attachment);
+                if (message is null || !message.HasRecipients)
+                {
+                    status = VoicemailEmailStatus.Skipped;
+                }
+                else
+                {
+                    recipients = string.Join(", ", message.To.Concat(message.Cc).Concat(message.Bcc));
+                    await sp.GetRequiredService<IEmailService>().SendAsync(message, ct);
+                    status = VoicemailEmailStatus.Sent;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            status = VoicemailEmailStatus.Failed;
+            error  = ex.Message;
+            _logger.LogError(ex, "vm_done: voicemail {VmId} email delivery failed", voicemail.Id);
+        }
+
+        try
+        {
+            await using var db = dbFactory.Create(session.TenantSchemaName);
+            var row = await db.Voicemails.FirstOrDefaultAsync(v => v.Id == voicemail.Id, ct);
+            row?.RecordEmailDelivery(status, recipients, error);
+            if (row is not null) await db.SaveChangesAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "vm_done: failed to persist email-delivery outcome for voicemail {VmId}", voicemail.Id);
+        }
+    }
+
+    private async Task<VariableContext> BuildVoicemailVarContextAsync(
+        ITenantDbContextFactory dbFactory, TelephonyCallSession session, CancellationToken ct)
+    {
+        var ctx = new VariableContext
+        {
+            Tenant = { ["id"] = session.TenantId.ToString(), ["subdomain"] = session.TenantSubdomain },
+        };
+        ctx.Caller["phone"] = session.CallerNumber;
+        ctx.Caller["ani"]   = session.CallerNumber;
+        ctx.Caller["dnis"]  = session.DestinationNumber;
+        ctx.CallRecord["id"] = session.CallRecordId.ToString();
+        ctx.CallRecord["dnis"] = session.DestinationNumber;
+        ctx.CallRecord["campaign_id"] = session.CampaignId.ToString();
+
+        foreach (var (k, v) in session.Vars)
+            if (!k.StartsWith('_')) ctx.FlowVars[k] = v;
+
+        try
+        {
+            await using var db = dbFactory.Create(session.TenantSchemaName);
+            var r = await db.CallRecords.FirstOrDefaultAsync(x => x.Id == session.CallRecordId, ct);
+            if (r is not null)
+            {
+                ctx.CallRecord["status"]        = r.OverallStatus;
+                ctx.CallRecord["account_number"] = r.AccountNumber ?? "";
+                ctx.CallRecord["call_started_at"] = r.CallStartAt?.ToString("O") ?? "";
+                ctx.Caller["first_name"] = r.FirstName ?? "";
+                ctx.Caller["last_name"]  = r.LastName ?? "";
+                ctx.Caller["email"]      = r.Email ?? "";
+                ctx.Caller["name"] = string.Join(" ",
+                    new[] { r.FirstName, r.LastName }.Where(n => !string.IsNullOrWhiteSpace(n)));
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "BuildVoicemailVarContext: call record load failed (non-fatal)");
+        }
+
+        return ctx;
+    }
+
+    private string? HostRecordingPath(string containerPath)
+    {
+        if (string.IsNullOrEmpty(containerPath)) return null;
+        var fileName = Path.GetFileName(containerPath);
+        var hostDir  = _config["FreeSWITCH:RecordingsHostPath"] ?? "freeswitch/recordings";
+        return Path.GetFullPath(Path.Combine(hostDir, fileName));
+    }
+
+    private static int ParseFirstInt(params string?[] candidates)
+    {
+        foreach (var c in candidates)
+            if (int.TryParse(c, out var v)) return v;
+        return 0;
+    }
+
+    /// <summary>
+    /// Duration estimate for a voicemail .wav when FreeSWITCH gave us no record_ms (caller hung
+    /// up mid-message). Reads the canonical 44-byte PCM WAV header's ByteRate field (bytes/sec of
+    /// audio) rather than assuming a fixed sample rate — carrier and WebRTC legs record at 48 kHz,
+    /// not 8 kHz. Falls back to the 16 kB/s (8 kHz/16-bit/mono) assumption if the header can't be read.
+    /// </summary>
+    private int EstimateWavDurationMs(string path, long fileLen)
+    {
+        const int headerBytes = 44;
+        const int byteRateOffset = 28;
+        try
+        {
+            Span<byte> header = stackalloc byte[headerBytes];
+            using var fs = File.OpenRead(path);
+            if (fs.Read(header) == headerBytes
+                && header[0] == (byte)'R' && header[1] == (byte)'I' && header[2] == (byte)'F' && header[3] == (byte)'F')
+            {
+                var byteRate = BinaryPrimitives.ReadUInt32LittleEndian(header[byteRateOffset..]);
+                if (byteRate > 0)
+                    return (int)Math.Round((fileLen - headerBytes) / (double)byteRate * 1000);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "EstimateWavDurationMs: header read failed for {Path}, using 8 kHz fallback", path);
+        }
+        return (int)Math.Round((fileLen - headerBytes) / 16000.0 * 1000);
+    }
+
+    private static void TryDeleteFile(string? path)
+    {
+        try { if (!string.IsNullOrEmpty(path) && File.Exists(path)) File.Delete(path); }
+        catch { /* best effort — recordings mount */ }
+    }
+
+    private async Task ResumeAsync(string channelUuid, string? nodeId, EslClient esl, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(nodeId)) return;
+        using var scope = _scopeFactory.CreateScope();
+        await scope.ServiceProvider
+            .GetRequiredService<ITelephonyFlowEngine>()
+            .ResumeFromNodeAsync(channelUuid, nodeId, esl, ct);
+    }
+
+    /// <summary>
+    /// Agent placed the caller on/off hold (SIP re-INVITE → FreeSWITCH CHANNEL_HOLD/UNHOLD, fired
+    /// on the agent leg). When the call's campaign has AutoMaskOnHold set and a recording is
+    /// running, mask/unmask it for the hold span so hold-time audio isn't captured.
+    /// </summary>
+    private async Task HandleChannelHoldAsync(
+        Dictionary<string, string> vars, EslClient esl, bool mask, CancellationToken ct)
+    {
+        var eventUuid = vars.GetValueOrDefault("Unique-ID");
+        if (string.IsNullOrEmpty(eventUuid)) return;
+
+        var session = await ResolveSessionAsync(eventUuid, vars, ct);
+        if (session is null || session.CampaignId == Guid.Empty) return;
+
+        using var scope         = _scopeFactory.CreateScope();
+        var dbFactory           = scope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
+        var recordingController = scope.ServiceProvider.GetRequiredService<ICallRecordingController>();
+
+        await using var db = dbFactory.Create(session.TenantSchemaName);
+
+        var campaign = await db.Campaigns.FirstOrDefaultAsync(c => c.Id == session.CampaignId, ct);
+        if (campaign?.AutoMaskOnHold != true) return;
+
+        var record = await db.CallRecords.FirstOrDefaultAsync(r => r.ContactIdExternal == session.ChannelUuid, ct);
+        if (record is null || record.RecordingStartedAt is null || record.RecordingStoppedAt is not null)
+            return;   // no recording running to mask
+
+        var command = new RecordingCommand
+        {
+            ChannelUuid      = session.ChannelUuid,
+            CallRecordId     = record.Id,
+            TenantSchemaName = session.TenantSchemaName,
+            Source           = RecordingEventSource.AutoHold,
+            Reason           = mask ? "agent_hold" : "agent_unhold",
+        };
+
+        var outcome = mask
+            ? await recordingController.MaskAsync(new RecordingMaskCommand
+              {
+                  ChannelUuid = command.ChannelUuid, CallRecordId = command.CallRecordId,
+                  TenantSchemaName = command.TenantSchemaName, Source = command.Source, Reason = command.Reason,
+                  MaskFill = MaskFillKind.Silence,
+              }, esl, ct)
+            : await recordingController.UnmaskAsync(command, esl, ct);
+
+        _logger.LogInformation(
+            "CHANNEL_{Evt} {Uuid} → recording {Action} (AutoMaskOnHold) call={CallRecordId} ok={Ok}",
+            mask ? "HOLD" : "UNHOLD", eventUuid, mask ? "masked" : "unmasked", record.Id, outcome.Ok);
+    }
+
+    /// <summary>
     /// Channel hung up — fire the call_disconnected event branch (if configured), mark the
     /// CallRecord complete, and delete the live call session from Redis.
     /// </summary>
@@ -430,6 +869,43 @@ public sealed class EslBackgroundService : BackgroundService
         // for all session-store/CallRecord lookups below once a session is found.
         var session = await ResolveSessionAsync(channelUuid, vars, ct);
 
+        // tf_transfer external_number: the OUTBOUND leg (not the caller's own channel) died while
+        // the transfer was still in progress → the bridge never connected. Leave the session and
+        // call record alone — the caller's channel is still up and will re-park, at which point
+        // HandleChannelParkAsync drives the node's `failed` branch. (A connected transfer clears
+        // _xfer_in_progress on CHANNEL_BRIDGE, so this only fires on genuine connect failures.)
+        if (session is not null
+            && session.Vars.GetValueOrDefault("_xfer_in_progress") == "true"
+            && !string.Equals(channelUuid, session.ChannelUuid, StringComparison.Ordinal))
+        {
+            _logger.LogInformation(
+                "CHANNEL_HANGUP {Uuid} cause={Cause}: external-transfer outbound leg failed — caller {Caller} stays up for the failed branch",
+                channelUuid, cause, session.ChannelUuid);
+            return;
+        }
+
+        // Caller hung up while leaving a voicemail (never pressed # / hit silence). The vm_record
+        // extension's trailing event+park never ran — salvage the .wav before the session is torn
+        // down. Claim it synchronously (cheap Redis write) so a racing contactconnection::vm_done
+        // event can't also store the message, then run the slow part (file read → blob → DB row →
+        // email → SignalR, ~1.5s incl. the Resend call) off the ESL event loop instead of stalling
+        // every telephony event behind it. HandleVmDoneAsync skips the flow resume when fromHangup.
+        if (session?.Vars.GetValueOrDefault("_vm_in_progress") == "true")
+        {
+            session.Vars["_vm_in_progress"] = "salvaging";
+            try { await _sessionStore.SaveAsync(session, ct); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Voicemail salvage claim failed for {Uuid}", channelUuid); }
+
+            var salvageSession = session;
+            var salvageVars    = vars;
+            var salvageUuid    = channelUuid;
+            _ = Task.Run(async () =>
+            {
+                try { await HandleVmDoneAsync(salvageVars, esl, CancellationToken.None, fromHangup: true, knownSession: salvageSession); }
+                catch (Exception ex) { _logger.LogError(ex, "Voicemail salvage on hangup failed for {Uuid}", salvageUuid); }
+            });
+        }
+
         if (session is not null)
         {
             var sessionUuid = session.ChannelUuid;
@@ -443,8 +919,10 @@ public sealed class EslBackgroundService : BackgroundService
             var traceRegistry       = scope.ServiceProvider.GetRequiredService<ICallTraceSubscriptionRegistry>();
             var traceNotifier       = scope.ServiceProvider.GetRequiredService<ICallTraceNotifier>();
             var callStateRecorder   = scope.ServiceProvider.GetRequiredService<ICallStateHistoryRecorder>();
+            var recordingController = scope.ServiceProvider.GetRequiredService<ICallRecordingController>();
 
             // Fire the call_disconnected event so the designer branch can run post-call actions
+            // (which may itself include a tf_record(stop) node — handled before the safety net below)
             await telephonyEngine.FireEventAsync(
                 sessionUuid, "call_disconnected",
                 new FireEventContext { AdditionalVars = new() { ["hangup_cause"] = cause } },
@@ -462,6 +940,21 @@ public sealed class EslBackgroundService : BackgroundService
                 _logger.LogInformation(
                     "CHANNEL_HANGUP {Uuid} cause={Cause} → CallRecord {RecordId} completed",
                     channelUuid, cause, record.Id);
+
+                // Recording safety net: always drop watchdog timers for this channel; if a
+                // recording was running and nothing closed it (no tf_record(stop) wired into
+                // the disconnect branch), close the audit trail now. FreeSWITCH already stopped
+                // the physical recording when the channel died.
+                recordingController.ForgetChannel(sessionUuid);
+                if (record.RecordingStartedAt is not null && record.RecordingStoppedAt is null)
+                    await recordingController.FinalizeOnDisconnectAsync(new RecordingCommand
+                    {
+                        ChannelUuid      = sessionUuid,
+                        CallRecordId     = record.Id,
+                        TenantSchemaName = session.TenantSchemaName,
+                        Source           = RecordingEventSource.Disconnect,
+                        Reason           = cause,
+                    }, ct);
 
                 if (session.CampaignId != Guid.Empty)
                     campaign = await db.Campaigns.FirstOrDefaultAsync(c => c.Id == session.CampaignId, ct);
@@ -598,6 +1091,16 @@ public sealed class EslBackgroundService : BackgroundService
 
         var bridgeSession = await _sessionStore.GetAsync(uuid, ct);
         if (bridgeSession is null) return;
+
+        // tf_transfer external_number connected — the outbound leg is now bridged to the caller, so
+        // the transfer is no longer "in progress". Clearing this lets that outbound leg's eventual
+        // CHANNEL_HANGUP complete the call normally instead of being read as a bridge failure.
+        if (bridgeSession.Vars.Remove("_xfer_in_progress"))
+        {
+            foreach (var k in new[] { "_xfer_node_id", "_xfer_next_failed" })
+                bridgeSession.Vars.Remove(k);
+            await _sessionStore.SaveAsync(bridgeSession, ct);
+        }
 
         // Call is now bridged to an agent — record the "active" transition
         {
@@ -887,7 +1390,44 @@ public sealed class EslBackgroundService : BackgroundService
             case "mod_audio_stream::connect":
                 _logger.LogDebug("AudioStreamConnect [{Uuid}]", vars.GetValueOrDefault("Unique-ID"));
                 break;
+            case "contactconnection::ivr_done":
+                await HandleIvrDoneAsync(vars, esl, ct);
+                break;
+            case "contactconnection::vm_done":
+                await HandleVmDoneAsync(vars, esl, ct);
+                break;
+            case "contactconnection::xfer_failed":
+                await HandleXferFailedAsync(vars, esl, ct);
+                break;
         }
+    }
+
+    /// <summary>
+    /// The xfer_bridge dialplan extension (tf_transfer → external_number) couldn't connect the
+    /// bridge and re-parked the caller. Clear the _xfer_* markers and resume the telephony flow on
+    /// the node's <c>failed</c> handle so it can offer voicemail / another destination.
+    /// </summary>
+    private async Task HandleXferFailedAsync(Dictionary<string, string> vars, EslClient esl, CancellationToken ct)
+    {
+        var uuid = vars.GetValueOrDefault("Unique-ID");
+        if (string.IsNullOrEmpty(uuid)) return;
+
+        var session = await ResolveSessionAsync(uuid, vars, ct);
+        if (session is null || session.Vars.GetValueOrDefault("_xfer_in_progress") != "true") return;
+
+        var nextFailed = session.Vars.GetValueOrDefault("_xfer_next_failed");
+        var cause      = vars.GetValueOrDefault("cc_xfer_cause") ?? "unknown";
+
+        foreach (var k in new[] { "_xfer_in_progress", "_xfer_node_id", "_xfer_next_failed" })
+            session.Vars.Remove(k);
+        await _sessionStore.SaveAsync(session, ct);
+
+        _logger.LogInformation(
+            "xfer_failed {Uuid}: external transfer did not connect (cause={Cause}) → {Next}",
+            uuid, cause, string.IsNullOrEmpty(nextFailed) ? "(no failed handle — call stays parked)" : nextFailed);
+
+        if (!string.IsNullOrEmpty(nextFailed))
+            await ResumeAsync(session.ChannelUuid, nextFailed, esl, ct);
     }
 
     /// <summary>

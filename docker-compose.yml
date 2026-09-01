@@ -30,12 +30,28 @@ services:
       timeout: 5s
       retries: 5
 
+  # Keeps the shared Docker Desktop / WSL2 VM kernel clock disciplined. That one
+  # kernel clock is shared by every container, so this single sidecar fixes time
+  # drift for all of them (FreeSWITCH especially — recording + screen-capture
+  # timestamp alignment depends on it). WSL2's own resync is unreliable after a
+  # long host sleep/hibernate (Session 98: SIP reg EXP was ~2 days stale).
+  # Needs SYS_TIME to step the kernel clock; nothing else.
+  timesync:
+    build:
+      context: ./timesync
+    container_name: cc_timesync
+    restart: unless-stopped
+    cap_add:
+      - SYS_TIME
+
   freeswitch:
     build:
       context: ./freeswitch
       args:
         SIGNALWIRE_PAT: ${SIGNALWIRE_PAT}
     container_name: cc_freeswitch
+    depends_on:
+      - timesync
     ports:
       - "5060:5060/udp"              # SIP — internal profile (agent softphones)
       - "5060:5060/tcp"              # SIP TCP
@@ -48,6 +64,9 @@ services:
     volumes:
       - ./freeswitch/conf:/etc/freeswitch
       - ./freeswitch/sounds:/usr/share/freeswitch/sounds/contactconnection
+      # Call recordings written by uuid_record. Host-mounted so the (future) transcode/upload
+      # worker can read the .wav files; contents are gitignored (runtime data, not source).
+      - ./freeswitch/recordings:/var/lib/freeswitch/recordings
     extra_hosts:
       - "host.docker.internal:host-gateway"
 

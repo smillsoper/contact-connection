@@ -59,6 +59,18 @@ public class ScriptPopNodeHandler : ITelephonyNodeHandler
         if (Guid.TryParse(nodeFlowIdStr, out var nodeFlowId))
             flowId = nodeFlowId;
 
+        // A tf_transfer node earlier in the call may have stashed a screen-pop flow override so
+        // the receiving campaign's agent gets a specific script instead of that campaign's
+        // default. The node's own flowId still wins (most-specific), so only apply when unset.
+        if (flowId is null &&
+            Guid.TryParse(ctx.Vars.GetValueOrDefault("_screenpop_flow_override"), out var overrideFlowId))
+        {
+            flowId = overrideFlowId;
+            _logger.LogInformation(
+                "ScriptPopNodeHandler [{Uuid}]: using transfer screen-pop override flow {FlowId}",
+                ctx.ChannelUuid, overrideFlowId);
+        }
+
         if (flowId is null)
         {
             await using var db = _factory.Create(ctx.TenantSchemaName);

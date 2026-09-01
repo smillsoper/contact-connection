@@ -86,4 +86,9 @@ public interface IFlowHubClient
 
     /// <summary>Broadcast to supervisor dashboards — a call in this campaign changed queue/routing state.</summary>
     Task ReceiveCallStateSnapshot(string campaignId, string state);
+
+    /// <summary>Broadcast to supervisor dashboards — a tf_voicemail node captured a new caller message.</summary>
+    Task ReceiveVoicemail(
+        string voicemailId, string campaignId, string callRecordId,
+        string callerId, int durationSeconds, string createdAtIso);
 }

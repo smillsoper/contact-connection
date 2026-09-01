@@ -186,6 +186,7 @@ public static class AdminAgentsEndpoints
         a.CreatedAt,
         a.LastLoginAt,
         a.Timezone,
+        a.SipExtension,
     };
 }
 

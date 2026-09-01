@@ -14,6 +14,7 @@ public static class CampaignsEndpoints
         group.MapGet("",                              GetAll);
         group.MapGet("{id:guid}",                     GetById);
         group.MapPut("{id:guid}",                     Update);
+        group.MapPut("{id:guid}/recording",           UpdateRecording);
         group.MapPut("{id:guid}/flow",                SetFlow);
         group.MapDelete("{id:guid}/flow",             RemoveFlow);
         group.MapPut("{id:guid}/inbound-flow",        SetInboundFlow);
@@ -104,6 +105,32 @@ public static class CampaignsEndpoints
             req.MaxQueueSize, req.QueueTimeoutSeconds, req.ServiceLevelThresholdSeconds, req.ShortAbandonThresholdSeconds,
             req.QueueAccelerationEnabled, req.QueueAccelerationIntervalSeconds, req.QueueAccelerationPriorityBoost,
             req.RingStrategy, req.RingTopN);
+        await repo.SaveChangesAsync(ct);
+        return Results.Ok(ToSummaryResponse(campaign));
+    }
+
+    // ── PUT /api/v1/campaigns/{id}/recording ───────────────────────────────
+    // Call-recording policy is its own endpoint (not folded into Update) — it's the
+    // ceiling the tf_record node and the ESL recording controller enforce, and keeping
+    // it separate avoids piling onto Update's already-long positional signature.
+
+    private static async Task<IResult> UpdateRecording(
+        Guid id, UpdateCampaignRecordingRequest req,
+        ICampaignRepository repo, TenantContext tenantContext, CancellationToken ct)
+    {
+        if (!tenantContext.HasTenant) return Results.Unauthorized();
+        var campaign = await repo.GetByIdAsync(id, ct);
+        if (campaign is null) return Results.NotFound();
+
+        campaign.ConfigureRecording(
+            recordingMode:          req.RecordingMode,
+            consentModel:           req.ConsentModel,
+            recordingRequired:      req.RecordingRequired,
+            recordStereo:           req.RecordStereo,
+            recordingBeepEnabled:   req.RecordingBeepEnabled,
+            autoMaskOnHold:         req.AutoMaskOnHold,
+            recordingRetentionDays: req.RecordingRetentionDays);
+
         await repo.SaveChangesAsync(ct);
         return Results.Ok(ToSummaryResponse(campaign));
     }
@@ -355,6 +382,8 @@ public static class CampaignsEndpoints
         c.MaxQueueSize, c.QueueTimeoutSeconds, c.ServiceLevelThresholdSeconds, c.ShortAbandonThresholdSeconds,
         c.QueueAccelerationEnabled, c.QueueAccelerationIntervalSeconds, c.QueueAccelerationPriorityBoost,
         c.RingStrategy, c.RingTopN,
+        c.RecordingMode, c.ConsentModel, c.RecordingRequired, c.RecordStereo,
+        c.RecordingBeepEnabled, c.AutoMaskOnHold, c.RecordingRetentionDays,
         Client = c.Client is null ? null : new { c.Client.Id, c.Client.Name },
         c.CreatedAt, c.UpdatedAt
     };
@@ -366,6 +395,8 @@ public static class CampaignsEndpoints
         c.MaxQueueSize, c.QueueTimeoutSeconds, c.ServiceLevelThresholdSeconds, c.ShortAbandonThresholdSeconds,
         c.QueueAccelerationEnabled, c.QueueAccelerationIntervalSeconds, c.QueueAccelerationPriorityBoost,
         c.RingStrategy, c.RingTopN,
+        c.RecordingMode, c.ConsentModel, c.RecordingRequired, c.RecordStereo,
+        c.RecordingBeepEnabled, c.AutoMaskOnHold, c.RecordingRetentionDays,
         Client = c.Client is null ? null : new { c.Client.Id, c.Client.Name },
         PhoneNumbers     = c.PhoneNumbers.Select(p => new { p.Id, p.Number, p.Label, p.IsActive, p.FlowId, p.TelephonyFlowId }),
         AgentAssignments = c.AgentAssignments.Where(a => a.IsActive).Select(ToAssignmentResponse),
@@ -399,6 +430,14 @@ public record UpdateCampaignRequest(
     int QueueAccelerationPriorityBoost = 1,
     string RingStrategy = "ring_all",
     int RingTopN = 3);
+public record UpdateCampaignRecordingRequest(
+    string RecordingMode = "disabled",
+    string ConsentModel = "one_party",
+    bool RecordingRequired = false,
+    bool RecordStereo = true,
+    bool RecordingBeepEnabled = false,
+    bool AutoMaskOnHold = false,
+    int RecordingRetentionDays = 90);
 public record SetCampaignFlowRequest(Guid FlowId);
 public record AssignAgentRequest(Guid AgentId, int Proficiency = 50);
 public record BulkAssignAgentsRequest(List<BulkAgentEntry> Agents);

@@ -20,4 +20,15 @@ public interface IDashboardNotifier
         Guid campaignId,
         string state,
         CancellationToken ct = default);
+
+    /// <summary>A tf_voicemail node just captured a caller message — push it to the tenant's supervisor dashboards.</summary>
+    Task NotifyVoicemailReceivedAsync(
+        Guid tenantId,
+        Guid campaignId,
+        Guid voicemailId,
+        Guid callRecordId,
+        string? callerId,
+        int durationSeconds,
+        DateTimeOffset createdAt,
+        CancellationToken ct = default);
 }

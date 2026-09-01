@@ -186,13 +186,28 @@ export default function SoftphonePanel() {
       uri:              `sip:${sipExtension}@${tenantSubdomain}`,
       password:         sipPassword,
       register:         true,
-      register_expires: 300,
+      register_expires: 600,
       session_timers:   false,
     })
 
-    // Track first registration so re-REGISTERs (every 300s) don't reset state.
+    // Track first registration so re-REGISTERs don't reset state.
     let firstRegistration = true
+
+    // A clean JsSIP REGISTER refresh emits no event. An `unregistered` /
+    // `registrationFailed` after we've been up therefore means a transient
+    // WebSocket transport drop — JsSIP's connection_recovery reconnects and
+    // re-registers within a few seconds. Don't flash "Not registered" for that;
+    // hold the last-good state for a grace window and only downgrade if the
+    // recovery genuinely doesn't happen.
+    let graceTimer: ReturnType<typeof setTimeout> | null = null
+    const clearGrace = () => { if (graceTimer) { clearTimeout(graceTimer); graceTimer = null } }
+    const startGrace = (next: SipRegistrationStatus) => {
+      if (graceTimer) return
+      graceTimer = setTimeout(() => { graceTimer = null; setRegistrationStatus(next) }, 12_000)
+    }
+
     ua.on('registered', () => {
+      clearGrace()
       setRegistrationStatus('registered')
       if (firstRegistration) {
         firstRegistration = false
@@ -200,8 +215,11 @@ export default function SoftphonePanel() {
         api.put('/api/v1/agent-state', { code: 'unavailable', customCodeId: null, customLabel: null }).catch(() => {})
       }
     })
-    ua.on('unregistered',       () => setRegistrationStatus('idle'))
-    ua.on('registrationFailed', () => setRegistrationStatus('failed'))
+    // With a listener attached, JsSIP hands us the pre-expiry renewal instead of
+    // doing it silently — renew immediately and keep the UI green throughout.
+    ua.on('registrationExpiring', () => { try { ua.register() } catch { /* ignore */ } })
+    ua.on('unregistered',       () => { if (firstRegistration) setRegistrationStatus('idle');   else startGrace('idle') })
+    ua.on('registrationFailed', () => { if (firstRegistration) setRegistrationStatus('failed'); else startGrace('failed') })
 
     ua.on('newRTCSession', ({ session }: { session: any }) => {
       // Decide whether this is a consultation leg or a new primary call
@@ -295,7 +313,7 @@ export default function SoftphonePanel() {
     ua.start()
     uaRef.current = ua
 
-    return () => { ua.stop(); uaRef.current = null }
+    return () => { clearGrace(); ua.stop(); uaRef.current = null }
   }, [sipExtension, sipPassword, tenantSubdomain]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Conference audio helpers ──────────────────────────────────────────────

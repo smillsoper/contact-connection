@@ -19,4 +19,12 @@ public class DashboardNotifier(IHubContext<FlowHub, IFlowHubClient> hubContext) 
         Guid tenantId, Guid campaignId, string state, CancellationToken ct = default) =>
         hubContext.Clients.Group($"supervisor:{tenantId}")
             .ReceiveCallStateSnapshot(campaignId.ToString(), state);
+
+    public Task NotifyVoicemailReceivedAsync(
+        Guid tenantId, Guid campaignId, Guid voicemailId, Guid callRecordId,
+        string? callerId, int durationSeconds, DateTimeOffset createdAt, CancellationToken ct = default) =>
+        hubContext.Clients.Group($"supervisor:{tenantId}")
+            .ReceiveVoicemail(
+                voicemailId.ToString(), campaignId.ToString(), callRecordId.ToString(),
+                callerId ?? "", durationSeconds, createdAt.ToString("O"));
 }

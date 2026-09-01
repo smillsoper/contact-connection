@@ -4,7 +4,23 @@ import type { TelNodeData, TelephonyNodeType, TimeWindow, TelVariableAssignment 
 import { TELEPHONY_NODE_META } from '../../types/telephony-designer'
 import { TIMEZONE_GROUPS } from '../../utils/timezones'
 import { audioFilesApi, BUILTIN_AUDIO_GROUPS, BUILTIN_AUDIO_OPTIONS, type AudioFileRecord } from '../../api/audioFiles'
-import { flowsApi, type GeneralApiSummary } from '../../api/flows'
+import { flowsApi, type GeneralApiSummary, type FlowSummary } from '../../api/flows'
+import { listAdminAgents, type AgentRecord } from '../../api/adminAgents'
+import { listCampaigns, listSipGateways } from '../../api/telephony'
+import { api } from '../../api/client'
+import SearchableSelect from '../SearchableSelect'
+import RichTextEditor, { type RichTextEditorHandle } from '../designer/RichTextEditor'
+
+// Node types that need one or more of the shared name→id dropdowns (agents, flows, campaigns, gateways).
+const NEEDS_PICKERS: TelephonyNodeType[] = ['tf_transfer', 'tf_route_to_queue', 'tf_script_pop', 'tf_check_agent_availability']
+
+interface PickerData {
+  agents: AgentRecord[]
+  telephonyFlows: FlowSummary[]
+  crmFlows: FlowSummary[]
+  campaigns: { id: string; name: string }[]
+  gateways: { name: string }[]
+}
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -54,6 +70,39 @@ export default function TelephonyNodePropertiesPanel({
     flowsApi.listGeneralApis().then(setGeneralApis).catch(console.error)
   }, [type])
 
+  // Shared name→id pickers (agents / flows / campaigns / gateways) — fetched once when a node
+  // that uses any of them is selected. Every dropdown is a searchable SearchableSelect.
+  const [pickers, setPickers] = useState<PickerData>({
+    agents: [], telephonyFlows: [], crmFlows: [], campaigns: [], gateways: [],
+  })
+  useEffect(() => {
+    if (!NEEDS_PICKERS.includes(type)) return
+    let cancelled = false
+    ;(async () => {
+      const [agents, telephonyFlows, crmFlows, campaigns] = await Promise.all([
+        listAdminAgents().catch(() => [] as AgentRecord[]),
+        flowsApi.listAllByType('telephony').catch(() => [] as FlowSummary[]),
+        flowsApi.listAllByType('crm').catch(() => [] as FlowSummary[]),
+        listCampaigns().catch(() => [] as { id: string; name: string }[]),
+      ])
+      let gateways: { name: string }[] = []
+      try {
+        const me = await api.get<{ id: string }>('/api/v1/tenants/me')
+        gateways = await listSipGateways(me.id)
+      } catch { /* gateway list is optional — free-text fallback in the editor */ }
+      if (!cancelled) setPickers({ agents, telephonyFlows, crmFlows, campaigns, gateways })
+    })()
+    return () => { cancelled = true }
+  }, [type])
+
+  const agentOptions = pickers.agents
+    .filter((a) => a.isActive && a.sipExtension)
+    .map((a) => ({ value: a.sipExtension as string, label: `${a.firstName} ${a.lastName}`.trim() || a.email, sublabel: `ext ${a.sipExtension}` }))
+  const telephonyFlowOptions = pickers.telephonyFlows.map((f) => ({ value: f.id, label: f.name, sublabel: f.is_active ? `v${f.version}` : 'draft' }))
+  const crmFlowOptions = pickers.crmFlows.map((f) => ({ value: f.id, label: f.name, sublabel: f.is_active ? `v${f.version}` : 'draft' }))
+  const campaignOptions = pickers.campaigns.map((c) => ({ value: c.id, label: c.name }))
+  const gatewayOptions = pickers.gateways.map((g) => ({ value: g.name, label: g.name }))
+
   return (
     <div className="w-72 bg-gray-900 border-l border-gray-700 flex flex-col p-4 gap-3 overflow-y-auto shrink-0 text-sm">
       {/* Header */}
@@ -93,26 +142,41 @@ export default function TelephonyNodePropertiesPanel({
 
       {type === 'tf_check_agent_availability' && (
         <div>
-          <label className="block text-xs text-gray-400 mb-1">Campaign ID override (optional)</label>
-          <input
-            className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-blue-500"
-            placeholder="Leave blank to use call's campaign"
+          <label className="block text-xs text-gray-400 mb-1">Campaign override (optional)</label>
+          <SearchableSelect
+            options={campaignOptions}
             value={(data.campaignId as string) ?? ''}
-            onChange={(e) => set('campaignId', e.target.value)}
+            onChange={(v) => set('campaignId', v)}
+            allLabel="— Use the call's campaign —"
           />
         </div>
       )}
 
       {type === 'tf_route_to_queue' && (
         <div>
-          <label className="block text-xs text-gray-400 mb-1">Direct to extension (optional)</label>
-          <input
-            className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-blue-500"
-            placeholder="e.g. 1001 — leave blank for queue"
+          <label className="block text-xs text-gray-400 mb-1">Direct to agent (optional)</label>
+          <SearchableSelect
+            options={agentOptions}
             value={(data.agentExtension as string) ?? ''}
-            onChange={(e) => set('agentExtension', e.target.value)}
+            onChange={(v) => set('agentExtension', v)}
+            allLabel="— Queue (any eligible agent) —"
           />
+          <p className="text-xs text-gray-500 mt-1">
+            Pick an agent to bridge straight to their extension, or leave on Queue to ring the campaign.
+          </p>
         </div>
+      )}
+
+      {type === 'tf_transfer' && (
+        <TransferNodeEditor
+          data={data}
+          onChange={(patch) => onChange(node.id, patch)}
+          agentOptions={agentOptions}
+          telephonyFlowOptions={telephonyFlowOptions}
+          crmFlowOptions={crmFlowOptions}
+          campaignOptions={campaignOptions}
+          gatewayOptions={gatewayOptions}
+        />
       )}
 
       {type === 'tf_branch' && (
@@ -271,6 +335,18 @@ export default function TelephonyNodePropertiesPanel({
         <DtmfNodeEditor data={data} onChange={(patch) => onChange(node.id, patch)} />
       )}
 
+      {type === 'tf_record' && (
+        <RecordNodeEditor data={data} onChange={(patch) => onChange(node.id, patch)} />
+      )}
+
+      {type === 'tf_ivr_menu' && (
+        <IvrMenuNodeEditor data={data} onChange={(patch) => onChange(node.id, patch)} />
+      )}
+
+      {type === 'tf_voicemail' && (
+        <VoicemailNodeEditor data={data} onChange={(patch) => onChange(node.id, patch)} />
+      )}
+
       {type === 'tf_play' && (
         <PlayNodeEditor data={data} onChange={(patch) => onChange(node.id, patch)} />
       )}
@@ -282,17 +358,17 @@ export default function TelephonyNodePropertiesPanel({
       {type === 'tf_script_pop' && (
         <div className="flex flex-col gap-2">
           <div>
-            <label className="block text-xs text-gray-400 mb-1">CRM flow ID override (optional)</label>
-            <input
-              className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-cyan-500"
-              placeholder="Leave blank to use campaign's default flow"
+            <label className="block text-xs text-gray-400 mb-1">CRM script flow override (optional)</label>
+            <SearchableSelect
+              options={crmFlowOptions}
               value={(data.flowId as string) ?? ''}
-              onChange={(e) => set('flowId', e.target.value)}
+              onChange={(v) => set('flowId', v)}
+              allLabel="— Use campaign's default flow —"
             />
           </div>
           <p className="text-xs text-gray-500 leading-snug">
             Starts the CRM script flow on the answering agent's screen.
-            Resolution: node override → campaign's assigned Script Flow.
+            Resolution: node override → transfer screen-pop → DID → campaign's assigned Script Flow.
           </p>
         </div>
       )}
@@ -685,6 +761,549 @@ function CallerIdVariableReference({ onInsert }: { onInsert: (tag: string) => vo
           ))}
         </div>
       ))}
+    </div>
+  )
+}
+
+type Opt = { value: string; label: string; sublabel?: string }
+
+function TransferNodeEditor({
+  data,
+  onChange,
+  agentOptions,
+  telephonyFlowOptions,
+  crmFlowOptions,
+  campaignOptions,
+  gatewayOptions,
+}: {
+  data: TelNodeData
+  onChange: (patch: Partial<TelNodeData>) => void
+  agentOptions: Opt[]
+  telephonyFlowOptions: Opt[]
+  crmFlowOptions: Opt[]
+  campaignOptions: Opt[]
+  gatewayOptions: Opt[]
+}) {
+  const inputCls = 'w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-indigo-500'
+  const labelCls = 'block text-xs text-gray-400 mb-1'
+  const dest = (data.destinationType as string) ?? 'campaign_queue'
+  const ext = String(data.externalNumber ?? '')
+  const isSipUri = ext.trim().toLowerCase().startsWith('sip:')
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div>
+        <label className={labelCls}>Transfer to</label>
+        <select className={inputCls} value={dest}
+          onChange={(e) => onChange({ destinationType: e.target.value as TelNodeData['destinationType'] })}>
+          <option value="campaign_queue">Another campaign's queue</option>
+          <option value="agent">A specific agent</option>
+          <option value="telephony_flow">Another telephony flow</option>
+          <option value="external_number">External number / SIP endpoint</option>
+        </select>
+      </div>
+
+      {dest === 'campaign_queue' && (
+        <div>
+          <label className={labelCls}>Target campaign</label>
+          <SearchableSelect options={campaignOptions}
+            value={(data.targetCampaignId as string) ?? ''}
+            onChange={(v) => onChange({ targetCampaignId: v })}
+            placeholder="Select a campaign…" />
+          <p className="text-[10px] text-gray-500 mt-1 leading-snug">
+            The call record moves to this campaign and its agents are rung. Same parked call — no new record.
+          </p>
+        </div>
+      )}
+
+      {dest === 'agent' && (
+        <div>
+          <label className={labelCls}>Agent</label>
+          <SearchableSelect options={agentOptions}
+            value={(data.agentExtension as string) ?? ''}
+            onChange={(v) => onChange({ agentExtension: v })}
+            placeholder="Select an agent…" />
+          <p className="text-[10px] text-gray-500 mt-1">Only agents with a SIP extension are listed.</p>
+        </div>
+      )}
+
+      {dest === 'telephony_flow' && (
+        <div>
+          <label className={labelCls}>Telephony flow</label>
+          <SearchableSelect options={telephonyFlowOptions}
+            value={(data.targetTelephonyFlowId as string) ?? ''}
+            onChange={(v) => onChange({ targetTelephonyFlowId: v })}
+            placeholder="Select a flow…" />
+          <p className="text-[10px] text-gray-500 mt-1 leading-snug">
+            Runs that flow from its entry node on this call. Shared flow variables carry over.
+          </p>
+        </div>
+      )}
+
+      {dest === 'external_number' && (
+        <>
+          <div>
+            <label className={labelCls}>Number or SIP endpoint</label>
+            <input className={`${inputCls} font-mono text-xs`}
+              placeholder="+18005551234  ·  sip:support@pbx.client.com"
+              value={ext}
+              onChange={(e) => onChange({ externalNumber: e.target.value })} />
+            <p className="text-[10px] text-gray-500 mt-1 leading-snug">
+              A plain number dials out through a SIP gateway. A <span className="font-mono">sip:</span> URI
+              is dialed directly — no gateway, no route-digit prefixing.
+            </p>
+          </div>
+          {!isSipUri && (
+            <div>
+              <label className={labelCls}>SIP gateway</label>
+              {gatewayOptions.length > 0 ? (
+                <SearchableSelect options={gatewayOptions}
+                  value={(data.externalGatewayName as string) ?? ''}
+                  onChange={(v) => onChange({ externalGatewayName: v })}
+                  allLabel="— Server default —" />
+              ) : (
+                <input className={`${inputCls} font-mono text-xs`}
+                  placeholder="gateway name (blank = server default)"
+                  value={(data.externalGatewayName as string) ?? ''}
+                  onChange={(e) => onChange({ externalGatewayName: e.target.value })} />
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ── Announcement to the caller ─────────────────────────────── */}
+      <div className="border-t border-gray-700 pt-3">
+        <label className={labelCls}>Announcement audio file (optional)</label>
+        <input className={`${inputCls} font-mono text-xs`}
+          placeholder="audio file GUID  ·  __builtin:/path.wav"
+          value={(data.announceAudioFileId as string) ?? ''}
+          onChange={(e) => onChange({ announceAudioFileId: e.target.value })} />
+        <label className={`${labelCls} mt-2`}>…or spoken text (fallback)</label>
+        <input className={inputCls}
+          placeholder="Please hold while we transfer your call."
+          value={(data.announceTtsText as string) ?? ''}
+          onChange={(e) => onChange({ announceTtsText: e.target.value })} />
+        <input className={`${inputCls} text-xs mt-1`} placeholder="voice (kal)"
+          value={(data.announceTtsVoice as string) ?? ''}
+          onChange={(e) => onChange({ announceTtsVoice: e.target.value })} />
+      </div>
+
+      {/* ── Screen-pop override ────────────────────────────────────── */}
+      {dest !== 'external_number' && (
+        <div>
+          <label className={labelCls}>Screen pop for the receiving agent (optional)</label>
+          <SearchableSelect options={crmFlowOptions}
+            value={(data.screenPopFlowId as string) ?? ''}
+            onChange={(v) => onChange({ screenPopFlowId: v })}
+            allLabel="— Default (from campaign / DID) —" />
+          <p className="text-[10px] text-gray-500 mt-1 leading-snug">
+            Overrides the CRM script the answering agent gets. Leave on Default to use the target
+            campaign's assigned flow.
+          </p>
+        </div>
+      )}
+
+      <p className="text-[10px] text-gray-500 leading-snug bg-gray-800 border border-gray-700 rounded p-2">
+        <span className="font-mono text-green-400">transferred</span> fires once the handoff is set
+        up (usually terminal). <span className="font-mono text-red-400">failed</span> fires when it
+        can't be — queue full, no agent extension, missing flow, or the external bridge never
+        connects — wire it to a voicemail or a second destination.
+      </p>
+    </div>
+  )
+}
+
+function VoicemailNodeEditor({
+  data,
+  onChange,
+}: {
+  data: TelNodeData
+  onChange: (patch: Partial<TelNodeData>) => void
+}) {
+  const inputCls = 'w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-purple-500'
+  const labelCls = 'block text-xs text-gray-400 mb-1'
+  const bodyRef = useRef<RichTextEditorHandle>(null)
+  const emailOn = (data.deliveryEmailEnabled as boolean) ?? false
+
+  const VARS = ['{{caller.phone}}', '{{caller.name}}', '{{caller.first_name}}', '{{call_record.id}}', '{{call_record.dnis}}']
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* ── Greeting ───────────────────────────────────────────── */}
+      <div>
+        <label className={labelCls}>Greeting audio file (optional)</label>
+        <input className={`${inputCls} font-mono text-xs`}
+          placeholder="audio file GUID  ·  __builtin:/path.wav  ·  silence_stream://…"
+          value={(data.greetingAudioFileId as string) ?? ''}
+          onChange={(e) => onChange({ greetingAudioFileId: e.target.value })} />
+      </div>
+      <div>
+        <label className={labelCls}>Greeting spoken text (fallback if no file)</label>
+        <textarea className={inputCls} rows={2}
+          placeholder="You've reached us after hours. Leave a message after the tone."
+          value={(data.greetingTtsText as string) ?? ''}
+          onChange={(e) => onChange({ greetingTtsText: e.target.value })} />
+        <div className="grid grid-cols-2 gap-2 mt-1">
+          <input className={`${inputCls} text-xs`} placeholder="voice (kal)"
+            value={(data.greetingTtsVoice as string) ?? ''}
+            onChange={(e) => onChange({ greetingTtsVoice: e.target.value })} />
+        </div>
+      </div>
+
+      {/* ── Recording limits ──────────────────────────────────── */}
+      <label className="flex items-center gap-2 text-xs text-gray-300">
+        <input type="checkbox" checked={(data.beepEnabled as boolean) ?? true}
+          onChange={(e) => onChange({ beepEnabled: e.target.checked })} />
+        Play a beep before recording
+      </label>
+      <div className="grid grid-cols-3 gap-2">
+        <div>
+          <label className={labelCls}>Max length (s)</label>
+          <input type="number" min={5} step={5} className={inputCls} value={(data.maxLengthSeconds as number) ?? 120}
+            onChange={(e) => onChange({ maxLengthSeconds: parseInt(e.target.value) || 120 })} />
+        </div>
+        <div>
+          <label className={labelCls}>Stop on silence (s)</label>
+          <input type="number" min={1} step={1} className={inputCls} value={(data.maxSilenceSeconds as number) ?? 5}
+            onChange={(e) => onChange({ maxSilenceSeconds: parseInt(e.target.value) || 5 })} />
+        </div>
+        <div>
+          <label className={labelCls}>Min to keep (s)</label>
+          <input type="number" min={0} step={1} className={inputCls} value={(data.minLengthSeconds as number) ?? 2}
+            onChange={(e) => onChange({ minLengthSeconds: parseInt(e.target.value) || 0 })} />
+        </div>
+      </div>
+      <p className="text-[10px] text-gray-500 leading-snug">
+        Recordings shorter than the minimum take the <span className="font-mono text-gray-400">no_message</span> handle;
+        anything longer takes <span className="font-mono text-purple-400">recorded</span>.
+      </p>
+
+      {/* ── Email delivery ────────────────────────────────────── */}
+      <div className="border-t border-gray-700 pt-3 mt-1">
+        <label className="flex items-center gap-2 text-xs font-medium text-gray-200">
+          <input type="checkbox" checked={emailOn}
+            onChange={(e) => onChange({ deliveryEmailEnabled: e.target.checked })} />
+          Also deliver the message by email
+        </label>
+
+        {emailOn && (
+          <div className="flex flex-col gap-2 mt-2">
+            <div>
+              <label className={labelCls}>To</label>
+              <input className={`${inputCls} font-mono text-xs`} placeholder="ops@client.com, {{flow.queue_email}}"
+                value={(data.deliveryEmailTo as string) ?? ''}
+                onChange={(e) => onChange({ deliveryEmailTo: e.target.value })} />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className={labelCls}>Cc</label>
+                <input className={`${inputCls} font-mono text-xs`}
+                  value={(data.deliveryEmailCc as string) ?? ''}
+                  onChange={(e) => onChange({ deliveryEmailCc: e.target.value })} />
+              </div>
+              <div>
+                <label className={labelCls}>Bcc</label>
+                <input className={`${inputCls} font-mono text-xs`}
+                  value={(data.deliveryEmailBcc as string) ?? ''}
+                  onChange={(e) => onChange({ deliveryEmailBcc: e.target.value })} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className={labelCls}>From name</label>
+                <input className={inputCls} placeholder="Support Voicemail"
+                  value={(data.deliveryEmailFromName as string) ?? ''}
+                  onChange={(e) => onChange({ deliveryEmailFromName: e.target.value })} />
+              </div>
+              <div>
+                <label className={labelCls}>Reply-to</label>
+                <input className={`${inputCls} font-mono text-xs`} placeholder="team@client.com"
+                  value={(data.deliveryEmailReplyTo as string) ?? ''}
+                  onChange={(e) => onChange({ deliveryEmailReplyTo: e.target.value })} />
+              </div>
+            </div>
+            <p className="text-[10px] text-gray-500 leading-snug -mt-1">
+              The sending address stays the platform sender (Resend needs a verified domain); the
+              From name and Reply-to are yours to set.
+            </p>
+            <div>
+              <label className={labelCls}>Subject</label>
+              <input className={`${inputCls} text-xs`}
+                value={(data.deliveryEmailSubject as string) ?? ''}
+                onChange={(e) => onChange({ deliveryEmailSubject: e.target.value })} />
+            </div>
+
+            <div>
+              <label className={labelCls}>Body</label>
+              <div className="flex flex-wrap gap-1 mb-1">
+                {VARS.map((v) => (
+                  <button key={v} type="button"
+                    onClick={() => bodyRef.current?.insert(v)}
+                    className="text-[10px] font-mono bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-purple-300 hover:border-purple-500">
+                    {v}
+                  </button>
+                ))}
+              </div>
+              <RichTextEditor
+                ref={bodyRef}
+                dark
+                value={(data.deliveryEmailBodyHtml as string) ?? ''}
+                onChange={(html) => onChange({ deliveryEmailBodyHtml: html })}
+              />
+              <p className="text-[10px] text-gray-500 mt-1 leading-snug">
+                Same <span className="font-mono">{'{{variable}}'}</span> tags as the script editor —
+                <span className="font-mono"> {'{{caller.*}}'}</span>, <span className="font-mono">{'{{call_record.*}}'}</span>,
+                <span className="font-mono"> {'{{flow.*}}'}</span> — resolved when the email is sent.
+              </p>
+            </div>
+
+            <label className="flex items-center gap-2 text-xs text-gray-300">
+              <input type="checkbox" checked={(data.deliveryAttachAudio as boolean) ?? true}
+                onChange={(e) => onChange({ deliveryAttachAudio: e.target.checked })} />
+              Attach the recording (.wav)
+            </label>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function IvrMenuNodeEditor({
+  data,
+  onChange,
+}: {
+  data: TelNodeData
+  onChange: (patch: Partial<TelNodeData>) => void
+}) {
+  const inputCls = 'w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-teal-500'
+  const labelCls = 'block text-xs text-gray-400 mb-1'
+  const options = (data.options as { digit: string; transition: string }[] | undefined) ?? []
+  const maxDigits = (data.maxDigits as number) ?? 1
+
+  const setOptions = (next: { digit: string; transition: string }[]) => onChange({ options: next })
+  const updateOption = (i: number, patch: Partial<{ digit: string; transition: string }>) =>
+    setOptions(options.map((o, idx) => (idx === i ? { ...o, ...patch } : o)))
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div>
+        <label className={labelCls}>Prompt audio file</label>
+        <input className={`${inputCls} font-mono text-xs`}
+          placeholder="audio file GUID  ·  __builtin:/path.wav  ·  silence_stream://…"
+          value={(data.promptAudioFileId as string) ?? ''}
+          onChange={(e) => onChange({ promptAudioFileId: e.target.value })} />
+        <p className="text-[10px] text-gray-500 mt-1 leading-snug">
+          Menu prompts must be a recorded file — FreeSWITCH's <span className="font-mono">play_and_get_digits</span> can't
+          take a TTS string. Record/upload one on a Play node and paste its id here.
+        </p>
+      </div>
+
+      <div>
+        <label className={labelCls}>Invalid-entry prompt audio (optional)</label>
+        <input className={`${inputCls} font-mono text-xs`} placeholder="audio file GUID  ·  __builtin:/path.wav"
+          value={(data.invalidAudioFileId as string) ?? ''}
+          onChange={(e) => onChange({ invalidAudioFileId: e.target.value })} />
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        <div>
+          <label className={labelCls}>Max digits</label>
+          <input type="number" min={1} max={32} className={inputCls} value={maxDigits}
+            onChange={(e) => onChange({ maxDigits: parseInt(e.target.value) || 1 })} />
+        </div>
+        <div>
+          <label className={labelCls}>Max tries</label>
+          <input type="number" min={1} max={10} className={inputCls} value={(data.maxTries as number) ?? 3}
+            onChange={(e) => onChange({ maxTries: parseInt(e.target.value) || 1 })} />
+        </div>
+        <div>
+          <label className={labelCls}>Terminators</label>
+          <input className={`${inputCls} font-mono`} placeholder={maxDigits > 1 ? '#' : 'none'}
+            value={(data.terminators as string) ?? ''}
+            onChange={(e) => onChange({ terminators: e.target.value })} />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className={labelCls}>First-digit timeout (ms)</label>
+          <input type="number" min={1000} step={500} className={inputCls} value={(data.timeoutMs as number) ?? 5000}
+            onChange={(e) => onChange({ timeoutMs: parseInt(e.target.value) || 5000 })} />
+        </div>
+        <div>
+          <label className={labelCls}>Inter-digit timeout (ms)</label>
+          <input type="number" min={500} step={250} className={inputCls} value={(data.interDigitTimeoutMs as number) ?? 3000}
+            onChange={(e) => onChange({ interDigitTimeoutMs: parseInt(e.target.value) || 3000 })} />
+        </div>
+      </div>
+
+      <div>
+        <label className={labelCls}>Options — DTMF entry → transition name (its own handle)</label>
+        <div className="flex flex-col gap-1.5">
+          {options.map((o, i) => (
+            <div key={i} className="flex items-center gap-1.5">
+              <input
+                className={`${inputCls} font-mono w-16 text-center`}
+                placeholder="1"
+                value={o.digit}
+                onChange={(e) => updateOption(i, { digit: e.target.value.replace(/[^0-9*#]/g, '') })}
+              />
+              <span className="text-gray-600 text-xs">→</span>
+              <input
+                className={`${inputCls} font-mono`}
+                placeholder="option_1"
+                value={o.transition}
+                onChange={(e) => updateOption(i, { transition: e.target.value.replace(/[^a-z0-9_]/gi, '_').toLowerCase() })}
+              />
+              <button
+                type="button"
+                onClick={() => setOptions(options.filter((_, idx) => idx !== i))}
+                className="text-gray-500 hover:text-red-400 text-sm px-1"
+              >×</button>
+            </div>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={() => setOptions([...options, { digit: '', transition: `option_${options.length + 1}` }])}
+          className="mt-2 text-xs text-teal-400 hover:text-teal-300"
+        >+ Add option</button>
+        <p className="text-[10px] text-gray-500 mt-1.5 leading-snug">
+          Each transition gets a source handle on the node. Unmatched / timed-out entries take the
+          <span className="font-mono text-gray-400"> no_match</span> handle.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function RecordNodeEditor({
+  data,
+  onChange,
+}: {
+  data: TelNodeData
+  onChange: (patch: Partial<TelNodeData>) => void
+}) {
+  const inputCls = 'w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-rose-500'
+  const labelCls = 'block text-xs text-gray-400 mb-1'
+  const action = (data.action as string) ?? 'start'
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div>
+        <label className={labelCls}>Action</label>
+        <select
+          className={inputCls}
+          value={action}
+          onChange={(e) => onChange({ action: e.target.value as TelNodeData['action'] })}
+        >
+          <option value="start">Start recording</option>
+          <option value="stop">Stop recording</option>
+          <option value="mask">Mask (silence a segment)</option>
+          <option value="unmask">Unmask</option>
+        </select>
+      </div>
+
+      {action === 'start' && (
+        <>
+          <div>
+            <label className={labelCls}>Duration limit (seconds, 0 = unlimited)</label>
+            <input
+              type="number"
+              min={0}
+              step={30}
+              className={inputCls}
+              value={(data.recordLimitSeconds as number) ?? 0}
+              onChange={(e) => onChange({ recordLimitSeconds: parseInt(e.target.value) || 0 })}
+            />
+          </div>
+
+          <div className="border-t border-gray-700 pt-3">
+            <label className={labelCls}>Consent announcement audio file</label>
+            <input
+              className={`${inputCls} font-mono text-xs`}
+              placeholder="audio file GUID  ·  __builtin:/path.wav"
+              value={(data.consentAudioFileId as string) ?? ''}
+              onChange={(e) => onChange({ consentAudioFileId: e.target.value })}
+            />
+            <label className={`${labelCls} mt-2`}>…or TTS fallback text</label>
+            <input
+              className={inputCls}
+              placeholder="This call may be recorded for quality assurance and training purposes."
+              value={(data.consentTtsText as string) ?? ''}
+              onChange={(e) => onChange({ consentTtsText: e.target.value })}
+            />
+            <p className="text-[11px] text-gray-500 mt-1.5 leading-snug">
+              Played on the caller's line right before recording starts — but only when the
+              <strong className="text-gray-300"> campaign's consent model</strong> is two-party.
+              Left blank on a two-party campaign, a generic TTS announcement is used so recording
+              never starts with no announcement. For opt-out, put a <span className="font-mono">tf_ivr_menu</span> before
+              this node and route opt-out callers around it.
+            </p>
+          </div>
+
+          <p className="text-[11px] text-gray-500 leading-snug bg-gray-800 border border-gray-700 rounded p-2">
+            Stereo capture, the consent model, and whether recording is allowed at all come from the
+            <strong className="text-gray-300"> campaign's recording policy</strong>, not this node.
+            If the policy is <span className="font-mono">disabled</span>, this node does nothing.
+            <br /><br />
+            <strong className="text-gray-300">Placement:</strong> for full/IVR coverage put this
+            before <span className="font-mono">tf_answer</span>; for conversation-only put it in the
+            <span className="font-mono"> Agent Answer</span> branch.
+          </p>
+        </>
+      )}
+
+      {action === 'mask' && (
+        <>
+          <div>
+            <label className={labelCls}>Mask fill</label>
+            <select
+              className={inputCls}
+              value={(data.maskFill as string) ?? 'silence'}
+              onChange={(e) => onChange({ maskFill: e.target.value as TelNodeData['maskFill'] })}
+            >
+              <option value="silence">Silence (standard PCI fill)</option>
+              <option value="tone">Faint tone (QA can see the gap is intentional)</option>
+              <option value="comfort_noise">Comfort noise</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelCls}>Auto-unmask watchdog (seconds, blank = default 180)</label>
+            <input
+              type="number"
+              min={5}
+              step={5}
+              className={inputCls}
+              value={(data.maxMaskSeconds as number | undefined) ?? ''}
+              onChange={(e) => onChange({ maxMaskSeconds: e.target.value ? parseInt(e.target.value) : undefined })}
+            />
+          </div>
+          <div>
+            <label className={labelCls}>Reason (audit context)</label>
+            <input
+              className={`${inputCls} font-mono`}
+              placeholder="e.g. pan, cvv, ssn"
+              value={(data.reason as string) ?? ''}
+              onChange={(e) => onChange({ reason: e.target.value })}
+            />
+          </div>
+          <p className="text-[11px] text-gray-500 leading-snug bg-gray-800 border border-gray-700 rounded p-2">
+            Masking fills the recording with silence while keeping it wall-clock continuous — never
+            a stop/start. If an <span className="font-mono">unmask</span> never arrives, the watchdog
+            forces one so the rest of the call isn't lost.
+          </p>
+        </>
+      )}
+
+      {(action === 'stop' || action === 'unmask') && (
+        <p className="text-[11px] text-gray-500 leading-snug bg-gray-800 border border-gray-700 rounded p-2">
+          {action === 'stop'
+            ? 'Optional — the recording is closed automatically on hangup. Use this only to stop early.'
+            : 'Ends the current mask window and resumes recording.'}
+        </p>
+      )}
     </div>
   )
 }

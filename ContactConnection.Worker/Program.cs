@@ -25,6 +25,7 @@ if (!string.IsNullOrWhiteSpace(vaultUri))
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddHostedService<SubscriptionProcessingService>();
 builder.Services.AddHostedService<FreeSwitchEslService>();
+builder.Services.AddHostedService<RecordingMergeService>();
 
 var host = builder.Build();
 host.Run();

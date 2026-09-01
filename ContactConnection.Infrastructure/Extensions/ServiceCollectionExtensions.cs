@@ -15,8 +15,10 @@ using ContactConnection.Infrastructure.FlowEngine;
 using ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 using ContactConnection.Infrastructure.FlowEngine.Services;
 using ContactConnection.Infrastructure.Repositories;
+using ContactConnection.Infrastructure.Storage;
 using ContactConnection.Infrastructure.Telephony;
 using ContactConnection.Infrastructure.Telephony.NodeHandlers;
+using ContactConnection.Infrastructure.Telephony.Recording;
 using ContactConnection.Infrastructure.Tenants;
 using ContactConnection.Infrastructure.Tts;
 using ContactConnection.Infrastructure.Versioning;
@@ -193,6 +195,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ITelephonyNodeHandler, DtmfNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, WhisperNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, GeneralApiCallNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, RecordNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, IvrMenuNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, VoicemailNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, TransferNodeHandler>();
 
         // Call session store (singleton — Redis operations are inherently stateless)
         services.AddSingleton<ITelephonyCallSessionStore, RedisCallSessionStore>();
@@ -220,6 +226,29 @@ public static class ServiceCollectionExtensions
         // Call queue/routing state history — mirrors the call trace registration above
         services.AddScoped<ICallStateHistoryRepository, CallStateHistoryRepository>();
         services.AddScoped<ICallStateHistoryRecorder, CallStateHistoryRecorder>();
+
+        // Call recording — the controller is singleton (owns the auto-unmask watchdog timers)
+        // so its repository must be singleton too. Both depend only on singletons
+        // (ITenantDbContextFactory, IEslCommanderFactory). IEslCommanderFactory's implementation
+        // lives in the Api project and is registered in Program.cs.
+        services.AddSingleton<ICallRecordingRepository, CallRecordingRepository>();
+        services.AddSingleton<ICallRecordingController, CallRecordingController>();
+
+        // Screen-capture ingest — blob store (stateless, filesystem-backed locally) + a
+        // request-scoped repository for the screen_recordings rows.
+        services.AddSingleton<IBlobStorage, LocalFileBlobStorage>();
+        services.AddScoped<IScreenRecordingRepository, ScreenRecordingRepository>();
+
+        // Recording transcode / A/V merge — the RecordingMergeService worker drives these.
+        // FfmpegRunner is a stateless CLI seam (singleton); the merger orchestrates blob I/O
+        // around it; the job repository is tenant-scoped like the screen-recording one.
+        services.AddSingleton<IFfmpegRunner, FfmpegRunner>();
+        services.AddSingleton<IRecordingMerger, FfmpegRecordingMerger>();
+        services.AddScoped<IRecordingMergeJobRepository, RecordingMergeJobRepository>();
+
+        // Voicemail — tf_voicemail node captures a caller message; the ESL background path
+        // persists via ITenantDbContextFactory directly, this scoped repo serves the API.
+        services.AddScoped<IVoicemailRepository, VoicemailRepository>();
 
         // Ranks a campaign's eligible agents (proficiency DESC, longest-idle tie-break) — shared
         // by RouteToQueueNodeHandler and QueuePollingService. Scoped for consistency with the

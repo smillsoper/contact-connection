@@ -12,6 +12,7 @@ export interface AgentRecord {
   createdAt: string
   lastLoginAt: string | null
   timezone: string | null
+  sipExtension: string | null
 }
 
 export function listAdminAgents(): Promise<AgentRecord[]> {

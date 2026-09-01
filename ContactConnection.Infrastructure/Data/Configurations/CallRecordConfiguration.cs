@@ -62,6 +62,14 @@ public class CallRecordConfiguration : IEntityTypeConfiguration<CallRecord>
         builder.Property(r => r.ContactIdExternal).HasColumnName("contact_id_external").HasMaxLength(100);
         builder.Property(r => r.RecordingUrl).HasColumnName("recording_url").HasMaxLength(500);
 
+        // Recording lifecycle (denormalised from recording_events)
+        builder.Property(r => r.RecordingStartedAt).HasColumnName("recording_started_at");
+        builder.Property(r => r.RecordingStoppedAt).HasColumnName("recording_stopped_at");
+        builder.Property(r => r.RecordingMaskedSeconds).HasColumnName("recording_masked_seconds").HasDefaultValue(0);
+        builder.Property(r => r.RecordingRetained).HasColumnName("recording_retained").HasDefaultValue(true);
+        builder.Property(r => r.RecordingDeletedAt).HasColumnName("recording_deleted_at");
+        builder.Property(r => r.RecordingDeleteReason).HasColumnName("recording_delete_reason").HasMaxLength(200);
+
         // JSONB — typed
         builder.Property(r => r.Addresses)
             .HasColumnName("addresses")
@@ -76,6 +84,14 @@ public class CallRecordConfiguration : IEntityTypeConfiguration<CallRecord>
             .HasConversion(
                 v => JsonSerializer.Serialize(v, JsonOptions),
                 v => JsonSerializer.Deserialize<List<CommitmentEvent>>(v, JsonOptions) ?? new())
+            .HasDefaultValueSql("'[]'::jsonb");
+
+        builder.Property(r => r.RecordingEvents)
+            .HasColumnName("recording_events")
+            .HasColumnType("jsonb")
+            .HasConversion(
+                v => JsonSerializer.Serialize(v, JsonOptions),
+                v => JsonSerializer.Deserialize<List<RecordingEvent>>(v, JsonOptions) ?? new())
             .HasDefaultValueSql("'[]'::jsonb");
 
         builder.Property(r => r.Cart)

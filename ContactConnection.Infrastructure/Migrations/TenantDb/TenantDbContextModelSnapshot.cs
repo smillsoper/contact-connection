@@ -592,6 +592,42 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .HasColumnType("character varying(20)")
                         .HasColumnName("record_type");
 
+                    b.Property<string>("RecordingDeleteReason")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("recording_delete_reason");
+
+                    b.Property<DateTimeOffset?>("RecordingDeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("recording_deleted_at");
+
+                    b.Property<string>("RecordingEvents")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("recording_events")
+                        .HasDefaultValueSql("'[]'::jsonb");
+
+                    b.Property<int>("RecordingMaskedSeconds")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("recording_masked_seconds");
+
+                    b.Property<bool>("RecordingRetained")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("recording_retained");
+
+                    b.Property<DateTimeOffset?>("RecordingStartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("recording_started_at");
+
+                    b.Property<DateTimeOffset?>("RecordingStoppedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("recording_stopped_at");
+
                     b.Property<string>("RecordingUrl")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
@@ -859,6 +895,12 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .HasColumnType("integer")
                         .HasColumnName("after_call_work_seconds");
 
+                    b.Property<bool>("AutoMaskOnHold")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("auto_mask_on_hold");
+
                     b.Property<string>("CallerIdNumber")
                         .HasMaxLength(30)
                         .HasColumnType("character varying(30)")
@@ -867,6 +909,14 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                     b.Property<Guid>("ClientId")
                         .HasColumnType("uuid")
                         .HasColumnName("client_id");
+
+                    b.Property<string>("ConsentModel")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasDefaultValue("one_party")
+                        .HasColumnName("consent_model");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
@@ -930,6 +980,38 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                     b.Property<int>("QueueTimeoutSeconds")
                         .HasColumnType("integer")
                         .HasColumnName("queue_timeout_seconds");
+
+                    b.Property<bool>("RecordStereo")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("record_stereo");
+
+                    b.Property<bool>("RecordingBeepEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("recording_beep_enabled");
+
+                    b.Property<string>("RecordingMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasDefaultValue("disabled")
+                        .HasColumnName("recording_mode");
+
+                    b.Property<bool>("RecordingRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("recording_required");
+
+                    b.Property<int>("RecordingRetentionDays")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(90)
+                        .HasColumnName("recording_retention_days");
 
                     b.Property<string>("RingStrategy")
                         .IsRequired()
@@ -2440,6 +2522,109 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                     b.ToTable("product_kits", (string)null);
                 });
 
+            modelBuilder.Entity("ContactConnection.Domain.Entities.RecordingMergeJob", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("Attempts")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("attempts");
+
+                    b.Property<Guid>("CallRecordId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("call_record_id");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("FfmpegCommand")
+                        .HasColumnType("text")
+                        .HasColumnName("ffmpeg_command");
+
+                    b.Property<bool>("HadVideo")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("had_video");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("text")
+                        .HasColumnName("last_error");
+
+                    b.Property<int>("MaxAttempts")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(5)
+                        .HasColumnName("max_attempts");
+
+                    b.Property<DateTimeOffset>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("next_attempt_at");
+
+                    b.Property<string>("OutputBlobKey")
+                        .HasMaxLength(400)
+                        .HasColumnType("character varying(400)")
+                        .HasColumnName("output_blob_key");
+
+                    b.Property<long?>("OutputDurationMs")
+                        .HasColumnType("bigint")
+                        .HasColumnName("output_duration_ms");
+
+                    b.Property<string>("OutputFormat")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("output_format");
+
+                    b.Property<int>("ScreenRecordingCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("screen_recording_count");
+
+                    b.Property<Guid?>("ScreenRecordingId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("screen_recording_id");
+
+                    b.Property<DateTimeOffset?>("StartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("started_at");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CallRecordId")
+                        .IsUnique()
+                        .HasDatabaseName("idx_recording_merge_jobs_call_record");
+
+                    b.HasIndex("Status", "NextAttemptAt")
+                        .HasDatabaseName("idx_recording_merge_jobs_status_next");
+
+                    b.ToTable("recording_merge_jobs", (string)null);
+                });
+
             modelBuilder.Entity("ContactConnection.Domain.Entities.Role", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2487,6 +2672,120 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .HasDatabaseName("idx_roles_tenant_name");
 
                     b.ToTable("roles", (string)null);
+                });
+
+            modelBuilder.Entity("ContactConnection.Domain.Entities.ScreenRecording", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AgentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("agent_id");
+
+                    b.Property<Guid>("CallRecordId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("call_record_id");
+
+                    b.Property<long>("ClientClockOffsetMs")
+                        .HasColumnType("bigint")
+                        .HasColumnName("client_clock_offset_ms");
+
+                    b.Property<string>("Codec")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("codec");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<string>("Container")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("container");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("CuePoints")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("cue_points")
+                        .HasDefaultValueSql("'[]'::jsonb");
+
+                    b.Property<long?>("DurationMs")
+                        .HasColumnType("bigint")
+                        .HasColumnName("duration_ms");
+
+                    b.Property<string>("FailureReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("failure_reason");
+
+                    b.Property<Guid?>("InteractionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("interaction_id");
+
+                    b.Property<string>("ReceivedChunkIndices")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("received_chunk_indices")
+                        .HasDefaultValueSql("'[]'::jsonb");
+
+                    b.Property<string>("Sha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("sha256");
+
+                    b.Property<DateTimeOffset>("StartedAtClient")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("started_at_client");
+
+                    b.Property<DateTimeOffset>("StartedAtServer")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("started_at_server");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<string>("StorageKey")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("storage_key");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<long>("TotalBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("total_bytes");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CallRecordId")
+                        .HasDatabaseName("idx_screen_recordings_call_record");
+
+                    b.HasIndex("TenantId", "Status")
+                        .HasDatabaseName("idx_screen_recordings_tenant_status");
+
+                    b.ToTable("screen_recordings", (string)null);
                 });
 
             modelBuilder.Entity("ContactConnection.Domain.Entities.Subscription", b =>
@@ -2840,6 +3139,96 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .HasDatabaseName("ix_tenant_api_preferences_api_sub_type");
 
                     b.ToTable("tenant_api_preferences", (string)null);
+                });
+
+            modelBuilder.Entity("ContactConnection.Domain.Entities.Voicemail", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("ArchivedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("archived_at");
+
+                    b.Property<Guid>("CallRecordId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("call_record_id");
+
+                    b.Property<string>("CallerId")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("caller_id");
+
+                    b.Property<Guid>("CampaignId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("campaign_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("DurationSeconds")
+                        .HasColumnType("integer")
+                        .HasColumnName("duration_seconds");
+
+                    b.Property<DateTimeOffset?>("EmailDeliveredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("email_delivered_at");
+
+                    b.Property<string>("EmailDeliveredTo")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("email_delivered_to");
+
+                    b.Property<string>("EmailDeliveryError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("email_delivery_error");
+
+                    b.Property<string>("EmailDeliveryStatus")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("email_delivery_status");
+
+                    b.Property<DateTimeOffset?>("HeardAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("heard_at");
+
+                    b.Property<Guid?>("HeardBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("heard_by");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<string>("StorageKey")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("storage_key");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("Transcription")
+                        .HasColumnType("text")
+                        .HasColumnName("transcription");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CallRecordId")
+                        .HasDatabaseName("idx_voicemails_call_record");
+
+                    b.HasIndex("CampaignId", "Status")
+                        .HasDatabaseName("idx_voicemails_campaign_status");
+
+                    b.ToTable("voicemails", (string)null);
                 });
 
             modelBuilder.Entity("ContactConnection.Domain.Entities.WebhookEndpoint", b =>

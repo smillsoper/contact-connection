@@ -28,6 +28,23 @@ public interface IEslCommander
     Task SendDtmfAsync(string uuid, string digits, int durationMs, CancellationToken ct = default);
 
     /// <summary>
+    /// uuid_transfer &lt;uuid&gt; &lt;destination&gt; &lt;dialplan&gt; &lt;context&gt; — sends a live (parked) channel
+    /// into a dialplan extension. Used by tf_ivr_menu to run FreeSWITCH's play_and_get_digits in the
+    /// "ivr_collect" extension (this build has no uuid_execute), which emits a CUSTOM event with the
+    /// result and re-parks.
+    /// </summary>
+    Task TransferAsync(string uuid, string destination, string dialplan, string context, CancellationToken ct = default);
+
+    /// <summary>
+    /// uuid_record &lt;uuid&gt; &lt;action&gt; &lt;path&gt; — controls call recording on a live channel.
+    /// action is one of start | stop | mask | unmask. mask/unmask fill the recording with
+    /// silence while keeping the file wall-clock continuous (PCI-correct — never stop/start
+    /// for a sensitive segment). path must be identical across all four actions for one file.
+    /// limitSeconds &gt; 0 caps a recording's duration (0 = unlimited).
+    /// </summary>
+    Task RecordAsync(string uuid, string action, string path, int limitSeconds = 0, CancellationToken ct = default);
+
+    /// <summary>
     /// uuid_audio_stream ... start — opens an outbound WebSocket connection from FreeSWITCH to
     /// wssUrl for streaming TTS playback (mod_audio_stream). metadata should be a short,
     /// space-free correlation token, not the actual request payload — see TtsStreamRelayRequest.

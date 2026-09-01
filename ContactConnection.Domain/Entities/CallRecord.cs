@@ -49,9 +49,19 @@ public class CallRecord
     public string? ContactIdExternal { get; private set; }
     public string? RecordingUrl { get; private set; }
 
+    // Recording lifecycle — denormalised from RecordingEvents for fast reporting.
+    // See ARCHITECTURE.md §13 / §14.
+    public DateTimeOffset? RecordingStartedAt { get; private set; }
+    public DateTimeOffset? RecordingStoppedAt { get; private set; }
+    public int RecordingMaskedSeconds { get; private set; }        // total masked audio across the call
+    public bool RecordingRetained { get; private set; } = true;    // false once purged / disposition-discarded
+    public DateTimeOffset? RecordingDeletedAt { get; private set; }
+    public string? RecordingDeleteReason { get; private set; }
+
     // JSONB — variable/nested, not frequently queried by field
     public CallAddresses? Addresses { get; private set; }
     public List<CommitmentEvent> CommitmentEvents { get; private set; } = [];
+    public List<RecordingEvent> RecordingEvents { get; private set; } = [];   // JSONB — recording audit trail / merge EDL
     public CartDocument? Cart { get; private set; }             // JSONB — commerce engine owns this
     public string? FlowExecutionState { get; private set; }   // JSONB — flow engine owns this
     public string? CustomFields { get; private set; }         // JSONB — denormalized snapshot
@@ -276,6 +286,68 @@ public class CallRecord
     {
         RecordingUrl = recordingUrl;
         UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>
+    /// Appends one recording-lifecycle transition (start/stop/mask/unmask) and refreshes
+    /// the denormalised recording_* scalar columns from the full event list. Events may
+    /// arrive slightly out of order (independent ESL callbacks) — aggregates are always
+    /// recomputed from the time-sorted list, never incrementally.
+    /// </summary>
+    public void AppendRecordingEvent(RecordingEvent evt)
+    {
+        RecordingEvents.Add(evt);
+        RecomputeRecordingAggregates();
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>Marks the recording as no longer retained (retention purge or disposition discard).</summary>
+    public void MarkRecordingPurged(string reason)
+    {
+        RecordingRetained     = false;
+        RecordingDeletedAt    = DateTimeOffset.UtcNow;
+        RecordingDeleteReason = reason;
+        RecordingUrl          = null;
+        UpdatedAt             = DateTimeOffset.UtcNow;
+    }
+
+    private void RecomputeRecordingAggregates()
+    {
+        var ordered = RecordingEvents.OrderBy(e => e.At).ToList();
+
+        RecordingStartedAt = ordered
+            .FirstOrDefault(e => e.Action == RecordingEventAction.Start)?.At;
+        RecordingStoppedAt = ordered
+            .LastOrDefault(e => e.Action == RecordingEventAction.Stop)?.At;
+
+        // Sum of masked audio. Nested masks collapse to the outermost window; a mask left
+        // open at the end is closed at the stop time, else at the last event.
+        var lastAt = ordered.Count > 0 ? ordered[^1].At : (DateTimeOffset?)null;
+        var closeAt = RecordingStoppedAt ?? lastAt;
+
+        double maskedSeconds = 0;
+        int maskDepth = 0;
+        DateTimeOffset windowStart = default;
+
+        foreach (var e in ordered)
+        {
+            if (e.Action == RecordingEventAction.Mask)
+            {
+                if (maskDepth == 0) windowStart = e.At;
+                maskDepth++;
+            }
+            else if (e.Action == RecordingEventAction.Unmask && maskDepth > 0)
+            {
+                maskDepth--;
+                if (maskDepth == 0)
+                    maskedSeconds += (e.At - windowStart).TotalSeconds;
+            }
+        }
+
+        if (maskDepth > 0 && closeAt is { } end && end > windowStart)
+            maskedSeconds += (end - windowStart).TotalSeconds;
+
+        RecordingMaskedSeconds = (int)Math.Round(Math.Max(0, maskedSeconds));
     }
 
     public void SetExternalContactId(string contactIdExternal)

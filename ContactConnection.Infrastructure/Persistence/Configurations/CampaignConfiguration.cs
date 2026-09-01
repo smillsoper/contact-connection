@@ -35,6 +35,18 @@ public class CampaignConfiguration : IEntityTypeConfiguration<Campaign>
         builder.Property(c => c.QueueAccelerationEnabled).HasColumnName("queue_acceleration_enabled");
         builder.Property(c => c.QueueAccelerationIntervalSeconds).HasColumnName("queue_acceleration_interval_seconds");
         builder.Property(c => c.QueueAccelerationPriorityBoost).HasColumnName("queue_acceleration_priority_boost");
+
+        // Call recording policy
+        builder.Property(c => c.RecordingMode)
+            .HasColumnName("recording_mode").HasMaxLength(40).IsRequired().HasDefaultValue(RecordingMode.Disabled);
+        builder.Property(c => c.ConsentModel)
+            .HasColumnName("consent_model").HasMaxLength(30).IsRequired().HasDefaultValue(ConsentModel.OneParty);
+        builder.Property(c => c.RecordingRequired).HasColumnName("recording_required").HasDefaultValue(false);
+        builder.Property(c => c.RecordStereo).HasColumnName("record_stereo").HasDefaultValue(true);
+        builder.Property(c => c.RecordingBeepEnabled).HasColumnName("recording_beep_enabled").HasDefaultValue(false);
+        builder.Property(c => c.AutoMaskOnHold).HasColumnName("auto_mask_on_hold").HasDefaultValue(false);
+        builder.Property(c => c.RecordingRetentionDays).HasColumnName("recording_retention_days").HasDefaultValue(90);
+
         builder.Property(c => c.CreatedAt).HasColumnName("created_at");
         builder.Property(c => c.UpdatedAt).HasColumnName("updated_at");
 
