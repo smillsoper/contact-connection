@@ -139,6 +139,55 @@ public class RouteToQueueNodeHandlerTests
     }
 
     [Fact]
+    public async Task EnteringQueue_CancelsCallerPendingCallbackForThisCampaign()
+    {
+        var campaign = Campaign.Create(Guid.NewGuid(), Guid.NewGuid(), "Test", "test");
+        campaign.Update(
+            name: "Test", description: null,
+            direction: CampaignDirection.Inbound, dialMode: CampaignDialMode.Manual,
+            priority: 5, afterCallWorkSeconds: 30, callerIdNumber: null,
+            maxQueueSize: 5, queueTimeoutSeconds: 300, serviceLevelThresholdSeconds: 30,
+            shortAbandonThresholdSeconds: 10,
+            queueAccelerationEnabled: false, queueAccelerationIntervalSeconds: 60, queueAccelerationPriorityBoost: 1,
+            ringStrategy: CampaignRingStrategy.RingAll, ringTopN: 3);
+
+        var dbName = Guid.NewGuid().ToString();
+        TenantDbContext Open() => new(new DbContextOptionsBuilder<TenantDbContext>()
+            .UseInMemoryDatabase(dbName).Options);
+
+        // caller "+15551234567" (the NewContext ANI) had booked a callback on this campaign,
+        // plus an unrelated one on another campaign and one already terminal — only the first cancels.
+        var mine     = Callback.Create(Guid.NewGuid(), Guid.NewGuid(), campaign.Id, "+15551234567", TimeSpan.Zero);
+        var other    = Callback.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "+15551234567", TimeSpan.Zero);
+        var done     = Callback.Create(Guid.NewGuid(), Guid.NewGuid(), campaign.Id, "+15551234567", TimeSpan.Zero);
+        done.MarkAttempted(); done.MarkCompleted();
+        using (var seed = Open())
+        {
+            seed.Campaigns.Add(campaign);
+            seed.Callbacks.AddRange(mine, other, done);
+            seed.SaveChanges();
+        }
+
+        var dbFactory = new Mock<ITenantDbContextFactory>();
+        dbFactory.Setup(f => f.Create(It.IsAny<string>())).Returns(Open);
+
+        var sessionStore = new Mock<ITelephonyCallSessionStore>();
+        sessionStore.Setup(s => s.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<TelephonyCallSession>());
+        var ranker = new EligibleAgentRanker(new Mock<IAgentStateStore>().Object);
+        var handler = new RouteToQueueNodeHandler(
+            dbFactory.Object, new Mock<ICallStateHistoryRecorder>().Object, ranker, sessionStore.Object);
+
+        var result = await handler.ExecuteAsync(new JsonObject(), NewContext(campaign.Id));
+
+        Assert.Equal("queued", result.TransitionTaken);
+        await using var check = Open();
+        Assert.Equal(CallbackStatus.Cancelled, (await check.Callbacks.FindAsync(mine.Id))!.Status);
+        Assert.Equal(CallbackStatus.Scheduled, (await check.Callbacks.FindAsync(other.Id))!.Status);
+        Assert.Equal(CallbackStatus.Completed, (await check.Callbacks.FindAsync(done.Id))!.Status);
+    }
+
+    [Fact]
     public async Task QueueBelowCapacity_EntersQueueNormally()
     {
         var campaign = Campaign.Create(Guid.NewGuid(), Guid.NewGuid(), "Test", "test");

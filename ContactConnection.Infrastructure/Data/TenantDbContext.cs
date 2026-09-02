@@ -22,6 +22,7 @@ public class TenantDbContext : DbContext
     public DbSet<ScreenRecording> ScreenRecordings => Set<ScreenRecording>();
     public DbSet<RecordingMergeJob> RecordingMergeJobs => Set<RecordingMergeJob>();
     public DbSet<Voicemail> Voicemails => Set<Voicemail>();
+    public DbSet<Callback> Callbacks => Set<Callback>();
     public DbSet<Flow> Flows => Set<Flow>();
     public DbSet<FlowSession> FlowSessions => Set<FlowSession>();
     public DbSet<Product> Products => Set<Product>();
@@ -67,6 +68,7 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new ScreenRecordingConfiguration());
         modelBuilder.ApplyConfiguration(new RecordingMergeJobConfiguration());
         modelBuilder.ApplyConfiguration(new VoicemailConfiguration());
+        modelBuilder.ApplyConfiguration(new CallbackConfiguration());
         modelBuilder.ApplyConfiguration(new FlowConfiguration());
         modelBuilder.ApplyConfiguration(new FlowSessionConfiguration());
         modelBuilder.ApplyConfiguration(new ProductConfiguration());

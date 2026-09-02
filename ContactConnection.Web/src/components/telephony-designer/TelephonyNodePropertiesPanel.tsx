@@ -347,6 +347,88 @@ export default function TelephonyNodePropertiesPanel({
         <VoicemailNodeEditor data={data} onChange={(patch) => onChange(node.id, patch)} />
       )}
 
+      {type === 'tf_request_callback' && (
+        <div className="flex flex-col gap-3">
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Callback number</label>
+            <select
+              className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-blue-500"
+              value={(data.numberSource as string) ?? 'ani'}
+              onChange={(e) => set('numberSource', e.target.value)}
+            >
+              <option value="ani">Caller's presented number (ANI)</option>
+              <option value="collected">A variable collected earlier</option>
+            </select>
+          </div>
+
+          {(data.numberSource as string) === 'collected' && (
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Variable name</label>
+              <input
+                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-blue-500"
+                placeholder="e.g. callback_digits"
+                value={(data.collectedVar as string) ?? ''}
+                onChange={(e) => set('collectedVar', e.target.value)}
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Session/channel var, e.g. digits captured by an earlier IVR Menu or Send DTMF node.
+              </p>
+            </div>
+          )}
+
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Delay (min)</label>
+              <input
+                type="number" min={0}
+                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-blue-500"
+                value={(data.delayMinutes as number) ?? 0}
+                onChange={(e) => set('delayMinutes', Math.max(0, Number(e.target.value)))}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Window (min)</label>
+              <input
+                type="number" min={1}
+                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-blue-500"
+                value={(data.windowMinutes as number) ?? 120}
+                onChange={(e) => set('windowMinutes', Math.max(1, Number(e.target.value)))}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Max tries</label>
+              <input
+                type="number" min={1}
+                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-blue-500"
+                value={(data.maxAttempts as number) ?? 3}
+                onChange={(e) => set('maxAttempts', Math.max(1, Number(e.target.value)))}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Caller ID override (optional)</label>
+            <input
+              className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-blue-500"
+              placeholder="Blank = number the caller dialed"
+              value={(data.callerIdOverride as string) ?? ''}
+              onChange={(e) => set('callerIdOverride', e.target.value)}
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Literal E.164 or a <span className="font-mono">{'{{variable}}'}</span> (frozen now, not when the call fires).
+              Must be a number on your trunk’s account — carriers reject arbitrary caller IDs.
+            </p>
+          </div>
+
+          <p className="text-xs text-gray-500 leading-snug">
+            Books a callback and takes the caller out of the queue. Wire <span className="text-cyan-300">requested</span> to
+            a Play (“we’ll call you back”) → Hang Up. Wire <span className="text-red-300">failed</span> back to hold music
+            for callers with no usable number. The Worker places the outbound call when the window opens. While the caller
+            is in this menu they hold their queue slot but aren’t offered to an agent.
+          </p>
+        </div>
+      )}
+
       {type === 'tf_play' && (
         <PlayNodeEditor data={data} onChange={(patch) => onChange(node.id, patch)} />
       )}

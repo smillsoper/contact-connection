@@ -200,7 +200,11 @@ public sealed class EslBackgroundService : BackgroundService
         // the previous check never matched anything, so this never actually skipped the A-leg,
         // producing a duplicate CallRecord (queued, screen-popped, and answerable independently)
         // for every self-dial test call.
-        if (vars.GetValueOrDefault("Call-Direction") == "outbound") return;
+        // EXCEPTION: a fired callback (CallbackProcessingService originates "...&park()" with
+        // cc_callback_id + cc_did) — that answered outbound leg IS the real party and must run
+        // the campaign's inbound flow so it queues to an agent, exactly like a fresh DID call.
+        if (vars.GetValueOrDefault("Call-Direction") == "outbound"
+            && string.IsNullOrEmpty(vars.GetValueOrDefault("variable_cc_callback_id"))) return;
 
         var callerNumber = vars.GetValueOrDefault("Caller-Caller-ID-Number") ?? "";
         var callerName   = vars.GetValueOrDefault("Caller-Caller-ID-Name") ?? "";
@@ -225,6 +229,7 @@ public sealed class EslBackgroundService : BackgroundService
         var dbFactory        = scope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
         var telephonyEngine  = scope.ServiceProvider.GetRequiredService<ITelephonyFlowEngine>();
         var callStateRecorder = scope.ServiceProvider.GetRequiredService<ICallStateHistoryRecorder>();
+        var callbackConn     = scope.ServiceProvider.GetRequiredService<ICallbackConnectionService>();
 
         // ── DID routing: check if destination matches a provisioned phone number ──
         // Carriers vary on whether the dialed number carries a leading "+" and/or "1",
@@ -244,7 +249,7 @@ public sealed class EslBackgroundService : BackgroundService
         {
             await HandleDidCallAsync(
                 routing, callerNumber, callerName, channelUuid, destination, vars,
-                esl, telephonyEngine, platformDb, dbFactory, callStateRecorder, ct);
+                esl, telephonyEngine, platformDb, dbFactory, callStateRecorder, callbackConn, ct);
             return;
         }
 
@@ -269,6 +274,7 @@ public sealed class EslBackgroundService : BackgroundService
         ContactConnectionDbContext platformDb,
         ITenantDbContextFactory dbFactory,
         ICallStateHistoryRecorder callStateRecorder,
+        ICallbackConnectionService callbackConn,
         CancellationToken ct)
     {
         var tenant = await platformDb.Tenants.FirstOrDefaultAsync(t => t.Id == routing.TenantId, ct);
@@ -280,12 +286,18 @@ public sealed class EslBackgroundService : BackgroundService
 
         await using var db = dbFactory.Create(tenant.SchemaName);
 
-        var record = CallRecord.CreateInbound(
-            tenantId: tenant.Id,
-            callerId: callerNumber,
-            agentId: null,
-            contactIdExternal: channelUuid);
+        // A fired callback leg carries cc_callback_id — its connected call record is a "callback"
+        // source record, and CallbackConnectionService links it back + marks the row completed
+        // once the flow has run (below).
+        var callbackIdRaw = eventVars.GetValueOrDefault("variable_cc_callback_id");
+        var isCallbackLeg = Guid.TryParse(callbackIdRaw, out var callbackId);
 
+        var record = isCallbackLeg
+            ? CallRecord.CreateCallback(tenant.Id, routing.CampaignId, callerNumber)
+            : CallRecord.CreateInbound(
+                tenantId: tenant.Id, callerId: callerNumber, agentId: null, contactIdExternal: channelUuid);
+
+        record.SetContactIdExternal(channelUuid);
         // Stamp the campaign and dialed number so the CallRecord knows where it belongs
         record.SetCampaign(routing.CampaignId);
         record.SetDnis(routing.Number);
@@ -327,6 +339,10 @@ public sealed class EslBackgroundService : BackgroundService
         };
 
         await telephonyEngine.ExecuteAsync(ctx, ct);
+
+        // Fired callback connected — mark the Callback row completed and link this call record.
+        if (isCallbackLeg)
+            await callbackConn.MarkConnectedAsync(tenant.SchemaName, tenant.Id, callbackId, record.Id, ct);
 
         // Persist the flow execution trace to the call record
         if (ctx.Trace is not null)
@@ -869,6 +885,33 @@ public sealed class EslBackgroundService : BackgroundService
         // for all session-store/CallRecord lookups below once a session is found.
         var session = await ResolveSessionAsync(channelUuid, vars, ct);
 
+        // A fired callback leg that hung up with no session — HandleChannelParkAsync never ran
+        // for it, so the callee never answered (no answer / busy / gateway reject). Resolve the
+        // Callback row: retry if attempts remain, else abandon. A callback that DID connect has a
+        // session (keyed at park) on the first CHANNEL_HANGUP, so it falls through to the normal
+        // completion path; we skip the trailing CHANNEL_HANGUP_COMPLETE (session already torn
+        // down) so it can't be misread as a no-answer. MarkNoAnswerAsync is a no-op unless the
+        // row is still 'attempted', which is the real backstop either way.
+        var callbackIdRaw = vars.GetValueOrDefault("variable_cc_callback_id");
+        if (session is null
+            && vars.GetValueOrDefault("Event-Name") == "CHANNEL_HANGUP"
+            && Guid.TryParse(callbackIdRaw, out var hungCallbackId))
+        {
+            var cbSchema = vars.GetValueOrDefault("variable_cc_tenant_schema");
+            Guid.TryParse(vars.GetValueOrDefault("variable_cc_tenant_id"), out var cbTenantId);
+            if (!string.IsNullOrEmpty(cbSchema))
+            {
+                using var cbScope = _scopeFactory.CreateScope();
+                var callbackConn = cbScope.ServiceProvider.GetRequiredService<ICallbackConnectionService>();
+                var abandoned = await callbackConn.MarkNoAnswerAsync(cbSchema, cbTenantId, hungCallbackId, cause, ct);
+                _logger.LogInformation(
+                    "CHANNEL_HANGUP {Uuid} cause={Cause}: fired callback {CallbackId} leg ended with no session " +
+                    "(abandoned={Abandoned})",
+                    channelUuid, cause, hungCallbackId, abandoned);
+            }
+            return;
+        }
+
         // tf_transfer external_number: the OUTBOUND leg (not the caller's own channel) died while
         // the transfer was still in progress → the bridge never connected. Leave the session and
         // call record alone — the caller's channel is still up and will re-park, at which point
@@ -965,6 +1008,17 @@ public sealed class EslBackgroundService : BackgroundService
                     await callStateRecorder.RecordAsync(
                         session.TenantId, session.TenantSchemaName, record.Id,
                         CallHistoryState.Completed, session.CampaignId, completedAgentId, cause, ct: ct);
+                }
+                else if (session.Vars.ContainsKey("_left_for_callback"))
+                {
+                    // The caller booked a callback via tf_request_callback and then hung up — this
+                    // is neither an abandon nor a completion. The Callback row's own lifecycle
+                    // (completed / abandoned / expired) is the authoritative outcome; here we just
+                    // close the timeline for this inbound leg.
+                    await callStateRecorder.RecordAsync(
+                        session.TenantId, session.TenantSchemaName, record.Id,
+                        CallHistoryState.PostAgent, session.CampaignId, agentId: null,
+                        detail: "Call ended — callback pending", ct: ct);
                 }
                 else if (session.Vars.ContainsKey("_queued"))
                 {

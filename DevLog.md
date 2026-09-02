@@ -116,6 +116,8 @@
 | 104 | 2026-08-31 → 2026-09-01 | 12:04 PM PDT (8/31) | 8:44 AM PDT (9/1) | 48 min (12:04–12:25 PM 8/31 + 8:17–8:44 AM 9/1; hard stop overnight, not idle time) | ~12369 min |
 | 105 | 2026-09-01 | 8:54 AM PDT | 3:23 PM PDT | 59 min (8:54–9:30 AM + 3:00–3:23 PM; hard stop midday, not idle time) | ~12428 min |
 | 106 | 2026-09-01 | 3:27 PM PDT | 3:47 PM PDT | 20 min | ~12448 min |
+| 107 | 2026-09-02 | 9:43 AM PDT | 10:13 AM PDT | 30 min | ~12478 min |
+| 108 | 2026-09-02 | 10:16 AM PDT | 12:25 PM PDT | 129 min | ~12607 min |
 
 ---
 
@@ -4809,6 +4811,145 @@ The bug is *two* independent problems, and the "every 5 minutes" framing was a r
 
 1. **Visually verify the softphone registration fix** (idle-soak + inbound call during a re-registration window). If the blip persists, capture `sofia/sip-trace` and check whether the OPTIONS ping is actually reaching the browser.
 2. **Callback lifecycle** — next inbound feature gap after transfer.
+3. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
+4. Fix the Worker's Development boot (Session 101 carry-over).
+5. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
+6. `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit (opportunistic).
+7. Prior carry-overs: `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; `FlowEngine` test coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 107
+
+**Date:** 2026-09-02
+**Start:** 9:43 AM PDT
+**End:** 10:13 AM PDT
+**Duration:** 30 minutes
+**Total Duration:** ~12478 minutes
+
+### Focus
+
+1. Log the softphone re-registration fix (Sessions 105–106) as **live-verified**.
+2. Begin the **Callback lifecycle** inbound gap (ARCHITECTURE.md §16) — the next telephony feature after `tf_transfer`.
+
+### Softphone registration fix — LIVE-VERIFIED ✓
+
+User ran the idle-soak test: logged in as ext 1000, started a stopwatch, left the softphone idle. At the 10-minute mark dialed a test number — the call connected cleanly, the CRM script launched, everything flowed as designed, and the registration badge never flipped to "not registered". The three-prong S106 fix (12 s grace timer + `registrationExpiring` renew + `register_expires` 600 in `SoftphonePanel.tsx`; `sofia_contact` retry in `EslClient`; `all-reg-options-ping` in `internal.xml`) is confirmed solid. `[[project_sip_registration_plan]]` updated.
+
+### Callback lifecycle — foundation + node + worker + API + designer node
+
+New `Callback` aggregate and the full state machine from ARCHITECTURE.md §16: `scheduled → attempted → completed | abandoned`, plus `expired` / `cancelled`. A non-final no-answer drops back to `scheduled` for the next worker pass; only the last one abandons.
+
+**Domain** — `ContactConnection.Domain/Entities/Callback.cs` + `CallbackStatus`. `Create(delay, windowMinutes, maxAttempts)` opens at `scheduled` (skips the transient `requested`). `IsDue(now)` / `IsExpired(now)` guards. `MarkAttempted` / `MarkCompleted` / `MarkNoAnswer` (returns true on abandon) / `MarkExpired` / `Cancel`. `CallRecord.CreateCallback(tenantId, campaignId, number)` added — outbound-leg record, `Source = CallSource.Callback` (constant existed, was unused). **25 Domain tests** (`CallbackTests`).
+
+**Persistence** — `ICallbackRepository` + `CallbackRepository` (scoped, `ScopedTenantDbContextFactory`), `CallbackConfiguration` (`callbacks` table, 3 indexes incl. `idx_callbacks_status_scheduled` for the worker scan), `TenantDbContext.Callbacks` DbSet, DI registration. Migration `20260902165614_AddCallbacks` — applied to `tenant_test_tenant` via `dotnet ef` and to `tenant_test_contact_center` (the live softphone-test tenant) via an idempotent SQL script run against the container (the EF design-time factory only targets `tenant_test_tenant`).
+
+**Node** — `tf_request_callback` (`RequestCallbackNodeHandler`, registered). From an in-queue caller: creates the row, clears `_queued` (stops QueuePollingService offers), stores `_callback_id`, records a `post_agent` call-state-history row (NOT an abandon — a callback only abandons on final no-answer). `numberSource` = `ani` (validates ≥7 digits, rejects "anonymous") or `collected` (reads `collectedVar` from session/channel vars). Transitions `requested` / `failed`. **4 Infra tests** (in-memory `TenantDbContext`).
+
+**Worker** — `CallbackProcessingService` (registered in `Program.cs`, 30 s `PeriodicTimer`). Per active tenant: expiry sweep → `MarkExpired`; due sweep → `CallRecord.CreateCallback` + `MarkAttempted` + ESL `bgapi originate {…cc_callback_id,cc_call_record_id,cc_tenant_schema,cc_campaign_id…}sofia/gateway/<DefaultGateway>/<num> &transfer('<Callbacks:DialplanExtension|callback_answer>' XML default)` via `FreeSwitchEslClient`; opt-in stale-attempt sweep — only when `Callbacks:AutoResolveAttemptedAfterSeconds > 0` (default 0/off so it can never record a false abandon) → `MarkNoAnswer`, writing a `callback_abandon` (`CallAbandonType.CallbackAbandon`) row against the original inbound `CallRecordId` when it abandons.
+
+**API** — `CallbacksEndpoints` (registered after voicemails): `GET /api/v1/callbacks/{id}`, `POST /api/v1/callbacks/{id}/cancel` (supervisor; 409 if terminal or mid-attempt), `GET /api/v1/call-records/{id}/callbacks`, `GET /api/v1/campaigns/{id}/callbacks?status=&limit=`.
+
+**Flow designer** — `tf_request_callback` node in `ContactConnection.Web`: `TelephonyNodeType` + `TelNodeData` fields (`numberSource`, `collectedVar`, `delayMinutes`, `windowMinutes`, `maxAttempts`), `TELEPHONY_NODE_META` (cyan, `multi` handles `requested` / `failed`), `defaultTelNodeData`, `RequestCallbackNode.tsx`, palette `INBOUND_NODES`, `nodeTypes` in `TelephonyDesignerPage`, inline properties block in `TelephonyNodePropertiesPanel`.
+
+### State
+
+- Full solution builds **0 errors** (only the pre-existing `Microsoft.OpenApi` NU1903 advisory). **499 tests pass** (Domain 142 (+25), Application 20, Infrastructure 269 (+4), Api 68). Web `tsc --noEmit` clean.
+- Migration `AddCallbacks` live on both dev tenant schemas.
+- Not committed (working tree continues to accumulate).
+
+### Callback lifecycle — remaining (Session 108)
+
+1. **Real completion/abandon signal** — wire `FreeSwitchEslService` (Worker ESL path) to watch the callback leg keyed off `cc_callback_id`: answer → `MarkCompleted`, hangup-before-answer → `MarkNoAnswer`. Until then the opt-in stale sweep is the only resolver (kept off).
+2. **FreeSWITCH `callback_answer` dialplan extension** — park the answered leg so `CHANNEL_PARK` routes it into the campaign flow / queue (analogous to `xfer-bridge` for `tf_transfer`). Not yet in `freeswitch/conf/dialplan/`.
+3. **Inbound re-call → `Callback.Cancel`** — cancel a `requested`/`scheduled` callback when the caller phones back in (`ICallbackRepository.ListPendingByNumberAsync` is ready).
+4. **Live FS verification** — needs #1 + #2.
+5. **Supervisor UI** — callbacks list/cancel view (endpoints exist).
+
+### Next Session — pick up here
+
+1. **Callback lifecycle** items 1–4 above (ESL signal + dialplan + inbound-cancel + live verify).
+2. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
+3. Fix the Worker's Development boot (Session 101 carry-over).
+4. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
+5. `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit (opportunistic).
+6. Prior carry-overs: `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; `FlowEngine` test coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 108
+
+**Date:** 2026-09-02
+**Start:** 10:16 AM PDT
+**End:** 12:25 PM PDT
+**Duration:** 129 minutes
+**Total Duration:** ~12607 minutes
+
+### Focus
+
+Finish the **Callback lifecycle** (ARCHITECTURE.md §16): ESL connect/no-answer wiring, inbound re-call cancel, **live verification on the real Telnyx trunk**, design refinements from the user's review (delivery suppression during in-queue IVR, caller-ID override on the request node), then a **full agent-answered end-to-end run** of a user-built inbound flow (IVR "press 1 for callback") that surfaced three real bugs — all fixed. See the "Full-flow test + fixes" addendum below.
+
+### ESL wiring + inbound-cancel
+
+- **No `callback_answer` dialplan extension needed.** `CallbackProcessingService` now originates `...sofia/gateway/telnyx/<num> &park()` (was `&transfer('callback_answer' ...)`) with `cc_did` = the campaign's active `PhoneNumberRouting.Number` (platform `ContactConnectionDbContext` lookup) + `cc_callback_id` / `cc_tenant_id` / `cc_tenant_schema` / `cc_tenant_subdomain` / `cc_campaign_id`. The answered leg re-parks and the **existing** DID park path runs the campaign inbound flow and queues it. No active DID -> attempt skipped (stays `scheduled`, warns).
+- **`Callback.MarkAttempted(Guid? = null)`** - record id no longer required up front; new `Callback.LinkConnectedCallRecord(id)` links the connected record on answer. `CallbackProcessingService` no longer pre-creates the outbound `CallRecord`.
+- **`ICallbackConnectionService` / `CallbackConnectionService`** (Infra `Telephony/`, scoped, schema-explicit, mirrors `ICallStateHistoryRecorder`): `MarkConnectedAsync` (attempted -> `completed` + link) and `MarkNoAnswerAsync` (attempted -> `MarkNoAnswer`; on abandon writes the `callback_abandon` / `CallAbandonType.CallbackAbandon` state-history row against the original inbound record). No-ops if the row is missing or already resolved.
+- **`EslBackgroundService` - 3 hooks:** (a) `HandleChannelParkAsync` outbound-skip lets a `variable_cc_callback_id` channel through; (b) `HandleDidCallAsync` - a `cc_callback_id` leg gets `CallRecord.CreateCallback` (not `CreateInbound`); after the flow runs -> `MarkConnectedAsync`; (c) `HandleChannelHangupCoreAsync` - a `variable_cc_callback_id` channel that hung up on the first `CHANNEL_HANGUP` with **no session** (never parked = never answered) -> `MarkNoAnswerAsync` then return.
+- **Inbound re-call -> cancel** - `RouteToQueueNodeHandler.CancelPendingCallbacksAsync`: on normal queue entry, any `requested`/`scheduled` callback for `(campaignId, callerNumber)` is `Cancel(...)`ed.
+
+### LIVE-VERIFIED - real Telnyx trunk (tenant_test_tenant / campaign 226ae1c6)
+
+API + Worker started manually (API with launch profile; Worker `DOTNET_ENVIRONMENT=Production dotnet run --no-launch-profile` + env `ConnectionStrings__DefaultConnection` / `__Redis` / `FreeSWITCH__EslPassword`, since Production skips user-secrets - the Worker still can't boot in Development, DI `ValidateOnBuild`). Seeded `callbacks` rows directly.
+
+- **Connected** - Worker fired the `&park()` originate; Telnyx `CallsOUT 0->1`; the answered A-leg re-parked with `variable_cc_callback_id` + `variable_cc_did` present and `Call-Direction=outbound` (park guard change let it through); `HandleDidCallAsync` made a `source=callback` record, ran the flow, `CallbackConnectionService ... completed - connected call record <id>`; row -> `completed` + `outbound_call_record_id` linked. **The user set their agent Available and answered the queued callback live.**
+- **No-answer** - `+15005550006` (invalid) -> Telnyx `CALL_REJECTED` -> leg hung up, no session -> `MarkNoAnswerAsync` -> row `abandoned`, `detail="No answer (CALL_REJECTED)."`; `call_state_history` `state=abandoned, abandon_type=callback_abandon` written.
+- **Fix from the run:** the hangup hook re-fired on `CHANNEL_HANGUP_COMPLETE` + a re-fired `CALL_REJECTED` hangup and logged a misleading "did not connect" - harmless (`MarkNoAnswerAsync` no-ops unless status is `attempted`). Refined to run **only on `Event-Name == "CHANNEL_HANGUP"`** and log the real `abandoned` bool.
+- **Hairpin test artifact (not a bug):** dialing our own DID made the call come back inbound as a *second* plain-inbound leg + record. A real cell-phone callback has one leg. In this run the agent actually connected to that phantom leg, not the callback leg - the callback row still went `completed` because `MarkConnectedAsync` fires when the callback leg runs the flow.
+- Test data cleaned; API + Worker stopped.
+- **Note:** the live telephony test tenant is **`tenant_test_tenant`** (campaign `226ae1c6`, DIDs `+15419196582`/`+15415293670`, inbound flow `8386ec2d`; ext 1000 = `admin@contactconnection.local`, ext 1002 = `sopermills2010@gmail.com`) - Session 107's "contact_center is the live tenant" note was wrong. `AddCallbacks` was applied to both schemas so no harm.
+
+### Design refinements (from user review, post-live-test)
+
+- **Delivery suppression during input sub-dialogs** - `QueuePollingService.IsDeliverable(session)` = `_queued=="true"` AND no `_ivr_in_progress` / `_vm_in_progress`. A queued caller running a mid-queue `tf_ivr_menu` (e.g. "press 1 for a callback", confirm/collect number) or `tf_voicemail` keeps their queue slot + `_in_queue_at` clock but is NOT offered to an agent until the sub-dialog completes - bridging mid-`play_and_get_digits` races the ivr_done/vm_done resume and loses the DTMF. `QueuedCallDeliveryService.DeliverAsync` also early-returns `"Caller is in a menu..."` for a stale screen-pop click. General correctness fix.
+- **Caller ID override on `tf_request_callback`** - new `callerIdOverride` node field (literal E.164 or `{{variable}}`, resolved to a literal at request time via `TelSetVariableNodeHandler.Resolve` and frozen on new nullable column `Callback.CallerIdOverride`; migration `20260902181352_AddCallbackCallerIdOverride`, applied to both dev schemas). `CallbackProcessingService` uses `callback.CallerIdOverride ?? did` - **blank = the DNIS the caller dialed** (dropped the old `campaign.CallerIdNumber`-first preference, wrong for callbacks). Designer field + help text (carrier CID caveat). Telephony designer node/palette/properties for `tf_request_callback` were also added this session (carried from S107's list).
+
+### State
+
+- Full solution builds **0 errors** (only pre-existing `Microsoft.OpenApi` NU1903). **520 tests pass** (Domain 148, Application 20, Infrastructure 278, Api 74). Web `tsc --noEmit` clean.
+- Migrations `AddCallbacks` (S107) + `AddCallbackCallerIdOverride` + `AddCallbackDnis` (S108) live on both dev tenant schemas.
+- Committed at end of session (checkpoint of the accumulated tree).
+
+### Full-flow test + fixes (addendum)
+
+The user built the IVR path into `Test Campaign 1 - Inbound Call Flow` (`8386ec2d`): `tf_route_to_queue → tf_play (hold) → tf_ivr_menu` ("press 1 request callback, press 2 stay in queue") `→ tf_request_callback → tf_play (confirm) → tf_hangup`. Called in live from a cell to `+15419196582`, pressed 1. Symptom: "set my agent Available, nothing happened."
+
+**Diagnosis from the DB trace** (call `2c9495ca`): the flow ran perfectly and booked callback `64574db6`. "Nothing happened" was **correct** — pressing 1 takes the caller out of the queue, so there was nothing to deliver when the agent went Available; the callback is the delivery mechanism. But the Worker wasn't running, so the callback never fired; and once started it hit `CALL_REJECTED`.
+
+**Three bugs found + fixed:**
+
+1. **Wrong caller ID on the callback.** `CallbackProcessingService` picked *an arbitrary* active DID for the campaign from `phone_number_routing` (got `8001234567`, a placeholder) and used it as both `cc_did` and `origination_caller_id_number` → Telnyx rejects it (not a real number on the trunk). **Fix:** new `Callback.Dnis` column (migration `AddCallbackDnis`) — `tf_request_callback` freezes `ctx.DestinationNumber` (the exact DID dialed) onto the row; the Worker uses `callback.Dnis` for `cc_did` + caller ID, with the routing-table lookup (preferring `+…` over bare numbers) only as a fallback for pre-migration rows. Caller-ID chain: `CallerIdOverride ?? Dnis ?? routing-fallback`.
+2. **`tf_request_callback` didn't actually dequeue on the session.** It cleared `_queued` on `ctx.Vars` only; the flow engine's var-sync copies `ctx.Vars` INTO the session but never *deletes* keys, so the persisted Redis session stayed `_queued="true"`. Consequences: the `CHANNEL_HANGUP` logged a spurious `in_queue` abandon (double-counting the callback), and `QueuePollingService` could still bridge the caller to an agent mid "we'll call you back" audio. **Fix:** the handler now injects `ITelephonyCallSessionStore`, does `session.Vars.Remove("_queued")` + `session.Vars["_left_for_callback"]="true"` + `SaveAsync`. `EslBackgroundService.HandleChannelHangupCoreAsync` gets a `_left_for_callback` branch → records a neutral `post_agent` "Call ended — callback pending" row (not an abandon, not a completion; the Callback row's lifecycle is authoritative).
+3. **Worker still can't boot in Development** (DI `ValidateOnBuild` — the Worker host doesn't register `IFlowNotifier` / `IDashboardNotifier` / `ICallTraceNotifier` / `IEslCommanderFactory`). Ran it `DOTNET_ENVIRONMENT=Production dotnet run --no-launch-profile` + env `ConnectionStrings__DefaultConnection` / `__Redis` / `FreeSWITCH__EslPassword` (Production skips user-secrets). Also made `CallbackProcessingService`'s `ICallStateHistoryRecorder` resolution lazy so the default path needs no notifier registration. The proper fix (no-op notifiers in `Worker/Program.cs`) is still a carry-over.
+
+**Full end-to-end re-verified** — Worker dialed the cell (`+15416704541`) presenting the correct caller ID (`+15419196582`), the answered leg re-parked → routed into campaign `226ae1c6` → agent `e4c95478` auto-selected → user answered on the softphone → ~18 s conversation → `NORMAL_CLEARING`. Connected record `8cc38f34` (`source=callback`, `agent_id` set, `dnis=+15419196582`); state history `pre_queue → in_queue → routing → active → completed`; `Callback` row → `completed` + linked. No phantom leg this time (real cell = one leg, unlike the S108 hairpin test).
+
+### Telnyx Verified Numbers - noted as a future feature
+
+Discussed: let tenants register an off-Telnyx caller ID (a client's main / customer-service line) for outbound campaigns and, rarely, callbacks. Telnyx exposes a Verified Numbers API (`POST /v2/verified_numbers` to request SMS/call OTP -> `POST /v2/verified_numbers/{num}/actions/verify` to confirm; list/get/delete). Only needed for numbers **not** owned on Telnyx (owned DIDs already work as caller ID). Clean future addition - new portal credential (Telnyx API key) + admin verify flow + a caller-ID picker. See memory `project_telnyx_verified_numbers`.
+
+### Callback lifecycle - remaining
+
+Request side, fire side, connect/no-answer, inbound-cancel — all live-verified end to end this session. Left:
+
+1. **Supervisor UI** - callbacks list/cancel view (endpoints exist: `GET /api/v1/campaigns/{id}/callbacks`, `POST /api/v1/callbacks/{id}/cancel`).
+2. Optional: also cancel on inbound entry in `EslBackgroundService.HandleDidCallAsync` (callers who reach an agent without hitting `tf_route_to_queue`).
+3. Fold the Worker-boot fix (no-op notifier registrations in `ContactConnection.Worker/Program.cs`) so it runs under a plain `dotnet run` - Session 101 carry-over.
+4. Tidy the dev `phone_number_routing` table — the placeholder rows (`8001234567` etc.) that triggered bug #1 are still there; harmless now that `Callback.Dnis` is used, but noise.
+
+### Next Session - pick up here
+
+1. Callback lifecycle: supervisor UI (item 1 above).
+2. Telnyx Verified Numbers feature (portal credential + verify flow + caller-ID picker).
 3. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
 4. Fix the Worker's Development boot (Session 101 carry-over).
 5. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.

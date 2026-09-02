@@ -55,6 +55,20 @@ public class QueuedCallDeliveryService(
 
         var callerUuid = record.ContactIdExternal;
 
+        // Don't bridge a caller who is mid input/record sub-dialog (tf_ivr_menu / tf_voicemail) —
+        // the bridge races the ivr_done/vm_done resume and loses their DTMF. QueuePollingService
+        // already filters these out, but a stale screen-pop "Pick Up" click can still land here.
+        var preSession = await sessionStore.GetAsync(callerUuid, ct);
+        if (preSession is not null
+            && (!string.IsNullOrEmpty(preSession.Vars.GetValueOrDefault("_ivr_in_progress"))
+                || !string.IsNullOrEmpty(preSession.Vars.GetValueOrDefault("_vm_in_progress"))))
+        {
+            logger.LogInformation(
+                "Delivery: call {CallRecordId} → agent {AgentId} deferred — caller is in an IVR/voicemail sub-dialog",
+                callRecordId, agentId);
+            return new DeliveryResult(false, "Caller is in a menu — try again in a moment.");
+        }
+
         logger.LogInformation(
             "Delivery: call {CallRecordId} → agent {AgentId} (ext {Ext}), callerUuid={CallerUuid}",
             callRecordId, agentId, agent.SipExtension, callerUuid);

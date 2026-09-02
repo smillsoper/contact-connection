@@ -165,6 +165,30 @@ public class CallRecord
         };
     }
 
+    /// <summary>
+    /// Creates the call record for the outbound leg placed when a scheduled <see cref="Callback"/>
+    /// fires. Campaign is known (the callback carries it); no agent yet — one is assigned when the
+    /// answered leg routes into the queue. <paramref name="callbackNumber"/> is the number dialled.
+    /// </summary>
+    public static CallRecord CreateCallback(Guid tenantId, Guid campaignId, string callbackNumber)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return new CallRecord
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ClientId = Guid.Empty,
+            CampaignId = campaignId,
+            Source = CallSource.Callback,
+            RecordType = CallRecordType.Full,
+            OverallStatus = CallRecordStatus.Active,
+            CallerId = callbackNumber,
+            CallStartAt = now,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+    }
+
     /// <summary>Creates a stub record for telephony events (abandon, callback, etc.) with no agent session.</summary>
     public static CallRecord CreateStub(Guid tenantId, Guid clientId, Guid campaignId, string? callerId = null)
     {

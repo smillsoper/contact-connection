@@ -22,6 +22,7 @@ export type TelephonyNodeType =
   | 'tf_ivr_menu'
   | 'tf_record'
   | 'tf_voicemail'
+  | 'tf_request_callback'
   // Agent-selected event branch actions
   | 'tf_whisper'
   // Event listener nodes — independent entry points that fire on lifecycle events
@@ -140,6 +141,13 @@ export interface TelNodeData extends Record<string, unknown> {
   /** HTML from the rich-text editor; {{caller.*}} / {{call_record.*}} / {{flow.*}} resolved at send time. */
   deliveryEmailBodyHtml?: string
   deliveryAttachAudio?: boolean
+  // tf_request_callback — a queued caller opts out of holding for a scheduled callback
+  numberSource?: 'ani' | 'collected'
+  collectedVar?: string            // session/channel var to read when numberSource = 'collected'
+  delayMinutes?: number            // how far out the callback window opens (0 = as soon as possible)
+  windowMinutes?: number           // how long the window stays open before the request expires
+  maxAttempts?: number             // outbound attempts before the callback is abandoned
+  callerIdOverride?: string         // outbound CID for the callback leg; blank = DNIS the caller dialed. Literal or {{variable}} (frozen at request time)
   // tf_whisper
   // (audioFileId reused from tf_play)
   // tf_on_custom_event
@@ -325,6 +333,14 @@ export const TELEPHONY_NODE_META: Record<
     description: 'Play a greeting, record the caller’s message, optionally email it',
     handles: 'multi',
   },
+  tf_request_callback: {
+    label: 'Request Callback',
+    color: '#0891b2',
+    description: 'Queued caller opts out of holding — schedule an outbound callback',
+    // 'requested' (booked — wire to a Play "we'll call you back" → Hangup) + 'failed' (no
+    // callback number available — wire back to the hold/queue path).
+    handles: 'multi',
+  },
   tf_whisper: {
     label: 'Whisper',
     color: '#7c3aed',
@@ -451,6 +467,13 @@ export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
         deliveryEmailFromName: '', deliveryEmailReplyTo: '',
         deliveryEmailSubject: 'New voicemail from {{caller.phone}}',
         deliveryEmailBodyHtml: '', deliveryAttachAudio: true,
+      }
+    case 'tf_request_callback':
+      return {
+        label: 'Request Callback',
+        numberSource: 'ani', collectedVar: '',
+        delayMinutes: 0, windowMinutes: 120, maxAttempts: 3,
+        callerIdOverride: '',
       }
     case 'tf_whisper':
       return { label: 'Whisper', audioFileId: '' }

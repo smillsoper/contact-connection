@@ -80,4 +80,32 @@ public class QueuePollingServiceArbitrationTests
         var ordered = QueuePollingService.OrderByArbitrationPriority([], DateTimeOffset.UtcNow);
         Assert.Empty(ordered);
     }
+
+    // ── IsDeliverable: a queued caller inside an IVR/voicemail sub-dialog is not offered to an agent ──
+
+    private static TelephonyCallSession Sess(params (string k, string v)[] vars)
+    {
+        var s = NewSession();
+        foreach (var (k, v) in vars) s.Vars[k] = v;
+        return s;
+    }
+
+    [Fact]
+    public void IsDeliverable_QueuedAndNotInSubDialog_True() =>
+        Assert.True(QueuePollingService.IsDeliverable(Sess(("_queued", "true"))));
+
+    [Fact]
+    public void IsDeliverable_NotQueued_False() =>
+        Assert.False(QueuePollingService.IsDeliverable(Sess()));
+
+    [Theory]
+    [InlineData("_ivr_in_progress", "true")]
+    [InlineData("_vm_in_progress", "true")]
+    [InlineData("_vm_in_progress", "salvaging")]
+    public void IsDeliverable_QueuedButInSubDialog_False(string key, string value) =>
+        Assert.False(QueuePollingService.IsDeliverable(Sess(("_queued", "true"), (key, value))));
+
+    [Fact]
+    public void IsDeliverable_SubDialogFlagCleared_True() =>
+        Assert.True(QueuePollingService.IsDeliverable(Sess(("_queued", "true"), ("_ivr_in_progress", ""))));
 }

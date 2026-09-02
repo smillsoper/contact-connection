@@ -76,7 +76,15 @@ public sealed class QueuePollingService : BackgroundService
     {
         var sessions = await _sessionStore.GetAllAsync(ct);
 
-        var queued = sessions.Where(s => s.Vars.GetValueOrDefault("_queued") == "true").ToList();
+        // A queued caller currently inside an input/record sub-dialog (tf_ivr_menu → ivr_collect,
+        // or tf_voicemail → vm_record) is NOT deliverable — bridging them to an agent mid-
+        // play_and_get_digits races the contactconnection::ivr_done / vm_done resume transfer and
+        // loses the collected digits. They keep their queue slot (and _in_queue_at is untouched,
+        // so their wait clock and timeout math continue) and re-enter the deliverable set the
+        // moment the sub-dialog completes. This also covers a legitimate mid-queue "press 1 for a
+        // callback / to leave a message" branch of any length.
+        var queued       = sessions.Where(IsDeliverable).ToList();
+        var inSubDialog   = sessions.Count(s => s.Vars.GetValueOrDefault("_queued") == "true" && !IsDeliverable(s));
 
         // "session(s)" here = every live TelephonyCallSession in Redis: queued callers PLUS
         // calls already delivered/bridged to an agent (delivery removes _queued from the
@@ -85,8 +93,8 @@ public sealed class QueuePollingService : BackgroundService
         // non-queued count simply reflects active calls.
         if (sessions.Count > 0)
             _logger.LogInformation(
-                "QueuePoller: {Queued} queued, {Active} active call(s) ({Total} session(s) in Redis)",
-                queued.Count, sessions.Count - queued.Count, sessions.Count);
+                "QueuePoller: {Queued} queued, {InSubDialog} in IVR/voicemail, {Active} active call(s) ({Total} session(s) in Redis)",
+                queued.Count, inSubDialog, sessions.Count - queued.Count - inSubDialog, sessions.Count);
 
         if (queued.Count == 0) return;
 
@@ -318,6 +326,15 @@ public sealed class QueuePollingService : BackgroundService
             .OrderByDescending(x => EffectivePriorityCalculator.Compute(x.Campaign, (now - x.InQueueAt).TotalSeconds))
             .ThenBy(x => x.InQueueAt) // tie-break: longest wait first
             .ToList();
+
+    /// <summary>A session is deliverable to an agent when it is queued AND not currently inside
+    /// an input/record sub-dialog (tf_ivr_menu's ivr_collect or tf_voicemail's vm_record). The
+    /// voicemail salvage state ("_vm_in_progress" == "salvaging") counts as in-progress too.
+    /// Internal for QueuePollingServiceArbitrationTests (InternalsVisibleTo covers Api.Tests).</summary>
+    internal static bool IsDeliverable(TelephonyCallSession s) =>
+        s.Vars.GetValueOrDefault("_queued") == "true"
+        && string.IsNullOrEmpty(s.Vars.GetValueOrDefault("_ivr_in_progress"))
+        && string.IsNullOrEmpty(s.Vars.GetValueOrDefault("_vm_in_progress"));
 
     private static DateTimeOffset ParseInQueueAt(TelephonyCallSession session, DateTimeOffset fallback) =>
         session.Vars.TryGetValue("_in_queue_at", out var iso) && DateTimeOffset.TryParse(iso, out var parsed)

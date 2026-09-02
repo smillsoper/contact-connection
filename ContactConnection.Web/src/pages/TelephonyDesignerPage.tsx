@@ -45,6 +45,7 @@ import DtmfNode from '../components/telephony-designer/nodes/DtmfNode'
 import IvrMenuNode from '../components/telephony-designer/nodes/IvrMenuNode'
 import RecordNode from '../components/telephony-designer/nodes/RecordNode'
 import VoicemailNode from '../components/telephony-designer/nodes/VoicemailNode'
+import RequestCallbackNode from '../components/telephony-designer/nodes/RequestCallbackNode'
 import WhisperNode from '../components/telephony-designer/nodes/WhisperNode'
 import GeneralApiCallNode from '../components/telephony-designer/nodes/GeneralApiCallNode'
 
@@ -96,6 +97,7 @@ const nodeTypes = {
   tf_ivr_menu: IvrMenuNode,
   tf_record: RecordNode,
   tf_voicemail: VoicemailNode,
+  tf_request_callback: RequestCallbackNode,
   tf_whisper: WhisperNode,
   tf_general_api_call: GeneralApiCallNode,
   tf_on_agent_selected: OnAgentSelectedNode,
