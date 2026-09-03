@@ -17,6 +17,7 @@ const INBOUND_NODES: TelephonyNodeType[] = [
   'tf_record',
   'tf_voicemail',
   'tf_scheduled_callback',
+  'tf_queue_callback',
   'tf_set_variable',
   'tf_get_sip_header',
   'tf_set_sip_header',

@@ -168,6 +168,7 @@ public static class DashboardWidgetsEndpoints
         AgentStateCodes.UnavailableLunch,
         AgentStateCodes.OnCall,
         AgentStateCodes.Acw,
+        AgentStateCodes.CallbackPending,
         AgentStateCodes.LoggedOut,
     ];
 

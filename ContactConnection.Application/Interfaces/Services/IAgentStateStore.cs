@@ -10,6 +10,15 @@ public static class AgentStateCodes
     public const string Acw              = "acw";
 
     /// <summary>
+    /// A queue-callback placeholder reached this agent — they are held OUT of Available (so
+    /// EligibleAgentRanker / QueuePollingService route no other call to them) while the outbound
+    /// call to the caller is placed. Released back to Available on callback failure, promoted to
+    /// OnCall when the caller answers and is bridged. Set/cleared only by the queue-callback
+    /// delivery path, never chosen by the agent.
+    /// </summary>
+    public const string CallbackPending  = "callback_pending";
+
+    /// <summary>
     /// Set explicitly on sign-out (see AgentShell.tsx handleLogout). Also used to classify an
     /// agent with no state at all (never logged in) for dashboard-widget display purposes —
     /// distinct from Unavailable, which implies the agent is logged in but chose not to work.

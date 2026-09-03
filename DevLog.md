@@ -120,6 +120,7 @@
 | 108 | 2026-09-02 | 10:16 AM PDT | 12:25 PM PDT | 129 min | ~12607 min |
 | 109 | 2026-09-03 | 9:00 AM PDT | 9:46 AM PDT | 46 min | ~12653 min |
 | 110 | 2026-09-03 | 9:55 AM PDT | 10:52 AM PDT | 57 min | ~12710 min |
+| 111 | 2026-09-03 | 10:57 AM PDT | 11:24 AM PDT | 27 min | ~12737 min |
 
 ---
 
@@ -5065,3 +5066,58 @@ Live-verify the S109 scheduled callback end to end (telephony IVR node + CRM scr
 6. Telnyx Verified Numbers feature.
 7. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
 8. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 111
+
+**Date:** 2026-09-03
+**Start:** 10:57 AM PDT
+**End:** 11:24 AM PDT
+**Duration:** 27 minutes
+**Total Duration:** ~12737 minutes
+
+### Focus
+
+Build the **true queue callback** ("virtual hold") — the feature separated out from scheduled callback in Session 109. Caller opts out of holding but keeps their queue position; when the placeholder reaches a free agent, that agent is reserved while we dial the caller back and bridge them straight through. Full happy path + retry/abandon per the user's scope choice. Backend + designer node built and compiling; **not yet live-verified** (user will do the flow edit + live test next session in a fresh chat — this one was near the context limit).
+
+### Design decision — the placeholder IS the parked Redis session
+
+No new `QueueCallbackPlaceholder` entity. `tf_queue_callback` runs while the caller is already queued (`_queued` / `_in_queue_at` set) and just marks the session; it leaves `_queued` and `_in_queue_at` untouched so the placeholder advances in queue — including Queue Acceleration — exactly as if the caller were still holding. The caller then hangs up and the session lives on as the placeholder. This also means the callback reconnects to the **same original inbound CallRecord** (Single Record of Truth — `source` stays `inbound`, one continuous state-history timeline), not a new `callback`-source record.
+
+### Landed
+
+- **`AgentStateCodes.CallbackPending`** = `"callback_pending"` (Application). `EligibleAgentRanker` already excludes every state `!= Available`, so a reserved agent is auto-skipped with **no ranker change**. Added to `DashboardWidgetsEndpoints.AllStateCodes`.
+- **`tf_queue_callback` node** — `QueueCallbackNodeHandler` (`Infrastructure/Telephony/NodeHandlers/`, DI-registered). Config: `numberSource` (`ani` | `collected`) / `collectedVar`, `maxAttempts` (default 3), `connectAudioFileId` (blank = builtin `ivr/ivr-hold_connect_call.wav`). Transitions `queued` / `failed`. Stamps session vars `_queue_callback`, `_queue_callback_number`, `_queue_callback_max_attempts`, `_queue_callback_attempts`=0, `_queue_callback_connect_audio`, `_left_for_callback`. Writes the session directly too (mirrors the S110 ivr-resume-path fix). 4 handler tests.
+- **`EslClient.SendBgApiAsync`** (new) — non-blocking `bgapi` so the outbound `originate` to the caller doesn't stall the poll loop / ESL loop for the ring duration (`SendApiAsync` is blocking; `OriginateAndParkAsync` to an auto-answering agent can afford that, a call to a ringing cell cannot).
+- **`QueueCallbackDeliveryService`** (`ContactConnection.Api/Telephony/`, scoped, DI in `Program.cs`):
+  - `ReserveAndDialAsync` — agent → `CallbackPending` + SignalR push; placeholder gets `_queue_callback_reserved_agent_id`, `_queue_callback_attempts`++, `_queued` removed; `bgapi originate {origination_caller_id_number=<DNIS>,cc_did=<DNIS>,cc_qcb_reserved_agent_id,cc_qcb_placeholder_uuid,cc_tenant_*,cc_campaign_id,originate_timeout=30}sofia/gateway/<gw>/<digits> &park()`. Send failure → release agent, re-`_queued`.
+  - `ConnectAnsweredLegAsync` — re-keys the placeholder session onto the answered channel uuid, strips all `_queue_callback*` + `_queued`, `record.SetContactIdExternal(newUuid)`, broadcasts the connect prompt, then `QueuedCallDeliveryService.DeliverAsync(record.Id, reservedAgentId)` for the normal whisper / script-pop / bridge. Idempotency guard for a repeat park. Bridge failure → release agent, hang up caller, `CallbackAbandon`.
+  - `HandleFailedLegAsync` — no-session `cc_qcb_reserved_agent_id` hangup (no answer / busy / reject / 30s timeout): release agent → Available; attempts remain → re-`_queued` + `_queue_callback_retry_after` = now+60s; else → `CallbackAbandon` on the original record + `record.Complete()` + delete placeholder.
+- **`EslBackgroundService`** — (a) CHANNEL_PARK outbound-skip guard now lets `variable_cc_qcb_reserved_agent_id` legs through (like `cc_callback_id`); (b) `HandleDidCallAsync` calls `QueueCallbackDeliveryService.ConnectAnsweredLegAsync` first and returns (no inbound flow, no new record); (c) `HandleChannelHangupCoreAsync` — a `_queue_callback` placeholder session with no reserved/assigned agent that hangs up records a neutral `post_agent` and is **not** completed / abandoned / deleted; a no-session `cc_qcb_reserved_agent_id` hangup routes to `HandleFailedLegAsync`.
+- **`QueuePollingService`** — `ProcessTenantQueueAsync` partitions `_queue_callback` placeholders (no reserved agent, past any 60s `_queue_callback_retry_after` cool-off) OUT of the auto-answer / ring passes; `TryDeliverQueueCallbackAsync` ranks eligible agents, SETNX-claims the top one, calls `ReserveAndDialAsync`. `EvictTimedOutCallAsync` special-cases a placeholder → `CallbackAbandon` (not `QueueTimeout`), no flow-node resume.
+- **Designer** — `tf_queue_callback` in `TelephonyNodeType`, `TelNodeData.connectAudioFileId`, `TELEPHONY_NODE_META` (teal `#0e7490`, multi handles), `defaultTelNodeData`; `QueueCallbackNode.tsx`; palette `INBOUND_NODES`; `TelephonyNodePropertiesPanel` block; `TelephonyDesignerPage` `nodeTypes`.
+
+### State
+
+- Build **0 errors** (only the pre-existing NU1903 + CS8602 warnings). **550 tests pass** (Domain 147, Application 20, Infrastructure 309, Api 74). Web `tsc --noEmit` clean.
+- No new migrations. Committed at end of session.
+
+### Known v1 rough edges (deferred — noted in memory `project_queue_callback`)
+
+- `ConnectAnsweredLegAsync` calls `DeliverAsync` inline on the ESL event loop — an unreachable agent softphone blocks the agent-originate up to 30s (the existing "Pick Up" click carries the same risk). Move to `Task.Run` if it stalls in testing.
+- Connect prompt is `uuid_broadcast` then immediate hand-off — may clip on the simple-bridge path (flow with no `agent_selected` branch).
+- `connectAudioFileId` is a plain text field in the designer (`__builtin:path` or a file id), not the full audio picker.
+- Bridge failure after the caller answered = abandon, no re-queue even though the caller is on the line.
+
+### Next Session — pick up here
+
+1. **Live-verify queue callback** (fresh chat) — add `tf_queue_callback` to inbound flow `8386ec2d` off an IVR digit: `queued` → Play ("we'll call you back — you can hang up now") → Hang Up; `failed` → back to queue. Agent Available on ext 1000, call in → opt in → hang up → placeholder reserves the agent (`callback_pending`) → cell rings → answer → connect prompt → bridged to the agent. Then the failure path (don't answer the cell). API + FreeSWITCH + web only; **no Worker**. NB `8386ec2d` still has the orphaned `tf_request_callback` node from S108 — will need swapping to `tf_scheduled_callback` if that branch is exercised.
+2. Address the queue-callback v1 rough edges if they bite in testing.
+3. Supervisor visibility of `callback_pending` agents / pending queue callbacks.
+4. Supervisor scheduled-callbacks UI — list/cancel.
+5. Worker Development boot fix (Session 101 carry-over).
+6. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
+7. Telnyx Verified Numbers feature.
+8. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
+9. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.

@@ -23,6 +23,7 @@ export type TelephonyNodeType =
   | 'tf_record'
   | 'tf_voicemail'
   | 'tf_scheduled_callback'
+  | 'tf_queue_callback'
   // Agent-selected event branch actions
   | 'tf_whisper'
   // Event listener nodes — independent entry points that fire on lifecycle events
@@ -154,6 +155,9 @@ export interface TelNodeData extends Record<string, unknown> {
   windowMinutes?: number           // how long past the booked time the worker keeps trying
   maxAttempts?: number             // outbound attempts before the callback is abandoned
   callerIdOverride?: string         // outbound CID; blank = DNIS the caller dialed. Literal or {{variable}} (frozen at request time)
+  // tf_queue_callback — virtual hold (keeps queue position, dials the caller back when an agent is free)
+  // (numberSource / collectedVar / maxAttempts shared with tf_scheduled_callback above)
+  connectAudioFileId?: string       // played to the caller when the callback connects, before the bridge; blank = built-in prompt
   // tf_whisper
   // (audioFileId reused from tf_play)
   // tf_on_custom_event
@@ -347,6 +351,13 @@ export const TELEPHONY_NODE_META: Record<
     // outside allowed window) + 'failed' (no number / unparseable date).
     handles: 'multi',
   },
+  tf_queue_callback: {
+    label: 'Queue Callback',
+    color: '#0e7490',
+    description: 'Virtual hold — keep queue position, call the caller back when an agent is free',
+    // 'queued' (opted in → Play "we'll call you back" → Hangup) + 'failed' (no usable number).
+    handles: 'multi',
+  },
   tf_whisper: {
     label: 'Whisper',
     color: '#7c3aed',
@@ -482,6 +493,12 @@ export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
         targetFlowId: '', targetCampaignId: '',
         allowedDays: '', allowedStartTime: '', allowedEndTime: '',
         windowMinutes: 120, maxAttempts: 3, callerIdOverride: '',
+      }
+    case 'tf_queue_callback':
+      return {
+        label: 'Queue Callback',
+        numberSource: 'ani', collectedVar: '',
+        maxAttempts: 3, connectAudioFileId: '',
       }
     case 'tf_whisper':
       return { label: 'Whisper', audioFileId: '' }

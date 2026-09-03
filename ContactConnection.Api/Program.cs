@@ -58,6 +58,11 @@ builder.Services.AddSingleton<IDashboardNotifier, DashboardNotifier>();
 // initiated RingStrategy.AutoAnswerBestAgent delivery (no HTTP round trip).
 builder.Services.AddScoped<QueuedCallDeliveryService>();
 
+// The "virtual hold" delivery path for tf_queue_callback placeholders — reserves an agent,
+// dials the caller back, bridges the answered leg to that agent. Used by QueuePollingService
+// (reserve + dial) and EslBackgroundService (answered leg, failed leg).
+builder.Services.AddScoped<QueueCallbackDeliveryService>();
+
 // Mints short-lived ESL connections for the call-recording watchdog (ICallRecordingController,
 // registered in AddInfrastructure) — its forced unmask fires after the triggering node is gone.
 builder.Services.AddSingleton<IEslCommanderFactory, EslCommanderFactory>();

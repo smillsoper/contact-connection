@@ -111,6 +111,7 @@ public sealed class QueuePollingService : BackgroundService
         var dbFactory            = scope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
         var ranker               = scope.ServiceProvider.GetRequiredService<EligibleAgentRanker>();
         var deliveryService      = scope.ServiceProvider.GetRequiredService<QueuedCallDeliveryService>();
+        var queueCallbackDelivery = scope.ServiceProvider.GetRequiredService<QueueCallbackDeliveryService>();
         var callStateRecorder    = scope.ServiceProvider.GetRequiredService<ICallStateHistoryRecorder>();
         var telephonyFlowEngine  = scope.ServiceProvider.GetRequiredService<ITelephonyFlowEngine>();
         var config               = scope.ServiceProvider.GetRequiredService<IConfiguration>();
@@ -153,6 +154,26 @@ public sealed class QueuePollingService : BackgroundService
         // (auto-answered on one call while simultaneously rung for another).
         var claimedThisTick = new HashSet<Guid>();
 
+        // ── Queue-callback placeholders — "virtual hold" ───────────────────────────────────
+        // A placeholder is a session whose caller has hung up but which keeps its queue slot
+        // (_queue_callback set, no reserved agent yet). It's not bridgeable — deliver it by
+        // reserving an agent and dialing the caller back. Longest-waiting first; pulled out of
+        // activeSessions so the auto-answer / ring passes below never touch it.
+        var placeholders = activeSessions
+            .Where(s => s.Vars.GetValueOrDefault("_queue_callback") == "true"
+                        && string.IsNullOrEmpty(s.Vars.GetValueOrDefault("_queue_callback_reserved_agent_id"))
+                        && !RetryCoolingOff(s, now))
+            .OrderBy(s => ParseInQueueAt(s, now))
+            .ToList();
+        if (placeholders.Count > 0)
+        {
+            activeSessions.RemoveAll(s => s.Vars.GetValueOrDefault("_queue_callback") == "true");
+            foreach (var placeholder in placeholders)
+                await TryDeliverQueueCallbackAsync(
+                    placeholder, tenantId, tenantSchema, tenantSubdomain: placeholder.TenantSubdomain,
+                    db, ranker, queueCallbackDelivery, claimedThisTick, ct);
+        }
+
         // ── AutoAnswerBestAgent — highest effective priority first ──────────────────────────
         var autoAnswerCandidates = activeSessions
             .Where(s => campaigns.TryGetValue(s.CampaignId, out var c) && c.RingStrategy == CampaignRingStrategy.AutoAnswerBestAgent)
@@ -185,9 +206,23 @@ public sealed class QueuePollingService : BackgroundService
         session.Vars.Remove("_queued");
         await _sessionStore.SaveAsync(session, ct);
 
+        // A queue-callback placeholder that waited out the timeout is a callback abandon, not a
+        // queue-timeout abandon — and there is no live channel to resume a flow node on.
+        var isQueueCallback = session.Vars.GetValueOrDefault("_queue_callback") == "true";
+
         await callStateRecorder.RecordAsync(
             tenantId, tenantSchema, session.CallRecordId, CallHistoryState.Abandoned, session.CampaignId,
-            agentId: null, detail: "Queue timeout", abandonType: CallAbandonType.QueueTimeout, ct: ct);
+            agentId: null, detail: isQueueCallback ? "Queue callback timed out in queue" : "Queue timeout",
+            abandonType: isQueueCallback ? CallAbandonType.CallbackAbandon : CallAbandonType.QueueTimeout, ct: ct);
+
+        if (isQueueCallback)
+        {
+            await _sessionStore.DeleteAsync(session.ChannelUuid, ct);
+            _logger.LogInformation(
+                "QueuePoller: queue-callback placeholder {Uuid} timed out in queue — abandoned",
+                session.ChannelUuid);
+            return;
+        }
 
         var host = config["FreeSWITCH:Host"] ?? "127.0.0.1";
         var port = int.Parse(config["FreeSWITCH:EslPort"] ?? "8021");
@@ -208,6 +243,44 @@ public sealed class QueuePollingService : BackgroundService
         _logger.LogInformation(
             "QueuePoller: evicted timed-out call {CallRecordId} from queue (channel {Uuid}, campaign {CampaignId})",
             session.CallRecordId, session.ChannelUuid, session.CampaignId);
+    }
+
+    /// <summary>Deliver one queue-callback placeholder: rank eligible agents, atomically claim
+    /// the top candidate, and hand to QueueCallbackDeliveryService to reserve them + dial the
+    /// caller back. On failure the claim is released and the next candidate is tried (bounded).
+    /// If nobody is eligible the placeholder just stays put for the next tick.</summary>
+    private async Task TryDeliverQueueCallbackAsync(
+        TelephonyCallSession placeholder, Guid tenantId, string tenantSchema, string tenantSubdomain,
+        TenantDbContext db, EligibleAgentRanker ranker, QueueCallbackDeliveryService queueCallbackDelivery,
+        HashSet<Guid> claimedThisTick, CancellationToken ct)
+    {
+        var ranked = await ranker.GetRankedEligibleAgentsAsync(
+            db, placeholder.TenantId, placeholder.CampaignId, excludeAgentIds: claimedThisTick, ct: ct);
+
+        foreach (var candidate in ranked.Take(MaxAutoAnswerAttempts))
+        {
+            var claimKey = AgentClaimKey(tenantId, candidate.AgentId);
+            if (!await _sessionStore.TrySetKeyAsync(claimKey, placeholder.ChannelUuid, AgentClaimTtl, ct))
+                continue;
+
+            var result = await queueCallbackDelivery.ReserveAndDialAsync(
+                placeholder, tenantId, tenantSchema, tenantSubdomain, candidate.AgentId, ct);
+
+            await _sessionStore.DeleteKeyAsync(claimKey, ct);
+
+            if (result.Success)
+            {
+                claimedThisTick.Add(candidate.AgentId);
+                _logger.LogInformation(
+                    "QueuePoller: queue-callback placeholder {Uuid} → agent {AgentId} reserved, dialing caller",
+                    placeholder.ChannelUuid, candidate.AgentId);
+                return;
+            }
+
+            _logger.LogWarning(
+                "QueuePoller: queue-callback reserve/dial for {Uuid} via agent {AgentId} failed: {Error} — next candidate",
+                placeholder.ChannelUuid, candidate.AgentId, result.ErrorDetail);
+        }
     }
 
     private async Task TryAutoAnswerDeliverAsync(
@@ -335,6 +408,13 @@ public sealed class QueuePollingService : BackgroundService
         s.Vars.GetValueOrDefault("_queued") == "true"
         && string.IsNullOrEmpty(s.Vars.GetValueOrDefault("_ivr_in_progress"))
         && string.IsNullOrEmpty(s.Vars.GetValueOrDefault("_vm_in_progress"));
+
+    /// <summary>A queue-callback placeholder whose last dial attempt failed carries
+    /// _queue_callback_retry_after — a short cool-off before it's re-dialed.</summary>
+    private static bool RetryCoolingOff(TelephonyCallSession s, DateTimeOffset now) =>
+        s.Vars.TryGetValue("_queue_callback_retry_after", out var iso)
+        && DateTimeOffset.TryParse(iso, out var after)
+        && now < after;
 
     private static DateTimeOffset ParseInQueueAt(TelephonyCallSession session, DateTimeOffset fallback) =>
         session.Vars.TryGetValue("_in_queue_at", out var iso) && DateTimeOffset.TryParse(iso, out var parsed)

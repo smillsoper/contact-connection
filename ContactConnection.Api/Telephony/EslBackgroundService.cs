@@ -203,8 +203,11 @@ public sealed class EslBackgroundService : BackgroundService
         // EXCEPTION: a fired callback (CallbackProcessingService originates "...&park()" with
         // cc_callback_id + cc_did) — that answered outbound leg IS the real party and must run
         // the campaign's inbound flow so it queues to an agent, exactly like a fresh DID call.
+        // Same for a queue-callback dial leg (cc_qcb_reserved_agent_id) — it bridges to the
+        // reserved agent instead (handled in HandleDidCallAsync).
         if (vars.GetValueOrDefault("Call-Direction") == "outbound"
-            && string.IsNullOrEmpty(vars.GetValueOrDefault("variable_cc_callback_id"))) return;
+            && string.IsNullOrEmpty(vars.GetValueOrDefault("variable_cc_callback_id"))
+            && string.IsNullOrEmpty(vars.GetValueOrDefault("variable_cc_qcb_reserved_agent_id"))) return;
 
         var callerNumber = vars.GetValueOrDefault("Caller-Caller-ID-Number") ?? "";
         var callerName   = vars.GetValueOrDefault("Caller-Caller-ID-Name") ?? "";
@@ -230,6 +233,13 @@ public sealed class EslBackgroundService : BackgroundService
         var telephonyEngine  = scope.ServiceProvider.GetRequiredService<ITelephonyFlowEngine>();
         var callStateRecorder = scope.ServiceProvider.GetRequiredService<ICallStateHistoryRecorder>();
         var callbackConn     = scope.ServiceProvider.GetRequiredService<IScheduledCallbackConnectionService>();
+
+        // Queue-callback dial leg answered — bridge it to the reserved agent, no inbound flow.
+        if (!string.IsNullOrEmpty(vars.GetValueOrDefault("variable_cc_qcb_reserved_agent_id")))
+        {
+            var qcbDelivery = scope.ServiceProvider.GetRequiredService<QueueCallbackDeliveryService>();
+            if (await qcbDelivery.ConnectAnsweredLegAsync(channelUuid, vars, esl, ct)) return;
+        }
 
         // ── DID routing: check if destination matches a provisioned phone number ──
         // Carriers vary on whether the dialed number carries a leading "+" and/or "1",
@@ -913,6 +923,44 @@ public sealed class EslBackgroundService : BackgroundService
                     "CHANNEL_HANGUP {Uuid} cause={Cause}: fired callback {CallbackId} leg ended with no session " +
                     "(abandoned={Abandoned})",
                     channelUuid, cause, hungCallbackId, abandoned);
+            }
+            return;
+        }
+
+        // A queue-callback dial leg that hung up with no session — the caller never answered
+        // (no answer / busy / gateway reject / originate timeout). Release the reserved agent and
+        // either re-queue the placeholder (attempts remain) or record a callback abandon.
+        if (session is null
+            && vars.GetValueOrDefault("Event-Name") == "CHANNEL_HANGUP"
+            && !string.IsNullOrEmpty(vars.GetValueOrDefault("variable_cc_qcb_reserved_agent_id")))
+        {
+            using var qcbScope = _scopeFactory.CreateScope();
+            var qcbDelivery = qcbScope.ServiceProvider.GetRequiredService<QueueCallbackDeliveryService>();
+            await qcbDelivery.HandleFailedLegAsync(vars, cause, ct);
+            return;
+        }
+
+        // A queue-callback placeholder: the caller opted into virtual hold (tf_queue_callback) and
+        // has now hung up. Keep the session alive as the queue placeholder — QueuePollingService
+        // reserves an agent and dials back. Never complete the record / record an abandon / delete
+        // the session here; the placeholder's own lifecycle is the outcome. Fires for both
+        // CHANNEL_HANGUP and the trailing CHANNEL_HANGUP_COMPLETE — log once.
+        if (session is not null
+            && session.Vars.GetValueOrDefault("_queue_callback") == "true"
+            && string.IsNullOrEmpty(session.Vars.GetValueOrDefault("_queue_callback_reserved_agent_id"))
+            && string.IsNullOrEmpty(session.Vars.GetValueOrDefault("_assigned_agent_id")))
+        {
+            if (vars.GetValueOrDefault("Event-Name") == "CHANNEL_HANGUP")
+            {
+                using var qcbScope = _scopeFactory.CreateScope();
+                var stateRecorder = qcbScope.ServiceProvider.GetRequiredService<ICallStateHistoryRecorder>();
+                await stateRecorder.RecordAsync(
+                    session.TenantId, session.TenantSchemaName, session.CallRecordId,
+                    CallHistoryState.PostAgent, session.CampaignId, agentId: null,
+                    detail: "Caller hung up — holding queue position for callback", ct: ct);
+                _logger.LogInformation(
+                    "CHANNEL_HANGUP {Uuid} cause={Cause}: queue-callback placeholder kept in queue (position held)",
+                    channelUuid, cause);
             }
             return;
         }

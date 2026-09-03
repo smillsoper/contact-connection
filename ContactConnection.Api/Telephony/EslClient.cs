@@ -95,6 +95,22 @@ public sealed class EslClient(ILogger<EslClient>? logger = null) : IOwnedEslComm
             logger?.LogWarning("ESL api command failed: '{Command}' → {Response}", command, reply.Body.Trim());
     }
 
+    /// <summary>
+    /// Fire an api command in the background — returns as soon as FreeSWITCH accepts the job
+    /// (its "+OK Job-UUID" command/reply), NOT when the command completes. Use for anything that
+    /// would otherwise block the caller for the length of a call, e.g. an <c>originate</c> to an
+    /// external number that may ring for the full originate_timeout. The eventual outcome arrives
+    /// as normal channel events (CHANNEL_PARK on answer, CHANNEL_HANGUP on no-answer/reject).
+    /// </summary>
+    public async Task SendBgApiAsync(string command, CancellationToken ct = default)
+    {
+        await _writer!.WriteLineAsync($"bgapi {command}");
+        await _writer.WriteLineAsync();
+        var reply = await ReadMessageAsync(ct);
+        if (reply?.Body?.StartsWith("-ERR", StringComparison.Ordinal) == true)
+            logger?.LogWarning("ESL bgapi command failed: '{Command}' → {Response}", command, reply.Body.Trim());
+    }
+
     public Task KillChannelAsync(string uuid, int causeCode, CancellationToken ct = default) =>
         SendApiAsync($"uuid_kill {uuid} Q.850:{causeCode}", ct);
 

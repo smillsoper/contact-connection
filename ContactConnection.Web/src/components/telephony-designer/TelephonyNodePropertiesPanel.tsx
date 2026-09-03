@@ -494,6 +494,69 @@ export default function TelephonyNodePropertiesPanel({
         </div>
       )}
 
+      {type === 'tf_queue_callback' && (
+        <div className="flex flex-col gap-3">
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Callback number</label>
+            <select
+              className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-blue-500"
+              value={(data.numberSource as string) ?? 'ani'}
+              onChange={(e) => set('numberSource', e.target.value)}
+            >
+              <option value="ani">Caller's presented number (ANI)</option>
+              <option value="collected">A variable collected earlier</option>
+            </select>
+          </div>
+
+          {(data.numberSource as string) === 'collected' && (
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Number variable</label>
+              <input
+                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-blue-500"
+                placeholder="e.g. callback_digits"
+                value={(data.collectedVar as string) ?? ''}
+                onChange={(e) => set('collectedVar', e.target.value)}
+              />
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Max dial attempts</label>
+            <input
+              type="number" min={1}
+              className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-blue-500"
+              value={(data.maxAttempts as number) ?? 3}
+              onChange={(e) => set('maxAttempts', Math.max(1, Number(e.target.value)))}
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Retries when the caller doesn’t answer — the placeholder keeps its queue slot between tries.
+              After the last failure it’s a callback abandon.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Connect prompt (optional)</label>
+            <input
+              className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-blue-500"
+              placeholder="__builtin:ivr/ivr-hold_connect_call.wav  or an audio file id"
+              value={(data.connectAudioFileId as string) ?? ''}
+              onChange={(e) => set('connectAudioFileId', e.target.value)}
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Played to the caller the moment the callback connects, before the agent bridge. Blank = a
+              built-in “please hold, connecting you” prompt.
+            </p>
+          </div>
+
+          <p className="text-xs text-gray-500 leading-snug">
+            Virtual hold: the caller keeps their place in line and hangs up. When the placeholder reaches
+            a free agent, that agent is held while we call the caller back and bridge them straight through.
+            Wire <span className="text-cyan-300">queued</span> to a Play (“we’ll call you back — you can hang
+            up now”) → Hang Up, and <span className="text-red-300">failed</span> to a fallback.
+          </p>
+        </div>
+      )}
+
       {type === 'tf_play' && (
         <PlayNodeEditor data={data} onChange={(patch) => onChange(node.id, patch)} />
       )}
