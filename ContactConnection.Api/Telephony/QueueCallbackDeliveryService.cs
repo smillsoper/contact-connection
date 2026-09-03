@@ -180,9 +180,24 @@ public sealed class QueueCallbackDeliveryService(
         try { await esl.BroadcastAsync(newChannelUuid, $"{mediaArg} aleg", ct); }
         catch (Exception ex) { logger.LogDebug(ex, "QueueCallback {Uuid}: connect prompt broadcast failed (non-fatal)", newChannelUuid); }
 
+        // Honor the campaign's agent answer mode. For AutoAnswerBestAgent the reserved agent's
+        // softphone must auto-answer the bridge INVITE with no click — mirror the normal auto-
+        // answer delivery path (QueuePollingService.TryAutoAnswerDeliverAsync): push
+        // ReceiveAutoConnecting BEFORE DeliverAsync originates so the client arms auto-answer
+        // ahead of the INVITE, and carry the original caller's ANI so the agent UI shows the
+        // caller's number rather than the bogus From on the outbound-to-cell leg.
+        var campaign = await db.Campaigns.FirstOrDefaultAsync(c => c.Id == record.CampaignId, ct);
+        var autoAnswer = campaign?.RingStrategy == CampaignRingStrategy.AutoAnswerBestAgent;
+        var ani = record.CallerId is { Length: > 0 } cid ? cid : placeholder.CallerNumber;
+        if (autoAnswer)
+        {
+            await hub.Clients.Group($"agent:{agentId}").ReceiveAutoConnecting(
+                record.Id.ToString(), ani, ani, placeholder.DestinationNumber, record.CampaignId.ToString());
+        }
+
         logger.LogInformation(
-            "QueueCallback: caller answered on {Uuid} (record {RecordId}) — bridging to reserved agent {AgentId}",
-            newChannelUuid, record.Id, agentId);
+            "QueueCallback: caller answered on {Uuid} (record {RecordId}) — bridging to reserved agent {AgentId} (autoAnswer={AutoAnswer}, ani={Ani})",
+            newChannelUuid, record.Id, agentId, autoAnswer, ani);
 
         var result = await queuedCallDelivery.DeliverAsync(
             tenantId, tenantSchema, tenantSubdomain, record.Id, agentId, ct);
@@ -192,6 +207,8 @@ public sealed class QueueCallbackDeliveryService(
             logger.LogWarning(
                 "QueueCallback: delivery to reserved agent {AgentId} failed for {RecordId}: {Error} — releasing agent, hanging up caller",
                 agentId, record.Id, result.ErrorDetail);
+            if (autoAnswer)
+                await hub.Clients.Group($"agent:{agentId}").ReceiveAutoConnectFailed(record.Id.ToString());
             await ReleaseAgentAsync(tenantId, tenantSchema, agentId, ct);
             await esl.HangupChannelAsync(newChannelUuid, ct);
             await callStateRecorder.RecordAsync(

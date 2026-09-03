@@ -55,6 +55,20 @@ public class QueuedCallDeliveryService(
 
         var callerUuid = record.ContactIdExternal;
 
+        // Defence in depth: a queue-callback placeholder (_queue_callback still set) must never
+        // reach this path — it has no live caller channel, only a parked placeholder session, so
+        // "delivering" it bridges the agent to the original, already-hung-up inbound channel.
+        // QueueCallbackDeliveryService.ConnectAnsweredLegAsync strips _queue_callback before it
+        // hands a re-keyed session here; anything still carrying it is a bug upstream.
+        var guardSession = await sessionStore.GetAsync(callerUuid, ct);
+        if (guardSession?.Vars.GetValueOrDefault("_queue_callback") == "true")
+        {
+            logger.LogWarning(
+                "Delivery: call {CallRecordId} → agent {AgentId} refused — session {CallerUuid} is still a queue-callback placeholder",
+                callRecordId, agentId, callerUuid);
+            return new DeliveryResult(false, "Call is a queue-callback placeholder — not directly deliverable.");
+        }
+
         // Don't bridge a caller who is mid input/record sub-dialog (tf_ivr_menu / tf_voicemail) —
         // the bridge races the ivr_done/vm_done resume and loses their DTMF. QueuePollingService
         // already filters these out, but a stale screen-pop "Pick Up" click can still land here.

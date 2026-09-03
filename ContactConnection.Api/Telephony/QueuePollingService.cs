@@ -156,23 +156,29 @@ public sealed class QueuePollingService : BackgroundService
 
         // ── Queue-callback placeholders — "virtual hold" ───────────────────────────────────
         // A placeholder is a session whose caller has hung up but which keeps its queue slot
-        // (_queue_callback set, no reserved agent yet). It's not bridgeable — deliver it by
-        // reserving an agent and dialing the caller back. Longest-waiting first; pulled out of
-        // activeSessions so the auto-answer / ring passes below never touch it.
-        var placeholders = activeSessions
-            .Where(s => s.Vars.GetValueOrDefault("_queue_callback") == "true"
-                        && string.IsNullOrEmpty(s.Vars.GetValueOrDefault("_queue_callback_reserved_agent_id"))
+        // (_queue_callback set). It is NEVER bridgeable — it is delivered only by
+        // TryDeliverQueueCallbackAsync (reserve an agent + dial the caller back). Pull every
+        // _queue_callback session out of activeSessions unconditionally, up front, so one that
+        // is momentarily not deliverable — reserved-agent dial in flight, or in its post-
+        // NO_ANSWER retry cool-off, both of which still carry _queued=true — can't fall through
+        // to the auto-answer / ring passes below and get "delivered" to an agent with the
+        // original (already hung-up) inbound channel as the bridge target.
+        var placeholderSessions = activeSessions
+            .Where(s => s.Vars.GetValueOrDefault("_queue_callback") == "true")
+            .ToList();
+        activeSessions.RemoveAll(s => s.Vars.GetValueOrDefault("_queue_callback") == "true");
+
+        // Of those, the ones actually deliverable this tick: no agent reserved yet, not cooling
+        // off after a failed dial. Longest-waiting first.
+        var placeholders = placeholderSessions
+            .Where(s => string.IsNullOrEmpty(s.Vars.GetValueOrDefault("_queue_callback_reserved_agent_id"))
                         && !RetryCoolingOff(s, now))
             .OrderBy(s => ParseInQueueAt(s, now))
             .ToList();
-        if (placeholders.Count > 0)
-        {
-            activeSessions.RemoveAll(s => s.Vars.GetValueOrDefault("_queue_callback") == "true");
-            foreach (var placeholder in placeholders)
-                await TryDeliverQueueCallbackAsync(
-                    placeholder, tenantId, tenantSchema, tenantSubdomain: placeholder.TenantSubdomain,
-                    db, ranker, queueCallbackDelivery, claimedThisTick, ct);
-        }
+        foreach (var placeholder in placeholders)
+            await TryDeliverQueueCallbackAsync(
+                placeholder, tenantId, tenantSchema, tenantSubdomain: placeholder.TenantSubdomain,
+                db, ranker, queueCallbackDelivery, claimedThisTick, ct);
 
         // ── AutoAnswerBestAgent — highest effective priority first ──────────────────────────
         var autoAnswerCandidates = activeSessions

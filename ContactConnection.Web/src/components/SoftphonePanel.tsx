@@ -617,6 +617,7 @@ export default function SoftphonePanel() {
           unavailable_lunch: { label: 'Unavailable - Lunch', dot: 'bg-amber-700', text: 'text-amber-600' },
           on_call:           { label: 'On Call',             dot: 'bg-blue-500',  text: 'text-blue-400'  },
           acw:               { label: 'After Call Work',     dot: 'bg-purple-500', text: 'text-purple-400' },
+          callback_pending:  { label: 'Callback Pending',    dot: 'bg-blue-500',  text: 'text-blue-400'  },
         }
         const current = STATE_META[agentState] ?? { label: customCodes.find(c => c.id === agentState)?.name ?? 'Unavailable', dot: 'bg-orange-500', text: 'text-orange-400' }
         const currentLabel = agentState === 'acw' && acwCountdown !== null

@@ -247,8 +247,13 @@ public sealed class EslClient(ILogger<EslClient>? logger = null) : IOwnedEslComm
         // as a zombie, later firing an orphan CHANNEL_HANGUP with no session to clean up.
         var agentUuid = Guid.NewGuid().ToString();
 
+        // origination_caller_id_* populates the From header of the INVITE FreeSWITCH sends to the
+        // agent's endpoint — effective_caller_id_* alone does not on an originate, so without this
+        // the agent's softphone shows a blank/zeroed caller number on any INVITE it actually rings
+        // for (e.g. a queue-callback bridge under a non-auto-answer campaign).
         var vars = $"{{origination_uuid={agentUuid},originate_timeout=30,sip_auto_answer=true," +
                    $"sip_h_Alert-Info=answer-after=0," +
+                   $"origination_caller_id_number={callerNumber},origination_caller_id_name={callerNumber}," +
                    $"effective_caller_id_number={callerNumber},effective_caller_id_name={callerNumber}," +
                    $"cc_whisper=true}}";
         var response = await SendApiBodyAsync($"originate {vars}{contact} &park()", ct);

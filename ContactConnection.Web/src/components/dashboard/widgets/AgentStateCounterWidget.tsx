@@ -11,6 +11,7 @@ const STATE_COLORS: Record<string, string> = {
   unavailable_lunch: '#f97316',
   on_call: '#8b5cf6',
   acw: '#3b82f6',
+  callback_pending: '#0ea5e9',
   logged_out: '#6b7280',
 }
 
@@ -21,6 +22,7 @@ const STATE_LABELS: Record<string, string> = {
   unavailable_lunch: 'Lunch',
   on_call: 'On Call',
   acw: 'ACW',
+  callback_pending: 'Callback Pending',
   logged_out: 'Logged Out',
 }
 

@@ -121,6 +121,7 @@
 | 109 | 2026-09-03 | 9:00 AM PDT | 9:46 AM PDT | 46 min | ~12653 min |
 | 110 | 2026-09-03 | 9:55 AM PDT | 10:52 AM PDT | 57 min | ~12710 min |
 | 111 | 2026-09-03 | 10:57 AM PDT | 11:24 AM PDT | 27 min | ~12737 min |
+| 112 | 2026-09-03 | 11:28 AM PDT | 12:17 PM PDT | 49 min | ~12786 min |
 
 ---
 
@@ -5121,3 +5122,58 @@ No new `QueueCallbackPlaceholder` entity. `tf_queue_callback` runs while the cal
 7. Telnyx Verified Numbers feature.
 8. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
 9. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 112
+
+**Date:** 2026-09-03
+**Start:** 11:28 AM PDT
+**End:** 12:17 PM PDT
+**Duration:** 49 minutes
+**Total Duration:** ~12786 minutes
+
+### Focus
+
+Live-verify the Session 111 queue callback ("virtual hold") end to end, and fix what the live tests surfaced. Fresh chat — API + FreeSWITCH + web only, no Worker. Inbound flow `8386ec2d` was wired with `tf_queue_callback` off IVR digit 1 (`queued` → Play "we'll call you back" → Hang Up; `failed` → Queue MOH).
+
+### Pre-test fix — orphaned designer node
+
+`8386ec2d` still carried the S108 `tf_request_callback` node (renamed away in S109). Clicking it in the telephony designer crashed React every time, so it could not be deleted from the UI. Removed it directly: pulled the flow `definition` JSONB, confirmed `tf_request_callback_1788374055614` was a true orphan (nothing transitions into it, no `_waypoints` reference it), deleted that one key, wrote it back. 23 → 22 nodes, `entry_node` and waypoints intact, `tf_queue_callback_1788460271186` untouched. Pre-edit definition backed up to scratchpad.
+
+### Bugs found in live testing + fixes
+
+1. **Auto-answer not honored + caller ANI showed `0000000000`.** The queue-callback delivery path (`QueueCallbackDeliveryService.ConnectAnsweredLegAsync`) handed the answered leg to `QueuedCallDeliveryService.DeliverAsync` but skipped the `ReceiveAutoConnecting` SignalR push that the normal auto-answer path (`QueuePollingService.TryAutoAnswerDeliverAsync`) sends first. That push (a) arms the softphone's `autoAnswerBridgeRef` so the bridge INVITE auto-answers, and (b) feeds the caller number into the agent UI. Without it the softphone fell to a manual ring and displayed the SIP `From` of the outbound-to-cell leg (`0000000000`).
+   - Fix A — `ConnectAnsweredLegAsync` now loads the campaign, and when `RingStrategy == AutoAnswerBestAgent` pushes `ReceiveAutoConnecting(recordId, ani, ani, dnis, campaignId)` to `agent:{id}` before the `DeliverAsync` hand-off (ANI = `record.CallerId`, falling back to the placeholder session's `CallerNumber`); sends `ReceiveAutoConnectFailed` on the bridge-failure branch.
+   - Fix B — `EslClient.OriginateAndParkAsync` now also sets `origination_caller_id_number` / `origination_caller_id_name` (not just `effective_caller_id_*`, which don't populate the outbound INVITE `From` on an `originate`). Fixes the ANI at the SIP layer for any INVITE the agent actually rings for (non-auto-answer campaigns); harmless on the auto-answer path.
+
+2. **No-answer retry leaked the placeholder into normal auto-answer delivery → phantom script pop + agent bridged to a dead channel.** After a `NO_ANSWER`, `HandleFailedLegAsync` correctly re-queued the placeholder with a 60s `_queue_callback_retry_after` cool-off and released the agent. But `QueuePollingService.ProcessTenantQueueAsync` only pulled `_queue_callback` sessions out of the auto-answer / ring passes **when at least one placeholder was deliverable that tick** (`if (placeholders.Count > 0)`). During the cool-off `placeholders` is empty, so the still-`_queued=true`, `RingStrategy=AutoAnswerBestAgent` placeholder fell straight into `TryAutoAnswerDeliverAsync` → `DeliverAsync`, which originated to the agent, fired `agent_selected` (CRM script pop + whisper), auto-answered the agent, and bridged them to `record.ContactIdExternal` — the original inbound channel that hung up minutes earlier (`uuid_bridge ... -ERR Invalid uuid`). Agent connected to silence.
+   - Fix C — `ProcessTenantQueueAsync` now pulls **every** `_queue_callback` session out of `activeSessions` unconditionally, up front, then filters that set for the ones deliverable this tick. A placeholder mid-dial or cooling off simply waits for the next callback-path tick.
+   - Fix D (defence in depth) — `QueuedCallDeliveryService.DeliverAsync` refuses any session still flagged `_queue_callback=="true"` and returns a failure instead of bridging to its stale channel.
+
+3. **Softphone / dashboard showed "Unavailable" (orange) for `callback_pending`.** No state-meta entry existed for the code, so it fell to the generic fallback. Added `callback_pending` → "Callback Pending" (blue/sky) to `SoftphonePanel` `STATE_META` and to `AgentStateCounterWidget` (`STATE_COLORS` + `STATE_LABELS`) and `AgentListWidget` (`STATE_DOT`).
+
+### Manual cleanup of the bad state left by test-run 2
+
+The phantom-delivery bug stranded: a zombie `telephony:session:865049f9…` in Redis (counted forever as "1 active call", no `_queued`), agent `e4c95478` stuck `on_call`, and call record `e5a45436` stalled at `routing` with no terminal state. Deleted the two Redis keys; left the dead call record (harmless, nothing revisits it) and one abandoned `flow:session:*` (CRM pop, TTLs out).
+
+### Live verification — PASS (real Telnyx trunk, cell as caller, agent ext 1000)
+
+- **Happy path** — call in → IVR 1 → "we'll call you back" → hang up → placeholder held queue slot → reached agent → `Callback Pending` shown → cell rang → answered → connect prompt → **auto-answered on the softphone, caller number displayed correctly**, delivered to the agent.
+- **No-answer → retry → abandon** — call in → opt in → hang up → 3 attempts, each: agent reserved (`Callback Pending` visible), cell dialed, `NO_ANSWER`, agent released to `Available`, 60s cool-off. **No CRM pop / phantom delivery between attempts** (poller held at `1 queued, 0 active` during each cool-off). After attempt 3: single terminal `abandoned` / `callback_abandon` state-history row ("Queue callback abandoned after 3 attempt(s) (last cause NO_ANSWER)"), Redis session cleaned, agent `Available`.
+
+### State
+
+- Build **0 errors**. Web `tsc --noEmit` clean. Test suite not re-run — changes are additive and confined to `ContactConnection.Api` (`QueueCallbackDeliveryService`, `QueuePollingService`, `QueuedCallDeliveryService`, `EslClient`) + 3 web files; no Domain / Application / handler / migration changes, so the S111 count of 550 stands.
+- 4 API files + 3 web files changed. Flow `8386ec2d` definition edited in the DB (orphan node removed). Committed at end of session.
+
+### Next Session — pick up here
+
+1. Queue callback v1 rough edges still open (memory `project_queue_callback`): `ConnectAnsweredLegAsync` calls `DeliverAsync` inline on the ESL event loop (30s stall risk on an unreachable softphone); connect prompt may clip on the simple-bridge path; `connectAudioFileId` is a plain text field, not the audio picker; bridge failure after the caller answered = abandon with no re-queue.
+2. Supervisor visibility of `callback_pending` agents / pending queue callbacks.
+3. Supervisor scheduled-callbacks UI — list/cancel.
+4. Worker Development boot fix (Session 101 carry-over).
+5. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
+6. Telnyx Verified Numbers feature.
+7. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
+8. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.
