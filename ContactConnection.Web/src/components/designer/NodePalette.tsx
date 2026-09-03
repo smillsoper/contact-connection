@@ -10,6 +10,7 @@ const NODE_TYPES: ContactConnectionNodeType[] = [
   'section',
   'execute_flow',
   'transition_to_flow',
+  'scheduled_callback',
   'branch',
   'set_variable',
   'api_call',

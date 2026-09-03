@@ -50,7 +50,10 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
 
         var campaign = await db.Campaigns.FirstOrDefaultAsync(c => c.Id == ctx.CampaignId, ct);
 
-        var flowId = phoneNumber?.TelephonyFlowId ?? campaign?.InboundFlowId;
+        // FlowIdOverride wins — a fired scheduled callback names the exact flow to run so it can't
+        // re-enter the inbound flow and re-offer itself.
+        var flowId = (ctx.FlowIdOverride is { } o && o != Guid.Empty ? o : (Guid?)null)
+                     ?? phoneNumber?.TelephonyFlowId ?? campaign?.InboundFlowId;
         if (flowId is null)
         {
             _logger.LogWarning(

@@ -166,6 +166,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<INodeHandler, SetVariableNodeHandler>();
         services.AddScoped<INodeHandler, ApiCallNodeHandler>();
         services.AddScoped<INodeHandler, EndNodeHandler>();
+        services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.ScheduledCallbackNodeHandler>();
 
         // Flow engine (scoped — uses scoped repositories and tenant context)
         services.AddScoped<IFlowEngine, FlowEngine.FlowEngine>();
@@ -198,7 +199,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ITelephonyNodeHandler, RecordNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, IvrMenuNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, VoicemailNodeHandler>();
-        services.AddScoped<ITelephonyNodeHandler, RequestCallbackNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, Telephony.NodeHandlers.ScheduledCallbackNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, TransferNodeHandler>();
 
         // Call session store (singleton — Redis operations are inherently stateless)
@@ -228,9 +229,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICallStateHistoryRepository, CallStateHistoryRepository>();
         services.AddScoped<ICallStateHistoryRecorder, CallStateHistoryRecorder>();
 
-        // Callback lifecycle — the Worker's CallbackProcessingService places/expires outbound
+        // Scheduled callback — the Worker's ScheduledCallbackProcessingService places/expires outbound
         // legs; this service lands the terminal state from the ESL path (connected / no-answer).
-        services.AddScoped<ICallbackConnectionService, CallbackConnectionService>();
+        services.AddScoped<IScheduledCallbackConnectionService, ScheduledCallbackConnectionService>();
 
         // Call recording — the controller is singleton (owns the auto-unmask watchdog timers)
         // so its repository must be singleton too. Both depend only on singletons
@@ -254,7 +255,7 @@ public static class ServiceCollectionExtensions
         // Voicemail — tf_voicemail node captures a caller message; the ESL background path
         // persists via ITenantDbContextFactory directly, this scoped repo serves the API.
         services.AddScoped<IVoicemailRepository, VoicemailRepository>();
-        services.AddScoped<ICallbackRepository, CallbackRepository>();
+        services.AddScoped<IScheduledCallbackRepository, ScheduledCallbackRepository>();
 
         // Ranks a campaign's eligible agents (proficiency DESC, longest-idle tie-break) — shared
         // by RouteToQueueNodeHandler and QueuePollingService. Scoped for consistency with the

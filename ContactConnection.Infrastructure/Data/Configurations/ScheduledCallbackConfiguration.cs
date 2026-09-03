@@ -4,11 +4,11 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace ContactConnection.Infrastructure.Data.Configurations;
 
-public class CallbackConfiguration : IEntityTypeConfiguration<Callback>
+public class ScheduledCallbackConfiguration : IEntityTypeConfiguration<ScheduledCallback>
 {
-    public void Configure(EntityTypeBuilder<Callback> builder)
+    public void Configure(EntityTypeBuilder<ScheduledCallback> builder)
     {
-        builder.ToTable("callbacks");
+        builder.ToTable("scheduled_callbacks");
         builder.HasKey(c => c.Id);
 
         builder.Property(c => c.Id).HasColumnName("id");
@@ -18,6 +18,8 @@ public class CallbackConfiguration : IEntityTypeConfiguration<Callback>
         builder.Property(c => c.CallbackNumber).HasColumnName("callback_number").HasMaxLength(30).IsRequired();
         builder.Property(c => c.Dnis).HasColumnName("dnis").HasMaxLength(30);
         builder.Property(c => c.CallerIdOverride).HasColumnName("caller_id_override").HasMaxLength(64);
+        builder.Property(c => c.TargetFlowId).HasColumnName("target_flow_id");
+        builder.Property(c => c.TargetCampaignId).HasColumnName("target_campaign_id");
 
         builder.Property(c => c.Status).HasColumnName("status").HasMaxLength(20).IsRequired();
 
@@ -40,10 +42,10 @@ public class CallbackConfiguration : IEntityTypeConfiguration<Callback>
         builder.Property(c => c.CreatedAt).HasColumnName("created_at");
         builder.Property(c => c.UpdatedAt).HasColumnName("updated_at");
 
-        builder.HasIndex(c => c.CallRecordId).HasDatabaseName("idx_callbacks_call_record");
-        builder.HasIndex(c => new { c.CampaignId, c.Status }).HasDatabaseName("idx_callbacks_campaign_status");
+        builder.HasIndex(c => c.CallRecordId).HasDatabaseName("idx_scheduled_callbacks_call_record");
+        builder.HasIndex(c => new { c.CampaignId, c.Status }).HasDatabaseName("idx_scheduled_callbacks_campaign_status");
 
         // The worker's due-scan filters on status + scheduled_for across all campaigns.
-        builder.HasIndex(c => new { c.Status, c.ScheduledFor }).HasDatabaseName("idx_callbacks_status_scheduled");
+        builder.HasIndex(c => new { c.Status, c.ScheduledFor }).HasDatabaseName("idx_scheduled_callbacks_status_scheduled");
     }
 }

@@ -172,7 +172,7 @@ app.MapCallRecordsEndpoints();
 app.MapCallRecordingsEndpoints();
 app.MapScreenRecordingsEndpoints();
 app.MapVoicemailsEndpoints();
-app.MapCallbacksEndpoints();
+app.MapScheduledCallbacksEndpoints();
 app.MapProductsEndpoints();
 app.MapCategoriesEndpoints();
 app.MapAttributesEndpoints();

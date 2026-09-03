@@ -4,34 +4,35 @@ using Xunit;
 namespace ContactConnection.Domain.Tests.Domain;
 
 /// <summary>
-/// Callback entity — a queued caller's request to be phoned back instead of holding, created by
-/// a tf_request_callback node and driven by the Worker's CallbackProcessingService. Covers the
-/// full state machine from ARCHITECTURE.md §16: scheduled → attempted → completed | abandoned,
-/// plus expired and cancelled, and the retry drop-back on a non-final no-answer.
+/// ScheduledCallback entity — a callback booked for a specific future time, created by a
+/// tf_scheduled_callback / scheduled_callback node and driven by the Worker's
+/// ScheduledCallbackProcessingService. Covers the state machine from ARCHITECTURE.md §16:
+/// scheduled → attempted → completed | abandoned, plus expired and cancelled, and the retry
+/// drop-back on a non-final no-answer.
 /// </summary>
-public class CallbackTests
+public class ScheduledCallbackTests
 {
-    private static Callback New(TimeSpan? delay = null, int windowMinutes = 120, int maxAttempts = 3) =>
-        Callback.Create(
+    private static ScheduledCallback New(int minutesFromNow = 1, int windowMinutes = 120, int maxAttempts = 3) =>
+        ScheduledCallback.Create(
             Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "+15551234567",
-            delay ?? TimeSpan.Zero, windowMinutes, maxAttempts);
+            DateTimeOffset.UtcNow.AddMinutes(minutesFromNow), windowMinutes, maxAttempts);
 
     [Fact]
     public void Create_SetsScheduledWindow_AndDefaults()
     {
-        var before = DateTimeOffset.UtcNow;
-        var cb = Callback.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), " +1 555 000 1111 ",
-            TimeSpan.FromMinutes(5), windowMinutes: 30, maxAttempts: 2);
+        var when = DateTimeOffset.UtcNow.AddHours(3);
+        var cb = ScheduledCallback.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), " +1 555 000 1111 ",
+            when, windowMinutes: 30, maxAttempts: 2,
+            targetFlowId: Guid.Parse("11111111-1111-1111-1111-111111111111"));
 
-        Assert.Equal(CallbackStatus.Scheduled, cb.Status);
+        Assert.Equal(ScheduledCallbackStatus.Scheduled, cb.Status);
         Assert.Equal("+1 555 000 1111", cb.CallbackNumber);
         Assert.Equal(0, cb.AttemptCount);
         Assert.Equal(2, cb.MaxAttempts);
-        Assert.True(cb.RequestedAt >= before);
-        Assert.NotNull(cb.ScheduledFor);
-        Assert.NotNull(cb.ExpiresAt);
-        Assert.Equal(TimeSpan.FromMinutes(30), cb.ExpiresAt!.Value - cb.ScheduledFor!.Value);
-        Assert.True(cb.ScheduledFor!.Value >= before.AddMinutes(5).AddSeconds(-2));
+        Assert.Equal(when, cb.ScheduledFor);
+        Assert.Equal(TimeSpan.FromMinutes(30), cb.ExpiresAt - cb.ScheduledFor);
+        Assert.Equal(Guid.Parse("11111111-1111-1111-1111-111111111111"), cb.TargetFlowId);
+        Assert.Null(cb.TargetCampaignId);
     }
 
     [Theory]
@@ -41,7 +42,7 @@ public class CallbackTests
     public void Create_BlankNumber_Throws(string? number)
     {
         Assert.Throws<ArgumentException>(() =>
-            Callback.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), number!, TimeSpan.Zero));
+            ScheduledCallback.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), number!, DateTimeOffset.UtcNow.AddHours(1)));
     }
 
     [Fact]
@@ -59,41 +60,35 @@ public class CallbackTests
     [InlineData("  +15035550123 ", "+15035550123")]
     public void Create_NormalizesCallerIdOverride(string? input, string? expected)
     {
-        var cb = Callback.Create(
+        var cb = ScheduledCallback.Create(
             Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "+15551234567",
-            TimeSpan.Zero, callerIdOverride: input);
+            DateTimeOffset.UtcNow.AddHours(1), callerIdOverride: input);
         Assert.Equal(expected, cb.CallerIdOverride);
     }
 
     [Fact]
     public void Create_StoresDnisTheCallerDialed()
     {
-        var cb = Callback.Create(
+        var cb = ScheduledCallback.Create(
             Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "+15551234567",
-            TimeSpan.Zero, dnis: " +15419196582 ");
+            DateTimeOffset.UtcNow.AddHours(1), dnis: " +15419196582 ");
         Assert.Equal("+15419196582", cb.Dnis);
-        Assert.Null(cb.CallerIdOverride);   // blank override => the DID the caller dialed is used
+        Assert.Null(cb.CallerIdOverride);
     }
 
     [Fact]
-    public void IsDue_TrueInsideOpenWindowWithAttemptsLeft()
+    public void IsDue_TrueOnceBookedTimeHasArrived_WithAttemptsLeft()
     {
-        var cb = New();
-        Assert.True(cb.IsDue(DateTimeOffset.UtcNow.AddSeconds(1)));
+        var cb = New(minutesFromNow: 1);
+        Assert.False(cb.IsDue(DateTimeOffset.UtcNow));                    // before the booked time
+        Assert.True(cb.IsDue(DateTimeOffset.UtcNow.AddMinutes(2)));       // after it
     }
 
     [Fact]
-    public void IsDue_FalseBeforeWindowOpens()
+    public void IsDue_FalseAfterAttemptWindowCloses()
     {
-        var cb = New(delay: TimeSpan.FromMinutes(10));
-        Assert.False(cb.IsDue(DateTimeOffset.UtcNow.AddMinutes(1)));
-    }
-
-    [Fact]
-    public void IsDue_FalseAfterWindowCloses()
-    {
-        var cb = New(windowMinutes: 5);
-        Assert.False(cb.IsDue(DateTimeOffset.UtcNow.AddMinutes(6)));
+        var cb = New(minutesFromNow: 1, windowMinutes: 5);
+        Assert.False(cb.IsDue(DateTimeOffset.UtcNow.AddMinutes(10)));
     }
 
     [Fact]
@@ -104,7 +99,7 @@ public class CallbackTests
 
         cb.MarkAttempted(outbound);
 
-        Assert.Equal(CallbackStatus.Attempted, cb.Status);
+        Assert.Equal(ScheduledCallbackStatus.Attempted, cb.Status);
         Assert.Equal(1, cb.AttemptCount);
         Assert.Equal(outbound, cb.OutboundCallRecordId);
         Assert.NotNull(cb.LastAttemptAt);
@@ -122,10 +117,9 @@ public class CallbackTests
     public void MarkAttempted_NoRecordId_ThenLinkConnectedCallRecord()
     {
         var cb = New();
-        cb.MarkAttempted();                       // outbound leg placed, connected record not yet created
+        cb.MarkAttempted();
 
-        Assert.Equal(CallbackStatus.Attempted, cb.Status);
-        Assert.Equal(1, cb.AttemptCount);
+        Assert.Equal(ScheduledCallbackStatus.Attempted, cb.Status);
         Assert.Null(cb.OutboundCallRecordId);
 
         var connected = Guid.NewGuid();
@@ -133,7 +127,7 @@ public class CallbackTests
         Assert.Equal(connected, cb.OutboundCallRecordId);
 
         cb.MarkCompleted();
-        Assert.Equal(CallbackStatus.Completed, cb.Status);
+        Assert.Equal(ScheduledCallbackStatus.Completed, cb.Status);
     }
 
     [Fact]
@@ -141,19 +135,16 @@ public class CallbackTests
     {
         var cb = New();
         cb.MarkAttempted(Guid.NewGuid());
-
         cb.MarkCompleted();
 
-        Assert.Equal(CallbackStatus.Completed, cb.Status);
+        Assert.Equal(ScheduledCallbackStatus.Completed, cb.Status);
         Assert.NotNull(cb.CompletedAt);
-        Assert.True(CallbackStatus.IsTerminal(cb.Status));
+        Assert.True(ScheduledCallbackStatus.IsTerminal(cb.Status));
     }
 
     [Fact]
-    public void MarkCompleted_FromScheduled_Throws()
-    {
+    public void MarkCompleted_FromScheduled_Throws() =>
         Assert.Throws<InvalidOperationException>(() => New().MarkCompleted());
-    }
 
     [Fact]
     public void MarkNoAnswer_WithRetriesLeft_DropsBackToScheduled_ReturnsFalse()
@@ -164,9 +155,9 @@ public class CallbackTests
         var abandoned = cb.MarkNoAnswer("no answer");
 
         Assert.False(abandoned);
-        Assert.Equal(CallbackStatus.Scheduled, cb.Status);
+        Assert.Equal(ScheduledCallbackStatus.Scheduled, cb.Status);
         Assert.Equal(1, cb.AttemptCount);
-        Assert.True(cb.IsDue(DateTimeOffset.UtcNow.AddSeconds(1)));
+        Assert.True(cb.IsDue(DateTimeOffset.UtcNow.AddMinutes(2)));
     }
 
     [Fact]
@@ -174,13 +165,13 @@ public class CallbackTests
     {
         var cb = New(maxAttempts: 2);
         cb.MarkAttempted(Guid.NewGuid());
-        cb.MarkNoAnswer();                 // attempt 1 → back to scheduled
-        cb.MarkAttempted(Guid.NewGuid());  // attempt 2
+        cb.MarkNoAnswer();
+        cb.MarkAttempted(Guid.NewGuid());
 
         var abandoned = cb.MarkNoAnswer("still no answer");
 
         Assert.True(abandoned);
-        Assert.Equal(CallbackStatus.Abandoned, cb.Status);
+        Assert.Equal(ScheduledCallbackStatus.Abandoned, cb.Status);
         Assert.NotNull(cb.AbandonedAt);
         Assert.Equal("still no answer", cb.Detail);
     }
@@ -191,7 +182,7 @@ public class CallbackTests
         var cb = New();
         cb.MarkExpired("window closed");
 
-        Assert.Equal(CallbackStatus.Expired, cb.Status);
+        Assert.Equal(ScheduledCallbackStatus.Expired, cb.Status);
         Assert.NotNull(cb.ExpiredAt);
     }
 
@@ -207,19 +198,19 @@ public class CallbackTests
     [Fact]
     public void IsExpired_TrueForScheduledPastWindow()
     {
-        var cb = New(windowMinutes: 5);
-        Assert.True(cb.IsExpired(DateTimeOffset.UtcNow.AddMinutes(6)));
-        Assert.False(cb.IsExpired(DateTimeOffset.UtcNow.AddMinutes(1)));
+        var cb = New(minutesFromNow: 1, windowMinutes: 5);
+        Assert.True(cb.IsExpired(DateTimeOffset.UtcNow.AddMinutes(10)));
+        Assert.False(cb.IsExpired(DateTimeOffset.UtcNow.AddMinutes(2)));
     }
 
     [Fact]
     public void Cancel_FromScheduled_RecordsReason()
     {
         var cb = New();
-        cb.Cancel("caller phoned back in");
+        cb.Cancel("caller reached an agent another way");
 
-        Assert.Equal(CallbackStatus.Cancelled, cb.Status);
-        Assert.Equal("caller phoned back in", cb.Detail);
+        Assert.Equal(ScheduledCallbackStatus.Cancelled, cb.Status);
+        Assert.Equal("caller reached an agent another way", cb.Detail);
         Assert.NotNull(cb.CancelledAt);
     }
 
@@ -232,15 +223,15 @@ public class CallbackTests
     }
 
     [Theory]
-    [InlineData(CallbackStatus.Completed, true)]
-    [InlineData(CallbackStatus.Abandoned, true)]
-    [InlineData(CallbackStatus.Expired, true)]
-    [InlineData(CallbackStatus.Cancelled, true)]
-    [InlineData(CallbackStatus.Scheduled, false)]
-    [InlineData(CallbackStatus.Attempted, false)]
+    [InlineData(ScheduledCallbackStatus.Completed, true)]
+    [InlineData(ScheduledCallbackStatus.Abandoned, true)]
+    [InlineData(ScheduledCallbackStatus.Expired, true)]
+    [InlineData(ScheduledCallbackStatus.Cancelled, true)]
+    [InlineData(ScheduledCallbackStatus.Scheduled, false)]
+    [InlineData(ScheduledCallbackStatus.Attempted, false)]
     public void IsTerminal_MatchesLifecycle(string status, bool expected)
     {
-        Assert.Equal(expected, CallbackStatus.IsTerminal(status));
-        Assert.True(CallbackStatus.IsValid(status));
+        Assert.Equal(expected, ScheduledCallbackStatus.IsTerminal(status));
+        Assert.True(ScheduledCallbackStatus.IsValid(status));
     }
 }

@@ -22,7 +22,7 @@ export type TelephonyNodeType =
   | 'tf_ivr_menu'
   | 'tf_record'
   | 'tf_voicemail'
-  | 'tf_request_callback'
+  | 'tf_scheduled_callback'
   // Agent-selected event branch actions
   | 'tf_whisper'
   // Event listener nodes — independent entry points that fire on lifecycle events
@@ -141,13 +141,19 @@ export interface TelNodeData extends Record<string, unknown> {
   /** HTML from the rich-text editor; {{caller.*}} / {{call_record.*}} / {{flow.*}} resolved at send time. */
   deliveryEmailBodyHtml?: string
   deliveryAttachAudio?: boolean
-  // tf_request_callback — a queued caller opts out of holding for a scheduled callback
+  // tf_scheduled_callback — book a callback for a specific future time
   numberSource?: 'ani' | 'collected'
   collectedVar?: string            // session/channel var to read when numberSource = 'collected'
-  delayMinutes?: number            // how far out the callback window opens (0 = as soon as possible)
-  windowMinutes?: number           // how long the window stays open before the request expires
+  scheduledDateValue?: string      // date text or {{variable}} (e.g. "2026-09-10", "9/10/2026")
+  scheduledTimeValue?: string      // time text or {{variable}} (e.g. "14:30", "2:30 PM"); blank => 09:00
+  targetFlowId?: string            // telephony flow the answered leg runs (should NOT re-offer callback)
+  targetCampaignId?: string        // optional campaign context for the answered leg's queue
+  allowedDays?: string             // optional CSV of 0-6 (0=Sun) the callback may land on
+  allowedStartTime?: string        // optional "HH:mm" earliest local time-of-day
+  allowedEndTime?: string          // optional "HH:mm" latest local time-of-day
+  windowMinutes?: number           // how long past the booked time the worker keeps trying
   maxAttempts?: number             // outbound attempts before the callback is abandoned
-  callerIdOverride?: string         // outbound CID for the callback leg; blank = DNIS the caller dialed. Literal or {{variable}} (frozen at request time)
+  callerIdOverride?: string         // outbound CID; blank = DNIS the caller dialed. Literal or {{variable}} (frozen at request time)
   // tf_whisper
   // (audioFileId reused from tf_play)
   // tf_on_custom_event
@@ -333,12 +339,12 @@ export const TELEPHONY_NODE_META: Record<
     description: 'Play a greeting, record the caller’s message, optionally email it',
     handles: 'multi',
   },
-  tf_request_callback: {
-    label: 'Request Callback',
+  tf_scheduled_callback: {
+    label: 'Scheduled Callback',
     color: '#0891b2',
-    description: 'Queued caller opts out of holding — schedule an outbound callback',
-    // 'requested' (booked — wire to a Play "we'll call you back" → Hangup) + 'failed' (no
-    // callback number available — wire back to the hold/queue path).
+    description: 'Book a callback for a specific future date/time',
+    // 'scheduled' (booked → Play confirmation → Hangup) + 'invalid_time' (parsed but past /
+    // outside allowed window) + 'failed' (no number / unparseable date).
     handles: 'multi',
   },
   tf_whisper: {
@@ -468,12 +474,14 @@ export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
         deliveryEmailSubject: 'New voicemail from {{caller.phone}}',
         deliveryEmailBodyHtml: '', deliveryAttachAudio: true,
       }
-    case 'tf_request_callback':
+    case 'tf_scheduled_callback':
       return {
-        label: 'Request Callback',
+        label: 'Scheduled Callback',
         numberSource: 'ani', collectedVar: '',
-        delayMinutes: 0, windowMinutes: 120, maxAttempts: 3,
-        callerIdOverride: '',
+        scheduledDateValue: '', scheduledTimeValue: '',
+        targetFlowId: '', targetCampaignId: '',
+        allowedDays: '', allowedStartTime: '', allowedEndTime: '',
+        windowMinutes: 120, maxAttempts: 3, callerIdOverride: '',
       }
     case 'tf_whisper':
       return { label: 'Whisper', audioFileId: '' }

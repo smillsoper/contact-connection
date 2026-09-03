@@ -157,14 +157,14 @@ public class RouteToQueueNodeHandlerTests
 
         // caller "+15551234567" (the NewContext ANI) had booked a callback on this campaign,
         // plus an unrelated one on another campaign and one already terminal — only the first cancels.
-        var mine     = Callback.Create(Guid.NewGuid(), Guid.NewGuid(), campaign.Id, "+15551234567", TimeSpan.Zero);
-        var other    = Callback.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "+15551234567", TimeSpan.Zero);
-        var done     = Callback.Create(Guid.NewGuid(), Guid.NewGuid(), campaign.Id, "+15551234567", TimeSpan.Zero);
+        var mine     = ScheduledCallback.Create(Guid.NewGuid(), Guid.NewGuid(), campaign.Id, "+15551234567", DateTimeOffset.UtcNow.AddHours(1));
+        var other    = ScheduledCallback.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "+15551234567", DateTimeOffset.UtcNow.AddHours(1));
+        var done     = ScheduledCallback.Create(Guid.NewGuid(), Guid.NewGuid(), campaign.Id, "+15551234567", DateTimeOffset.UtcNow.AddHours(1));
         done.MarkAttempted(); done.MarkCompleted();
         using (var seed = Open())
         {
             seed.Campaigns.Add(campaign);
-            seed.Callbacks.AddRange(mine, other, done);
+            seed.ScheduledCallbacks.AddRange(mine, other, done);
             seed.SaveChanges();
         }
 
@@ -182,9 +182,9 @@ public class RouteToQueueNodeHandlerTests
 
         Assert.Equal("queued", result.TransitionTaken);
         await using var check = Open();
-        Assert.Equal(CallbackStatus.Cancelled, (await check.Callbacks.FindAsync(mine.Id))!.Status);
-        Assert.Equal(CallbackStatus.Scheduled, (await check.Callbacks.FindAsync(other.Id))!.Status);
-        Assert.Equal(CallbackStatus.Completed, (await check.Callbacks.FindAsync(done.Id))!.Status);
+        Assert.Equal(ScheduledCallbackStatus.Cancelled, (await check.ScheduledCallbacks.FindAsync(mine.Id))!.Status);
+        Assert.Equal(ScheduledCallbackStatus.Scheduled, (await check.ScheduledCallbacks.FindAsync(other.Id))!.Status);
+        Assert.Equal(ScheduledCallbackStatus.Completed, (await check.ScheduledCallbacks.FindAsync(done.Id))!.Status);
     }
 
     [Fact]

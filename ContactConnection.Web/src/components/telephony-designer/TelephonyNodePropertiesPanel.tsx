@@ -347,7 +347,7 @@ export default function TelephonyNodePropertiesPanel({
         <VoicemailNodeEditor data={data} onChange={(patch) => onChange(node.id, patch)} />
       )}
 
-      {type === 'tf_request_callback' && (
+      {type === 'tf_scheduled_callback' && (
         <div className="flex flex-col gap-3">
           <div>
             <label className="block text-xs text-gray-400 mb-1">Callback number</label>
@@ -363,31 +363,96 @@ export default function TelephonyNodePropertiesPanel({
 
           {(data.numberSource as string) === 'collected' && (
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Variable name</label>
+              <label className="block text-xs text-gray-400 mb-1">Number variable</label>
               <input
                 className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-blue-500"
                 placeholder="e.g. callback_digits"
                 value={(data.collectedVar as string) ?? ''}
                 onChange={(e) => set('collectedVar', e.target.value)}
               />
-              <p className="text-xs text-gray-500 mt-1">
-                Session/channel var, e.g. digits captured by an earlier IVR Menu or Send DTMF node.
-              </p>
             </div>
           )}
 
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Delay (min)</label>
+              <label className="block text-xs text-gray-400 mb-1">Date</label>
               <input
-                type="number" min={0}
-                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-blue-500"
-                value={(data.delayMinutes as number) ?? 0}
-                onChange={(e) => set('delayMinutes', Math.max(0, Number(e.target.value)))}
+                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-blue-500"
+                placeholder="{{flow.cb_date}}"
+                value={(data.scheduledDateValue as string) ?? ''}
+                onChange={(e) => set('scheduledDateValue', e.target.value)}
               />
             </div>
             <div>
-              <label className="block text-xs text-gray-400 mb-1">Window (min)</label>
+              <label className="block text-xs text-gray-400 mb-1">Time</label>
+              <input
+                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-blue-500"
+                placeholder="{{flow.cb_time}}"
+                value={(data.scheduledTimeValue as string) ?? ''}
+                onChange={(e) => set('scheduledTimeValue', e.target.value)}
+              />
+            </div>
+          </div>
+          <p className="text-xs text-gray-500 -mt-1">
+            Literal or <span className="font-mono">{'{{variable}}'}</span> — capture the date/time however you like
+            (IVR, DTMF, agent). Parsed in the tenant timezone; blank time = 09:00.
+          </p>
+
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Route answered call to flow</label>
+            <SearchableSelect
+              options={telephonyFlowOptions}
+              value={(data.targetFlowId as string) ?? ''}
+              onChange={(v) => set('targetFlowId', v)}
+              allLabel="— Campaign's inbound flow (not recommended) —"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              The flow the callback lands in when it connects. Point this at a queue-only flow, not one
+              that offers a callback again.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Queue campaign (optional)</label>
+            <SearchableSelect
+              options={campaignOptions}
+              value={(data.targetCampaignId as string) ?? ''}
+              onChange={(v) => set('targetCampaignId', v)}
+              allLabel="— Same campaign —"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Allowed window (optional)</label>
+            <div className="grid grid-cols-3 gap-2">
+              <input
+                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-blue-500"
+                placeholder="days 1,2,3,4,5"
+                value={(data.allowedDays as string) ?? ''}
+                onChange={(e) => set('allowedDays', e.target.value)}
+              />
+              <input
+                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-blue-500"
+                placeholder="from 08:00"
+                value={(data.allowedStartTime as string) ?? ''}
+                onChange={(e) => set('allowedStartTime', e.target.value)}
+              />
+              <input
+                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-blue-500"
+                placeholder="to 17:00"
+                value={(data.allowedEndTime as string) ?? ''}
+                onChange={(e) => set('allowedEndTime', e.target.value)}
+              />
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              Days = CSV of 0–6 (0 = Sun). A booked time outside this window takes
+              <span className="text-amber-300"> invalid_time</span>.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Attempt window (min)</label>
               <input
                 type="number" min={1}
                 className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-blue-500"
@@ -421,10 +486,10 @@ export default function TelephonyNodePropertiesPanel({
           </div>
 
           <p className="text-xs text-gray-500 leading-snug">
-            Books a callback and takes the caller out of the queue. Wire <span className="text-cyan-300">requested</span> to
-            a Play (“we’ll call you back”) → Hang Up. Wire <span className="text-red-300">failed</span> back to hold music
-            for callers with no usable number. The Worker places the outbound call when the window opens. While the caller
-            is in this menu they hold their queue slot but aren’t offered to an agent.
+            Books a callback for a future time and takes the caller out of the queue. Wire
+            <span className="text-cyan-300"> scheduled</span> to a Play (“we’ll call you back on …”) → Hang Up,
+            <span className="text-amber-300"> invalid_time</span> to a re-prompt, and
+            <span className="text-red-300"> failed</span> to a fallback. The Worker places the call at the booked time.
           </p>
         </div>
       )}

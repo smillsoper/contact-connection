@@ -5,23 +5,23 @@ using ContactConnection.Domain.Entities;
 namespace ContactConnection.Api.Endpoints;
 
 /// <summary>
-/// Callback list + supervisor cancel. Rows are created by a <c>tf_request_callback</c> telephony
-/// node when a queued caller opts out of holding; the outbound leg is placed by the Worker's
-/// <c>CallbackProcessingService</c> when the window opens. See ARCHITECTURE.md §16.
+/// Scheduled-callback list + supervisor cancel. Rows are created by a <c>tf_scheduled_callback</c>
+/// telephony node or a <c>scheduled_callback</c> CRM script node; the outbound leg is placed by
+/// the Worker's <c>ScheduledCallbackProcessingService</c> at the booked time. See ARCHITECTURE.md §16.
 /// </summary>
-public static class CallbacksEndpoints
+public static class ScheduledCallbacksEndpoints
 {
-    public static IEndpointRouteBuilder MapCallbacksEndpoints(this IEndpointRouteBuilder app)
+    public static IEndpointRouteBuilder MapScheduledCallbacksEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/v1/callbacks/{id:guid}", GetById).RequireAuthorization();
-        app.MapPost("/api/v1/callbacks/{id:guid}/cancel", Cancel).RequireAuthorization();
-        app.MapGet("/api/v1/call-records/{callRecordId:guid}/callbacks", ListForCall).RequireAuthorization();
-        app.MapGet("/api/v1/campaigns/{campaignId:guid}/callbacks", ListForCampaign).RequireAuthorization();
+        app.MapGet("/api/v1/scheduled-callbacks/{id:guid}", GetById).RequireAuthorization();
+        app.MapPost("/api/v1/scheduled-callbacks/{id:guid}/cancel", Cancel).RequireAuthorization();
+        app.MapGet("/api/v1/call-records/{callRecordId:guid}/scheduled-callbacks", ListForCall).RequireAuthorization();
+        app.MapGet("/api/v1/campaigns/{campaignId:guid}/scheduled-callbacks", ListForCampaign).RequireAuthorization();
         return app;
     }
 
     private static async Task<IResult> GetById(
-        Guid id, ICallbackRepository repo, TenantContext tenant, CancellationToken ct)
+        Guid id, IScheduledCallbackRepository repo, TenantContext tenant, CancellationToken ct)
     {
         if (tenant.Current is null) return Results.Unauthorized();
         var cb = await repo.GetByIdAsync(id, ct);
@@ -29,7 +29,7 @@ public static class CallbacksEndpoints
     }
 
     private static async Task<IResult> ListForCall(
-        Guid callRecordId, ICallbackRepository repo, TenantContext tenant, CancellationToken ct)
+        Guid callRecordId, IScheduledCallbackRepository repo, TenantContext tenant, CancellationToken ct)
     {
         if (tenant.Current is null) return Results.Unauthorized();
         var list = await repo.ListByCallRecordAsync(callRecordId, ct);
@@ -38,10 +38,10 @@ public static class CallbacksEndpoints
 
     private static async Task<IResult> ListForCampaign(
         Guid campaignId, string? status, int? limit,
-        ICallbackRepository repo, TenantContext tenant, CancellationToken ct)
+        IScheduledCallbackRepository repo, TenantContext tenant, CancellationToken ct)
     {
         if (tenant.Current is null) return Results.Unauthorized();
-        if (status is not null && !CallbackStatus.IsValid(status))
+        if (status is not null && !ScheduledCallbackStatus.IsValid(status))
             return Results.BadRequest(new { error = $"invalid status '{status}'." });
 
         var list = await repo.ListByCampaignAsync(campaignId, status, Math.Clamp(limit ?? 100, 1, 500), ct);
@@ -49,16 +49,16 @@ public static class CallbacksEndpoints
     }
 
     private static async Task<IResult> Cancel(
-        Guid id, CancelCallbackRequest? body,
-        ICallbackRepository repo, TenantContext tenant, CancellationToken ct)
+        Guid id, CancelScheduledCallbackRequest? body,
+        IScheduledCallbackRepository repo, TenantContext tenant, CancellationToken ct)
     {
         if (tenant.Current is null) return Results.Unauthorized();
         var cb = await repo.GetByIdAsync(id, ct);
         if (cb is null) return Results.NotFound();
 
-        if (CallbackStatus.IsTerminal(cb.Status))
+        if (ScheduledCallbackStatus.IsTerminal(cb.Status))
             return Results.Conflict(new { error = $"callback is already '{cb.Status}'." });
-        if (cb.Status == CallbackStatus.Attempted)
+        if (cb.Status == ScheduledCallbackStatus.Attempted)
             return Results.Conflict(new { error = "callback is mid-attempt and cannot be cancelled." });
 
         cb.Cancel(string.IsNullOrWhiteSpace(body?.Reason) ? "Cancelled by supervisor." : body!.Reason!.Trim());
@@ -66,12 +66,16 @@ public static class CallbacksEndpoints
         return Results.Ok(ToResponse(cb));
     }
 
-    private static object ToResponse(Callback c) => new
+    private static object ToResponse(ScheduledCallback c) => new
     {
         id                   = c.Id,
         callRecordId         = c.CallRecordId,
         campaignId           = c.CampaignId,
         callbackNumber       = c.CallbackNumber,
+        dnis                 = c.Dnis,
+        callerIdOverride     = c.CallerIdOverride,
+        targetFlowId         = c.TargetFlowId,
+        targetCampaignId     = c.TargetCampaignId,
         status               = c.Status,
         requestedAt          = c.RequestedAt,
         scheduledFor         = c.ScheduledFor,
@@ -90,4 +94,4 @@ public static class CallbacksEndpoints
     };
 }
 
-public record CancelCallbackRequest(string? Reason);
+public record CancelScheduledCallbackRequest(string? Reason);

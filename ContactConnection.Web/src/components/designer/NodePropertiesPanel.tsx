@@ -64,6 +64,13 @@ export default function NodePropertiesPanel({
     flowsApi.listGeneralApis().then(setGeneralApis).catch(console.error)
   }, [type])
 
+  // Telephony flows for scheduled_callback's targetFlowId — fetched lazily
+  const [telephonyFlows, setTelephonyFlows] = useState<FlowSummary[]>([])
+  useEffect(() => {
+    if (type !== 'scheduled_callback') return
+    flowsApi.listAllByType('telephony').then(setTelephonyFlows).catch(console.error)
+  }, [type])
+
   // Address node — active script tab ('main' | field key)
   const [addrScriptTab, setAddrScriptTab] = useState('main')
 
@@ -448,6 +455,106 @@ export default function NodePropertiesPanel({
                 ? 'All flow variables are shared with the sub-flow. Execution returns here when the sub-flow ends.'
                 : 'All flow variables carry over. Execution never returns to this flow.'}
             </p>
+          </>
+        )
+      }
+
+      case 'scheduled_callback': {
+        const field = (key: keyof typeof data, label: string, placeholder: string, mono = true) => (
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-gray-400">{label}</label>
+            <input
+              className={`w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-sky-500 ${mono ? 'font-mono' : ''}`}
+              value={(data[key] as string) ?? ''}
+              placeholder={placeholder}
+              onChange={(e) => onUpdate(node.id, { [key]: e.target.value })}
+            />
+          </div>
+        )
+        return (
+          <>
+            {field('callbackNumber', 'Callback number', '{{flow.customer_phone.value}}')}
+            <div className="grid grid-cols-2 gap-2">
+              {field('scheduledDateValue', 'Date', '{{flow.cb_date}}')}
+              {field('scheduledTimeValue', 'Time', '{{flow.cb_time}}')}
+            </div>
+            <p className="text-[10px] text-gray-500 -mt-1 leading-snug">
+              Literal or <span className="font-mono">{'{{variable}}'}</span> — capture the date/time however the flow
+              likes. Parsed in the tenant timezone; blank time = 09:00.
+            </p>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-400">Route answered call to telephony flow</label>
+              <select
+                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-sky-500"
+                value={(data.targetFlowId as string) ?? ''}
+                onChange={(e) => {
+                  const chosen = telephonyFlows.find((f) => f.id === e.target.value)
+                  onUpdate(node.id, { targetFlowId: chosen?.id ?? '', targetFlowName: chosen?.name ?? '' })
+                }}
+              >
+                <option value="">— Campaign's inbound flow (not recommended) —</option>
+                {telephonyFlows.map((f) => (
+                  <option key={f.id} value={f.id}>{f.name}{f.is_active ? '' : ' (draft)'}</option>
+                ))}
+              </select>
+              <p className="text-[10px] text-gray-500">Point at a queue-only flow, not one that offers a callback again.</p>
+            </div>
+
+            {field('targetCampaignId', 'Queue campaign ID (optional)', 'blank = the call’s campaign')}
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-400">Allowed window (optional)</label>
+              <div className="grid grid-cols-3 gap-2">
+                <input className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white font-mono placeholder-gray-500 focus:outline-none focus:border-sky-500"
+                  placeholder="days 1,2,3,4,5" value={(data.allowedDays as string) ?? ''}
+                  onChange={(e) => onUpdate(node.id, { allowedDays: e.target.value })} />
+                <input className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white font-mono placeholder-gray-500 focus:outline-none focus:border-sky-500"
+                  placeholder="from 08:00" value={(data.allowedStartTime as string) ?? ''}
+                  onChange={(e) => onUpdate(node.id, { allowedStartTime: e.target.value })} />
+                <input className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white font-mono placeholder-gray-500 focus:outline-none focus:border-sky-500"
+                  placeholder="to 17:00" value={(data.allowedEndTime as string) ?? ''}
+                  onChange={(e) => onUpdate(node.id, { allowedEndTime: e.target.value })} />
+              </div>
+              <p className="text-[10px] text-gray-500">Days = CSV of 0–6 (0 = Sun). Outside this window → <span className="text-amber-400">invalid_time</span>.</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-400">Attempt window (min)</label>
+                <input type="number" min={1}
+                  className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-sky-500"
+                  value={(data.windowMinutes as number) ?? 120}
+                  onChange={(e) => onUpdate(node.id, { windowMinutes: Math.max(1, Number(e.target.value)) })} />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-400">Max tries</label>
+                <input type="number" min={1}
+                  className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-sky-500"
+                  value={(data.maxAttempts as number) ?? 3}
+                  onChange={(e) => onUpdate(node.id, { maxAttempts: Math.max(1, Number(e.target.value)) })} />
+              </div>
+            </div>
+
+            {field('callerIdOverride', 'Caller ID override (optional)', 'blank = number the caller dialed')}
+            <p className="text-[10px] text-gray-500 -mt-1 leading-snug">
+              Must be a number on your trunk’s account — carriers reject arbitrary caller IDs.
+            </p>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-400">Output variable</label>
+              <input
+                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white font-mono placeholder-gray-500 focus:outline-none focus:border-sky-500"
+                value={(data.outputVariable as string) ?? ''}
+                placeholder="scheduled_callback"
+                onChange={(e) => onUpdate(node.id, { outputVariable: e.target.value })}
+              />
+              <p className="text-[10px] text-gray-500">
+                Stores <span className="font-mono">{'{outcome, id, status, scheduledFor}'}</span>. Wire the
+                <span className="text-cyan-300"> scheduled</span> / <span className="text-amber-400">invalid_time</span> /
+                <span className="text-red-400"> failed</span> exits.
+              </p>
+            </div>
           </>
         )
       }

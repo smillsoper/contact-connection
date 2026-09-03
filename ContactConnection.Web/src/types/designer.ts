@@ -7,6 +7,7 @@ export type ContactConnectionNodeType =
   | 'section'
   | 'execute_flow'
   | 'transition_to_flow'
+  | 'scheduled_callback'
   | 'branch'
   | 'set_variable'
   | 'api_call'
@@ -49,6 +50,17 @@ export interface NodeData extends Record<string, unknown> {
   // execute_flow / transition_to_flow
   targetFlowId?: string
   targetFlowName?: string
+  // scheduled_callback — book a customer callback for a future time
+  callbackNumber?: string          // template, e.g. {{flow.customer_phone.value}}
+  scheduledDateValue?: string      // template — the date
+  scheduledTimeValue?: string      // template — the time; blank => 09:00
+  targetCampaignId?: string        // queue campaign for the answered leg (blank = current)
+  allowedDays?: string             // CSV of 0-6 (0=Sun) the callback may land on
+  allowedStartTime?: string        // "HH:mm" earliest local time
+  allowedEndTime?: string          // "HH:mm" latest local time
+  windowMinutes?: number
+  maxAttempts?: number
+  callerIdOverride?: string         // blank = DNIS the caller dialed. Literal or {{variable}}
   // branch
   condition?: string
   // set_variable
@@ -166,6 +178,12 @@ export const NODE_META: Record<
     description: 'Hand off to another flow (no return)',
     handles: 'none',
   },
+  scheduled_callback: {
+    label: 'Scheduled Callback',
+    color: '#0891b2',
+    description: 'Book a customer callback for a future date/time',
+    handles: 'single',
+  },
   branch: {
     label: 'Branch',
     color: '#f59e0b',
@@ -210,6 +228,14 @@ export function defaultNodeData(type: ContactConnectionNodeType): NodeData {
       return { label: 'Execute Flow', targetFlowId: '', targetFlowName: '' }
     case 'transition_to_flow':
       return { label: 'Transition to Flow', targetFlowId: '', targetFlowName: '' }
+    case 'scheduled_callback':
+      return {
+        label: 'Scheduled Callback',
+        callbackNumber: '', scheduledDateValue: '', scheduledTimeValue: '',
+        targetFlowId: '', targetFlowName: '', targetCampaignId: '',
+        allowedDays: '', allowedStartTime: '', allowedEndTime: '',
+        windowMinutes: 120, maxAttempts: 3, callerIdOverride: '', outputVariable: 'scheduled_callback',
+      }
     case 'branch':
       return { label: 'New Branch', condition: '' }
     case 'set_variable':

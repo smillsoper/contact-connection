@@ -118,6 +118,7 @@
 | 106 | 2026-09-01 | 3:27 PM PDT | 3:47 PM PDT | 20 min | ~12448 min |
 | 107 | 2026-09-02 | 9:43 AM PDT | 10:13 AM PDT | 30 min | ~12478 min |
 | 108 | 2026-09-02 | 10:16 AM PDT | 12:25 PM PDT | 129 min | ~12607 min |
+| 109 | 2026-09-03 | 9:00 AM PDT | 9:46 AM PDT | 46 min | ~12653 min |
 
 ---
 
@@ -4955,3 +4956,61 @@ Request side, fire side, connect/no-answer, inbound-cancel — all live-verified
 5. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
 6. `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit (opportunistic).
 7. Prior carry-overs: `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; `FlowEngine` test coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 109
+
+**Date:** 2026-09-03
+**Start:** 9:00 AM PDT
+**End:** 9:46 AM PDT
+**Duration:** 46 minutes
+**Total Duration:** ~12653 minutes
+
+### Focus
+
+Design correction + refactor. On review, what S107–108 built as "queue callback / callback lifecycle" is actually a **scheduled callback** (dial back at a future time, re-enter a flow). A real **queue callback** (virtual hold: keep the caller's queue position, reserve an agent, bridge direct) is a separate feature. User decisions: two separate entities; build the scheduled callback first (rename/extend the current work); queue callback later. This session did the scheduled-callback rename + extension, in both the telephony and CRM-script flow engines.
+
+### Rename — `Callback` → `ScheduledCallback`
+
+`git mv` + rewrite across every layer: entity + `ScheduledCallbackStatus` (dropped the unused `requested` state), `IScheduledCallbackRepository` / `ScheduledCallbackRepository`, `ScheduledCallbackConfiguration`, `TenantDbContext.ScheduledCallbacks`, DI, `IScheduledCallbackConnectionService` / impl, Worker `ScheduledCallbackProcessingService`, `ScheduledCallbacksEndpoints` (routes `/api/v1/callbacks/*` → `/api/v1/scheduled-callbacks/*`). Table `callbacks` → `scheduled_callbacks` — migration `20260903163036_RenameCallbacksToScheduledCallbacks` (DROP + CREATE; dev data was test-only) applied to both dev schemas. `config["Callbacks:*"]` → `config["ScheduledCallbacks:*"]`.
+
+### Extension
+
+- **`ScheduledCallback.Create(... DateTimeOffset scheduledFor ...)`** — the booked time is now an explicit parsed datetime (was `now + delay`). New columns `target_flow_id` / `target_campaign_id` (bundled into the rename migration; `dnis` from S108 carried over).
+- **`ScheduledCallbackTimeParser`** (`Infrastructure/Telephony/`) — shared by both node handlers: parse free-text date + time in the tenant timezone, validate against an optional `allowedDays` (CSV 0–6, 0=Sun) / `allowedStartTime` / `allowedEndTime` window → `ok` / `failed` (unparseable) / `invalid_time` (past or outside window). 8 tests.
+- **Loop fix** — `TelephonyFlowContext.FlowIdOverride`; `TelephonyFlowEngine.ExecuteAsync` uses it before the phone-number / campaign flow resolution. `EslBackgroundService.HandleDidCallAsync` sets it from `variable_cc_target_flow_id`. So a fired scheduled callback lands in its designated flow, not the inbound flow that would re-offer the callback and loop the caller. `ScheduledCallbackProcessingService` passes `cc_target_flow_id` + `cc_campaign_id = TargetCampaignId ?? CampaignId` on the `&park()` originate.
+
+### Nodes — one in each designer
+
+Per the user: leave date/time as free-text fields that accept `{{variables}}`, so the tenant captures them however they like (IVR, DTMF, agent).
+
+- **Telephony `tf_scheduled_callback`** (`Infrastructure/Telephony/NodeHandlers/ScheduledCallbackNodeHandler.cs`, was `RequestCallbackNodeHandler`/`tf_request_callback`). Config: `numberSource`/`collectedVar`, `scheduledDateValue`/`scheduledTimeValue`, `targetFlowId`/`targetCampaignId`, `allowedDays`/`allowedStartTime`/`allowedEndTime`, `windowMinutes`/`maxAttempts`/`callerIdOverride`. Transitions `scheduled` / `invalid_time` / `failed`. Still dequeues on the session (`_left_for_callback`). Designer: renamed node component + palette + `nodeTypes` + full properties block (telephony-flow + campaign `SearchableSelect`s, allowed-window inputs). 8 handler tests.
+- **CRM-script `scheduled_callback`** (`Infrastructure/FlowEngine/NodeHandlers/ScheduledCallbackNodeHandler.cs`) — an agent books a callback mid-call. `callbackNumber` template (handles a phone-node JSON object → `.value` / `.display_value`), campaign + `dnis` pulled from `ctx.CallRecord`, tz from `ctx.Tenant["timezone"]`, writes via `IScheduledCallbackRepository`, stores `{outcome,id,status,scheduledFor}` in `outputVariable`. Designer: new node component; `FIXED_EXIT_OPTIONS['scheduled','invalid_time','failed']` (single handle + option-picker, like `api_call`); palette + properties block (fetches telephony flows via `flowsApi.listAllByType('telephony')`). 5 handler tests. NB: both handler classes are `ScheduledCallbackNodeHandler` in different namespaces — DI registers them fully-qualified (`FlowEngine.NodeHandlers.` / `Telephony.NodeHandlers.`).
+
+### State
+
+- Build **0 errors** (only the pre-existing `Microsoft.OpenApi` NU1903). **537 tests pass** (Domain 147, Application 20, Infrastructure 296, Api 74). Web `tsc --noEmit` clean.
+- Migrations `AddCallbacks` (S107) + `AddCallbackCallerIdOverride` + `AddCallbackDnis` (S108) + `RenameCallbacksToScheduledCallbacks` (S109) — all live on both dev tenant schemas.
+- Committed at end of session.
+
+### Still pending — scheduled callback
+
+1. **Live verification** of the renamed/extended telephony node + the CRM node end to end (book from a flow → Worker fires at the booked time → answered leg runs `TargetFlowId` → agent). The S108 mechanics are proven; the S109 changes (explicit datetime, target-flow routing, CRM path) are not yet live-tested.
+2. Supervisor UI — list/cancel view (`/api/v1/scheduled-callbacks/*` endpoints exist).
+3. Worker Dev-boot fix (no-op notifier registrations) — still a carry-over.
+
+### Queue callback (virtual hold) — separate, not started
+
+Design captured in memory `project_queue_callback`: caller keeps their queue position; when the placeholder reaches an available agent, that agent goes to a new `callback_pending` state (held out of `available`) while the outbound call is placed; on answer a "connecting you" prompt plays and the caller is bridged directly to the reserved agent; on failure the agent is released. Its own delivery path in the queue engine — not the DID-park path the scheduled engine reuses.
+
+### Next Session — pick up here
+
+1. Live-verify the scheduled callback (telephony + CRM nodes).
+2. Queue callback (virtual hold) — the separate feature.
+3. Supervisor scheduled-callbacks UI.
+4. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
+5. Fix the Worker's Development boot (Session 101 carry-over).
+6. Telnyx Verified Numbers feature.
+7. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
+8. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; `FlowEngine` test coverage; retire the `.cc` softphone route.

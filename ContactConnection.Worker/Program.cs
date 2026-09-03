@@ -26,7 +26,7 @@ builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddHostedService<SubscriptionProcessingService>();
 builder.Services.AddHostedService<FreeSwitchEslService>();
 builder.Services.AddHostedService<RecordingMergeService>();
-builder.Services.AddHostedService<CallbackProcessingService>();
+builder.Services.AddHostedService<ScheduledCallbackProcessingService>();
 
 var host = builder.Build();
 host.Run();

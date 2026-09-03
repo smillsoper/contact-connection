@@ -105,7 +105,7 @@ public class RouteToQueueNodeHandler : ITelephonyNodeHandler
         // Caller phoned back in and is now waiting again — cancel any callback they had booked
         // for this campaign (they no longer need it). "cancelled" is a distinct, non-abandon
         // outcome per ARCHITECTURE.md §16.
-        await CancelPendingCallbacksAsync(db, ctx.CampaignId, ctx.CallerNumber, ct);
+        await CancelPendingScheduledCallbacksAsync(db, ctx.CampaignId, ctx.CallerNumber, ct);
 
         // Allow chaining — e.g. RouteToQueue → Play (hold music) — by reading the default transition.
         // Returns null if no transition is defined (old behavior, call stays parked silently).
@@ -113,16 +113,16 @@ public class RouteToQueueNodeHandler : ITelephonyNodeHandler
         return new TelephonyNodeResult(nextNodeId, "queued");
     }
 
-    private static async Task CancelPendingCallbacksAsync(
+    private static async Task CancelPendingScheduledCallbacksAsync(
         TenantDbContext db, Guid campaignId, string? callerNumber, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(callerNumber)) return;
 
         var number  = callerNumber.Trim();
-        var pending = await db.Callbacks
+        var pending = await db.ScheduledCallbacks
             .Where(c => c.CampaignId == campaignId
                         && c.CallbackNumber == number
-                        && (c.Status == CallbackStatus.Requested || c.Status == CallbackStatus.Scheduled))
+                        && c.Status == ScheduledCallbackStatus.Scheduled)
             .ToListAsync(ct);
 
         if (pending.Count == 0) return;

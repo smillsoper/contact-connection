@@ -10,11 +10,11 @@ using Xunit;
 namespace ContactConnection.Infrastructure.Tests.Telephony;
 
 /// <summary>
-/// CallbackConnectionService lands a fired callback's terminal state from the ESL path:
+/// ScheduledCallbackConnectionService lands a fired callback's terminal state from the ESL path:
 /// MarkConnectedAsync (leg answered → completed + linked record) and MarkNoAnswerAsync
 /// (leg failed → reschedule while retries remain, else abandon + a callback_abandon row).
 /// </summary>
-public class CallbackConnectionServiceTests
+public class ScheduledCallbackConnectionServiceTests
 {
     private const string Schema = "tenant_test_tenant";
     private static readonly Guid TenantId = Guid.Parse("dddddddd-0000-0000-0000-0000000000aa");
@@ -25,25 +25,25 @@ public class CallbackConnectionServiceTests
 
     private readonly Mock<ICallStateHistoryRecorder> _stateRecorder = new();
 
-    private CallbackConnectionService NewService(string dbName)
+    private ScheduledCallbackConnectionService NewService(string dbName)
     {
         var factory = new Mock<ITenantDbContextFactory>();
         factory.Setup(f => f.Create(It.IsAny<string>())).Returns(() => Db(dbName));
-        return new CallbackConnectionService(
-            factory.Object, _stateRecorder.Object, NullLogger<CallbackConnectionService>.Instance);
+        return new ScheduledCallbackConnectionService(
+            factory.Object, _stateRecorder.Object, NullLogger<ScheduledCallbackConnectionService>.Instance);
     }
 
-    private static Callback Attempted(string dbName, int maxAttempts = 3, int attemptsMade = 1)
+    private static ScheduledCallback Attempted(string dbName, int maxAttempts = 3, int attemptsMade = 1)
     {
-        var cb = Callback.Create(TenantId, Guid.NewGuid(), Guid.NewGuid(), "+15551234567",
-            TimeSpan.Zero, windowMinutes: 120, maxAttempts: maxAttempts);
+        var cb = ScheduledCallback.Create(TenantId, Guid.NewGuid(), Guid.NewGuid(), "+15551234567",
+            DateTimeOffset.UtcNow.AddMinutes(-1), windowMinutes: 120, maxAttempts: maxAttempts);
         for (var i = 0; i < attemptsMade; i++)
         {
             cb.MarkAttempted();
             if (i < attemptsMade - 1) cb.MarkNoAnswer();  // back to scheduled between attempts
         }
         using var db = Db(dbName);
-        db.Callbacks.Add(cb);
+        db.ScheduledCallbacks.Add(cb);
         db.SaveChanges();
         return cb;
     }
@@ -59,8 +59,8 @@ public class CallbackConnectionServiceTests
 
         Assert.True(ok);
         await using var check = Db(dbName);
-        var stored = await check.Callbacks.FindAsync(cb.Id);
-        Assert.Equal(CallbackStatus.Completed, stored!.Status);
+        var stored = await check.ScheduledCallbacks.FindAsync(cb.Id);
+        Assert.Equal(ScheduledCallbackStatus.Completed, stored!.Status);
         Assert.Equal(connectedRecord, stored.OutboundCallRecordId);
         Assert.NotNull(stored.CompletedAt);
     }
@@ -69,14 +69,14 @@ public class CallbackConnectionServiceTests
     public async Task MarkConnected_WhenNotAttempted_IsNoOp()
     {
         var dbName = DbName;
-        var cb = Callback.Create(TenantId, Guid.NewGuid(), Guid.NewGuid(), "+15551234567", TimeSpan.Zero);
-        using (var db = Db(dbName)) { db.Callbacks.Add(cb); db.SaveChanges(); }  // still 'scheduled'
+        var cb = ScheduledCallback.Create(TenantId, Guid.NewGuid(), Guid.NewGuid(), "+15551234567", DateTimeOffset.UtcNow.AddMinutes(-1));
+        using (var db = Db(dbName)) { db.ScheduledCallbacks.Add(cb); db.SaveChanges(); }  // still 'scheduled'
 
         var ok = await NewService(dbName).MarkConnectedAsync(Schema, TenantId, cb.Id, Guid.NewGuid());
 
         Assert.False(ok);
         await using var check = Db(dbName);
-        Assert.Equal(CallbackStatus.Scheduled, (await check.Callbacks.FindAsync(cb.Id))!.Status);
+        Assert.Equal(ScheduledCallbackStatus.Scheduled, (await check.ScheduledCallbacks.FindAsync(cb.Id))!.Status);
     }
 
     [Fact]
@@ -97,7 +97,7 @@ public class CallbackConnectionServiceTests
 
         Assert.False(abandoned);
         await using var check = Db(dbName);
-        Assert.Equal(CallbackStatus.Scheduled, (await check.Callbacks.FindAsync(cb.Id))!.Status);
+        Assert.Equal(ScheduledCallbackStatus.Scheduled, (await check.ScheduledCallbacks.FindAsync(cb.Id))!.Status);
         _stateRecorder.Verify(r => r.RecordAsync(
             It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(),
             It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<bool?>(),
@@ -114,10 +114,10 @@ public class CallbackConnectionServiceTests
 
         Assert.True(abandoned);
         await using var check = Db(dbName);
-        Assert.Equal(CallbackStatus.Abandoned, (await check.Callbacks.FindAsync(cb.Id))!.Status);
+        Assert.Equal(ScheduledCallbackStatus.Abandoned, (await check.ScheduledCallbacks.FindAsync(cb.Id))!.Status);
         _stateRecorder.Verify(r => r.RecordAsync(
             TenantId, Schema, cb.CallRecordId, CallHistoryState.Abandoned, cb.CampaignId,
-            null, It.Is<string>(s => s.Contains("Callback abandoned")),
+            null, It.Is<string>(s => s.Contains("Scheduled callback abandoned")),
             CallAbandonType.CallbackAbandon, null, null, It.IsAny<CancellationToken>()), Times.Once);
     }
 }

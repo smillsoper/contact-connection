@@ -1,58 +1,76 @@
 namespace ContactConnection.Domain.Entities;
 
 /// <summary>
-/// A queued caller's request to be called back instead of holding — created by a
-/// <c>tf_request_callback</c> telephony flow node (offered on long queue waits / after hours /
-/// an IVR "press 1 for a callback" branch). A child of the originating call record (the Single
-/// Record of Truth container); the outbound leg placed when the callback fires gets its own
-/// call record, linked via <see cref="OutboundCallRecordId"/>.
+/// A callback booked for a specific future time — created by a <c>tf_scheduled_callback</c>
+/// telephony node or a <c>scheduled_callback</c> CRM script node. The tenant's flow captures the
+/// desired date/time however it likes (IVR, DTMF, agent entry) and passes it as text; the node
+/// validates it against an allowed day/hour window and freezes it here.
 ///
-/// Full state tracking per ARCHITECTURE.md §16 — not just requested/completed:
+/// When the time comes, the Worker places an outbound call to <see cref="CallbackNumber"/> with
+/// caller ID <see cref="CallerIdOverride"/> (or the <see cref="Dnis"/> the caller originally
+/// dialed), and the answered leg is routed into <see cref="TargetFlowId"/> — a designated
+/// telephony flow, NOT necessarily the origin campaign's inbound flow (that would risk re-
+/// offering the callback and looping the caller).
 ///
-///   requested  → row created, no window assigned yet
-///   scheduled  → window assigned (<see cref="ScheduledFor"/> … <see cref="ExpiresAt"/>)
+/// This is distinct from a queue callback / virtual hold (hold the caller's place in line,
+/// reserve an agent, bridge direct) — that is a separate feature, not this entity.
+///
+/// State tracking (ARCHITECTURE.md §16):
+///
+///   scheduled  → booked; waiting for <see cref="ScheduledFor"/>
 ///   attempted  → outbound leg placed, ringing the caller
 ///   completed  → caller answered ✓
 ///   abandoned  → caller did not answer after the last allowed attempt (IS an abandon —
 ///                <see cref="CallAbandonType.CallbackAbandon"/>)
-///   expired    → the window passed without a single attempt
-///   cancelled  → caller phoned back in (or a supervisor cancelled) before the callback fired
+///   expired    → the attempt window (<see cref="ScheduledFor"/> … <see cref="ExpiresAt"/>)
+///                passed without a single successful contact
+///   cancelled  → caller reached an agent another way, or a supervisor cancelled, before it fired
 ///
 /// A no-answer on an attempt that still has retries left drops back to <c>scheduled</c> for the
 /// worker's next due pass; only the final no-answer lands on <c>abandoned</c>.
 /// </summary>
-public class Callback
+public class ScheduledCallback
 {
     public Guid Id { get; private set; }
     public Guid TenantId { get; private set; }
 
-    /// <summary>The inbound call record this request was made on.</summary>
+    /// <summary>The call record this callback was booked on (an inbound call, or the agent's
+    /// active call when booked from a CRM script node).</summary>
     public Guid CallRecordId { get; private set; }
+
+    /// <summary>Campaign the booking was made under (used for reporting / eligibility when
+    /// <see cref="TargetCampaignId"/> is not set).</summary>
     public Guid CampaignId { get; private set; }
 
-    /// <summary>E.164 number to dial when the callback fires — the caller's ANI, or a number
-    /// the IVR/agent collected.</summary>
+    /// <summary>E.164 number to dial when the callback fires — the caller's ANI, or a number the
+    /// IVR/agent captured.</summary>
     public string CallbackNumber { get; private set; } = string.Empty;
 
     /// <summary>The number the caller originally dialed (DNIS) — captured when the request node
-    /// runs. Used as the outbound caller ID when no <see cref="CallerIdOverride"/> is set, and as
-    /// the <c>cc_did</c> that routes the answered callback leg back to the same campaign.</summary>
+    /// runs. Default outbound caller ID, and the <c>cc_did</c> that resolves the tenant/campaign
+    /// for the answered leg.</summary>
     public string? Dnis { get; private set; }
 
-    /// <summary>Caller ID to present on the outbound callback leg. Null/blank = <see cref="Dnis"/>
-    /// (the number the caller dialed). Resolved to a literal when the request node runs (so a
-    /// <c>{{variable}}</c> is frozen here, not re-evaluated when the callback later fires).</summary>
+    /// <summary>Caller ID to present on the outbound leg. Null/blank = <see cref="Dnis"/>.
+    /// Resolved to a literal when the request node runs (a <c>{{variable}}</c> is frozen here).</summary>
     public string? CallerIdOverride { get; private set; }
 
-    public string Status { get; private set; } = CallbackStatus.Requested;
+    /// <summary>Telephony flow the answered callback leg runs. Null = the origin campaign's
+    /// inbound flow (discouraged — see the class summary).</summary>
+    public Guid? TargetFlowId { get; private set; }
+
+    /// <summary>Campaign context for the answered leg (its queue). Null = <see cref="CampaignId"/>.</summary>
+    public Guid? TargetCampaignId { get; private set; }
+
+    public string Status { get; private set; } = ScheduledCallbackStatus.Scheduled;
 
     public DateTimeOffset RequestedAt { get; private set; }
 
-    /// <summary>Earliest the worker may place the outbound leg. Null while <c>requested</c>.</summary>
-    public DateTimeOffset? ScheduledFor { get; private set; }
+    /// <summary>The booked time — earliest the worker may place the outbound leg.</summary>
+    public DateTimeOffset ScheduledFor { get; private set; }
 
-    /// <summary>Window close — after this, an un-attempted callback <c>expires</c>.</summary>
-    public DateTimeOffset? ExpiresAt { get; private set; }
+    /// <summary>Attempt-window close — after this an un-connected callback <c>expires</c>.</summary>
+    public DateTimeOffset ExpiresAt { get; private set; }
 
     public int AttemptCount { get; private set; }
     public int MaxAttempts { get; private set; } = 3;
@@ -72,28 +90,31 @@ public class Callback
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
-    private Callback() { }
+    private ScheduledCallback() { }
 
-    /// <param name="delay">How far out the window opens from now (0 = eligible immediately).</param>
-    /// <param name="windowMinutes">How long the window stays open before the request expires.</param>
-    public static Callback Create(
+    /// <param name="scheduledFor">The booked time (must be in the future). The node is
+    /// responsible for validating it against any allowed day/hour window first.</param>
+    /// <param name="windowMinutes">How long past <paramref name="scheduledFor"/> the worker keeps
+    /// trying before the callback expires.</param>
+    public static ScheduledCallback Create(
         Guid tenantId,
         Guid callRecordId,
         Guid campaignId,
         string callbackNumber,
-        TimeSpan delay,
+        DateTimeOffset scheduledFor,
         int windowMinutes = 120,
         int maxAttempts = 3,
         string? callerIdOverride = null,
-        string? dnis = null)
+        string? dnis = null,
+        Guid? targetFlowId = null,
+        Guid? targetCampaignId = null)
     {
         if (string.IsNullOrWhiteSpace(callbackNumber))
             throw new ArgumentException("A callback number is required.", nameof(callbackNumber));
 
         var now = DateTimeOffset.UtcNow;
-        var scheduledFor = now + (delay < TimeSpan.Zero ? TimeSpan.Zero : delay);
 
-        return new Callback
+        return new ScheduledCallback
         {
             Id               = Guid.NewGuid(),
             TenantId         = tenantId,
@@ -102,7 +123,9 @@ public class Callback
             CallbackNumber   = callbackNumber.Trim(),
             Dnis             = string.IsNullOrWhiteSpace(dnis) ? null : dnis.Trim(),
             CallerIdOverride = string.IsNullOrWhiteSpace(callerIdOverride) ? null : callerIdOverride.Trim(),
-            Status           = CallbackStatus.Scheduled,
+            TargetFlowId     = targetFlowId == Guid.Empty ? null : targetFlowId,
+            TargetCampaignId = targetCampaignId == Guid.Empty ? null : targetCampaignId,
+            Status           = ScheduledCallbackStatus.Scheduled,
             RequestedAt      = now,
             ScheduledFor     = scheduledFor,
             ExpiresAt        = scheduledFor + TimeSpan.FromMinutes(Math.Max(1, windowMinutes)),
@@ -115,23 +138,22 @@ public class Callback
 
     /// <summary>True when the worker should place an outbound leg now.</summary>
     public bool IsDue(DateTimeOffset now) =>
-        Status == CallbackStatus.Scheduled
-        && ScheduledFor is { } s && now >= s
-        && ExpiresAt is { } e && now < e
+        Status == ScheduledCallbackStatus.Scheduled
+        && now >= ScheduledFor
+        && now < ExpiresAt
         && AttemptCount < MaxAttempts;
 
-    /// <summary>True when the window has closed without the callback ever being attempted.</summary>
+    /// <summary>True when the attempt window has closed without a successful contact.</summary>
     public bool IsExpired(DateTimeOffset now) =>
-        Status is CallbackStatus.Requested or CallbackStatus.Scheduled
-        && ExpiresAt is { } e && now >= e;
+        Status == ScheduledCallbackStatus.Scheduled && now >= ExpiresAt;
 
     /// <summary>Records an outbound leg going out. <paramref name="outboundCallRecordId"/> is the
     /// call record for that leg when it already exists; pass null when the connected call record
     /// is created later (on answer) and linked via <see cref="LinkConnectedCallRecord"/>.</summary>
     public void MarkAttempted(Guid? outboundCallRecordId = null)
     {
-        RequireStatus(CallbackStatus.Scheduled);
-        Status        = CallbackStatus.Attempted;
+        RequireStatus(ScheduledCallbackStatus.Scheduled);
+        Status        = ScheduledCallbackStatus.Attempted;
         AttemptCount += 1;
         LastAttemptAt = DateTimeOffset.UtcNow;
         if (outboundCallRecordId is { } id && id != Guid.Empty)
@@ -139,8 +161,7 @@ public class Callback
         Touch();
     }
 
-    /// <summary>Links the call record created for the connected callback leg (set on answer,
-    /// when the leg re-enters the campaign flow). Safe to call once, from <c>attempted</c>.</summary>
+    /// <summary>Links the call record created for the connected callback leg. From <c>attempted</c>.</summary>
     public void LinkConnectedCallRecord(Guid connectedCallRecordId)
     {
         if (connectedCallRecordId != Guid.Empty)
@@ -151,50 +172,50 @@ public class Callback
     /// <summary>Caller answered the callback.</summary>
     public void MarkCompleted()
     {
-        RequireStatus(CallbackStatus.Attempted);
-        Status      = CallbackStatus.Completed;
+        RequireStatus(ScheduledCallbackStatus.Attempted);
+        Status      = ScheduledCallbackStatus.Completed;
         CompletedAt = DateTimeOffset.UtcNow;
         Touch();
     }
 
     /// <summary>An attempt that didn't connect. Drops back to <c>scheduled</c> for another pass
     /// while retries remain; the final no-answer lands on <c>abandoned</c>. Returns true when it
-    /// abandoned (so the caller can record the abandon in call state history).</summary>
+    /// abandoned.</summary>
     public bool MarkNoAnswer(string? detail = null)
     {
-        RequireStatus(CallbackStatus.Attempted);
+        RequireStatus(ScheduledCallbackStatus.Attempted);
         Detail = detail ?? Detail;
 
         if (AttemptCount >= MaxAttempts)
         {
-            Status      = CallbackStatus.Abandoned;
+            Status      = ScheduledCallbackStatus.Abandoned;
             AbandonedAt = DateTimeOffset.UtcNow;
             Touch();
             return true;
         }
 
-        Status = CallbackStatus.Scheduled;
+        Status = ScheduledCallbackStatus.Scheduled;
         Touch();
         return false;
     }
 
-    /// <summary>The window passed without a single attempt.</summary>
+    /// <summary>The attempt window passed without a successful contact.</summary>
     public void MarkExpired(string? detail = null)
     {
-        if (Status is not (CallbackStatus.Requested or CallbackStatus.Scheduled))
-            throw new InvalidOperationException($"Cannot expire a callback in status '{Status}'.");
-        Status    = CallbackStatus.Expired;
+        if (Status != ScheduledCallbackStatus.Scheduled)
+            throw new InvalidOperationException($"Cannot expire a scheduled callback in status '{Status}'.");
+        Status    = ScheduledCallbackStatus.Expired;
         ExpiredAt = DateTimeOffset.UtcNow;
         Detail    = detail ?? Detail;
         Touch();
     }
 
-    /// <summary>Caller phoned back in, or a supervisor cancelled, before the callback fired.</summary>
+    /// <summary>Caller reached an agent another way, or a supervisor cancelled, before it fired.</summary>
     public void Cancel(string reason)
     {
-        if (Status is not (CallbackStatus.Requested or CallbackStatus.Scheduled))
-            throw new InvalidOperationException($"Cannot cancel a callback in status '{Status}'.");
-        Status      = CallbackStatus.Cancelled;
+        if (Status != ScheduledCallbackStatus.Scheduled)
+            throw new InvalidOperationException($"Cannot cancel a scheduled callback in status '{Status}'.");
+        Status      = ScheduledCallbackStatus.Cancelled;
         CancelledAt = DateTimeOffset.UtcNow;
         Detail      = reason;
         Touch();
@@ -204,15 +225,14 @@ public class Callback
     {
         if (Status != expected)
             throw new InvalidOperationException(
-                $"Callback must be '{expected}' for this transition, but is '{Status}'.");
+                $"Scheduled callback must be '{expected}' for this transition, but is '{Status}'.");
     }
 
     private void Touch() => UpdatedAt = DateTimeOffset.UtcNow;
 }
 
-public static class CallbackStatus
+public static class ScheduledCallbackStatus
 {
-    public const string Requested = "requested";
     public const string Scheduled = "scheduled";
     public const string Attempted = "attempted";
     public const string Completed = "completed";
@@ -225,5 +245,5 @@ public static class CallbackStatus
         value is Completed or Abandoned or Expired or Cancelled;
 
     public static bool IsValid(string value) =>
-        value is Requested or Scheduled or Attempted or Completed or Abandoned or Expired or Cancelled;
+        value is Scheduled or Attempted or Completed or Abandoned or Expired or Cancelled;
 }

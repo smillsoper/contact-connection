@@ -31,6 +31,7 @@ import TransitionToFlowNode from '../components/designer/nodes/TransitionToFlowN
 import BranchNode from '../components/designer/nodes/BranchNode'
 import SetVariableNode from '../components/designer/nodes/SetVariableNode'
 import ApiCallNode from '../components/designer/nodes/ApiCallNode'
+import ScheduledCallbackNode from '../components/designer/nodes/ScheduledCallbackNode'
 import EndNode from '../components/designer/nodes/EndNode'
 
 import type { NodeData, ContactConnectionNodeType, ContactConnectionFlowDefinition, FlowOption } from '../types/designer'
@@ -49,6 +50,7 @@ const nodeTypes = {
   branch: BranchNode,
   set_variable: SetVariableNode,
   api_call: ApiCallNode,
+  scheduled_callback: ScheduledCallbackNode,
   end: EndNode,
 }
 
@@ -60,6 +62,7 @@ const edgeTypes = {
 // physical handle + picker-modal mechanism as select-type input nodes.
 const FIXED_EXIT_OPTIONS: Partial<Record<ContactConnectionNodeType, string[]>> = {
   api_call: ['success', 'error', 'timeout'],
+  scheduled_callback: ['scheduled', 'invalid_time', 'failed'],
 }
 
 // Options for a node that uses the fixed-handle picker (select-type input, or a
@@ -604,6 +607,7 @@ function DesignerCanvas({
                 branch: '#f59e0b',
                 set_variable: '#8b5cf6',
                 api_call: '#6366f1',
+                scheduled_callback: '#0891b2',
                 end: '#ef4444',
               }
               return meta[n.type ?? ''] ?? '#9ca3af'

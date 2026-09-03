@@ -11,32 +11,30 @@ using Microsoft.Extensions.Logging;
 namespace ContactConnection.Worker;
 
 /// <summary>
-/// Drives the <see cref="Callback"/> lifecycle (ARCHITECTURE.md §16). Runs every 30 s and, for
-/// every active tenant:
+/// Drives the <see cref="ScheduledCallback"/> lifecycle (ARCHITECTURE.md §16). Runs every 30 s
+/// and, for every active tenant:
 ///
-///   1. Expiry sweep — <c>scheduled</c>/<c>requested</c> callbacks whose window has closed with
-///      no attempt → <c>expired</c>.
-///   2. Due sweep — <c>scheduled</c> callbacks whose window is open → place the outbound leg
-///      (create the callback CallRecord, mark <c>attempted</c>, ESL <c>originate</c> to the
-///      caller routed into the campaign's callback dialplan extension).
-///   3. Stale-attempt sweep — only when <c>Callbacks:AutoResolveAttemptedAfterSeconds</c> &gt; 0
-///      (default off): an <c>attempted</c> callback with no completion signal after that many
-///      seconds → <see cref="Callback.MarkNoAnswer"/> (back to <c>scheduled</c> while retries
-///      remain, else <c>abandoned</c> + a <c>callback_abandon</c> call-state-history row).
+///   1. Expiry sweep — <c>scheduled</c> rows whose attempt window has closed with no successful
+///      contact → <c>expired</c>.
+///   2. Due sweep — <c>scheduled</c> rows whose booked time has arrived → place the outbound leg
+///      (ESL <c>originate ... &amp;park()</c> to the caller's number, carrying cc_did / cc_callback_id /
+///      cc_target_flow_id so the answered leg resolves the tenant and runs the designated flow),
+///      mark <c>attempted</c>. The connected call record is created by the ESL park handler.
+///   3. Stale-attempt sweep — only when <c>ScheduledCallbacks:AutoResolveAttemptedAfterSeconds</c>
+///      &gt; 0 (default off): an <c>attempted</c> row with no completion signal after that many
+///      seconds → <see cref="ScheduledCallback.MarkNoAnswer"/>.
 ///
-/// The precise <c>completed</c> / <c>abandoned</c> signals come from real FreeSWITCH answer/
-/// hangup events on the callback leg — that wiring lives in the ESL event path
-/// (<see cref="FreeSwitchEslService"/>) and is added in a follow-up session; until then the
-/// stale-attempt sweep is the only resolution and stays opt-in so it never records a false
-/// abandon against a call that actually connected.
+/// The precise <c>completed</c> / <c>abandoned</c> signals come from real FreeSWITCH events on
+/// the callback leg — that wiring lives in the API's ESL path
+/// (<c>EslBackgroundService</c> → <see cref="IScheduledCallbackConnectionService"/>).
 /// </summary>
-public sealed class CallbackProcessingService : BackgroundService
+public sealed class ScheduledCallbackProcessingService : BackgroundService
 {
     private static readonly TimeSpan Interval = TimeSpan.FromSeconds(30);
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConfiguration _config;
-    private readonly ILogger<CallbackProcessingService> _logger;
+    private readonly ILogger<ScheduledCallbackProcessingService> _logger;
 
     private readonly string _eslHost;
     private readonly int _eslPort;
@@ -44,10 +42,10 @@ public sealed class CallbackProcessingService : BackgroundService
     private readonly string _defaultGateway;
     private readonly int _autoResolveAfterSeconds;
 
-    public CallbackProcessingService(
+    public ScheduledCallbackProcessingService(
         IServiceScopeFactory scopeFactory,
         IConfiguration config,
-        ILogger<CallbackProcessingService> logger)
+        ILogger<ScheduledCallbackProcessingService> logger)
     {
         _scopeFactory = scopeFactory;
         _config       = config;
@@ -58,13 +56,13 @@ public sealed class CallbackProcessingService : BackgroundService
                              : config.GetSection("FreeSwitchEsl").GetValue<int>("Port", 8021);
         _eslPassword       = config["FreeSWITCH:EslPassword"] ?? "ClueCon";
         _defaultGateway    = config["FreeSWITCH:DefaultGateway"] ?? "telnyx";
-        _autoResolveAfterSeconds = int.TryParse(config["Callbacks:AutoResolveAttemptedAfterSeconds"], out var s) ? s : 0;
+        _autoResolveAfterSeconds = int.TryParse(config["ScheduledCallbacks:AutoResolveAttemptedAfterSeconds"], out var s) ? s : 0;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation(
-            "CallbackProcessingService started (gateway={Gateway}, autoResolveAfter={Secs}s).",
+            "ScheduledCallbackProcessingService started (gateway={Gateway}, autoResolveAfter={Secs}s).",
             _defaultGateway, _autoResolveAfterSeconds);
 
         using var timer = new PeriodicTimer(Interval);
@@ -76,7 +74,7 @@ public sealed class CallbackProcessingService : BackgroundService
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogError(ex, "Unhandled error in callback processing cycle.");
+                _logger.LogError(ex, "Unhandled error in scheduled-callback processing cycle.");
             }
         }
     }
@@ -95,7 +93,7 @@ public sealed class CallbackProcessingService : BackgroundService
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogError(ex, "Error processing callbacks for tenant {TenantId} ({Subdomain}).",
+                _logger.LogError(ex, "Error processing scheduled callbacks for tenant {TenantId} ({Subdomain}).",
                     tenant.Id, tenant.Subdomain);
             }
         }
@@ -104,13 +102,11 @@ public sealed class CallbackProcessingService : BackgroundService
     private async Task ProcessTenantAsync(Guid tenantId, string schemaName, string subdomain, CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
-        var dbFactory      = scope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
-        var platformDb     = scope.ServiceProvider.GetRequiredService<ContactConnectionDbContext>();
+        var dbFactory  = scope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
+        var platformDb = scope.ServiceProvider.GetRequiredService<ContactConnectionDbContext>();
 
         // Resolved lazily — only the opt-in stale-attempt sweep needs it, and ICallStateHistoryRecorder
-        // pulls in IDashboardNotifier, which the Worker host does not register (see project_worker_dev_boot).
-        // Keeping the resolution out of the default path lets CallbackProcessingService run in the Worker
-        // without that registration.
+        // pulls in IDashboardNotifier, which the Worker host does not register (project_worker_dev_boot).
         ICallStateHistoryRecorder? stateRecorder = null;
         ICallStateHistoryRecorder StateRecorder() =>
             stateRecorder ??= scope.ServiceProvider.GetRequiredService<ICallStateHistoryRecorder>();
@@ -119,11 +115,9 @@ public sealed class CallbackProcessingService : BackgroundService
 
         var now = DateTimeOffset.UtcNow;
 
-        // Cheap pre-filter: any non-terminal callback that could need action this tick.
-        var pending = await db.Callbacks
-            .Where(c => c.Status == CallbackStatus.Requested
-                        || c.Status == CallbackStatus.Scheduled
-                        || c.Status == CallbackStatus.Attempted)
+        var pending = await db.ScheduledCallbacks
+            .Where(c => c.Status == ScheduledCallbackStatus.Scheduled
+                        || c.Status == ScheduledCallbackStatus.Attempted)
             .OrderBy(c => c.ScheduledFor)
             .ToListAsync(ct);
 
@@ -141,13 +135,13 @@ public sealed class CallbackProcessingService : BackgroundService
                 // ── 1. Expiry ──────────────────────────────────────────────
                 if (callback.IsExpired(now))
                 {
-                    callback.MarkExpired("Window closed without an attempt.");
+                    callback.MarkExpired("Attempt window closed without a successful contact.");
                     expired++;
                     continue;
                 }
 
                 // ── 3. Stale attempt (opt-in) ──────────────────────────────
-                if (callback.Status == CallbackStatus.Attempted)
+                if (callback.Status == ScheduledCallbackStatus.Attempted)
                 {
                     if (_autoResolveAfterSeconds <= 0) continue;
                     if (callback.LastAttemptAt is not { } last) continue;
@@ -162,7 +156,7 @@ public sealed class CallbackProcessingService : BackgroundService
                         await StateRecorder().RecordAsync(
                             tenantId, schemaName, callback.CallRecordId,
                             CallHistoryState.Abandoned, callback.CampaignId, agentId: null,
-                            detail: $"Callback abandoned after {callback.AttemptCount} attempt(s)",
+                            detail: $"Scheduled callback abandoned after {callback.AttemptCount} attempt(s)",
                             abandonType: CallAbandonType.CallbackAbandon, ct: ct);
                     }
                     continue;
@@ -171,16 +165,16 @@ public sealed class CallbackProcessingService : BackgroundService
                 // ── 2. Due — place the outbound leg ────────────────────────
                 if (!callback.IsDue(now)) continue;
 
-                // cc_did routes the answered callback leg back to the campaign via the normal DID
-                // park path, and doubles as the outbound caller ID. Use the exact DID the caller
-                // dialed (frozen on the row). Fall back to the campaign's routing table only for
-                // rows created before Dnis was captured — preferring a real E.164 over a
-                // bare/placeholder number the trunk would reject.
+                // cc_did resolves the tenant/campaign for the answered leg (via the DID park
+                // path) and doubles as the outbound caller ID. Use the exact DID the caller
+                // dialed (frozen on the row); fall back to the campaign routing table (prefer a
+                // real E.164 over a bare/placeholder) only for pre-Dnis rows.
                 var did = callback.Dnis;
                 if (string.IsNullOrEmpty(did))
                 {
+                    var routeCampaign = callback.TargetCampaignId ?? callback.CampaignId;
                     var dids = await platformDb.PhoneNumberRoutings
-                        .Where(r => r.IsActive && r.CampaignId == callback.CampaignId)
+                        .Where(r => r.IsActive && r.CampaignId == routeCampaign)
                         .Select(r => r.Number)
                         .ToListAsync(ct);
                     did = dids.FirstOrDefault(n => n.StartsWith('+')) ?? dids.FirstOrDefault();
@@ -189,18 +183,18 @@ public sealed class CallbackProcessingService : BackgroundService
                 if (string.IsNullOrEmpty(did))
                 {
                     _logger.LogWarning(
-                        "Callback {CallbackId}: no DNIS on the row and campaign {CampaignId} has no active provisioned " +
-                        "DID — cannot route the callback back into the queue. Leaving it scheduled.",
+                        "ScheduledCallback {CallbackId}: no DNIS on the row and campaign {CampaignId} has no active " +
+                        "provisioned DID — cannot resolve a route. Leaving it scheduled.",
                         callback.Id, callback.CampaignId);
                     continue;
                 }
 
-                // Blank override = present the DID the caller dialed (most recognizable). A node
-                // override is already resolved to a literal at request time.
-                var callerId = callback.CallerIdOverride ?? did;
+                var callerId      = callback.CallerIdOverride ?? did;
+                var campaignVar   = callback.TargetCampaignId ?? callback.CampaignId;
+                var targetFlowVar = callback.TargetFlowId is { } tf ? $"cc_target_flow_id={tf}," : "";
 
                 // No call record yet — the DID park handler creates the connected record on answer
-                // and links it back via ICallbackConnectionService.MarkConnectedAsync.
+                // and links it via IScheduledCallbackConnectionService.MarkConnectedAsync.
                 callback.MarkAttempted();
                 await db.SaveChangesAsync(ct);
 
@@ -208,19 +202,19 @@ public sealed class CallbackProcessingService : BackgroundService
                 var digits  = new string(callback.CallbackNumber.Where(c => char.IsDigit(c) || c == '+').ToArray());
                 var command =
                     $"originate {{origination_caller_id_number={callerId}," +
-                    $"cc_did={did},cc_callback_id={callback.Id}," +
+                    $"cc_did={did},cc_callback_id={callback.Id},{targetFlowVar}" +
                     $"cc_tenant_id={tenantId},cc_tenant_schema={schemaName},cc_tenant_subdomain={subdomain}," +
-                    $"cc_campaign_id={callback.CampaignId},ignore_early_media=true," +
+                    $"cc_campaign_id={campaignVar},ignore_early_media=true," +
                     $"originate_timeout=45}}sofia/gateway/{_defaultGateway}/{digits} &park()";
 
                 await esl.SendBgApiAsync(command, ct);
                 placed++;
 
                 _logger.LogInformation(
-                    "Callback {CallbackId} attempt {Attempt}/{Max}: originating {Number} for campaign {CampaignId} " +
-                    "(DID {Did}).",
+                    "ScheduledCallback {CallbackId} attempt {Attempt}/{Max}: originating {Number} " +
+                    "(DID {Did}, targetFlow {Flow}).",
                     callback.Id, callback.AttemptCount, callback.MaxAttempts,
-                    callback.CallbackNumber, callback.CampaignId, did);
+                    callback.CallbackNumber, did, callback.TargetFlowId?.ToString() ?? "(campaign default)");
             }
 
             await db.SaveChangesAsync(ct);
@@ -232,7 +226,7 @@ public sealed class CallbackProcessingService : BackgroundService
 
         if (expired + placed + resolved > 0)
             _logger.LogInformation(
-                "Callbacks [{Subdomain}]: {Placed} placed, {Expired} expired, {Resolved} stale-resolved.",
+                "ScheduledCallbacks [{Subdomain}]: {Placed} placed, {Expired} expired, {Resolved} stale-resolved.",
                 subdomain, placed, expired, resolved);
     }
 

@@ -229,7 +229,7 @@ public sealed class EslBackgroundService : BackgroundService
         var dbFactory        = scope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
         var telephonyEngine  = scope.ServiceProvider.GetRequiredService<ITelephonyFlowEngine>();
         var callStateRecorder = scope.ServiceProvider.GetRequiredService<ICallStateHistoryRecorder>();
-        var callbackConn     = scope.ServiceProvider.GetRequiredService<ICallbackConnectionService>();
+        var callbackConn     = scope.ServiceProvider.GetRequiredService<IScheduledCallbackConnectionService>();
 
         // ── DID routing: check if destination matches a provisioned phone number ──
         // Carriers vary on whether the dialed number carries a leading "+" and/or "1",
@@ -274,7 +274,7 @@ public sealed class EslBackgroundService : BackgroundService
         ContactConnectionDbContext platformDb,
         ITenantDbContextFactory dbFactory,
         ICallStateHistoryRecorder callStateRecorder,
-        ICallbackConnectionService callbackConn,
+        IScheduledCallbackConnectionService callbackConn,
         CancellationToken ct)
     {
         var tenant = await platformDb.Tenants.FirstOrDefaultAsync(t => t.Id == routing.TenantId, ct);
@@ -286,11 +286,15 @@ public sealed class EslBackgroundService : BackgroundService
 
         await using var db = dbFactory.Create(tenant.SchemaName);
 
-        // A fired callback leg carries cc_callback_id — its connected call record is a "callback"
-        // source record, and CallbackConnectionService links it back + marks the row completed
-        // once the flow has run (below).
+        // A fired scheduled-callback leg carries cc_callback_id — its connected call record is a
+        // "callback" source record, and ScheduledCallbackConnectionService links it back + marks
+        // the row completed once the flow has run (below). cc_target_flow_id (when set) says which
+        // telephony flow to run for it instead of the campaign default — this is what keeps a
+        // scheduled callback from re-entering the inbound flow and re-offering itself.
         var callbackIdRaw = eventVars.GetValueOrDefault("variable_cc_callback_id");
         var isCallbackLeg = Guid.TryParse(callbackIdRaw, out var callbackId);
+        Guid? targetFlowId =
+            Guid.TryParse(eventVars.GetValueOrDefault("variable_cc_target_flow_id"), out var tf) ? tf : null;
 
         var record = isCallbackLeg
             ? CallRecord.CreateCallback(tenant.Id, routing.CampaignId, callerNumber)
@@ -336,6 +340,7 @@ public sealed class EslBackgroundService : BackgroundService
             TenantTimezone    = tenant.Timezone,
             Esl               = esl,
             ChannelVars       = channelVars,
+            FlowIdOverride    = targetFlowId,
         };
 
         await telephonyEngine.ExecuteAsync(ctx, ct);
@@ -902,7 +907,7 @@ public sealed class EslBackgroundService : BackgroundService
             if (!string.IsNullOrEmpty(cbSchema))
             {
                 using var cbScope = _scopeFactory.CreateScope();
-                var callbackConn = cbScope.ServiceProvider.GetRequiredService<ICallbackConnectionService>();
+                var callbackConn = cbScope.ServiceProvider.GetRequiredService<IScheduledCallbackConnectionService>();
                 var abandoned = await callbackConn.MarkNoAnswerAsync(cbSchema, cbTenantId, hungCallbackId, cause, ct);
                 _logger.LogInformation(
                     "CHANNEL_HANGUP {Uuid} cause={Cause}: fired callback {CallbackId} leg ended with no session " +

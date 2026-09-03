@@ -50,6 +50,11 @@ public class TelephonyFlowContext
     public IReadOnlyDictionary<string, string> ChannelVars { get; init; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Run this specific telephony flow instead of resolving one from the phone number /
+    /// campaign. Set for a fired scheduled callback (its <c>cc_target_flow_id</c>) so the answered
+    /// leg lands in a designated flow rather than re-running the inbound flow.</summary>
+    public Guid? FlowIdOverride { get; init; }
+
     // ── Dial cancellation ─────────────────────────────────────────────────────
     public bool IsCancelled { get; private set; }
     public string? CancelMessage { get; private set; }
