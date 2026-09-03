@@ -129,7 +129,7 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
         // Propagate any vars written during the main branch back to the session
         foreach (var (k, v) in ctx.Vars)
             session.Vars[k] = v;
-        ApplyPendingSessionMutations(session);
+        ApplyPendingSessionMutations(session, ctx);
         await _sessionStore.SaveAsync(session, ct);
     }
 
@@ -139,8 +139,13 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
     /// leave a sentinel var and the engine applies it here before every post-execution save.
     /// tf_transfer's "campaign_queue" destination uses <c>_switch_campaign_id</c>.
     /// </summary>
-    private static void ApplyPendingSessionMutations(TelephonyCallSession session)
+    private static void ApplyPendingSessionMutations(TelephonyCallSession session, TelephonyFlowContext ctx)
     {
+        // Handlers can't delete session vars through ctx.Vars (the sync above only copies in) —
+        // honour the explicit removal list.
+        foreach (var key in ctx.VarsToRemove)
+            session.Vars.Remove(key);
+
         if (session.Vars.Remove("_switch_campaign_id", out var cid) && Guid.TryParse(cid, out var newCampaignId))
             session.CampaignId = newCampaignId;
     }
@@ -203,7 +208,7 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
 
         foreach (var (k, v) in ctx.Vars)
             session.Vars[k] = v;
-        ApplyPendingSessionMutations(session);
+        ApplyPendingSessionMutations(session, ctx);
         await _sessionStore.SaveAsync(session, ct);
     }
 
@@ -264,7 +269,7 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
 
         foreach (var (k, v) in ctx.Vars)
             session.Vars[k] = v;
-        ApplyPendingSessionMutations(session);
+        ApplyPendingSessionMutations(session, ctx);
         await _sessionStore.SaveAsync(session, ct);
         return true;
     }
@@ -356,7 +361,7 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
         // branch (e.g. agent_selected). Either way the caller of FireEventAsync is the only
         // thing that should act on it.
         session.Vars.Remove("_crm_session_json");
-        ApplyPendingSessionMutations(session);
+        ApplyPendingSessionMutations(session, ctx);
         await _sessionStore.SaveAsync(session, ct);
 
         // Extract CRM session state if tf_script_pop fired during the branch

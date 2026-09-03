@@ -31,6 +31,16 @@ public class ScheduledCallbackTimeParserTests
         Assert.NotNull(when);
     }
 
+    [Fact]
+    public void ValidFuture_ReturnsUtcOffset()
+    {
+        // Npgsql rejects a non-zero Offset writing to a 'timestamp with time zone' column, so the
+        // parser must hand back a UTC-normalised DateTimeOffset even for an offset timezone.
+        var (when, outcome) = ScheduledCallbackTimeParser.Resolve(FutureDate(), "14:00", Tz, None);
+        Assert.Equal(ScheduledCallbackTimeParser.Ok, outcome);
+        Assert.Equal(TimeSpan.Zero, when!.Value.Offset);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("   ")]

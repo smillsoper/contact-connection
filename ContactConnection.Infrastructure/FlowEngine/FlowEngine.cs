@@ -42,8 +42,10 @@ public class FlowEngine : IFlowEngine
     // for a chain reached at true flow start (isStart stays true the whole way through), stops
     // and displays it with a Continue button. Clicking Continue then re-invokes ExecuteAsync on
     // the same node from scratch, calling the live API a second time with real side effects.
+    // scheduled_callback books a row and advances transparently (like set_variable) — it has no
+    // interactive content, so without this it stops and renders as a dead node with no controls.
     private static readonly HashSet<string> AutoAdvanceTypes =
-        ["branch", "set_variable", "section", "execute_flow", "transition_to_flow", "api_call"];
+        ["branch", "set_variable", "section", "execute_flow", "transition_to_flow", "api_call", "scheduled_callback"];
 
     private static readonly TimeSpan SessionTtl = TimeSpan.FromHours(12);
 

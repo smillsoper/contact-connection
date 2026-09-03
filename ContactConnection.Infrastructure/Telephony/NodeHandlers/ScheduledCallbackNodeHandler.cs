@@ -108,10 +108,13 @@ public class ScheduledCallbackNodeHandler : ITelephonyNodeHandler
             await db.SaveChangesAsync(ct);
         }
 
-        // If the caller was queued, take them out — the flow engine's var-sync only copies
-        // ctx.Vars INTO the session (never deletes), so clear _queued on the session directly and
-        // stamp _left_for_callback so the CHANNEL_HANGUP handler doesn't log an in_queue abandon.
-        ctx.Vars.Remove("_queued");
+        // If the caller was queued, take them out. The flow engine's var-sync only copies
+        // ctx.Vars INTO the session (never deletes) and re-saves its own session copy after the
+        // node runs — on the ivr_done / PLAYBACK_STOP resume path that re-save clobbers the direct
+        // session write below. RemoveSessionVar records the deletion so the engine applies it on
+        // its own sync; the direct write stays as a belt-and-braces for the park path and keeps
+        // _left_for_callback set so the CHANNEL_HANGUP handler doesn't log an in_queue abandon.
+        ctx.RemoveSessionVar("_queued");
         ctx.Vars["_scheduled_callback_id"] = callback.Id.ToString();
         ctx.Vars["_left_for_callback"]     = "true";
 

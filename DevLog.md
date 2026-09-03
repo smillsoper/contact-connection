@@ -119,6 +119,7 @@
 | 107 | 2026-09-02 | 9:43 AM PDT | 10:13 AM PDT | 30 min | ~12478 min |
 | 108 | 2026-09-02 | 10:16 AM PDT | 12:25 PM PDT | 129 min | ~12607 min |
 | 109 | 2026-09-03 | 9:00 AM PDT | 9:46 AM PDT | 46 min | ~12653 min |
+| 110 | 2026-09-03 | 9:55 AM PDT | 10:52 AM PDT | 57 min | ~12710 min |
 
 ---
 
@@ -5014,3 +5015,53 @@ Design captured in memory `project_queue_callback`: caller keeps their queue pos
 6. Telnyx Verified Numbers feature.
 7. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
 8. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; `FlowEngine` test coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 110
+
+**Date:** 2026-09-03
+**Start:** 9:55 AM PDT
+**End:** 10:52 AM PDT
+**Duration:** 57 minutes
+**Total Duration:** ~12710 minutes
+
+### Focus
+
+Live-verify the S109 scheduled callback end to end (telephony IVR node + CRM script node), on `tenant_test_tenant` / campaign `226ae1c6` over the real Telnyx trunk. Found and fixed 3 bugs in the S109 code along the way; all paths pass.
+
+### Setup for the test
+
+- New telephony flow **"Test Campaign 1 - Callback Answer Flow"** (`59b09f56…`) — a stripped clone of the inbound flow: `tf_answer → tf_route_to_queue → hold-loop`, plus the agent-selected / agent-answer / call-disconnected event handlers. No IVR, no callback offer — this is the `TargetFlowId` a fired callback lands in so it can't re-offer itself.
+- Inbound flow `8386ec2d` still had the S108 test node of type `tf_request_callback` — **orphaned** since the S109 rename (no handler; `TelephonyFlowEngine` terminates the flow on an unregistered node type). Swapped it to `tf_scheduled_callback` in the DB for B1.
+- Injected a `scheduled_callback` node into `Test Script 1` for B2 (campaign `226ae1c6` pops that script to whoever answers).
+- **All three DB flow edits were reverted after testing** — `8386ec2d` back to v76 (orphaned node still there), `Test Script 1` back to v48, answer flow deleted, test `scheduled_callbacks` rows + fake call records removed.
+
+### Bugs found & fixed (all S109 regressions)
+
+1. **`ScheduledCallbackTimeParser.Resolve` returned a non-UTC `DateTimeOffset`.** It built `new DateTimeOffset(local, tz.GetUtcOffset(local))` — offset `-05:00` for `America/Chicago`. Npgsql rejects a non-zero `Offset` writing to a `timestamp with time zone` column (`only offset 0 (UTC) is supported`), so `SaveChangesAsync` threw, the flow engine caught it, the node never transitioned, and the caller sat in queue. Fix: `return (when.ToUniversalTime(), Ok)`. Affected both node handlers (Part A didn't hit it — that row was seeded via raw SQL). Regression test: `ScheduledCallbackTimeParserTests.ValidFuture_ReturnsUtcOffset`.
+2. **`tf_scheduled_callback` did not durably dequeue on the `ivr_done` / PLAYBACK_STOP resume path.** `TelephonyFlowEngine.ResumeFromNodeAsync` loads the session once at the top, runs the node, then copies `ctx.Vars` back onto that *stale* in-memory session and re-saves — silently re-adding `_queued` that the handler had removed via its own `session.Vars.Remove` + `SaveAsync`. (Same class of "var-sync only copies, never deletes" bug S108 fixed for the park path.) With an available agent, the booked caller stayed deliverable for the ~5 s until they hung up. Fix: added `TelephonyFlowContext.RemoveSessionVar(key)` + a `VarsToRemove` set; `ApplyPendingSessionMutations(session, ctx)` now removes those keys, and it's called at all 4 engine session-sync points (`ExecuteAsync`, `ResumeFromNodeAsync`, `SwitchFlowAsync`, `FireEventAsync`). Handler uses `ctx.RemoveSessionVar("_queued")`. Regression test: `TelephonyFlowEngineResumeTests`.
+3. **CRM `scheduled_callback` missing from `FlowEngine.AutoAdvanceTypes`.** The handler booked the row correctly, but the engine then stopped and pushed the node to the agent UI as an interactive node with no controls — the script was stuck with no way to continue (user screenshot confirmed). Fix: added `"scheduled_callback"` to the set (it's transparent, like `set_variable`). Regression test: `FlowEngineAutoAdvanceTests`.
+
+### Live verification — all PASS (real Telnyx trunk, agent ext 1000)
+
+- **Part A** — seeded row (`scheduled_for = now()+2min`, `target_flow_id` set) → Worker due-scan → `originate …&park()` to the cell, caller ID = DNIS → answered leg carried `cc_target_flow_id` → engine logged `starting flow 'Callback Answer Flow' (59b09f56)` **not** the inbound flow → queue → agent answered on the softphone → row `completed`, `outbound_call_record_id` linked, connected record `source=callback`, state history `pre_queue→in_queue→routing→active→completed`.
+- **B1** — live call in, IVR press 1 → `tf_scheduled_callback` wrote a correct row (`scheduled`, cell as ANI, DNIS `+15419196582`, `target_flow_id 59b09f56`, `scheduled_for` = 10:35 America/Chicago → 15:35 UTC), thank-you audio played, hangup clean; queue dequeue durable (1 racing poll then `0 queued`, vs. 6 stuck ticks pre-fix); no `in_queue` abandon (`post_agent` "Call ended — callback pending" instead). The telephony designer also round-tripped and saved the swapped node. Then nudged `scheduled_for` to +90 s → Worker fired it → ran `59b09f56` → bridged to ext 1000 → row `completed`.
+- **B2** — live call in, script pop → `scheduled_callback` node booked a row transparently (campaign + DNIS from `ctx.CallRecord`), script advanced to the Introduction section, agent completed + dispositioned the flow (Junk / Test). Then nudged the row → Worker fired it → ran `59b09f56` → bridged to ext 1000 → row `completed`, connected record `source=callback`, `handle_time 24 s`.
+
+### State
+
+- Build **0 errors**. **546 tests pass** (Domain 147, Application 20, Infrastructure 305, Api 74) — +9 vs. S109's 537 (parser UTC assertion, `TelephonyFlowEngineResumeTests`, `FlowEngineAutoAdvanceTests` 7-case theory).
+- 5 source files + 2 test files changed, 2 new test files. Committed at end of session.
+- No new migrations. No web changes.
+
+### Next Session — pick up here
+
+1. **Queue callback (virtual hold)** — the separate feature (memory `project_queue_callback`): caller keeps queue position; on reaching an available agent that agent goes to a new `callback_pending` state while the outbound dial happens, then the caller is bridged direct; agent released on failure. Its own delivery path in the queue engine — not the DID-park path the scheduled engine reuses.
+2. Supervisor scheduled-callbacks UI — list/cancel (`/api/v1/scheduled-callbacks/*` endpoints exist).
+3. When re-using inbound flow `8386ec2d` for telephony tests: its `tf_request_callback` node is orphaned (S109 rename) — rebuild it as `tf_scheduled_callback` in the designer first, or the flow dead-ends there.
+4. Worker Development boot fix (Session 101 carry-over — no-op notifier registrations).
+5. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
+6. Telnyx Verified Numbers feature.
+7. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
+8. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.

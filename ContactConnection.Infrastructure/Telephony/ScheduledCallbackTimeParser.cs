@@ -57,6 +57,8 @@ public static class ScheduledCallbackTimeParser
         if (TimeSpan.TryParse(window.StartTime, out var start) && tod < start) return (null, InvalidTime);
         if (TimeSpan.TryParse(window.EndTime, out var end) && tod > end) return (null, InvalidTime);
 
-        return (when, Ok);
+        // Normalise to a UTC-offset DateTimeOffset — Npgsql rejects a non-zero Offset when writing
+        // to a 'timestamp with time zone' column (which every timestamp on ScheduledCallback is).
+        return (when.ToUniversalTime(), Ok);
     }
 }

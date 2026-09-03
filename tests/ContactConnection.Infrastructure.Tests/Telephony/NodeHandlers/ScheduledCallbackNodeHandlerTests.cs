@@ -88,6 +88,10 @@ public class ScheduledCallbackNodeHandlerTests
         Assert.Equal("scheduled", result.TransitionTaken);
         Assert.Equal("node_thanks", result.NextNodeId);
         Assert.False(ctx.Vars.ContainsKey("_queued"));
+        // The engine's post-node session-sync only copies ctx.Vars in — the handler must also
+        // register _queued for deletion or the ivr_done resume path re-persists it (the caller
+        // stays deliverable to an agent after booking a callback).
+        Assert.Contains("_queued", ctx.VarsToRemove);
         Assert.True(ctx.Vars.ContainsKey("_scheduled_callback_id"));
 
         await using var check = Db(dbName);

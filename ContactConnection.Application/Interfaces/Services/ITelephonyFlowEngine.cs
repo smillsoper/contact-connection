@@ -46,6 +46,22 @@ public class TelephonyFlowContext
     /// <summary>ESL connection — null during event branches (bridge already established).</summary>
     public IEslCommander? Esl { get; init; }
     public Dictionary<string, string> Vars { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Session var keys a handler wants deleted from the persisted session. The engine's
+    /// session-sync only ever copies <see cref="Vars"/> <em>into</em> the session, so removing a
+    /// key from <see cref="Vars"/> alone is silently undone on the next sync (notably on the
+    /// PLAYBACK_STOP / ivr_done resume path). A handler that needs a key gone — e.g.
+    /// tf_scheduled_callback clearing <c>_queued</c> so the caller isn't still deliverable —
+    /// calls <see cref="RemoveSessionVar"/>.</summary>
+    public HashSet<string> VarsToRemove { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Drop a var from both the live context and the persisted session on the next sync.</summary>
+    public void RemoveSessionVar(string key)
+    {
+        Vars.Remove(key);
+        VarsToRemove.Add(key);
+    }
+
     /// <summary>Channel variables from the CHANNEL_PARK event (e.g. SIP headers).</summary>
     public IReadOnlyDictionary<string, string> ChannelVars { get; init; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
