@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Linq;
 using System.Net.WebSockets;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -46,6 +47,9 @@ public class ElevenLabsTtsStreamProvider : ITtsStreamProvider
         using var socket = new ClientWebSocket();
         socket.Options.SetRequestHeader("xi-api-key", apiKey);
         await socket.ConnectAsync(uri, ct);
+        _logger.LogInformation(
+            "ElevenLabs TTS: connected (voice={Voice} model={Model} outputFormat={Format})",
+            request.VoiceId, modelId, outputFormat);
 
         // Init message opens the generation context; voice_settings apply for the whole
         // connection. The text field here is a required placeholder, not spoken content.
@@ -80,12 +84,31 @@ public class ElevenLabsTtsStreamProvider : ITtsStreamProvider
                 messageBytes.Write(buffer, 0, result.Count);
             } while (!result.EndOfMessage);
 
-            if (result.MessageType == WebSocketMessageType.Close) break;
+            if (result.MessageType == WebSocketMessageType.Close)
+            {
+                _logger.LogInformation(
+                    "ElevenLabs TTS: server closed the socket (status={Status} description={Description})",
+                    socket.CloseStatus, socket.CloseStatusDescription);
+                break;
+            }
 
             using var doc = JsonDocument.Parse(messageBytes.ToArray());
             var root = doc.RootElement;
 
-            if (root.TryGetProperty("audio", out var audioEl) && audioEl.ValueKind == JsonValueKind.String)
+            var hasAudio = root.TryGetProperty("audio", out var audioEl) && audioEl.ValueKind == JsonValueKind.String;
+            var audioLen = hasAudio ? audioEl.GetString()!.Length : 0;
+            var isFinal = root.TryGetProperty("isFinal", out var finalEl) && finalEl.ValueKind == JsonValueKind.True;
+
+            // Diagnostic — every reply's shape, not just error frames. audio is logged as its
+            // base64 length only (never the content): confirms whether ElevenLabs is sending real
+            // audio at all vs. e.g. an empty/zero-length "audio" field, an unrecognized message
+            // shape, or a close with no payload — narrows "silence on the call" down to our
+            // parsing vs. the vendor vs. the mod_audio_stream/FreeSWITCH playback side.
+            _logger.LogInformation(
+                "ElevenLabs TTS message: hasAudio={HasAudio} audioB64Len={AudioLen} isFinal={IsFinal} keys=[{Keys}]",
+                hasAudio, audioLen, isFinal, string.Join(",", root.EnumerateObject().Select(p => p.Name)));
+
+            if (hasAudio)
             {
                 var audioBytes = Convert.FromBase64String(audioEl.GetString()!);
                 if (audioBytes.Length > 0)
@@ -96,7 +119,7 @@ public class ElevenLabsTtsStreamProvider : ITtsStreamProvider
                 _logger.LogWarning("ElevenLabs TTS error message: {Error}", errorEl.ToString());
             }
 
-            if (root.TryGetProperty("isFinal", out var finalEl) && finalEl.ValueKind == JsonValueKind.True)
+            if (isFinal)
                 break;
         }
 

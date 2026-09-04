@@ -1,8 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
-using ContactConnection.Domain.Entities;
 using ContactConnection.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -22,7 +20,7 @@ namespace ContactConnection.Infrastructure.Telephony.NodeHandlers;
 ///            fired with uuid_broadcast. Requires freeswitch-mod-flite in the container.
 ///          - TtsStreaming preference configured: routed through mod_audio_stream + the Api's
 ///            /relay/tts-stream WebSocket relay to an external vendor (Azure, ElevenLabs, ...)
-///            via ITtsStreamProvider, fired with uuid_audio_stream. See ResolveStreamingProviderAsync.
+///            via ITtsStreamProvider, fired with uuid_audio_stream. See ITtsStreamingService.
 ///
 /// The node fires the media and returns immediately (fire-and-forget). Continuation is handled
 /// by EslBackgroundService: PLAYBACK_STOP for the uuid_broadcast paths (file, flite tts), or
@@ -33,32 +31,21 @@ public class PlayNodeHandler : ITelephonyNodeHandler
 {
     public string NodeType => "tf_play";
 
-    private static readonly JsonSerializerOptions RelayJsonOpts = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-    };
-
     private readonly ITenantDbContextFactory _factory;
-    private readonly IPortalApiEndpointRepository _portalEndpointRepo;
-    private readonly IPortalApiDefinitionRepository _portalDefRepo;
-    private readonly ITelephonyCallSessionStore _sessionStore;
+    private readonly ITtsStreamingService _tts;
     private readonly IConfiguration _config;
     private readonly ILogger<PlayNodeHandler> _logger;
 
     public PlayNodeHandler(
         ITenantDbContextFactory factory,
-        IPortalApiEndpointRepository portalEndpointRepo,
-        IPortalApiDefinitionRepository portalDefRepo,
-        ITelephonyCallSessionStore sessionStore,
+        ITtsStreamingService tts,
         IConfiguration config,
         ILogger<PlayNodeHandler> logger)
     {
-        _factory            = factory;
-        _portalEndpointRepo = portalEndpointRepo;
-        _portalDefRepo      = portalDefRepo;
-        _sessionStore       = sessionStore;
-        _config             = config;
-        _logger             = logger;
+        _factory = factory;
+        _tts     = tts;
+        _config  = config;
+        _logger  = logger;
     }
 
     public async Task<TelephonyNodeResult> ExecuteAsync(
@@ -95,9 +82,9 @@ public class PlayNodeHandler : ITelephonyNodeHandler
                 return TerminalResult(transitions, "tts_finished");
             }
 
-            var streamingProvider = await ResolveStreamingProviderAsync(ctx, ct);
+            var streamingProvider = await _tts.ResolveProviderAsync(ctx.TenantSchemaName, ct);
             if (streamingProvider is not null)
-                return await StartStreamingTtsAsync(ctx, streamingProvider.Value, ttsText, ttsVoice, transitions, autoRestart, ct);
+                return await StartStreamingTtsAsync(ctx, streamingProvider, ttsText, ttsVoice, transitions, autoRestart, ct);
 
             // FreeSWITCH TTS file-string syntax (mod_dptools' "tts" file format, backed by
             // mod_flite) — "say:" is a different subsystem (phrase/number macros) and throws
@@ -176,60 +163,16 @@ public class PlayNodeHandler : ITelephonyNodeHandler
     }
 
     /// <summary>
-    /// Looks up the tenant's chosen provider for ApiSubType.TtsStreaming, if any — either a
-    /// platform-catalog PortalApiEndpoint, or the tenant's own TenantApiEndpoint (e.g. they
-    /// manage their own vendor subscription/credentials rather than sharing the platform's).
-    /// Queried directly against TenantDbContext rather than ITenantApiPreferenceRepository/
-    /// ITenantApiEndpointRepository/ITenantApiDefinitionRepository — those resolve the tenant
-    /// via ambient TenantContext, which doesn't exist here (this runs from EslBackgroundService,
-    /// a background service with no HTTP request). Same explicit-schema pattern already used by
-    /// ResolveFileArgAsync below. Portal-side lookups still go through the injected repositories
-    /// since those are public-schema and have no such ambient-context dependency.
-    /// </summary>
-    private async Task<(string ProviderKey, string? SettingsJson)?> ResolveStreamingProviderAsync(
-        TelephonyFlowContext ctx, CancellationToken ct)
-    {
-        await using var db = _factory.Create(ctx.TenantSchemaName);
-        var preference = await db.TenantApiPreferences
-            .FirstOrDefaultAsync(p => p.ApiSubType == ApiSubType.TtsStreaming, ct);
-        if (preference is null) return null;
-
-        string? provider;
-        if (preference.Source == ApiPreferenceSource.Tenant)
-        {
-            var endpoint = await db.TenantApiEndpoints.FirstOrDefaultAsync(e => e.Id == preference.EndpointId, ct);
-            var definition = endpoint is null ? null
-                : await db.TenantApiDefinitions.FirstOrDefaultAsync(d => d.Id == endpoint.DefinitionId, ct);
-            provider = definition?.Provider;
-        }
-        else
-        {
-            var endpoint = await _portalEndpointRepo.GetByIdAsync(preference.EndpointId, ct);
-            var definition = endpoint is null ? null
-                : await _portalDefRepo.GetByIdAsync(endpoint.DefinitionId, ct);
-            provider = definition?.Provider;
-        }
-
-        if (string.IsNullOrWhiteSpace(provider))
-        {
-            _logger.LogWarning(
-                "PlayNodeHandler [{Uuid}]: tenant's tts_streaming preference (source={Source}) has no resolvable Provider — falling back to flite",
-                ctx.ChannelUuid, preference.Source);
-            return null;
-        }
-
-        return (provider, preference.SettingsJson);
-    }
-
-    /// <summary>
-    /// Routes TTS through mod_audio_stream + the streaming relay instead of flite. The relay
-    /// resolves credentials and calls the actual vendor — this handler only needs to pass along
-    /// which provider, the text/voice/settings, via a short-lived Redis-cached correlation token
-    /// (kept off the ESL command line itself — see TtsStreamRelayRequest for why).
+    /// Arms the live mod_audio_stream session via the shared ITtsStreamingService, then lays down
+    /// this node's own continuation bookkeeping — same session-var convention as the
+    /// uuid_broadcast path so EslBackgroundService's existing FireEndTransitionAsync
+    /// ("tts_finished" transition) works unchanged, only the triggering FreeSWITCH event differs
+    /// (mod_audio_stream::disconnect, not PLAYBACK_STOP). No "_play_media_arg" — nothing to
+    /// loop/re-broadcast on this path.
     /// </summary>
     private async Task<TelephonyNodeResult> StartStreamingTtsAsync(
         TelephonyFlowContext ctx,
-        (string ProviderKey, string? SettingsJson) provider,
+        TtsStreamingProviderInfo provider,
         string ttsText,
         string ttsVoice,
         JsonObject? transitions,
@@ -241,50 +184,12 @@ public class PlayNodeHandler : ITelephonyNodeHandler
                 "PlayNodeHandler [{Uuid}]: autoRestart is not supported for streaming TTS — ignoring",
                 ctx.ChannelUuid);
 
-        Dictionary<string, string>? providerSettings = null;
-        if (!string.IsNullOrWhiteSpace(provider.SettingsJson))
-        {
-            try
-            {
-                providerSettings = JsonSerializer.Deserialize<Dictionary<string, string>>(provider.SettingsJson);
-            }
-            catch (JsonException ex)
-            {
-                _logger.LogWarning(ex,
-                    "PlayNodeHandler [{Uuid}]: malformed TTS settings JSON for provider {Provider} — ignoring",
-                    ctx.ChannelUuid, provider.ProviderKey);
-            }
-        }
-
-        var relayRequest = new TtsStreamRelayRequest(
-            ctx.ChannelUuid,
-            ctx.TenantSubdomain,
-            provider.ProviderKey,
-            ttsVoice,
-            ttsText.Replace("\n", " "),
-            PreferredSampleRateHz: 8000,
-            providerSettings);
-
-        var token = Guid.NewGuid().ToString("N");
-        await _sessionStore.SetKeyAsync(
-            $"tts_relay:{token}", JsonSerializer.Serialize(relayRequest, RelayJsonOpts), TimeSpan.FromSeconds(30), ct);
-
-        var wssUrl = _config["FreeSWITCH:TtsRelayWsUrl"] ?? "ws://host.docker.internal:5135/relay/tts-stream";
-
-        // Same session-var convention as the uuid_broadcast path so EslBackgroundService's
-        // existing FireEndTransitionAsync ("tts_finished" transition) works unchanged — only the
-        // triggering FreeSWITCH event differs (mod_audio_stream::disconnect, not PLAYBACK_STOP).
-        // No "_play_media_arg" — nothing to loop/re-broadcast on this path.
         ctx.Vars["_play_state"]        = "streaming";
         ctx.Vars["_play_audio_source"] = "tts";
         ctx.Vars["_play_started_at"]   = DateTimeOffset.UtcNow.ToString("O");
         StoreTransitions(transitions, ctx.Vars);
 
-        _logger.LogInformation(
-            "PlayNodeHandler [{Uuid}]: streaming TTS via provider={Provider} voice={Voice}",
-            ctx.ChannelUuid, provider.ProviderKey, ttsVoice);
-
-        await ctx.Esl!.StartAudioStreamAsync(ctx.ChannelUuid, wssUrl, "mono", "8k", token, ct);
+        await _tts.StartStreamAsync(ctx, provider, ttsText, ttsVoice, ct);
 
         return new TelephonyNodeResult(null, "playing");
     }

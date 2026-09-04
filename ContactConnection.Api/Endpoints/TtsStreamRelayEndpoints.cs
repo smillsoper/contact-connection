@@ -35,6 +35,7 @@ public static class TtsStreamRelayEndpoints
         ITtsStreamProviderFactory providerFactory,
         ITenantCredentialStore credentialStore,
         ITelephonyCallSessionStore cache,
+        TtsPlaybackCoordinator coordinator,
         IConfiguration config,
         ILoggerFactory loggerFactory,
         CancellationToken ct)
@@ -88,12 +89,28 @@ public static class TtsStreamRelayEndpoints
         // the connection can stall once the OS receive buffer fills.
         _ = DrainIncomingAsync(socket, logger, ct);
 
+        var forwardedAny = false;
         try
         {
-            await RunSynthesisAsync(request, socket, providerFactory, credentialStore, logger, ct);
+            forwardedAny = await RunSynthesisAsync(request, socket, providerFactory, credentialStore, logger, ct);
         }
         finally
         {
+            // mod_audio_stream deletes every temp file it wrote for this session the moment it
+            // processes "uuid_audio_stream stop" — calling that before EslBackgroundService's
+            // local play queue has actually finished playing everything silently deletes chunks
+            // still sitting in that queue out from under uuid_broadcast (live-verified: first
+            // chunk plays, then dead air, flow never resumes). Skip the wait entirely when
+            // nothing was ever forwarded (provider/credential failure, zero audio) — matches the
+            // old fast-fail behavior for that case, nothing to wait for.
+            if (forwardedAny)
+            {
+                await MarkStreamCompleteAsync(request.ChannelUuid, cache, CancellationToken.None);
+                logger.LogInformation(
+                    "TTS relay [{Uuid}]: waiting for local playback queue to drain before stopping", request.ChannelUuid);
+                await coordinator.WaitForDrainAsync(request.ChannelUuid, TimeSpan.FromSeconds(45), CancellationToken.None);
+            }
+
             // Verified live: closing only our side of the WebSocket is not enough. mod_audio_
             // stream's underlying WebSocket library auto-reconnects on any close, including a
             // normal one we initiate — without this ESL-side stop, FreeSWITCH retries the
@@ -108,7 +125,24 @@ public static class TtsStreamRelayEndpoints
         }
     }
 
-    private static async Task RunSynthesisAsync(
+    /// <summary>
+    /// Flags the channel's session as "no more streaming-TTS chunks are coming" — set here,
+    /// directly by the relay, rather than waited on indirectly via mod_audio_stream's own
+    /// disconnect event, because that event only fires as a *result* of the stop command this
+    /// very flag is gating (waiting on it would deadlock). EslBackgroundService's play-queue
+    /// drain (HandleStreamChunkFinishedAsync) reads this to decide "resume the flow now" vs.
+    /// "stay idle, more chunks may still be queued."
+    /// </summary>
+    private static async Task MarkStreamCompleteAsync(string channelUuid, ITelephonyCallSessionStore cache, CancellationToken ct)
+    {
+        var session = await cache.GetAsync(channelUuid, ct);
+        if (session is null) return;
+        session.Vars["_play_stream_disconnected"] = "true";
+        await cache.SaveAsync(session, ct);
+    }
+
+    /// <summary>Returns true if at least one audio chunk was actually forwarded to FreeSWITCH.</summary>
+    private static async Task<bool> RunSynthesisAsync(
         TtsStreamRelayRequest request,
         WebSocket socket,
         ITtsStreamProviderFactory providerFactory,
@@ -124,7 +158,7 @@ public static class TtsStreamRelayEndpoints
         catch (InvalidOperationException ex)
         {
             logger.LogError(ex, "TTS relay: no provider for key {ProviderKey}", request.ProviderKey);
-            return;
+            return false;
         }
 
         var credentials = new Dictionary<string, string>();
@@ -137,7 +171,7 @@ public static class TtsStreamRelayEndpoints
                 logger.LogWarning(
                     "TTS relay: tenant {Tenant} has no '{Field}' credential configured for provider {Provider}",
                     request.TenantSubdomain, field, request.ProviderKey);
-                return;
+                return false;
             }
             credentials[field] = value;
         }
@@ -145,6 +179,7 @@ public static class TtsStreamRelayEndpoints
         var synthesisRequest = new TtsStreamRequest(
             request.Text, request.VoiceId, credentials, request.PreferredSampleRateHz, request.ProviderSettings);
 
+        var sentAny = false;
         try
         {
             await foreach (var chunk in provider.SynthesizeAsync(synthesisRequest, ct))
@@ -160,6 +195,7 @@ public static class TtsStreamRelayEndpoints
                     },
                 });
                 await socket.SendAsync(Encoding.UTF8.GetBytes(frame), WebSocketMessageType.Text, true, ct);
+                sentAny = true;
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -167,6 +203,8 @@ public static class TtsStreamRelayEndpoints
             logger.LogError(ex, "TTS relay: synthesis failed for tenant {Tenant} provider {Provider}",
                 request.TenantSubdomain, request.ProviderKey);
         }
+
+        return sentAny;
     }
 
     private static async Task StopFreeswitchStreamAsync(string channelUuid, IConfiguration config, ILogger logger, CancellationToken ct)

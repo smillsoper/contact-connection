@@ -44,6 +44,8 @@ public class TransferNodeHandlerTests
             new EligibleAgentRanker(new Mock<IAgentStateStore>().Object),
             new Mock<ICallStateHistoryRecorder>().Object,
             new Mock<ITelephonyCallSessionStore>().Object,
+            new Mock<ITtsStreamingService>().Object,
+            new Mock<ITtsFileSynthesizer>().Object,
             sp, cfg, NullLogger<TransferNodeHandler>.Instance);
     }
 

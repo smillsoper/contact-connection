@@ -20,7 +20,10 @@ public class VoicemailNodeHandlerTests
             ["FreeSWITCH:RecordingsContainerPath"] = "/var/lib/freeswitch/recordings",
         }).Build();
         return new VoicemailNodeHandler(
-            new Mock<ITenantDbContextFactory>().Object, config, NullLogger<VoicemailNodeHandler>.Instance);
+            new Mock<ITenantDbContextFactory>().Object,
+            new Mock<ITtsStreamingService>().Object,
+            new Mock<ITtsFileSynthesizer>().Object,
+            config, NullLogger<VoicemailNodeHandler>.Instance);
     }
 
     private static readonly Guid CallId = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");

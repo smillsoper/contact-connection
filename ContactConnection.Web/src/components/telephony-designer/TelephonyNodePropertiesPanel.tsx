@@ -4,6 +4,7 @@ import type { TelNodeData, TelephonyNodeType, TimeWindow, TelVariableAssignment 
 import { TELEPHONY_NODE_META } from '../../types/telephony-designer'
 import { TIMEZONE_GROUPS } from '../../utils/timezones'
 import { audioFilesApi, BUILTIN_AUDIO_GROUPS, BUILTIN_AUDIO_OPTIONS, type AudioFileRecord } from '../../api/audioFiles'
+import { ttsServiceApi, type TtsServiceStatus } from '../../api/ttsService'
 import { flowsApi, type GeneralApiSummary, type FlowSummary } from '../../api/flows'
 import { listAdminAgents, type AgentRecord } from '../../api/adminAgents'
 import { listCampaigns, listSipGateways } from '../../api/telephony'
@@ -535,17 +536,14 @@ export default function TelephonyNodePropertiesPanel({
           </div>
 
           <div>
-            <label className="block text-xs text-gray-400 mb-1">Connect prompt (optional)</label>
-            <input
-              className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-blue-500"
-              placeholder="__builtin:ivr/ivr-hold_connect_call.wav  or an audio file id"
+            <AudioFilePicker
               value={(data.connectAudioFileId as string) ?? ''}
-              onChange={(e) => set('connectAudioFileId', e.target.value)}
+              onChange={(v) => set('connectAudioFileId', v)}
+              accent="blue"
+              label="Connect prompt (optional)"
+              blankLabel="— Default (built-in “please hold, connecting you”) —"
+              helpText="Played to the caller the moment the callback connects, before the agent bridge."
             />
-            <p className="text-xs text-gray-500 mt-1">
-              Played to the caller the moment the callback connects, before the agent bridge. Blank = a
-              built-in “please hold, connecting you” prompt.
-            </p>
           </div>
 
           <p className="text-xs text-gray-500 leading-snug">
@@ -1084,19 +1082,25 @@ function TransferNodeEditor({
 
       {/* ── Announcement to the caller ─────────────────────────────── */}
       <div className="border-t border-gray-700 pt-3">
-        <label className={labelCls}>Announcement audio file (optional)</label>
-        <input className={`${inputCls} font-mono text-xs`}
-          placeholder="audio file GUID  ·  __builtin:/path.wav"
+        <AudioFilePicker
           value={(data.announceAudioFileId as string) ?? ''}
-          onChange={(e) => onChange({ announceAudioFileId: e.target.value })} />
+          onChange={(v) => onChange({ announceAudioFileId: v })}
+          accent="indigo"
+          label="Announcement audio file (optional)"
+          blankLabel="— None (use TTS fallback below) —"
+        />
         <label className={`${labelCls} mt-2`}>…or spoken text (fallback)</label>
         <input className={inputCls}
           placeholder="Please hold while we transfer your call."
           value={(data.announceTtsText as string) ?? ''}
           onChange={(e) => onChange({ announceTtsText: e.target.value })} />
-        <input className={`${inputCls} text-xs mt-1`} placeholder="voice (kal)"
-          value={(data.announceTtsVoice as string) ?? ''}
-          onChange={(e) => onChange({ announceTtsVoice: e.target.value })} />
+        <div className="mt-2">
+          <TtsVoicePicker
+            value={(data.announceTtsVoice as string) ?? 'kal'}
+            onChange={(v) => onChange({ announceTtsVoice: v })}
+            accent="indigo"
+          />
+        </div>
       </div>
 
       {/* ── Screen-pop override ────────────────────────────────────── */}
@@ -1142,11 +1146,13 @@ function VoicemailNodeEditor({
     <div className="flex flex-col gap-3">
       {/* ── Greeting ───────────────────────────────────────────── */}
       <div>
-        <label className={labelCls}>Greeting audio file (optional)</label>
-        <input className={`${inputCls} font-mono text-xs`}
-          placeholder="audio file GUID  ·  __builtin:/path.wav  ·  silence_stream://…"
+        <AudioFilePicker
           value={(data.greetingAudioFileId as string) ?? ''}
-          onChange={(e) => onChange({ greetingAudioFileId: e.target.value })} />
+          onChange={(v) => onChange({ greetingAudioFileId: v })}
+          accent="purple"
+          label="Greeting audio file (optional)"
+          blankLabel="— None (use TTS fallback below) —"
+        />
       </div>
       <div>
         <label className={labelCls}>Greeting spoken text (fallback if no file)</label>
@@ -1154,10 +1160,12 @@ function VoicemailNodeEditor({
           placeholder="You've reached us after hours. Leave a message after the tone."
           value={(data.greetingTtsText as string) ?? ''}
           onChange={(e) => onChange({ greetingTtsText: e.target.value })} />
-        <div className="grid grid-cols-2 gap-2 mt-1">
-          <input className={`${inputCls} text-xs`} placeholder="voice (kal)"
-            value={(data.greetingTtsVoice as string) ?? ''}
-            onChange={(e) => onChange({ greetingTtsVoice: e.target.value })} />
+        <div className="mt-2">
+          <TtsVoicePicker
+            value={(data.greetingTtsVoice as string) ?? 'kal'}
+            onChange={(v) => onChange({ greetingTtsVoice: v })}
+            accent="purple"
+          />
         </div>
       </div>
 
@@ -1299,22 +1307,25 @@ function IvrMenuNodeEditor({
   return (
     <div className="flex flex-col gap-3">
       <div>
-        <label className={labelCls}>Prompt audio file</label>
-        <input className={`${inputCls} font-mono text-xs`}
-          placeholder="audio file GUID  ·  __builtin:/path.wav  ·  silence_stream://…"
+        <AudioFilePicker
           value={(data.promptAudioFileId as string) ?? ''}
-          onChange={(e) => onChange({ promptAudioFileId: e.target.value })} />
-        <p className="text-[10px] text-gray-500 mt-1 leading-snug">
-          Menu prompts must be a recorded file — FreeSWITCH's <span className="font-mono">play_and_get_digits</span> can't
-          take a TTS string. Record/upload one on a Play node and paste its id here.
-        </p>
+          onChange={(v) => onChange({ promptAudioFileId: v })}
+          accent="teal"
+          label="Prompt audio file"
+          blankLabel="— Select audio (required) —"
+          helpText={<>Menu prompts must be a recorded file — FreeSWITCH's <span className="font-mono">play_and_get_digits</span> can't
+            take a TTS string. Record or upload one right here, or pick a file you've already saved.</>}
+        />
       </div>
 
       <div>
-        <label className={labelCls}>Invalid-entry prompt audio (optional)</label>
-        <input className={`${inputCls} font-mono text-xs`} placeholder="audio file GUID  ·  __builtin:/path.wav"
+        <AudioFilePicker
           value={(data.invalidAudioFileId as string) ?? ''}
-          onChange={(e) => onChange({ invalidAudioFileId: e.target.value })} />
+          onChange={(v) => onChange({ invalidAudioFileId: v })}
+          accent="teal"
+          label="Invalid-entry prompt audio (optional)"
+          blankLabel="— None —"
+        />
       </div>
 
       <div className="grid grid-cols-3 gap-2">
@@ -1609,6 +1620,87 @@ const TTS_VOICES = [
   { value: 'rms', label: 'Male Alt (rms)' },
 ]
 
+/**
+ * TTS voice picker — a tab for the built-in flite voices (always available) plus, only when the
+ * tenant has an active TTS-streaming vendor configured (Admin → API Preferences → tts_streaming),
+ * a second tab for that vendor. There's no per-node "which service" choice — a tenant has at most
+ * one active streaming preference at a time, same as the engine already assumes — so the picker
+ * just reflects whatever's configured and lets the user paste that vendor's voice ID/name. The
+ * underlying node field is still a single plain string either way; the engine decides how to
+ * interpret it purely from whether a streaming provider is configured (see ITtsStreamingService).
+ */
+function TtsVoicePicker({
+  value,
+  onChange,
+  accent = 'teal',
+}: {
+  value: string
+  onChange: (voice: string) => void
+  accent?: 'teal' | 'indigo' | 'purple'
+}) {
+  const [status, setStatus] = useState<TtsServiceStatus | null>(null)
+  useEffect(() => {
+    ttsServiceApi.getStatus().then(setStatus).catch(() => setStatus({ configured: false }))
+  }, [])
+
+  const isFliteVoice = TTS_VOICES.some((v) => v.value === value)
+  // Start on whichever tab already matches the stored value — a non-flite, non-empty value means
+  // this node was already pointed at a vendor voice id.
+  const [mode, setMode] = useState<'flite' | 'service'>(value && !isFliteVoice ? 'service' : 'flite')
+
+  const labelCls = 'block text-xs text-gray-400 mb-1'
+  const inputCls = `w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-${accent}-500`
+
+  return (
+    <div>
+      <label className={labelCls}>Voice</label>
+
+      {status?.configured && (
+        <div className="flex gap-1 mb-1.5">
+          {(['flite', 'service'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => {
+                setMode(m)
+                if (m === 'flite' && !isFliteVoice) onChange('kal')
+              }}
+              className={`flex-1 text-xs rounded py-1 border transition-colors ${
+                mode === m
+                  ? `bg-${accent}-700 border-${accent}-600 text-white`
+                  : 'bg-gray-800 border-gray-600 text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              {m === 'flite' ? 'Flite (offline)' : status.providerName ?? status.providerKey}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {mode === 'flite' ? (
+        <select className={inputCls} value={isFliteVoice ? value : 'kal'} onChange={(e) => onChange(e.target.value)}>
+          {TTS_VOICES.map((v) => (
+            <option key={v.value} value={v.value}>{v.label}</option>
+          ))}
+        </select>
+      ) : (
+        <>
+          <input
+            className={`${inputCls} font-mono text-xs`}
+            placeholder="Vendor voice ID/name"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+          />
+          <p className="text-[10px] text-gray-500 mt-1 leading-snug">
+            Routed through your configured {status?.providerName ?? status?.providerKey} service — paste the exact
+            voice ID/name from that vendor's account.
+          </p>
+        </>
+      )}
+    </div>
+  )
+}
+
 type RecordPhase = 'idle' | 'requesting' | 'recording' | 'review'
 
 function getBestMimeType(): string {
@@ -1624,6 +1716,304 @@ function mimeToExt(mime: string): string {
 
 function fmtTime(s: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+}
+
+/**
+ * Full-featured audio file picker — select (built-in groups + tenant-uploaded files), preview
+ * playback, upload, and in-browser record → review → name → save & select. Same feature set as
+ * the Play node's file picker (the original, single-slot home of this UI), generalized so any
+ * node with one or more audio-file slots (Transfer, Voicemail, IVR Menu, Queue Callback, …) gets
+ * it too. Each instance is fully self-contained (own audioFiles fetch, own recorder) — for a node
+ * with multiple slots (e.g. IVR Menu's prompt + invalid-entry prompts), render one instance per
+ * slot; recording/saving under a given instance always targets that instance's own field, so
+ * there's no ambiguity about which slot a save lands in.
+ */
+function AudioFilePicker({
+  value,
+  onChange,
+  accent = 'teal',
+  label = 'Audio File',
+  blankLabel = '— Select audio —',
+  helpText,
+}: {
+  value: string
+  onChange: (fileId: string) => void
+  accent?: 'teal' | 'indigo' | 'purple' | 'blue' | 'cyan' | 'amber'
+  label?: string
+  blankLabel?: string
+  helpText?: React.ReactNode
+}) {
+  const [audioFiles, setAudioFiles] = useState<AudioFileRecord[]>([])
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState('')
+
+  const [previewBlobUrl, setPreviewBlobUrl] = useState('')
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const lastPreviewedId = useRef('')
+
+  const [recordPhase, setRecordPhase] = useState<RecordPhase>('idle')
+  const [recordSeconds, setRecordSeconds] = useState(0)
+  const [recordBlobUrl, setRecordBlobUrl] = useState('')
+  const [recordMimeType, setRecordMimeType] = useState('')
+  const [recordName, setRecordName] = useState('New Recording')
+  const [savingRecording, setSavingRecording] = useState(false)
+  const [saveError, setSaveError] = useState('')
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const chunksRef = useRef<Blob[]>([])
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const recordBlobRef = useRef<Blob | null>(null)
+
+  useEffect(() => {
+    audioFilesApi.list().then(setAudioFiles).catch(() => setAudioFiles([]))
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current)
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop()
+      }
+      streamRef.current?.getTracks().forEach((t) => t.stop())
+    }
+  }, [])
+
+  const isUploadedFile =
+    value.length > 0 &&
+    !value.startsWith('local_stream://') &&
+    !value.startsWith('silence_stream://') &&
+    !value.startsWith('tone_stream://') &&
+    !value.startsWith('__builtin:')
+
+  useEffect(() => {
+    if (lastPreviewedId.current !== value) {
+      lastPreviewedId.current = value
+      if (previewBlobUrl) {
+        URL.revokeObjectURL(previewBlobUrl)
+        setPreviewBlobUrl('')
+      }
+    }
+  }, [value, previewBlobUrl])
+
+  async function handleLoadPreview() {
+    if (!isUploadedFile) return
+    setPreviewLoading(true)
+    try {
+      if (previewBlobUrl) URL.revokeObjectURL(previewBlobUrl)
+      const url = await audioFilesApi.fetchBlobUrl(value)
+      setPreviewBlobUrl(url)
+    } catch { /* silent */ }
+    finally { setPreviewLoading(false) }
+  }
+
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    setUploadError('')
+    try {
+      const uploaded = await audioFilesApi.upload(file)
+      setAudioFiles((prev) => [...prev, uploaded])
+      onChange(uploaded.id)
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Upload failed')
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
+  }
+
+  async function startRecording() {
+    setRecordPhase('requesting')
+    setSaveError('')
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      streamRef.current = stream
+      chunksRef.current = []
+
+      const mimeType = getBestMimeType()
+      setRecordMimeType(mimeType)
+
+      const mr = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+      mediaRecorderRef.current = mr
+
+      mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data) }
+      mr.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: mimeType || 'audio/webm' })
+        recordBlobRef.current = blob
+        const url = URL.createObjectURL(blob)
+        setRecordBlobUrl(url)
+        setRecordPhase('review')
+        stream.getTracks().forEach((t) => t.stop())
+        streamRef.current = null
+      }
+
+      mr.start(100)
+      setRecordSeconds(0)
+      setRecordPhase('recording')
+      timerRef.current = setInterval(() => setRecordSeconds((s) => s + 1), 1000)
+    } catch {
+      setRecordPhase('idle')
+    }
+  }
+
+  function stopRecording() {
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null }
+    mediaRecorderRef.current?.stop()
+  }
+
+  function discardRecording() {
+    if (recordBlobUrl) URL.revokeObjectURL(recordBlobUrl)
+    setRecordBlobUrl('')
+    recordBlobRef.current = null
+    setRecordPhase('idle')
+    setRecordSeconds(0)
+    setRecordName('New Recording')
+    setSaveError('')
+  }
+
+  async function saveRecording() {
+    if (!recordBlobRef.current) return
+    setSavingRecording(true)
+    setSaveError('')
+    try {
+      const ext = mimeToExt(recordMimeType)
+      const file = new File([recordBlobRef.current], `recording${ext}`, { type: recordMimeType || 'audio/webm' })
+      const uploaded = await audioFilesApi.upload(file, recordName.trim() || 'New Recording')
+      setAudioFiles((prev) => [...prev, uploaded])
+      onChange(uploaded.id)
+      discardRecording()
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Save failed')
+    } finally {
+      setSavingRecording(false)
+    }
+  }
+
+  const inputCls = `w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-${accent}-500`
+  const labelCls = 'block text-xs text-gray-400 mb-1'
+
+  return (
+    <div>
+      <label className={labelCls}>{label}</label>
+      <select className={inputCls} value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">{blankLabel}</option>
+        {BUILTIN_AUDIO_GROUPS.map((grp) => (
+          <optgroup key={grp.group} label={grp.group}>
+            {grp.options.map((b) => (
+              <option key={b.value} value={b.value}>{b.label}</option>
+            ))}
+          </optgroup>
+        ))}
+        {audioFiles.length > 0 && (
+          <optgroup label="Uploaded Files">
+            {audioFiles.map((f) => (
+              <option key={f.id} value={f.id}>{f.name}</option>
+            ))}
+          </optgroup>
+        )}
+      </select>
+
+      {isUploadedFile && (
+        <div className="mt-2">
+          {previewBlobUrl ? (
+            <audio
+              controls
+              src={previewBlobUrl}
+              className="w-full"
+              style={{ filter: 'invert(0.88) hue-rotate(180deg) brightness(0.85)' }}
+            />
+          ) : (
+            <button
+              onClick={handleLoadPreview}
+              disabled={previewLoading}
+              className={`text-xs text-${accent}-400 hover:text-${accent}-300 disabled:opacity-50`}
+            >
+              {previewLoading ? 'Loading…' : '▶ Preview selected file'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {recordPhase === 'idle' && (
+        <div className="flex gap-1.5 mt-2">
+          <label className="flex-1 cursor-pointer">
+            <input
+              type="file"
+              accept=".wav,.mp3,.ogg,.webm,.mp4,audio/*"
+              className="hidden"
+              onChange={handleUpload}
+              disabled={uploading}
+            />
+            <span className="block text-center text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-600 rounded px-2 py-1.5 transition-colors">
+              {uploading ? 'Uploading…' : '↑ Upload'}
+            </span>
+          </label>
+          <button
+            onClick={startRecording}
+            className="flex-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-600 rounded px-2 py-1.5 transition-colors"
+          >
+            ● Record
+          </button>
+        </div>
+      )}
+
+      {uploadError && <p className="text-xs text-red-400 mt-1">{uploadError}</p>}
+
+      {recordPhase === 'requesting' && (
+        <p className="text-xs text-gray-400 italic mt-1">Requesting microphone access…</p>
+      )}
+
+      {recordPhase === 'recording' && (
+        <div className="bg-gray-800 border border-red-800 rounded p-2 mt-2 flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse shrink-0" />
+          <span className="text-xs text-red-300 font-mono flex-1">{fmtTime(recordSeconds)}</span>
+          <button
+            onClick={stopRecording}
+            className="text-xs bg-red-900 hover:bg-red-800 text-red-200 rounded px-2 py-1"
+          >
+            ■ Stop
+          </button>
+        </div>
+      )}
+
+      {recordPhase === 'review' && recordBlobUrl && (
+        <div className="bg-gray-800 border border-gray-700 rounded p-2 mt-2 flex flex-col gap-2">
+          <audio
+            controls
+            src={recordBlobUrl}
+            className="w-full"
+            style={{ filter: 'invert(0.88) hue-rotate(180deg) brightness(0.85)' }}
+          />
+          <input
+            className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-gray-100 text-xs focus:outline-none focus:border-teal-500"
+            value={recordName}
+            onChange={(e) => setRecordName(e.target.value)}
+            placeholder="Recording name…"
+          />
+          {saveError && <p className="text-xs text-red-400">{saveError}</p>}
+          <div className="flex gap-1.5">
+            <button
+              onClick={saveRecording}
+              disabled={savingRecording}
+              className={`flex-1 text-xs bg-${accent}-700 hover:bg-${accent}-600 text-white rounded py-1.5 disabled:opacity-50`}
+            >
+              {savingRecording ? 'Saving…' : '✓ Save & Select'}
+            </button>
+            <button
+              onClick={discardRecording}
+              disabled={savingRecording}
+              className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 rounded px-3 py-1.5 disabled:opacity-50"
+            >
+              Discard
+            </button>
+          </div>
+        </div>
+      )}
+
+      {helpText && <p className="text-[10px] text-gray-500 mt-1.5 leading-snug">{helpText}</p>}
+    </div>
+  )
 }
 
 function PlayNodeEditor({
@@ -1958,21 +2348,15 @@ function PlayNodeEditor({
               onChange={(e) => onChange({ ttsText: e.target.value })}
             />
             <p className="text-xs text-gray-500 mt-1">
-              Requires <span className="font-mono text-teal-400">freeswitch-mod-flite</span> in the FreeSWITCH container.
+              Flite voice requires <span className="font-mono text-teal-400">freeswitch-mod-flite</span> in the
+              FreeSWITCH container; a configured vendor below routes through it instead.
             </p>
           </div>
-          <div>
-            <label className={labelCls}>Voice</label>
-            <select
-              className={inputCls}
-              value={(data.ttsVoice as string) ?? 'kal'}
-              onChange={(e) => onChange({ ttsVoice: e.target.value })}
-            >
-              {TTS_VOICES.map((v) => (
-                <option key={v.value} value={v.value}>{v.label}</option>
-              ))}
-            </select>
-          </div>
+          <TtsVoicePicker
+            value={(data.ttsVoice as string) ?? 'kal'}
+            onChange={(v) => onChange({ ttsVoice: v })}
+            accent="teal"
+          />
         </>
       )}
 

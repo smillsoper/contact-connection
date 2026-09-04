@@ -1,3 +1,4 @@
+using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Infrastructure.Extensions;
 using ContactConnection.Worker;
 
@@ -23,6 +24,19 @@ if (!string.IsNullOrWhiteSpace(vaultUri))
 }
 
 builder.Services.AddInfrastructure(builder.Configuration);
+
+// No-op registrations for the SignalR-backed notifier interfaces + IEslCommanderFactory that
+// ContactConnection.Api's Program.cs supplies with real implementations. AddInfrastructure()
+// registers services (FlowEngine, TelephonyFlowEngine, AgentStateStore, CallStateHistoryRecorder,
+// CallTraceRecorder, CallRecordingController) that depend on these; without a registration here,
+// Host.CreateApplicationBuilder's ValidateOnBuild (on by default in Development) fails at startup
+// even though none of the Worker's own hosted services resolve them. See NoOpNotifiers.cs and
+// project memory project_worker_dev_boot.
+builder.Services.AddScoped<IFlowNotifier, NoOpFlowNotifier>();
+builder.Services.AddScoped<ICallTraceNotifier, NoOpCallTraceNotifier>();
+builder.Services.AddSingleton<IDashboardNotifier, NoOpDashboardNotifier>();
+builder.Services.AddSingleton<IEslCommanderFactory, NoOpEslCommanderFactory>();
+
 builder.Services.AddHostedService<SubscriptionProcessingService>();
 builder.Services.AddHostedService<FreeSwitchEslService>();
 builder.Services.AddHostedService<RecordingMergeService>();

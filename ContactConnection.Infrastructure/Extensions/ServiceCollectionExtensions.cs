@@ -112,6 +112,13 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITtsStreamProvider, ElevenLabsTtsStreamProvider>();
         services.AddSingleton<ITtsStreamProviderFactory, TtsStreamProviderFactory>();
 
+        // Shared TTS plumbing for node handlers — live streaming (tf_play, tf_transfer's
+        // live-broadcast destinations) vs. pre-synthesized cached file (tf_voicemail's greeting,
+        // tf_transfer's external_number announcement, both of which run inside a single FreeSWITCH
+        // dialplan uuid_transfer with no live ESL hook mid-execution).
+        services.AddScoped<ITtsStreamingService, TtsStreamingService>();
+        services.AddScoped<ITtsFileSynthesizer, TtsFileSynthesizer>();
+
         // Variable resolver (singleton — stateless, thread-safe regex engine)
         services.AddSingleton<IVariableResolver, VariableResolver>();
 

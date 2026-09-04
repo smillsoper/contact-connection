@@ -35,6 +35,8 @@ public class TransferNodeHandler : ITelephonyNodeHandler
     private readonly EligibleAgentRanker _ranker;
     private readonly ICallStateHistoryRecorder _callStateRecorder;
     private readonly ITelephonyCallSessionStore _sessionStore;
+    private readonly ITtsStreamingService _tts;
+    private readonly ITtsFileSynthesizer _fileSynth;
     private readonly IServiceProvider _services;
     private readonly IConfiguration _config;
     private readonly ILogger<TransferNodeHandler> _logger;
@@ -44,6 +46,8 @@ public class TransferNodeHandler : ITelephonyNodeHandler
         EligibleAgentRanker ranker,
         ICallStateHistoryRecorder callStateRecorder,
         ITelephonyCallSessionStore sessionStore,
+        ITtsStreamingService tts,
+        ITtsFileSynthesizer fileSynth,
         IServiceProvider services,
         IConfiguration config,
         ILogger<TransferNodeHandler> logger)
@@ -52,6 +56,8 @@ public class TransferNodeHandler : ITelephonyNodeHandler
         _ranker            = ranker;
         _callStateRecorder = callStateRecorder;
         _sessionStore      = sessionStore;
+        _tts               = tts;
+        _fileSynth         = fileSynth;
         _services          = services;
         _config            = config;
         _logger            = logger;
@@ -257,13 +263,45 @@ public class TransferNodeHandler : ITelephonyNodeHandler
 
     // ── announcement ─────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Used by every destination except external_number — the channel is still live under our
+    /// own ESL commands here, so a configured vendor gets played via the live mod_audio_stream
+    /// path (same as tf_play), not a pre-synthesized file. Fire-and-forget, same as the plain
+    /// uuid_broadcast this replaces: nothing downstream waits on the announcement finishing.
+    /// </summary>
     private async Task PlayAnnouncementAsync(JsonObject node, TelephonyFlowContext ctx, CancellationToken ct)
     {
-        var arg = await ResolveAnnouncementArgAsync(node, ctx, ct);
-        if (arg is not null && ctx.Esl is not null)
-            await ctx.Esl.BroadcastAsync(ctx.ChannelUuid, arg, ct);
+        if (ctx.Esl is null) return;
+
+        var fileArg = await TelephonyAudioResolver.ResolveFileArgAsync(
+            _factory, _config, node["announceAudioFileId"]?.GetValue<string>(), ctx.TenantSchemaName, ct);
+        if (fileArg is not null)
+        {
+            await ctx.Esl.BroadcastAsync(ctx.ChannelUuid, fileArg, ct);
+            return;
+        }
+
+        var tts = node["announceTtsText"]?.GetValue<string>();
+        if (string.IsNullOrWhiteSpace(tts)) return;
+        var voice = node["announceTtsVoice"]?.GetValue<string>() ?? "kal";
+
+        var provider = await _tts.ResolveProviderAsync(ctx.TenantSchemaName, ct);
+        if (provider is not null)
+        {
+            await _tts.StartStreamAsync(ctx, provider, tts, voice, ct);
+            return;
+        }
+
+        await ctx.Esl.SetChannelVarAsync(ctx.ChannelUuid, "cc_xfer_announce_text", tts.Replace("\n", " ").Trim(), ct);
+        await ctx.Esl.BroadcastAsync(ctx.ChannelUuid, $"tts://flite|{voice}|${{cc_xfer_announce_text}}", ct);
     }
 
+    /// <summary>
+    /// Used only by external_number — the announcement plays inline inside the xfer_bridge
+    /// dialplan extension (uuid_transfer, not a live broadcast we control), so it must resolve to
+    /// a static, playable media-arg string. Live vendor streaming can't be inlined there (same
+    /// constraint as tf_voicemail's greeting) — pre-synthesize to a cached file instead.
+    /// </summary>
     private async Task<string?> ResolveAnnouncementArgAsync(JsonObject node, TelephonyFlowContext ctx, CancellationToken ct)
     {
         var fileArg = await TelephonyAudioResolver.ResolveFileArgAsync(
@@ -272,8 +310,17 @@ public class TransferNodeHandler : ITelephonyNodeHandler
 
         var tts = node["announceTtsText"]?.GetValue<string>();
         if (string.IsNullOrWhiteSpace(tts)) return null;
-
         var voice = node["announceTtsVoice"]?.GetValue<string>() ?? "kal";
+
+        var provider = await _tts.ResolveProviderAsync(ctx.TenantSchemaName, ct);
+        if (provider is not null)
+        {
+            var cachedArg = await _fileSynth.SynthesizeToFileAsync(
+                ctx.TenantSchemaName, ctx.TenantSubdomain, provider.ProviderKey, provider.SettingsJson, voice, tts, ct);
+            if (cachedArg is not null) return cachedArg;
+            // Synthesis failed (missing credential, vendor error, …) — fall through to flite.
+        }
+
         await ctx.Esl!.SetChannelVarAsync(ctx.ChannelUuid, "cc_xfer_announce_text", tts.Replace("\n", " ").Trim(), ct);
         return $"tts://flite|{voice}|${{cc_xfer_announce_text}}";
     }

@@ -122,6 +122,7 @@
 | 110 | 2026-09-03 | 9:55 AM PDT | 10:52 AM PDT | 57 min | ~12710 min |
 | 111 | 2026-09-03 | 10:57 AM PDT | 11:24 AM PDT | 27 min | ~12737 min |
 | 112 | 2026-09-03 | 11:28 AM PDT | 12:17 PM PDT | 49 min | ~12786 min |
+| 113 | 2026-09-04 | 8:07 AM PDT | 9:49 AM PDT | 102 min | ~12888 min |
 
 ---
 
@@ -5177,3 +5178,77 @@ The phantom-delivery bug stranded: a zombie `telephony:session:865049f9…` in R
 6. Telnyx Verified Numbers feature.
 7. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
 8. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 113
+
+**Date:** 2026-09-04
+**Start:** 8:07 AM PDT
+**End:** 9:49 AM PDT
+**Duration:** 102 minutes
+**Total Duration:** ~12888 minutes
+
+### Focus
+
+Three threads: (1) Worker Development boot fix (S112 carry-over #4), (2) UI/UX cleanup of the audio-file picker on the newest telephony nodes, (3) an unplanned but substantial detour into real streaming-vendor TTS (Azure/ElevenLabs) — triggered by the audio-picker work surfacing that the TTS voice field was a free-text input everywhere except Play, which escalated into fixing a genuine, previously-unverified bug in the streaming-TTS pipeline itself once the user tested it live against a real paid ElevenLabs account.
+
+### 1. Worker Development boot fix
+
+Root cause (memory `project_worker_dev_boot`, now resolved): two separate issues.
+- `AddInfrastructure()` registers services (`FlowEngine`, `TelephonyFlowEngine`, `AgentStateStore`, `CallStateHistoryRecorder`, `CallTraceRecorder`, `CallRecordingController`) depending on `IFlowNotifier`/`IDashboardNotifier`/`ICallTraceNotifier`/`IEslCommanderFactory` — real implementations of which only existed in the **Api**'s `Program.cs`. `Host.CreateApplicationBuilder`'s `ValidateOnBuild` (default in Development) constructs every registered service at startup, so it threw `AggregateException`. Fixed with `ContactConnection.Worker/NoOpNotifiers.cs` — inert stub implementations of the three notifiers, and an `IEslCommanderFactory` stub that throws if ever actually invoked (nothing on the Worker's own hosted-service paths calls it) — registered in `Worker/Program.cs` right after `AddInfrastructure()`.
+- Separately, the Worker's own `UserSecretsId` (distinct from the Api's) never had `ConnectionStrings:DefaultConnection` set. Fixed via `dotnet user-secrets set`.
+
+Live-verified: `dotnet run --project ContactConnection.Worker` now boots clean in Development — all 4 hosted services start, Postgres query succeeds, FreeSWITCH ESL connects. No more `--no-launch-profile` + `DOTNET_ENVIRONMENT=Production` workaround needed to test worker-driven features.
+
+### 2. Audio-file picker parity across telephony nodes
+
+User ask: `tf_transfer`, `tf_ivr_menu`, `tf_voicemail`, `tf_queue_callback` should get the same full audio-picker feature the Play node already had — record/upload/name/save-and-select, file dropdown (built-ins + uploaded), preview playback — replacing plain text/GUID inputs. Extracted the picker UI (previously duplicated inline in `PlayNodeEditor`/`WhisperNodeEditor`) into a new shared `AudioFilePicker` component in `TelephonyNodePropertiesPanel.tsx`, parameterized by accent color/label/blank-label; wired into all 5 call sites (Transfer's announcement, Voicemail's greeting, IVR Menu's prompt + invalid-entry audio, Queue Callback's connect prompt). Each node's audio slot gets its own independent picker instance — for IVR Menu's two slots, recording under a given field's picker always targets that field, so there's no ambiguity about which slot a save lands in. `tsc --noEmit` clean.
+
+### 3. TTS voice picker + real streaming-vendor support (Transfer, Voicemail; Play refactored)
+
+Mid-review, user flagged that TTS voice fields (Transfer's `announceTtsVoice`, Voicemail's `greetingTtsVoice`) were plain free-text inputs, unlike Play's proper Flite dropdown — and asked for parity **plus** a way to select a configured TTS vendor service (Azure/ElevenLabs), extending to Play too. Investigation found: only Play routed through a configurable vendor at all (`ResolveStreamingProviderAsync`/`StartStreamingTtsAsync`, both private to `PlayNodeHandler`); Transfer/Voicemail hardcoded flite; there's no catalog of vendor voices anywhere (`ttsVoice` is a free string passed straight to whichever vendor is configured); a tenant has exactly one active `TenantApiPreference` for `ApiSubType.TtsStreaming` at a time (not a per-node choice).
+
+Design decisions (user confirmed via options): give Transfer/Voicemail full vendor TTS, not just Flite-dropdown-for-later; voice selection is Flite list + free-text vendor voice ID (no hardcoded per-vendor voice catalog); only the tenant's one active preference is selectable (no multi-service-per-node).
+
+Architectural fork discovered: Play's mod_audio_stream live-streaming path can't be reused as-is for Voicemail's greeting or Transfer's `external_number` announcement — both run inside a single FreeSWITCH dialplan `uuid_transfer` (this build has no `uuid_execute`) with no live ESL/event hook mid-execution. User chose (of two options): pre-synthesize those to a cached WAV file instead of a full streaming-architecture rebuild for those two call sites.
+
+**Backend:**
+- `ITtsStreamingService`/`TtsStreamingService` (Infrastructure/Tts) — extracted from `PlayNodeHandler`, used by Play (live streaming) and Transfer's non-`external_number` destinations (fire-and-forget broadcast, same live-channel situation as Play).
+- `ITtsFileSynthesizer`/`TtsFileSynthesizer` (Infrastructure/Tts) — one-shot synthesis to a **content-hash-cached** WAV file (provider+voice+text → SHA256 filename under `{SoundsHostPath}/{schema}/_tts_cache/`), used by Voicemail's greeting and Transfer's `external_number` announcement. Hand-rolled 44-byte WAV header writer (no new package).
+- `GET /api/v1/telephony/tts-service-status` (new, any-authenticated-agent) — tells the designer whether the tenant has a vendor configured and its display name.
+- `PlayNodeHandler`, `TransferNodeHandler`, `VoicemailNodeHandler` updated to inject/use the above.
+- Test constructor updates for `TransferNodeHandlerTests`/`VoicemailNodeHandlerTests` (new Moq params, default-null behavior unchanged — 550 tests still pass).
+
+**Frontend:** `TtsVoicePicker` (new, in `TelephonyNodePropertiesPanel.tsx`) — Flite tab (existing 4 voices) plus, only when `tts-service-status` reports a configured vendor, a second tab with a free-text voice-ID field. Wired into Play/Transfer/Voicemail's voice fields, replacing the old bare `<select>`/text `<input>`.
+
+### Live verification (real ElevenLabs paid account, Play node) — 3 rounds, 2 real bugs found and fixed
+
+**Round 1 — `payment_required`.** First test hit ElevenLabs' own API rejecting the account (free-tier restriction). Not a bug — user upgraded to a paid plan and retested.
+
+**Round 2 — dead air, no error, flow never resumed (required manual hangup).** Diagnostic logging added to `ElevenLabsTtsStreamProvider` (per-message shape: hasAudio/audioLen/isFinal/keys) proved real audio **was** being received from ElevenLabs (7 chunks, hundreds of KB of PCM) — so the vendor call was entirely correct. Root cause, confirmed against FreeSWITCH's own log (`docker exec cc_freeswitch ... freeswitch.log`) and the `mod_audio_stream` (sptmru fork) source on GitHub: **`mod_audio_stream` never plays audio itself** — for every `streamAudio` frame it decodes+writes to a temp file and fires a `mod_audio_stream::play` CUSTOM event (`{"file": "..."}`); it's the ESL client's job to `uuid_broadcast` it. `EslBackgroundService` only ever subscribed to `connect`/`disconnect`/`error` — never `play`. This gap had been sitting unexercised since the feature's original build (Session 81), which was only ever live-verified against the *missing-credentials fallback* path, never a real successful synthesis.
+  - Fix: subscribed to `mod_audio_stream::play`; added `EslMessage.EventBody` (locates the outermost `{...}` substring in the raw ESL body — robust to the exact nested header/blank-line layout FreeSWITCH uses for an event's own body, since `ParseBody()`'s existing key:value line parser mangles embedded JSON); new `HandleAudioStreamPlayAsync` (broadcasts a chunk immediately if idle, else queues it) + `HandleStreamChunkFinishedAsync` (drains the queue on each chunk's own `PLAYBACK_STOP`, chaining multiple chunks in sequence instead of interrupting each other) in `EslBackgroundService`.
+
+**Round 3 — first chunk played ("I'm so…"), then dead air again, still no resume.** FreeSWITCH's own log showed the smoking gun: `mod_sndfile.c:281 Error Opening File [.../…_1.tmp.r16] [No such file or directory]`, timed right after `mod_audio_stream: stop` / `destroy_tech_pvt` / `stream_session_cleanup`. Root cause: `uuid_audio_stream stop` (issued by the relay's cleanup, immediately after it finished *forwarding* all chunks — which takes well under a second, far faster than real-time *playback* of several seconds of audio) tears down the module's whole session and **deletes every temp file it ever wrote**, including chunks still sitting unplayed in the new local queue. The relay had no visibility into local playback state at all, so it always stopped too early for a multi-chunk utterance — this was fundamentally un-fixable without cross-component coordination, since the two pieces of information ("vendor synthesis is done" vs. "local playback is done") live in different places.
+  - Fix: new `TtsPlaybackCoordinator` (Api, singleton, in-process — the relay and `EslBackgroundService` are the same process, no IPC needed) — a per-channel `TaskCompletionSource` handshake tolerant of either side arriving first. `RunSynthesisAsync` now returns whether it forwarded ≥1 chunk; if so, the relay writes `_play_stream_disconnected=true` **directly into the session itself**, right after its own forward-loop ends (not via the `mod_audio_stream::disconnect` *event*, which only fires as a *result* of the stop call this flag is meant to gate — waiting on that would deadlock), then awaits `coordinator.WaitForDrainAsync` (45s safety-net timeout) before ever calling `uuid_audio_stream stop`. `HandleStreamChunkFinishedAsync` calls `coordinator.SignalDrained` the moment its queue is confirmed empty. `HandleAudioStreamFinishedAsync` (the real disconnect-event handler) reverted to its original simple unconditional-resume form — now purely a safety net for the timeout case, a no-op in the normal path since `_play_state` is already cleared by the time it fires.
+  - **Live-verified PASS**: all 7 chunks played in full sequence, queue drained, flow correctly resumed to the hangup node, `uuid_audio_stream stop` sent only after draining. User confirmed hearing the complete message end-to-end, with only a slight (expected, harmless) inter-chunk stutter from playing discrete files back-to-back rather than one continuous stream.
+
+### State
+
+- Build **0 errors** across all 4 backend projects (only pre-existing NU1903/CS8602 warnings). Web `tsc --noEmit` clean.
+- **550 tests pass** (Domain 147, Application 20, Infrastructure 309, Api 74) — no regressions; `TransferNodeHandlerTests`/`VoicemailNodeHandlerTests` updated for new constructor params only.
+- New files: `ContactConnection.Worker/NoOpNotifiers.cs`; `ContactConnection.Application/Interfaces/Services/{ITtsStreamingService,ITtsFileSynthesizer}.cs`; `ContactConnection.Infrastructure/Tts/{TtsStreamingService,TtsFileSynthesizer}.cs`; `ContactConnection.Api/Telephony/TtsPlaybackCoordinator.cs`; `ContactConnection.Api/Endpoints/TtsServiceStatusEndpoints.cs`; `ContactConnection.Web/src/api/ttsService.ts`.
+- Changed: `Worker/Program.cs`; `ServiceCollectionExtensions.cs`; `Api/Program.cs`; `PlayNodeHandler.cs`/`TransferNodeHandler.cs`/`VoicemailNodeHandler.cs`; `EslClient.cs`; `EslBackgroundService.cs`; `TtsStreamRelayEndpoints.cs`; `ElevenLabsTtsStreamProvider.cs` (diagnostic logging, kept — useful for future debugging); `TelephonyNodePropertiesPanel.tsx`; both node-handler test files.
+- Not committed yet — pending user review of the session. No migrations.
+
+### Next Session — pick up here
+
+1. **Live-verify Transfer's TTS announcement + Voicemail's greeting + Transfer's `external_number` announcement** against the real ElevenLabs account — only Play's path has been exercised live. Voicemail/`external_number` use the *new, entirely unverified* `ITtsFileSynthesizer` pre-synthesis path (WAV header writer, content-hash caching, host/container path resolution) — higher risk of a first-time bug than the now-hardened streaming path.
+2. Queue callback v1 rough edges (memory `project_queue_callback`).
+3. Supervisor visibility of `callback_pending` agents / pending queue callbacks.
+4. Supervisor scheduled-callbacks UI — list/cancel.
+5. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
+6. Telnyx Verified Numbers feature.
+7. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
+8. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.
+9. Minor polish (optional): the slight inter-chunk playback stutter on multi-chunk streaming TTS — could concatenate PCM chunks into fewer/larger playback segments if it ever becomes noticeable enough to matter.

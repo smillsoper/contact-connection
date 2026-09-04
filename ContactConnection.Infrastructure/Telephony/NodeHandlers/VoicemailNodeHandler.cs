@@ -34,15 +34,23 @@ public class VoicemailNodeHandler : ITelephonyNodeHandler
     public string NodeType => "tf_voicemail";
 
     private readonly ITenantDbContextFactory _factory;
+    private readonly ITtsStreamingService _tts;
+    private readonly ITtsFileSynthesizer _fileSynth;
     private readonly IConfiguration _config;
     private readonly ILogger<VoicemailNodeHandler> _logger;
 
     public VoicemailNodeHandler(
-        ITenantDbContextFactory factory, IConfiguration config, ILogger<VoicemailNodeHandler> logger)
+        ITenantDbContextFactory factory,
+        ITtsStreamingService tts,
+        ITtsFileSynthesizer fileSynth,
+        IConfiguration config,
+        ILogger<VoicemailNodeHandler> logger)
     {
-        _factory = factory;
-        _config  = config;
-        _logger  = logger;
+        _factory   = factory;
+        _tts       = tts;
+        _fileSynth = fileSynth;
+        _config    = config;
+        _logger    = logger;
     }
 
     public async Task<TelephonyNodeResult> ExecuteAsync(
@@ -77,9 +85,25 @@ public class VoicemailNodeHandler : ITelephonyNodeHandler
             if (!string.IsNullOrWhiteSpace(tts))
             {
                 var voice = node["greetingTtsVoice"]?.GetValue<string>() ?? "kal";
-                await ctx.Esl.SetChannelVarAsync(
-                    ctx.ChannelUuid, "cc_vm_greeting_text", tts.Replace("\n", " ").Trim(), ct);
-                greetingArg = $"tts://flite|{voice}|${{cc_vm_greeting_text}}";
+
+                // Greeting plays inline inside the vm_record dialplan extension (uuid_transfer,
+                // not a live broadcast we control) — same constraint as tf_transfer's
+                // external_number announcement. A configured vendor gets pre-synthesized to a
+                // cached file; live streaming can't be inlined there.
+                var provider = await _tts.ResolveProviderAsync(ctx.TenantSchemaName, ct);
+                if (provider is not null)
+                {
+                    greetingArg = await _fileSynth.SynthesizeToFileAsync(
+                        ctx.TenantSchemaName, ctx.TenantSubdomain, provider.ProviderKey, provider.SettingsJson,
+                        voice, tts, ct);
+                }
+
+                if (greetingArg is null)
+                {
+                    await ctx.Esl.SetChannelVarAsync(
+                        ctx.ChannelUuid, "cc_vm_greeting_text", tts.Replace("\n", " ").Trim(), ct);
+                    greetingArg = $"tts://flite|{voice}|${{cc_vm_greeting_text}}";
+                }
             }
             else
             {

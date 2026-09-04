@@ -293,6 +293,25 @@ public sealed class EslMessage(Dictionary<string, string> headers, string? body)
         headers.TryGetValue(key, out var v) ? v : null;
 
     /// <summary>
+    /// An event's own body (set via switch_event_add_body on the FreeSWITCH side — e.g.
+    /// mod_audio_stream::play's JSON payload) rides inside this ESL message's body, appended
+    /// after the event's headers. Rather than assume an exact header/blank-line/Content-Length
+    /// layout for that nested block, this just locates the outermost {...} substring — the only
+    /// part of a "event plain" body that can contain literal braces — so it's robust to whatever
+    /// separator FreeSWITCH actually uses. Null if the body has no such payload.
+    /// </summary>
+    public string? EventBody
+    {
+        get
+        {
+            if (body is null) return null;
+            var start = body.IndexOf('{');
+            var end = body.LastIndexOf('}');
+            return start >= 0 && end > start ? body[start..(end + 1)] : null;
+        }
+    }
+
+    /// <summary>
     /// Parses the plain-text event body into a key-value dictionary.
     /// FreeSWITCH URL-encodes values in plain events (e.g. %2B → +).
     /// </summary>

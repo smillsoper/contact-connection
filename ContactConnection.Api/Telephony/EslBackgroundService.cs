@@ -32,6 +32,7 @@ public sealed class EslBackgroundService : BackgroundService
     private readonly ILogger<EslClient> _eslClientLogger;
     private readonly ITelephonyCallSessionStore _sessionStore;
     private readonly IAgentStateStore _stateStore;
+    private readonly TtsPlaybackCoordinator _ttsPlaybackCoordinator;
 
     public EslBackgroundService(
         IHubContext<FlowHub, IFlowHubClient> hub,
@@ -40,15 +41,17 @@ public sealed class EslBackgroundService : BackgroundService
         ILogger<EslBackgroundService> logger,
         ILogger<EslClient> eslClientLogger,
         ITelephonyCallSessionStore sessionStore,
-        IAgentStateStore stateStore)
+        IAgentStateStore stateStore,
+        TtsPlaybackCoordinator ttsPlaybackCoordinator)
     {
-        _hub             = hub;
-        _scopeFactory    = scopeFactory;
-        _config          = config;
-        _logger          = logger;
-        _eslClientLogger = eslClientLogger;
-        _sessionStore    = sessionStore;
-        _stateStore      = stateStore;
+        _hub                    = hub;
+        _scopeFactory           = scopeFactory;
+        _config                 = config;
+        _logger                 = logger;
+        _eslClientLogger        = eslClientLogger;
+        _sessionStore           = sessionStore;
+        _stateStore             = stateStore;
+        _ttsPlaybackCoordinator = ttsPlaybackCoordinator;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -77,13 +80,15 @@ public sealed class EslBackgroundService : BackgroundService
         await using var esl = new EslClient(_eslClientLogger);
         await esl.ConnectAsync(host, port, pass, ct);
         // CUSTOM mod_audio_stream::* — streaming-TTS relay lifecycle (see HandleCustomEventAsync).
-        // ::connect is diagnostic only; ::disconnect is the streaming-TTS equivalent of
-        // PLAYBACK_STOP (resumes the flow); ::error covers vendor/relay failures so the flow
-        // still advances instead of leaving the caller on a channel that will never resume.
+        // ::connect is diagnostic only; ::play carries one decoded audio chunk's temp-file path —
+        // mod_audio_stream never plays audio itself, it's on us to uuid_broadcast each one (see
+        // HandleAudioStreamPlayAsync); ::disconnect/::error signal no more chunks are coming, but
+        // the flow only actually resumes once the last queued chunk has finished playing, not the
+        // instant the vendor stream ends (see HandleAudioStreamFinishedAsync).
         await esl.SubscribeAsync(
             "CHANNEL_PARK CHANNEL_ANSWER CHANNEL_HANGUP CHANNEL_HANGUP_COMPLETE CHANNEL_BRIDGE CHANNEL_UNBRIDGE " +
             "CHANNEL_HOLD CHANNEL_UNHOLD PLAYBACK_STOP " +
-            "CUSTOM mod_audio_stream::connect mod_audio_stream::disconnect mod_audio_stream::error " +
+            "CUSTOM mod_audio_stream::connect mod_audio_stream::play mod_audio_stream::disconnect mod_audio_stream::error " +
             "contactconnection::ivr_done contactconnection::vm_done contactconnection::xfer_failed", ct);
 
         _logger.LogInformation("ESL connected to FreeSWITCH at {Host}:{Port}", host, port);
@@ -126,7 +131,7 @@ public sealed class EslBackgroundService : BackgroundService
                     await HandleChannelHoldAsync(vars, esl, mask: false, ct);
                     break;
                 case "CUSTOM":
-                    await HandleCustomEventAsync(vars, esl, ct);
+                    await HandleCustomEventAsync(vars, msg.EventBody, esl, ct);
                     break;
             }
         }
@@ -1365,6 +1370,14 @@ public sealed class EslBackgroundService : BackgroundService
         }
 
         var session = await _sessionStore.GetAsync(uuid, ct);
+
+        // Streaming-TTS chunk finished — separate queue-draining path, not the file/flite one below.
+        if (session is not null && session.Vars.GetValueOrDefault("_play_stream_now_playing") == "true")
+        {
+            await HandleStreamChunkFinishedAsync(session, uuid, esl, ct);
+            return;
+        }
+
         if (session is null || !session.Vars.ContainsKey("_play_media_arg")) return;
 
         var isLoop     = session.Vars.GetValueOrDefault("_play_loop") == "true";
@@ -1484,10 +1497,13 @@ public sealed class EslBackgroundService : BackgroundService
     /// family is subscribed (see the "event plain ... CUSTOM ..." line in RunLoopAsync).
     /// </summary>
     private async Task HandleCustomEventAsync(
-        Dictionary<string, string> vars, EslClient esl, CancellationToken ct)
+        Dictionary<string, string> vars, string? eventBody, EslClient esl, CancellationToken ct)
     {
         switch (vars.GetValueOrDefault("Event-Subclass"))
         {
+            case "mod_audio_stream::play":
+                await HandleAudioStreamPlayAsync(vars, eventBody, esl, ct);
+                break;
             case "mod_audio_stream::disconnect":
                 await HandleAudioStreamFinishedAsync(vars, esl, "disconnected", ct);
                 break;
@@ -1538,13 +1554,123 @@ public sealed class EslBackgroundService : BackgroundService
     }
 
     /// <summary>
-    /// mod_audio_stream::disconnect/::error — the streaming-TTS equivalent of PLAYBACK_STOP.
-    /// The relay always calls "uuid_audio_stream stop" once synthesis ends (success or failure —
-    /// see TtsStreamRelayEndpoints), so disconnect fires on every outcome; error is a secondary,
+    /// mod_audio_stream::play — one decoded audio chunk is ready, written by the module to a temp
+    /// file on the FreeSWITCH host (event body: {"audioDataType","sampleRate","file"}). The module
+    /// never plays audio itself — every chunk needs an explicit uuid_broadcast from us, chained off
+    /// each broadcast's own PLAYBACK_STOP so multiple chunks for one utterance play in sequence
+    /// instead of interrupting each other (see HandleStreamChunkFinishedAsync). A chunk that arrives
+    /// while nothing is playing starts immediately; one that arrives mid-broadcast is queued.
+    /// </summary>
+    private async Task HandleAudioStreamPlayAsync(
+        Dictionary<string, string> vars, string? eventBody, EslClient esl, CancellationToken ct)
+    {
+        var uuid = vars.GetValueOrDefault("Unique-ID");
+        if (string.IsNullOrEmpty(uuid)) return;
+
+        var session = await _sessionStore.GetAsync(uuid, ct);
+        if (session is null || session.Vars.GetValueOrDefault("_play_state") != "streaming") return;
+
+        if (string.IsNullOrWhiteSpace(eventBody))
+        {
+            _logger.LogWarning("AudioStreamPlay [{Uuid}]: play event had no parsable body — chunk dropped", uuid);
+            return;
+        }
+
+        string? filePath;
+        try
+        {
+            using var doc = JsonDocument.Parse(eventBody);
+            filePath = doc.RootElement.TryGetProperty("file", out var fileEl) ? fileEl.GetString() : null;
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "AudioStreamPlay [{Uuid}]: could not parse play event body: {Body}", uuid, eventBody);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            _logger.LogWarning("AudioStreamPlay [{Uuid}]: play event body had no 'file': {Body}", uuid, eventBody);
+            return;
+        }
+
+        if (session.Vars.GetValueOrDefault("_play_stream_now_playing") == "true")
+        {
+            var pending = GetStreamQueue(session);
+            pending.Add(filePath);
+            session.Vars["_play_stream_pending_json"] = JsonSerializer.Serialize(pending);
+            await _sessionStore.SaveAsync(session, ct);
+            _logger.LogInformation("AudioStreamPlay [{Uuid}]: queued chunk {File} ({Count} pending)", uuid, filePath, pending.Count);
+            return;
+        }
+
+        session.Vars["_play_stream_now_playing"] = "true";
+        await _sessionStore.SaveAsync(session, ct);
+        _logger.LogInformation("AudioStreamPlay [{Uuid}]: broadcasting chunk {File}", uuid, filePath);
+        await esl.BroadcastAsync(uuid, filePath, ct);
+    }
+
+    /// <summary>
+    /// PLAYBACK_STOP for a streaming-TTS chunk (see HandlePlaybackStopAsync's early branch). Pops
+    /// the next queued chunk and plays it; once the queue is empty, either goes idle (more chunks
+    /// may still be arriving from the vendor) or — if mod_audio_stream::disconnect/error already
+    /// landed — resumes the flow, since this was genuinely the last chunk.
+    /// </summary>
+    private async Task HandleStreamChunkFinishedAsync(
+        TelephonyCallSession session, string uuid, EslClient esl, CancellationToken ct)
+    {
+        var pending = GetStreamQueue(session);
+        if (pending.Count > 0)
+        {
+            var next = pending[0];
+            pending.RemoveAt(0);
+            session.Vars["_play_stream_pending_json"] = JsonSerializer.Serialize(pending);
+            await _sessionStore.SaveAsync(session, ct);
+            _logger.LogInformation(
+                "AudioStreamPlay [{Uuid}]: broadcasting queued chunk {File} ({Remaining} left)", uuid, next, pending.Count);
+            await esl.BroadcastAsync(uuid, next, ct);
+            return;
+        }
+
+        session.Vars["_play_stream_now_playing"] = "false";
+        if (session.Vars.GetValueOrDefault("_play_stream_disconnected") == "true")
+        {
+            // "_play_stream_disconnected" is set directly by the relay (TtsStreamRelayEndpoints)
+            // the instant it's done forwarding chunks — not by mod_audio_stream's own disconnect
+            // event, which only fires *after* we tell it to stop (see TtsPlaybackCoordinator for
+            // why that would deadlock). Signal the relay's wait so it can now safely stop the
+            // stream — its cleanup deletes every temp file for this session, and every chunk has
+            // genuinely finished playing at this point.
+            _logger.LogInformation("AudioStreamPlay [{Uuid}]: last queued chunk finished after stream end — resuming flow", uuid);
+            _ttsPlaybackCoordinator.SignalDrained(uuid);
+            await FireEndTransitionAsync(session, uuid, "tts", esl, ct);
+        }
+        else
+        {
+            await _sessionStore.SaveAsync(session, ct);
+        }
+    }
+
+    private static List<string> GetStreamQueue(TelephonyCallSession session)
+    {
+        var json = session.Vars.GetValueOrDefault("_play_stream_pending_json", "");
+        if (string.IsNullOrEmpty(json)) return [];
+        try { return JsonSerializer.Deserialize<List<string>>(json) ?? []; }
+        catch { return []; }
+    }
+
+    /// <summary>
+    /// mod_audio_stream::disconnect/::error — the actual FreeSWITCH-side signal that the stream
+    /// stopped. In the normal case this fires well *after* the flow has already resumed (the
+    /// relay now waits for the local play queue to fully drain — see TtsPlaybackCoordinator —
+    /// before it ever calls "uuid_audio_stream stop", and that's what triggers this event), so by
+    /// the time it lands here ClearPlayVars has already cleared "_play_state" and the guard below
+    /// makes this a no-op. It only actually does something as a safety net: if the relay's
+    /// drain-wait timed out (a chunk got stuck, or some other gap) and it stopped anyway, this is
+    /// what stops the caller being left on a channel that would otherwise never resume — better a
+    /// possibly-truncated resume than a permanently stuck call. ::error is a secondary,
     /// diagnostic-only signal for the same underlying event, guarded against a double resume by
     /// the same "_play_state" check ClearPlayVars leaves behind after the first one lands.
-    /// Resumes the same way as the flite path (FireEndTransitionAsync) — PlayNodeHandler's
-    /// streaming branch stores the same "_play_next_{transition}" session vars either way.
     /// </summary>
     private async Task HandleAudioStreamFinishedAsync(
         Dictionary<string, string> vars, EslClient esl, string reason, CancellationToken ct)
