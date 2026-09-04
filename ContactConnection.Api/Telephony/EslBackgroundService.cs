@@ -767,7 +767,14 @@ public sealed class EslBackgroundService : BackgroundService
     {
         if (string.IsNullOrEmpty(containerPath)) return null;
         var fileName = Path.GetFileName(containerPath);
-        var hostDir  = _config["FreeSWITCH:RecordingsHostPath"] ?? "freeswitch/recordings";
+        // Default mirrors TtsFileSynthesizer.ResolveCacheHostDir / AudioFilesEndpoints.
+        // ResolveSoundsHostPath: the process's working directory is this project's own folder
+        // (ContactConnection.Api), one level below the repo root that docker-compose.yml's
+        // "./freeswitch/recordings" volume mount is relative to — the missing ".." here meant
+        // every voicemail recording resolved to a nonexistent ContactConnection.Api\freeswitch\
+        // recordings\ path, so HandleVmDoneAsync always saw 0 bytes and took no_message no matter
+        // how long the caller actually spoke (the real .wav was untouched, just never found).
+        var hostDir = _config["FreeSWITCH:RecordingsHostPath"] ?? Path.Combine("..", "freeswitch", "recordings");
         return Path.GetFullPath(Path.Combine(hostDir, fileName));
     }
 

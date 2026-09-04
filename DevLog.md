@@ -123,6 +123,7 @@
 | 111 | 2026-09-03 | 10:57 AM PDT | 11:24 AM PDT | 27 min | ~12737 min |
 | 112 | 2026-09-03 | 11:28 AM PDT | 12:17 PM PDT | 49 min | ~12786 min |
 | 113 | 2026-09-04 | 8:07 AM PDT | 9:49 AM PDT | 102 min | ~12888 min |
+| 114 | 2026-09-04 | 9:54 AM PDT | 10:45 AM PDT | 51 min | ~12939 min |
 
 ---
 
@@ -5252,3 +5253,52 @@ Architectural fork discovered: Play's mod_audio_stream live-streaming path can't
 7. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
 8. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.
 9. Minor polish (optional): the slight inter-chunk playback stutter on multi-chunk streaming TTS — could concatenate PCM chunks into fewer/larger playback segments if it ever becomes noticeable enough to matter.
+
+## Session 114
+
+**Date:** 2026-09-04
+**Start:** 9:54 AM PDT
+**End:** 10:45 AM PDT
+**Duration:** 51 minutes
+**Total Duration:** ~12939 minutes
+
+### Focus
+
+S113's carry-over: live-verify Transfer's TTS announcement, Voicemail's greeting, and Transfer's `external_number` announcement against the real ElevenLabs account — the last three untested streaming/pre-synthesis TTS call sites. Built a throwaway test harness by temporarily repointing `tf_answer_7`'s default transition straight at each node under test (one at a time) in "Test Campaign 1 - Inbound Call Flow" (`tenant_test_tenant`), configuring each with the ElevenLabs voice already verified in S113, running real inbound calls against it, then restoring the flow's original wiring at the end. Two real, previously-unverified bugs found and fixed.
+
+### Bug 1 — Transfer's live-streaming announcement played nothing (dead air)
+
+`TransferNodeHandler.PlayAnnouncementAsync`'s non-`external_number` path calls the shared `ITtsStreamingService.StartStreamAsync` (same call `PlayNodeHandler` makes) but never set `ctx.Vars["_play_state"] = "streaming"` first. `EslBackgroundService.HandleAudioStreamPlayAsync` silently drops every `mod_audio_stream::play` event unless the session carries that flag — `PlayNodeHandler` sets it before its own call, but the flag lives in the caller, not in the shared service, so Transfer's calls never armed it. First live attempt: FreeSWITCH log showed the WS streamer start but zero play events — total silence, then caller hangup. Fixed by setting `_play_state = "streaming"` in `PlayAnnouncementAsync` right before the call (no `_play_next_*` needed — Transfer already commits to its own transition synchronously, unlike tf_play's terminal-node wait).
+
+Re-tested with 3 real calls (agent auto-answer, agent ringing then rejected, agent's softphone gone entirely): the 2 calls where nothing raced the announcement away played all 7 chunks in full, cleanly. The auto-answer call cut the announcement short because the bridge happened faster than playback — expected fire-and-forget behavior (same as the plain-broadcast design it replaced), not a regression. User flagged a good follow-up idea from that test: today there's no way for a supervisor to see whether an agent's *softphone* is actually registered independent of the agent's status — navigating away from the portal page doesn't cleanly unregister, so a "registered but effectively dead" extension exists as a real, invisible state today.
+
+A one-time unexplained API process exit (code 1, no exception captured — a gap in this session's own log-capture pipe, not the app) happened somewhere in that test window; FreeSWITCH's own log shows all 3 calls completed cleanly with no distress, so it couldn't be tied to any specific call. Recovered on its own; flagged as unresolved.
+
+### Bug 2 — Voicemail recordings always misclassified as "no message" (pre-existing, unrelated to TTS)
+
+Voicemail's greeting (file-synthesis path via `ITtsFileSynthesizer`) worked correctly on the very first live attempt — cached WAV, correct container path, played + beeped cleanly. But `HandleVmDoneAsync` then reported `no usable message (bytes=0)` despite FreeSWITCH's own event confirming 9120ms recorded. Root cause: `EslBackgroundService.HostRecordingPath`'s default (`"freeswitch/recordings"`, no `..`) resolves relative to the process's working directory, which under `dotnet watch run --project ContactConnection.Api` is the **Api project's own folder**, one level below the repo root that `docker-compose.yml`'s `./freeswitch/recordings` volume mount is relative to — every recording resolved to a nonexistent `ContactConnection.Api\freeswitch\recordings\` path. This predates today's session; tf_voicemail's `recorded` branch had never been live-tested before, so the bug had been silently misrouting every real voicemail to `no_message` (the file itself was untouched on disk, just never found — `TryDeleteFile` at the wrong path was a no-op). Fixed by adding the missing `".."`, mirroring `TtsFileSynthesizer.ResolveCacheHostDir`'s already-correct pattern. Hot-reloaded live; re-tested with a second call — `vm_done ...: voicemail 61be85c1-... stored (9s)` confirmed, DB row verified.
+
+### Transfer's `external_number` announcement — verified working, no bug
+
+Announcement played in full (cached WAV via the same file-synth path as Voicemail's greeting), dialplan correctly bridged out via `sofia/gateway/telnyx/+1541670xxxx`, and when Telnyx rejected the outbound leg (`CALL_REJECTED`) the existing `contactconnection::xfer_failed` handling caught it cleanly and resumed the flow on `failed` → hangup. The TTS path itself has no bug here; the carrier-level rejection is a separate, pre-existing Telnyx trunk/outbound-compliance issue (overlaps the already-tracked "Telnyx onboarding + telephony SIP config" carry-over), not investigated further this session.
+
+### State
+
+- Build clean (only pre-existing NU1903/CS8602 warnings). No new tests added — both fixes are one-line/small changes to already-covered code paths; existing `TransferNodeHandlerTests`/`VoicemailNodeHandlerTests` unaffected.
+- Changed: `ContactConnection.Infrastructure/Telephony/NodeHandlers/TransferNodeHandler.cs` (`_play_state` fix), `ContactConnection.Api/Telephony/EslBackgroundService.cs` (`HostRecordingPath` fix).
+- Not committed yet — pending user review.
+- Test flow (`tenant_test_tenant` / "Test Campaign 1 - Inbound Call Flow") restored to its pre-session wiring; the two placeholder `tf_transfer`/`tf_voicemail` nodes left in it from S113 are back to blank/unwired.
+
+### Next Session — pick up here
+
+1. **Unexplained one-time API crash** during Test A (exit code 1, no exception captured) — recovered on its own; if it recurs, this session now has a fresh live log attached and a real shot at a stack trace.
+2. **New idea (user, this session): agent-vs-softphone registration state** — supervisors currently can't tell if an agent's SIP softphone is actually registered independent of the agent's own status (navigating away from the portal doesn't cleanly unregister); worth a supervisor-dashboard signal for this.
+3. Telnyx `CALL_REJECTED` on outbound `external_number` transfer — likely an outbound caller-ID/compliance restriction on the trunk; overlaps the pending Telnyx onboarding item.
+4. Queue callback v1 rough edges (memory `project_queue_callback`).
+5. Supervisor visibility of `callback_pending` agents / pending queue callbacks.
+6. Supervisor scheduled-callbacks UI — list/cancel.
+7. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
+8. Telnyx Verified Numbers feature.
+9. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
+10. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.
+11. Minor polish (optional): the slight inter-chunk playback stutter on multi-chunk streaming TTS.
