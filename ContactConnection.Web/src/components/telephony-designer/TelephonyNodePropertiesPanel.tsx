@@ -1764,8 +1764,21 @@ function AudioFilePicker({
   const streamRef = useRef<MediaStream | null>(null)
   const recordBlobRef = useRef<Blob | null>(null)
 
+  // "Generate TTS" — synthesize once via the tenant's configured vendor and save as a named,
+  // reusable clip (same AudioFile shape as an upload). ttsEditingId non-null means the form is
+  // regenerating that existing clip in place rather than creating a new one.
+  const [ttsStatus, setTtsStatus] = useState<TtsServiceStatus | null>(null)
+  const [ttsPhase, setTtsPhase] = useState<'idle' | 'form'>('idle')
+  const [ttsEditingId, setTtsEditingId] = useState<string | null>(null)
+  const [ttsName, setTtsName] = useState('')
+  const [ttsText, setTtsText] = useState('')
+  const [ttsVoice, setTtsVoice] = useState('')
+  const [ttsGenerating, setTtsGenerating] = useState(false)
+  const [ttsError, setTtsError] = useState('')
+
   useEffect(() => {
     audioFilesApi.list().then(setAudioFiles).catch(() => setAudioFiles([]))
+    ttsServiceApi.getStatus().then(setTtsStatus).catch(() => setTtsStatus({ configured: false }))
   }, [])
 
   useEffect(() => {
@@ -1777,6 +1790,49 @@ function AudioFilePicker({
       streamRef.current?.getTracks().forEach((t) => t.stop())
     }
   }, [])
+
+  const selectedFile = audioFiles.find((f) => f.id === value)
+
+  function openTtsForm(existing?: AudioFileRecord) {
+    setTtsError('')
+    if (existing) {
+      setTtsEditingId(existing.id)
+      setTtsName(existing.name)
+      setTtsText(existing.ttsSourceText ?? '')
+      setTtsVoice(existing.ttsVoiceId ?? '')
+    } else {
+      setTtsEditingId(null)
+      setTtsName('New TTS Clip')
+      setTtsText('')
+      setTtsVoice('')
+    }
+    setTtsPhase('form')
+  }
+
+  function closeTtsForm() {
+    setTtsPhase('idle')
+    setTtsError('')
+  }
+
+  async function saveTtsClip() {
+    if (!ttsText.trim() || !ttsVoice.trim()) return
+    setTtsGenerating(true)
+    setTtsError('')
+    try {
+      const saved = ttsEditingId
+        ? await audioFilesApi.regenerateTtsClip(ttsEditingId, ttsText.trim(), ttsVoice.trim(), ttsName.trim() || undefined)
+        : await audioFilesApi.saveTtsClip(ttsName.trim() || 'New TTS Clip', ttsText.trim(), ttsVoice.trim())
+      setAudioFiles((prev) =>
+        ttsEditingId ? prev.map((f) => (f.id === saved.id ? saved : f)) : [...prev, saved]
+      )
+      onChange(saved.id)
+      setTtsPhase('idle')
+    } catch (err) {
+      setTtsError(err instanceof Error ? err.message : 'Generation failed')
+    } finally {
+      setTtsGenerating(false)
+    }
+  }
 
   const isUploadedFile =
     value.length > 0 &&
@@ -1932,10 +1988,18 @@ function AudioFilePicker({
               {previewLoading ? 'Loading…' : '▶ Preview selected file'}
             </button>
           )}
+          {selectedFile?.isTtsGenerated && recordPhase === 'idle' && ttsPhase === 'idle' && (
+            <button
+              onClick={() => openTtsForm(selectedFile)}
+              className={`block text-xs text-${accent}-400 hover:text-${accent}-300 mt-1`}
+            >
+              ✎ Edit &amp; regenerate this TTS clip
+            </button>
+          )}
         </div>
       )}
 
-      {recordPhase === 'idle' && (
+      {recordPhase === 'idle' && ttsPhase === 'idle' && (
         <div className="flex gap-1.5 mt-2">
           <label className="flex-1 cursor-pointer">
             <input
@@ -1955,6 +2019,14 @@ function AudioFilePicker({
           >
             ● Record
           </button>
+          {ttsStatus?.configured && (
+            <button
+              onClick={() => openTtsForm()}
+              className="flex-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-600 rounded px-2 py-1.5 transition-colors"
+            >
+              ✦ Generate TTS
+            </button>
+          )}
         </div>
       )}
 
@@ -2006,6 +2078,51 @@ function AudioFilePicker({
               className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 rounded px-3 py-1.5 disabled:opacity-50"
             >
               Discard
+            </button>
+          </div>
+        </div>
+      )}
+
+      {ttsPhase === 'form' && (
+        <div className="bg-gray-800 border border-gray-700 rounded p-2 mt-2 flex flex-col gap-2">
+          <input
+            className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-gray-100 text-xs focus:outline-none focus:border-teal-500"
+            value={ttsName}
+            onChange={(e) => setTtsName(e.target.value)}
+            placeholder="Clip name…"
+          />
+          <textarea
+            className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-xs focus:outline-none focus:border-teal-500 resize-none"
+            rows={3}
+            value={ttsText}
+            onChange={(e) => setTtsText(e.target.value)}
+            placeholder="Text to synthesize…"
+          />
+          <input
+            className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-gray-100 text-xs font-mono focus:outline-none focus:border-teal-500"
+            value={ttsVoice}
+            onChange={(e) => setTtsVoice(e.target.value)}
+            placeholder={`${ttsStatus?.providerName ?? ttsStatus?.providerKey ?? 'Vendor'} voice ID/name`}
+          />
+          <p className="text-[10px] text-gray-500 leading-snug">
+            Synthesized once via your configured {ttsStatus?.providerName ?? ttsStatus?.providerKey} voice and saved
+            as a reusable audio file — reused on every call without re-billing the vendor.
+          </p>
+          {ttsError && <p className="text-xs text-red-400">{ttsError}</p>}
+          <div className="flex gap-1.5">
+            <button
+              onClick={saveTtsClip}
+              disabled={ttsGenerating || !ttsText.trim() || !ttsVoice.trim()}
+              className={`flex-1 text-xs bg-${accent}-700 hover:bg-${accent}-600 text-white rounded py-1.5 disabled:opacity-50`}
+            >
+              {ttsGenerating ? 'Generating…' : ttsEditingId ? '✓ Regenerate & Save' : '✓ Generate & Save'}
+            </button>
+            <button
+              onClick={closeTtsForm}
+              disabled={ttsGenerating}
+              className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 rounded px-3 py-1.5 disabled:opacity-50"
+            >
+              Cancel
             </button>
           </div>
         </div>

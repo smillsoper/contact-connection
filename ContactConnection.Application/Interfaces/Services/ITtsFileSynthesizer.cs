@@ -20,4 +20,16 @@ public interface ITtsFileSynthesizer
         string tenantSchemaName, string tenantSubdomain,
         string providerKey, string? providerSettingsJson, string voiceId, string text,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Same vendor call as <see cref="SynthesizeToFileAsync"/>, but returns the raw WAV bytes
+    /// directly instead of writing them to the content-hash cache — for a caller that's going to
+    /// give the result its own identity (a named, tenant-managed <c>AudioFile</c> "saved TTS clip"
+    /// via <c>POST/PUT /api/v1/audio-files/tts</c>) rather than an anonymous re-use-by-hash file.
+    /// Null on the same failure conditions as the file variant (missing provider/credentials,
+    /// vendor error, no audio returned).
+    /// </summary>
+    Task<(byte[] Wav, int SampleRateHz)?> SynthesizeToBytesAsync(
+        string tenantSubdomain, string providerKey, string? providerSettingsJson, string voiceId, string text,
+        CancellationToken ct = default);
 }

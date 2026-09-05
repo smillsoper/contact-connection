@@ -18,6 +18,9 @@ public class AudioFileConfiguration : IEntityTypeConfiguration<AudioFile>
         b.Property(x => x.ContentType).HasColumnName("content_type").HasMaxLength(127).IsRequired();
         b.Property(x => x.FileSizeBytes).HasColumnName("file_size_bytes");
         b.Property(x => x.CreatedAt).HasColumnName("created_at");
+        b.Property(x => x.TtsSourceText).HasColumnName("tts_source_text");
+        b.Property(x => x.TtsProviderKey).HasColumnName("tts_provider_key").HasMaxLength(63);
+        b.Property(x => x.TtsVoiceId).HasColumnName("tts_voice_id").HasMaxLength(255);
         b.HasIndex(x => x.TenantId).HasDatabaseName("ix_audio_files_tenant_id");
     }
 }

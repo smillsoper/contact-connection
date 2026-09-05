@@ -124,6 +124,7 @@
 | 112 | 2026-09-03 | 11:28 AM PDT | 12:17 PM PDT | 49 min | ~12786 min |
 | 113 | 2026-09-04 | 8:07 AM PDT | 9:49 AM PDT | 102 min | ~12888 min |
 | 114 | 2026-09-04 | 9:54 AM PDT | 10:45 AM PDT | 51 min | ~12939 min |
+| 115 | 2026-09-05 | 11:26 AM PDT | 12:19 PM PDT | 53 min | ~12992 min |
 
 ---
 
@@ -5302,3 +5303,54 @@ Announcement played in full (cached WAV via the same file-synth path as Voicemai
 9. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
 10. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.
 11. Minor polish (optional): the slight inter-chunk playback stutter on multi-chunk streaming TTS.
+
+## Session 115
+
+**Date:** 2026-09-05
+**Start:** 11:26 AM PDT
+**End:** 12:19 PM PDT
+**Duration:** 53 minutes
+**Total Duration:** ~12992 minutes
+
+### Focus
+
+User idea (overnight thought): let tenants pre-synthesize a piece of text via TTS **once**, name it, and reuse it repeatedly — instead of the live/direct streaming path re-synthesizing (and re-billing the vendor for) the same announcement every time. Also raised a related but distinct idea — a platform-wide library of common phrases across 4 curated ElevenLabs voices — captured to memory ([[project_platform_tts_phrase_library]]) but deliberately not built this session (needs real phrase-content + voice-ID decisions first).
+
+Confirmed two design decisions with the user before building: (1) a saved clip remembers its source text/provider/voice and can be edited + regenerated in place later (same id, so existing node references keep working); (2) lives inline in the existing `AudioFilePicker` as a third tab, not a separate library page.
+
+### Built: saved TTS clips
+
+Extended `AudioFile` (Domain) with 3 nullable columns rather than a new entity — `TtsSourceText`, `TtsProviderKey`, `TtsVoiceId` (migration `AddTtsSourceToAudioFiles`) — so a saved clip is just an `AudioFile` and shows up in every existing node picker (Play, Transfer, IVR Menu, Voicemail, Queue Callback) with zero node-handler changes. `ITtsFileSynthesizer` gained `SynthesizeToBytesAsync` (raw WAV bytes) alongside its existing content-hash-cached `SynthesizeToFileAsync`, both sharing one core synth method. New endpoints: `POST /api/v1/audio-files/tts` (synthesize + save, vendor-only — Flite has nothing to pre-render) and `PUT /api/v1/audio-files/{id}/tts` (regenerate in place, same id/filename, rejects a plain uploaded file with 400) — both transcode to OGG Vorbis 8kHz mono via the same ffmpeg helper the upload endpoint already used (extracted into a shared method). `AudioFilePicker` (`TelephonyNodePropertiesPanel.tsx`) gained a "✦ Generate TTS" button (shown only when a vendor is configured) and an "✎ Edit & regenerate" link on an already-saved clip, pre-filling the form from its stored source/voice.
+
+### Live verification — 1 real bug found and fixed, plus an unrelated infra issue that briefly looked related
+
+Direct API smoke tests (localhost, then through the Cloudflare tunnel) passed cleanly first try — create, regenerate-in-place, stream, and the reject-non-TTS-file guard all worked against the real ElevenLabs vendor. Browser click-through then hit a **502 Bad Gateway from Cloudflare itself** on every attempt (3 retries, same error) — a real Cloudflare error page (Ray ID, `Retry-After: 60`), not JSON from our app, so the request never reached the API at all as far as the browser could tell.
+
+Two things turned out to be tangled together:
+1. **A stale tunnel connection** (`cc_cloudflared`'s connIndex=2 had gone unhealthy from an unrelated earlier blip) — the user's browser had a persistent connection pinned to that specific broken path, while fresh connections (my own curl calls through the same tunnel) landed on healthy ones and succeeded — explaining why my server-side reproduction attempts kept passing while the user's browser kept failing identically. Fixed with `docker restart cc_cloudflared`.
+2. **A real bug in the new endpoint**, found via the browser's DevTools Network/HAR export the user provided: the synthesis-failure path returned raw HTTP **502**, which Cloudflare (and most reverse proxies) intercepts unconditionally and replaces with its own branded error page — completely hiding whatever the origin actually said. The trigger the user hit was ElevenLabs genuinely rejecting a voice ID not yet added to their account (`voice_id_does_not_exist`, resolved once they added it) — correct vendor behavior — but 502 was the wrong status regardless (a client-actionable input failure, not a gateway failure) and would have masked the real message for any future synthesis failure too. Fixed to a plain 400 with the actual error text.
+
+Root-caused entirely from a HAR export the user pulled from Chrome DevTools (Network tab) rather than needing back-and-forth guessing — the `Retry-After: 60` header and `wait` timing in the HAR were the key signals pointing at the tunnel-level explanation before the API log confirmed the real trigger.
+
+### State
+
+- 476 tests pass (Domain 147, Application 20, Infrastructure 309); Api.Tests build blocked by the live dev server's file lock, as usual when `dotnet watch` is running. `tsc --noEmit` clean.
+- Migration `AddTtsSourceToAudioFiles` applied to `tenant_test_tenant` only (not `tenant_test_contact_center` or `tenant_tms`).
+- New/changed: `ContactConnection.Domain/Entities/AudioFile.cs`; `AudioFileConfiguration.cs`; `ITtsFileSynthesizer.cs`/`TtsFileSynthesizer.cs`; `ContactConnection.Api/Endpoints/AudioFilesEndpoints.cs` (rewritten — shared ffmpeg-transcode helper, 2 new endpoints, 502→400 fix); `Web/src/api/audioFiles.ts`; `Web/src/components/telephony-designer/TelephonyNodePropertiesPanel.tsx` (`AudioFilePicker` extended).
+- Not committed yet — pending user review.
+- Also discovered during this session's own process juggling: two `dotnet watch` instances from Session 114 were still running, never stopped at the end of that session — worth remembering to stop background dev processes at session end, or at least checking for leftovers at the start of a new one.
+
+### Next Session — pick up here
+
+1. [[project_platform_tts_phrase_library]] — platform-wide phrase catalog across 4 curated voices; needs phrase-content + voice-ID decisions before any engineering starts.
+2. Apply `AddTtsSourceToAudioFiles` to other tenant schemas if/when they need it (`tenant_test_contact_center`, `tenant_tms`).
+3. Unexplained one-time API crash from S114 (exit code 1, no exception captured) — still unresolved, watch for a recurrence.
+4. Agent-vs-softphone registration state visibility ([[project_agent_softphone_registration_visibility]]).
+5. Telnyx `CALL_REJECTED` on outbound `external_number` transfer (S114) — likely an outbound caller-ID/compliance restriction on the trunk.
+6. Queue callback v1 rough edges (memory `project_queue_callback`).
+7. Supervisor visibility of `callback_pending` agents / pending queue callbacks.
+8. Supervisor scheduled-callbacks UI — list/cancel.
+9. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
+10. Telnyx Verified Numbers feature.
+11. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
+12. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.

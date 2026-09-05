@@ -9,6 +9,10 @@ export interface AudioFileRecord {
   contentType: string
   fileSizeBytes: number
   createdAt: string
+  isTtsGenerated: boolean
+  ttsSourceText: string | null
+  ttsProviderKey: string | null
+  ttsVoiceId: string | null
 }
 
 // Built-in FreeSWITCH audio options — available without uploading anything.
@@ -78,6 +82,16 @@ export const audioFilesApi = {
   },
 
   delete: (id: string): Promise<void> => api.delete<void>(`${BASE}/${id}`),
+
+  // Synthesizes the tenant's configured TTS vendor voice once and saves it as a new, named,
+  // reusable audio file — behaves exactly like an upload from then on (appears in every picker).
+  saveTtsClip: (name: string, text: string, voiceId: string): Promise<AudioFileRecord> =>
+    api.post<AudioFileRecord>(`${BASE}/tts`, { name, text, voiceId }),
+
+  // Re-synthesizes an existing saved TTS clip in place — same id, new audio — so every node still
+  // pointing at it by audioFileId keeps working. Only valid on a clip created via saveTtsClip.
+  regenerateTtsClip: (id: string, text: string, voiceId: string, name?: string): Promise<AudioFileRecord> =>
+    api.put<AudioFileRecord>(`${BASE}/${id}/tts`, { name, text, voiceId }),
 
   streamUrl: (id: string) => `${BASE}/${id}/stream`,
 

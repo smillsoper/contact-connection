@@ -43,6 +43,41 @@ public sealed class TtsFileSynthesizer : ITtsFileSynthesizer
         string providerKey, string? providerSettingsJson, string voiceId, string text,
         CancellationToken ct = default)
     {
+        var hostDir = ResolveCacheHostDir(tenantSchemaName);
+        var containerDir = ResolveCacheContainerDir(tenantSchemaName);
+        var hash = ComputeCacheKey(providerKey, voiceId, text);
+        var fileName = $"{hash}.wav";
+        var hostPath = Path.Combine(hostDir, fileName);
+        var containerArg = $"{containerDir}/{fileName}";
+
+        if (File.Exists(hostPath))
+            return containerArg;
+
+        var result = await SynthesizeToBytesAsync(tenantSubdomain, providerKey, providerSettingsJson, voiceId, text, ct);
+        if (result is null) return null;
+
+        try
+        {
+            Directory.CreateDirectory(hostDir);
+            WriteWavFile(hostPath, result.Value.Wav, result.Value.SampleRateHz);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "TtsFileSynthesizer: failed to write cached WAV {Path}", hostPath);
+            return null;
+        }
+
+        _logger.LogInformation(
+            "TtsFileSynthesizer: synthesized + cached {Path} (provider={Provider} voice={Voice} {Bytes} bytes @ {Rate}Hz)",
+            hostPath, providerKey, voiceId, result.Value.Wav.Length, result.Value.SampleRateHz);
+
+        return containerArg;
+    }
+
+    public async Task<(byte[] Wav, int SampleRateHz)?> SynthesizeToBytesAsync(
+        string tenantSubdomain, string providerKey, string? providerSettingsJson, string voiceId, string text,
+        CancellationToken ct = default)
+    {
         ITtsStreamProvider provider;
         try
         {
@@ -53,16 +88,6 @@ public sealed class TtsFileSynthesizer : ITtsFileSynthesizer
             _logger.LogWarning(ex, "TtsFileSynthesizer: no provider registered for key {Provider}", providerKey);
             return null;
         }
-
-        var hostDir = ResolveCacheHostDir(tenantSchemaName);
-        var containerDir = ResolveCacheContainerDir(tenantSchemaName);
-        var hash = ComputeCacheKey(providerKey, voiceId, text);
-        var fileName = $"{hash}.wav";
-        var hostPath = Path.Combine(hostDir, fileName);
-        var containerArg = $"{containerDir}/{fileName}";
-
-        if (File.Exists(hostPath))
-            return containerArg;
 
         var credentials = new Dictionary<string, string>();
         foreach (var field in provider.RequiredCredentialFields)
@@ -119,22 +144,7 @@ public sealed class TtsFileSynthesizer : ITtsFileSynthesizer
             return null;
         }
 
-        try
-        {
-            Directory.CreateDirectory(hostDir);
-            WriteWavFile(hostPath, pcm.GetBuffer().AsSpan(0, (int)pcm.Length), sampleRateHz);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "TtsFileSynthesizer: failed to write cached WAV {Path}", hostPath);
-            return null;
-        }
-
-        _logger.LogInformation(
-            "TtsFileSynthesizer: synthesized + cached {Path} (provider={Provider} voice={Voice} {Bytes} bytes @ {Rate}Hz)",
-            hostPath, providerKey, voiceId, pcm.Length, sampleRateHz);
-
-        return containerArg;
+        return (pcm.ToArray(), sampleRateHz);
     }
 
     private static string ComputeCacheKey(string providerKey, string voiceId, string text)
