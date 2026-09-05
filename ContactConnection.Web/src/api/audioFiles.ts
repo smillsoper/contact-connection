@@ -1,6 +1,50 @@
 import { api } from './client'
 import { useAuthStore } from '../stores/authStore'
 import { getSubdomainFromHostname } from '../utils/subdomain'
+import platformPhrasesRaw from '../data/platformPhrases.json'
+
+// ---- Platform phrase library ---------------------------------------------------
+// Platform-wide catalog of common IVR phrases, pre-synthesized once (per voice) by
+// scripts/generate-platform-phrases.mjs into committed OGGs under freeswitch/sounds/_platform/.
+// A flow references one as "__platform:{voiceKey}/{phraseKey}"; TelephonyAudioResolver expands it.
+// Available to every tenant regardless of their own TTS vendor config.
+export interface PlatformPhraseVoice {
+  key: string
+  id: string
+  label: string
+  lang: 'en' | 'es'
+  accent: string
+  gender: 'male' | 'female'
+}
+export interface PlatformPhrase {
+  key: string
+  category: string
+  en: string
+  es: string
+}
+export const PLATFORM_PHRASE_VOICES = platformPhrasesRaw.voices as unknown as PlatformPhraseVoice[]
+export const PLATFORM_PHRASES = platformPhrasesRaw.phrases as unknown as PlatformPhrase[]
+
+export const PLATFORM_REF_PREFIX = '__platform:'
+export const platformPhraseRef = (voiceKey: string, phraseKey: string) =>
+  `${PLATFORM_REF_PREFIX}${voiceKey}/${phraseKey}`
+export const isPlatformPhraseRef = (v: string) => v.startsWith(PLATFORM_REF_PREFIX)
+export function parsePlatformPhraseRef(v: string): { voiceKey: string; phraseKey: string } | null {
+  if (!v.startsWith(PLATFORM_REF_PREFIX)) return null
+  const [voiceKey, phraseKey] = v.slice(PLATFORM_REF_PREFIX.length).split('/')
+  return voiceKey && phraseKey ? { voiceKey, phraseKey } : null
+}
+/** Human label for a platform ref, e.g. `Will — "Please hold while we connect your call."` */
+export function platformPhraseLabel(v: string): string | null {
+  const parsed = parsePlatformPhraseRef(v)
+  if (!parsed) return null
+  const voice = PLATFORM_PHRASE_VOICES.find((x) => x.key === parsed.voiceKey)
+  const phrase = PLATFORM_PHRASES.find((x) => x.key === parsed.phraseKey)
+  if (!voice || !phrase) return `Platform: ${parsed.voiceKey}/${parsed.phraseKey}`
+  const text = voice.lang === 'es' ? phrase.es : phrase.en
+  const short = text.length > 60 ? `${text.slice(0, 57)}…` : text
+  return `${voice.label} — "${short}"`
+}
 
 export interface AudioFileRecord {
   id: string
@@ -106,5 +150,17 @@ export const audioFilesApi = {
     if (!res.ok) throw new Error(`Failed to load audio (${res.status})`)
     const blob = await res.blob()
     return URL.createObjectURL(blob)
+  },
+
+  // Preview blob URL for a platform phrase-library clip (committed OGG, not tenant-scoped).
+  fetchPlatformBlobUrl: async (voiceKey: string, phraseKey: string): Promise<string> => {
+    const { token, tenantSubdomain } = useAuthStore.getState()
+    const subdomain = getSubdomainFromHostname() ?? tenantSubdomain
+    const headers: Record<string, string> = {}
+    if (token) headers['Authorization'] = `Bearer ${token}`
+    if (subdomain) headers['X-Tenant-Subdomain'] = subdomain
+    const res = await fetch(`${BASE}/platform/${voiceKey}/${phraseKey}/stream`, { headers })
+    if (!res.ok) throw new Error(`Failed to load audio (${res.status})`)
+    return URL.createObjectURL(await res.blob())
   },
 }

@@ -125,6 +125,7 @@
 | 113 | 2026-09-04 | 8:07 AM PDT | 9:49 AM PDT | 102 min | ~12888 min |
 | 114 | 2026-09-04 | 9:54 AM PDT | 10:45 AM PDT | 51 min | ~12939 min |
 | 115 | 2026-09-05 | 11:26 AM PDT | 12:19 PM PDT | 53 min | ~12992 min |
+| 116 | 2026-09-05 | 12:29 PM PDT | 1:22 PM PDT | 53 min | ~13045 min |
 
 ---
 
@@ -5353,4 +5354,62 @@ Root-caused entirely from a HAR export the user pulled from Chrome DevTools (Net
 9. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
 10. Telnyx Verified Numbers feature.
 11. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
+12. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.
+
+## Session 116
+
+**Date:** 2026-09-05
+**Start:** 12:29 PM PDT
+**End:** 1:22 PM PDT
+**Duration:** 53 minutes
+**Total Duration:** ~13045 minutes
+
+### Focus
+
+S115 carry-over #1: build the **platform-wide TTS phrase library** — a catalog of common IVR phrases pre-synthesized *once* (by the platform, using the user's ElevenLabs account) into committed audio files that every tenant can pick from in the telephony designer, regardless of whether that tenant has any TTS vendor configured of its own. Distinct from S115's per-tenant "saved TTS clips" ([[project_tts_saved_clips]]).
+
+### Content decisions (reviewed with user before building)
+
+- **25 phrases** across 8 categories: Greeting, Recording disclosure, Hold/Queue, Menu/Input, Transfer, Callback, Voicemail, Closing. (A 26th, a generic "press 1 for sales…" main-menu prompt, was cut — menu routing is per-tenant.)
+- **6 voices**, language-split: English phrases render in the 4 English voices (Will/Matilda — American M/F; Callum/Effy — British M/F); Spanish phrases in the 2 Spanish voices (Eduardo/Annie KPasa — Latin-American M/F). → **150 clips** total.
+- Spanish translations: neutral Latin-American, written this session, kept as-is.
+- Runtime carries **zero ElevenLabs dependency** — synthesis is a one-time build step; at call time it's just a file path.
+
+### Built
+
+**Catalog (source of truth):** `ContactConnection.Web/src/data/platformPhrases.json` — voices (key/id/label/lang/accent/gender) + phrases (key/category/en/es). Consumed by both the generator script and the designer UI.
+
+**Generator:** `scripts/generate-platform-phrases.mjs` — Node 22+ (global `WebSocket`), no npm deps. Reads the catalog, synthesizes each (voice × phrase-in-its-language) via ElevenLabs' streaming WS protocol (same as `ElevenLabsTtsStreamProvider`, `eleven_flash_v2_5`, `pcm_16000`), writes 16-bit WAV, transcodes to OGG Vorbis 8 kHz mono via ffmpeg (identical params to `AudioFilesEndpoints.TranscodeToOggAsync`), outputs `freeswitch/sounds/_platform/{voiceKey}/{phraseKey}.ogg`. Flags: `--dry-run` (plan + credit estimate), `--force`, `--voice=`, `--phrase=`. Skips existing files by default. User ran it: 150/150 clips, ~12.7k chars, ~6.4k ElevenLabs credits (of 39.5k available).
+
+**Runtime resolution:** flow JSON stores a stable ref `__platform:{voice}/{phrase}` (not an absolute path, not a GUID). `TelephonyAudioResolver.ResolvePlatformPhraseArg` (new, `public static`) expands it to `{SoundsContainerPath}/_platform/{voice}/{phrase}.ogg`, with `[a-z0-9_]`-only segment validation (rejects traversal / bad shape → null). Same branch added to `PlayNodeHandler` and `WhisperNodeHandler`'s own private copies of the resolve switch (the codebase has 3 copies; followed the existing pattern rather than refactoring — noted as debt). The `freeswitch/sounds` bind mount means FreeSWITCH sees the committed OGGs with no container restart.
+
+**Preview endpoint:** `GET /api/v1/audio-files/platform/{voice}/{phrase}/stream` — serves the committed OGG from the host sounds path for in-designer preview; same `[a-z0-9_]` guard.
+
+**Designer UI:** new shared `<PlatformPhrasePicker>` component (voice `<select>` grouped EN/ES → phrase `<select>` grouped by category → shows the phrase text → ▶ Preview audio → ✓ Use this phrase). Wired into **all three** audio pickers in `TelephonyNodePropertiesPanel.tsx` — the shared `AudioFilePicker` (Transfer / Voicemail / IVR Menu / Queue Callback) *and* the Play node's and Whisper node's own inline pickers (initial pass only did `AudioFilePicker`, which is why the button was missing on the Play node the user tested first). Each picker gets a `✦ Platform` button, a synthetic "Platform Library" `<option>` + readable label when a `__platform:` ref is selected, a "✦ Change platform phrase" link, and `__platform:` excluded from the "uploaded file" preview path. `audioFiles.ts` gained the catalog exports + helpers (`platformPhraseRef`, `parsePlatformPhraseRef`, `platformPhraseLabel`, `fetchPlatformBlobUrl`). `resolveJsonModule: true` added to `tsconfig.app.json`.
+
+### Live verification — PASS, no bugs
+
+User configured a Play node with `__platform:will/hold_please_hold` via the new picker (preview worked), published, placed a real inbound call — heard *"Please hold while we connect your call."* correctly. Confirmed `cc_freeswitch` sees the files at the exact container path the resolver builds.
+
+### State
+
+- Build: API **0 errors** (pre-existing NU1903/CS8602 warnings only). Web `tsc --noEmit` clean.
+- **486 tests pass** (Domain 147, Application 20, Infrastructure 319) — +10 from new `TelephonyAudioResolverTests` (valid ref, configured container base, slash tolerance, 7 malformed/unsafe cases). Api.Tests not run (dev-server file lock, as usual).
+- New files: `ContactConnection.Web/src/data/platformPhrases.json`; `scripts/generate-platform-phrases.mjs`; `tests/ContactConnection.Infrastructure.Tests/Telephony/TelephonyAudioResolverTests.cs`; `freeswitch/sounds/_platform/**` (150 committed OGGs).
+- Changed: `TelephonyAudioResolver.cs`, `PlayNodeHandler.cs`, `WhisperNodeHandler.cs`, `AudioFilesEndpoints.cs`, `ContactConnection.Web/src/api/audioFiles.ts`, `TelephonyNodePropertiesPanel.tsx`, `ContactConnection.Web/tsconfig.app.json`.
+- Committed + pushed at end of session.
+
+### Next Session — pick up here
+
+1. **Regenerate a phrase / add phrases** — `node scripts/generate-platform-phrases.mjs --phrase=<key> --force` (or add rows to `platformPhrases.json` and run without `--force`). Catalog + generator are in place; no code changes needed for content edits.
+2. Apply `AddTtsSourceToAudioFiles` (S115) to other tenant schemas if/when needed (`tenant_test_contact_center`, `tenant_tms`).
+3. Unexplained one-time API crash from S114 (exit code 1, no exception) — still unresolved, watch for recurrence.
+4. Agent-vs-softphone SIP registration state visibility on supervisor dashboard ([[project_agent_softphone_registration_visibility]]).
+5. Queue callback v1 rough edges ([[project_queue_callback]]).
+6. Supervisor visibility of `callback_pending` agents / pending queue callbacks.
+7. Supervisor scheduled-callbacks UI — list/cancel.
+8. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
+9. Telnyx Verified Numbers feature.
+10. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
+11. Consider consolidating the 3 duplicated audio-resolve switches (`TelephonyAudioResolver` + private copies in `PlayNodeHandler`/`WhisperNodeHandler`) and the 3 designer audio pickers.
 12. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.

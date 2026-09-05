@@ -210,6 +210,10 @@ public class PlayNodeHandler : ITelephonyNodeHandler
         if (audioFileId.StartsWith("__builtin:"))
             return audioFileId["__builtin:".Length..];
 
+        // Platform phrase library — "__platform:{voice}/{phrase}" (see TelephonyAudioResolver)
+        if (audioFileId.StartsWith("__platform:"))
+            return TelephonyAudioResolver.ResolvePlatformPhraseArg(_config, audioFileId["__platform:".Length..]);
+
         // Tenant-uploaded file — look up stored filename
         if (!Guid.TryParse(audioFileId, out var fileId))
             return null;

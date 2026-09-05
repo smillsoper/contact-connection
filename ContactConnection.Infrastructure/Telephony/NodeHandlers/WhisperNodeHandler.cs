@@ -94,6 +94,9 @@ public class WhisperNodeHandler : ITelephonyNodeHandler
         if (audioFileId.StartsWith("__builtin:"))
             return audioFileId["__builtin:".Length..];
 
+        if (audioFileId.StartsWith("__platform:"))
+            return TelephonyAudioResolver.ResolvePlatformPhraseArg(_config, audioFileId["__platform:".Length..]);
+
         if (!Guid.TryParse(audioFileId, out var fileId)) return null;
 
         await using var db  = _factory.Create(ctx.TenantSchemaName);

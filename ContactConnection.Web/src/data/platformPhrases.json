@@ -1,0 +1,163 @@
+{
+  "_comment": "Canonical catalog for the platform TTS phrase library. Source of truth for BOTH scripts/generate-platform-phrases.mjs (which synthesizes each phrase in each voice via ElevenLabs) and the AudioFilePicker 'Platform Library' UI. Flow JSON references a phrase as '__platform:{voiceKey}/{phraseKey}', resolved by TelephonyAudioResolver to {SoundsContainerPath}/_platform/{voiceKey}/{phraseKey}.ogg. English phrases render in the 4 en voices, Spanish in the 2 es voices.",
+  "voices": [
+    { "key": "will",    "id": "bIHbv24MWmeRgasZH58o", "label": "Will",        "lang": "en", "accent": "American",       "gender": "male"   },
+    { "key": "matilda", "id": "XrExE9yKIg1WjnnlVkGX", "label": "Matilda",     "lang": "en", "accent": "American",       "gender": "female" },
+    { "key": "callum",  "id": "X1tufN2s4pZ5Z7j8p23n", "label": "Callum",      "lang": "en", "accent": "British",        "gender": "male"   },
+    { "key": "effy",    "id": "K4k9n8oWj5s31gNdXhwZ", "label": "Effy",        "lang": "en", "accent": "British",        "gender": "female" },
+    { "key": "eduardo", "id": "hWlKHuPiFgEVc4rtnFfm", "label": "Eduardo",     "lang": "es", "accent": "Latin American", "gender": "male"   },
+    { "key": "annie",   "id": "jUxkp8eMgszgJX3XU2pV", "label": "Annie KPasa", "lang": "es", "accent": "Latin American", "gender": "female" }
+  ],
+  "phrases": [
+    {
+      "key": "greeting_thank_you_for_calling",
+      "category": "Greeting",
+      "en": "Thank you for calling. Your call is important to us.",
+      "es": "Gracias por llamar. Su llamada es importante para nosotros."
+    },
+    {
+      "key": "greeting_menu_changed",
+      "category": "Greeting",
+      "en": "Please listen carefully, as our menu options have recently changed.",
+      "es": "Por favor escuche con atención, ya que nuestras opciones de menú han cambiado recientemente."
+    },
+    {
+      "key": "disclosure_may_be_recorded",
+      "category": "Recording",
+      "en": "This call may be monitored or recorded for quality assurance and training purposes.",
+      "es": "Esta llamada puede ser monitoreada o grabada con fines de garantía de calidad y capacitación."
+    },
+    {
+      "key": "disclosure_is_recorded",
+      "category": "Recording",
+      "en": "Please be advised that this call is now being recorded.",
+      "es": "Le informamos que esta llamada está siendo grabada."
+    },
+    {
+      "key": "hold_please_hold",
+      "category": "Hold / Queue",
+      "en": "Please hold while we connect your call.",
+      "es": "Por favor espere mientras conectamos su llamada."
+    },
+    {
+      "key": "hold_all_agents_busy",
+      "category": "Hold / Queue",
+      "en": "All of our representatives are currently helping other customers. Please stay on the line, and your call will be answered in the order it was received.",
+      "es": "Todos nuestros representantes están atendiendo a otros clientes. Por favor permanezca en la línea y su llamada será atendida en el orden en que fue recibida."
+    },
+    {
+      "key": "hold_thanks_for_patience",
+      "category": "Hold / Queue",
+      "en": "Thank you for your patience. A representative will be with you shortly.",
+      "es": "Gracias por su paciencia. Un representante lo atenderá en breve."
+    },
+    {
+      "key": "hold_high_call_volume",
+      "category": "Hold / Queue",
+      "en": "We are currently experiencing higher than normal call volume, which may result in longer wait times.",
+      "es": "Actualmente estamos recibiendo un volumen de llamadas más alto de lo normal, lo que puede ocasionar tiempos de espera más largos."
+    },
+    {
+      "key": "menu_invalid_entry",
+      "category": "Menu / Input",
+      "en": "That entry is not valid. Please try again.",
+      "es": "Esa entrada no es válida. Por favor intente de nuevo."
+    },
+    {
+      "key": "menu_no_input",
+      "category": "Menu / Input",
+      "en": "We did not receive your selection. Please try again.",
+      "es": "No recibimos su selección. Por favor intente de nuevo."
+    },
+    {
+      "key": "menu_enter_account_number",
+      "category": "Menu / Input",
+      "en": "Using your keypad, please enter your account number, followed by the pound key.",
+      "es": "Usando su teclado, por favor ingrese su número de cuenta, seguido de la tecla numeral."
+    },
+    {
+      "key": "menu_enter_phone_number",
+      "category": "Menu / Input",
+      "en": "Please enter your ten-digit phone number, area code first.",
+      "es": "Por favor ingrese su número de teléfono de diez dígitos, comenzando con el código de área."
+    },
+    {
+      "key": "menu_press_1_to_confirm",
+      "category": "Menu / Input",
+      "en": "Press 1 to confirm, or press 2 to try again.",
+      "es": "Presione 1 para confirmar, o presione 2 para intentar de nuevo."
+    },
+    {
+      "key": "transfer_please_hold",
+      "category": "Transfer",
+      "en": "Please hold while we transfer your call.",
+      "es": "Por favor espere mientras transferimos su llamada."
+    },
+    {
+      "key": "transfer_to_specialist",
+      "category": "Transfer",
+      "en": "I'm connecting you with a specialist who can help. One moment, please.",
+      "es": "Lo estoy comunicando con un especialista que puede ayudarle. Un momento, por favor."
+    },
+    {
+      "key": "transfer_unable_to_complete",
+      "category": "Transfer",
+      "en": "We were unable to complete your transfer. Please remain on the line.",
+      "es": "No pudimos completar su transferencia. Por favor permanezca en la línea."
+    },
+    {
+      "key": "callback_offer",
+      "category": "Callback",
+      "en": "If you prefer not to wait on hold, you can request a callback and we will return your call when it's your turn. To request a callback, press 1. To stay on the line, press 2.",
+      "es": "Si prefiere no esperar en la línea, puede solicitar que le devolvamos la llamada cuando sea su turno. Para solicitarlo, presione 1. Para permanecer en la línea, presione 2."
+    },
+    {
+      "key": "callback_confirmed",
+      "category": "Callback",
+      "en": "Your callback has been scheduled. You can hang up now, and we will call you back shortly. Thank you.",
+      "es": "Su devolución de llamada ha sido programada. Puede colgar ahora y le llamaremos en breve. Gracias."
+    },
+    {
+      "key": "callback_greeting",
+      "category": "Callback",
+      "en": "Hello. This is a return call you requested earlier. Please hold for the next available representative.",
+      "es": "Hola. Esta es la devolución de llamada que usted solicitó. Por favor espere para el siguiente representante disponible."
+    },
+    {
+      "key": "vm_greeting_unavailable",
+      "category": "Voicemail",
+      "en": "All of our representatives are currently unavailable. Please leave your name, number, and a brief message after the tone, and we will return your call as soon as possible.",
+      "es": "Todos nuestros representantes no están disponibles en este momento. Por favor deje su nombre, número y un breve mensaje después del tono, y le devolveremos la llamada lo antes posible."
+    },
+    {
+      "key": "vm_record_after_tone",
+      "category": "Voicemail",
+      "en": "Please record your message after the tone. When you're finished, you may hang up or press the pound key.",
+      "es": "Por favor grabe su mensaje después del tono. Cuando termine, puede colgar o presionar la tecla numeral."
+    },
+    {
+      "key": "vm_message_received",
+      "category": "Voicemail",
+      "en": "Thank you. Your message has been received. Goodbye.",
+      "es": "Gracias. Su mensaje ha sido recibido. Hasta luego."
+    },
+    {
+      "key": "closing_thank_you_goodbye",
+      "category": "Closing",
+      "en": "Thank you for calling. Goodbye.",
+      "es": "Gracias por llamar. Hasta luego."
+    },
+    {
+      "key": "closing_after_hours",
+      "category": "Closing",
+      "en": "You have reached us outside of our normal business hours. Please call back during regular business hours, or leave a message and we will return your call on the next business day.",
+      "es": "Nos ha contactado fuera de nuestro horario de atención. Por favor llame durante el horario habitual, o deje un mensaje y le devolveremos la llamada el siguiente día hábil."
+    },
+    {
+      "key": "error_technical_difficulty",
+      "category": "Closing",
+      "en": "We are experiencing technical difficulties. Please try your call again later.",
+      "es": "Estamos experimentando dificultades técnicas. Por favor intente su llamada más tarde."
+    }
+  ]
+}

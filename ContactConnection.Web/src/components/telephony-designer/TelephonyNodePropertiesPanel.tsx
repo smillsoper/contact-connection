@@ -3,7 +3,18 @@ import type { Node } from '@xyflow/react'
 import type { TelNodeData, TelephonyNodeType, TimeWindow, TelVariableAssignment } from '../../types/telephony-designer'
 import { TELEPHONY_NODE_META } from '../../types/telephony-designer'
 import { TIMEZONE_GROUPS } from '../../utils/timezones'
-import { audioFilesApi, BUILTIN_AUDIO_GROUPS, BUILTIN_AUDIO_OPTIONS, type AudioFileRecord } from '../../api/audioFiles'
+import {
+  audioFilesApi,
+  BUILTIN_AUDIO_GROUPS,
+  BUILTIN_AUDIO_OPTIONS,
+  PLATFORM_PHRASE_VOICES,
+  PLATFORM_PHRASES,
+  isPlatformPhraseRef,
+  parsePlatformPhraseRef,
+  platformPhraseRef,
+  platformPhraseLabel,
+  type AudioFileRecord,
+} from '../../api/audioFiles'
 import { ttsServiceApi, type TtsServiceStatus } from '../../api/ttsService'
 import { flowsApi, type GeneralApiSummary, type FlowSummary } from '../../api/flows'
 import { listAdminAgents, type AgentRecord } from '../../api/adminAgents'
@@ -1718,6 +1729,123 @@ function fmtTime(s: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
 
+type AudioAccent = 'teal' | 'indigo' | 'purple' | 'blue' | 'cyan' | 'amber'
+
+/**
+ * Inline form for picking a clip from the platform phrase library — a voice + a common IVR phrase,
+ * both from the committed catalog (ContactConnection.Web/src/data/platformPhrases.json). Emits
+ * "__platform:{voice}/{phrase}" via onSelect. Shared by every audio picker (AudioFilePicker, the
+ * Play node's own picker, the Whisper node's picker) so the feature stays in one place even though
+ * those three pickers are otherwise separate.
+ */
+function PlatformPhrasePicker({
+  current,
+  accent = 'teal',
+  onSelect,
+  onCancel,
+}: {
+  current: string
+  accent?: AudioAccent
+  onSelect: (ref: string) => void
+  onCancel: () => void
+}) {
+  const parsed = parsePlatformPhraseRef(current)
+  const [voice, setVoice] = useState(parsed?.voiceKey ?? PLATFORM_PHRASE_VOICES[0]?.key ?? '')
+  const [phrase, setPhrase] = useState(parsed?.phraseKey ?? '')
+  const [previewUrl, setPreviewUrl] = useState('')
+  const [previewLoading, setPreviewLoading] = useState(false)
+
+  useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl) }, [previewUrl])
+
+  const categories = [...new Set(PLATFORM_PHRASES.map((p) => p.category))]
+  const voiceObj = PLATFORM_PHRASE_VOICES.find((v) => v.key === voice)
+  const phraseObj = PLATFORM_PHRASES.find((p) => p.key === phrase)
+  const text = phraseObj ? (voiceObj?.lang === 'es' ? phraseObj.es : phraseObj.en) : ''
+
+  function resetPreview() {
+    setPreviewUrl((u) => { if (u) URL.revokeObjectURL(u); return '' })
+  }
+  async function loadPreview() {
+    if (!voice || !phrase) return
+    setPreviewLoading(true)
+    try {
+      resetPreview()
+      setPreviewUrl(await audioFilesApi.fetchPlatformBlobUrl(voice, phrase))
+    } catch { /* silent */ }
+    finally { setPreviewLoading(false) }
+  }
+
+  return (
+    <div className="bg-gray-800 border border-gray-700 rounded p-2 mt-2 flex flex-col gap-2">
+      <div className="text-xs text-gray-300 font-medium">Platform phrase library</div>
+      <select
+        value={voice}
+        onChange={(e) => { setVoice(e.target.value); resetPreview() }}
+        className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-gray-100 text-xs focus:outline-none focus:border-teal-500"
+      >
+        <optgroup label="English voices">
+          {PLATFORM_PHRASE_VOICES.filter((v) => v.lang === 'en').map((v) => (
+            <option key={v.key} value={v.key}>{v.label} — {v.accent} {v.gender}</option>
+          ))}
+        </optgroup>
+        <optgroup label="Spanish voices">
+          {PLATFORM_PHRASE_VOICES.filter((v) => v.lang === 'es').map((v) => (
+            <option key={v.key} value={v.key}>{v.label} — {v.accent} {v.gender}</option>
+          ))}
+        </optgroup>
+      </select>
+      <select
+        value={phrase}
+        onChange={(e) => { setPhrase(e.target.value); resetPreview() }}
+        className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-gray-100 text-xs focus:outline-none focus:border-teal-500"
+      >
+        <option value="">— Select phrase —</option>
+        {categories.map((cat) => (
+          <optgroup key={cat} label={cat}>
+            {PLATFORM_PHRASES.filter((p) => p.category === cat).map((p) => (
+              <option key={p.key} value={p.key}>{p.key}</option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
+      {text && <p className="text-[10px] text-gray-400 italic leading-snug">&ldquo;{text}&rdquo;</p>}
+      {phrase && (
+        previewUrl ? (
+          <audio
+            controls
+            src={previewUrl}
+            className="w-full"
+            style={{ filter: 'invert(0.88) hue-rotate(180deg) brightness(0.85)' }}
+          />
+        ) : (
+          <button
+            onClick={loadPreview}
+            disabled={previewLoading}
+            className={`self-start text-xs text-${accent}-400 hover:text-${accent}-300 disabled:opacity-50`}
+          >
+            {previewLoading ? 'Loading…' : '▶ Preview'}
+          </button>
+        )
+      )}
+      <div className="flex gap-1.5">
+        <button
+          onClick={() => voice && phrase && onSelect(platformPhraseRef(voice, phrase))}
+          disabled={!phrase}
+          className={`flex-1 text-xs bg-${accent}-700 hover:bg-${accent}-600 text-white rounded py-1.5 disabled:opacity-50`}
+        >
+          ✓ Use this phrase
+        </button>
+        <button
+          onClick={onCancel}
+          className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 rounded px-3 py-1.5"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
 /**
  * Full-featured audio file picker — select (built-in groups + tenant-uploaded files), preview
  * playback, upload, and in-browser record → review → name → save & select. Same feature set as
@@ -1775,6 +1903,11 @@ function AudioFilePicker({
   const [ttsVoice, setTtsVoice] = useState('')
   const [ttsGenerating, setTtsGenerating] = useState(false)
   const [ttsError, setTtsError] = useState('')
+
+  // "Platform Library" — pick a pre-synthesized common IVR phrase (per voice) from the
+  // platform-wide catalog. Stored on the node as "__platform:{voice}/{phrase}". Always available,
+  // independent of the tenant's own TTS vendor config. Form lives in <PlatformPhrasePicker>.
+  const [platformOpen, setPlatformOpen] = useState(false)
 
   useEffect(() => {
     audioFilesApi.list().then(setAudioFiles).catch(() => setAudioFiles([]))
@@ -1839,7 +1972,8 @@ function AudioFilePicker({
     !value.startsWith('local_stream://') &&
     !value.startsWith('silence_stream://') &&
     !value.startsWith('tone_stream://') &&
-    !value.startsWith('__builtin:')
+    !value.startsWith('__builtin:') &&
+    !value.startsWith('__platform:')
 
   useEffect(() => {
     if (lastPreviewedId.current !== value) {
@@ -1968,6 +2102,11 @@ function AudioFilePicker({
             ))}
           </optgroup>
         )}
+        {isPlatformPhraseRef(value) && (
+          <optgroup label="Platform Library">
+            <option value={value}>{platformPhraseLabel(value)}</option>
+          </optgroup>
+        )}
       </select>
 
       {isUploadedFile && (
@@ -1999,9 +2138,20 @@ function AudioFilePicker({
         </div>
       )}
 
-      {recordPhase === 'idle' && ttsPhase === 'idle' && (
-        <div className="flex gap-1.5 mt-2">
-          <label className="flex-1 cursor-pointer">
+      {isPlatformPhraseRef(value) && recordPhase === 'idle' && ttsPhase === 'idle' && !platformOpen && (
+        <div className="mt-2">
+          <button
+            onClick={() => setPlatformOpen(true)}
+            className={`text-xs text-${accent}-400 hover:text-${accent}-300`}
+          >
+            ✦ Change platform phrase
+          </button>
+        </div>
+      )}
+
+      {recordPhase === 'idle' && ttsPhase === 'idle' && !platformOpen && (
+        <div className="flex flex-wrap gap-1.5 mt-2">
+          <label className="flex-1 min-w-[72px] cursor-pointer">
             <input
               type="file"
               accept=".wav,.mp3,.ogg,.webm,.mp4,audio/*"
@@ -2015,14 +2165,20 @@ function AudioFilePicker({
           </label>
           <button
             onClick={startRecording}
-            className="flex-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-600 rounded px-2 py-1.5 transition-colors"
+            className="flex-1 min-w-[72px] text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-600 rounded px-2 py-1.5 transition-colors"
           >
             ● Record
+          </button>
+          <button
+            onClick={() => setPlatformOpen(true)}
+            className="flex-1 min-w-[72px] text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-600 rounded px-2 py-1.5 transition-colors"
+          >
+            ✦ Platform
           </button>
           {ttsStatus?.configured && (
             <button
               onClick={() => openTtsForm()}
-              className="flex-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-600 rounded px-2 py-1.5 transition-colors"
+              className="flex-1 min-w-[72px] text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-600 rounded px-2 py-1.5 transition-colors"
             >
               ✦ Generate TTS
             </button>
@@ -2128,6 +2284,15 @@ function AudioFilePicker({
         </div>
       )}
 
+      {platformOpen && (
+        <PlatformPhrasePicker
+          current={value}
+          accent={accent}
+          onSelect={(ref) => { onChange(ref); setPlatformOpen(false) }}
+          onCancel={() => setPlatformOpen(false)}
+        />
+      )}
+
       {helpText && <p className="text-[10px] text-gray-500 mt-1.5 leading-snug">{helpText}</p>}
     </div>
   )
@@ -2163,6 +2328,8 @@ function PlayNodeEditor({
   const streamRef = useRef<MediaStream | null>(null)
   const recordBlobRef = useRef<Blob | null>(null)
 
+  const [platformOpen, setPlatformOpen] = useState(false)
+
   useEffect(() => {
     audioFilesApi.list().then(setAudioFiles).catch(() => setAudioFiles([]))
   }, [])
@@ -2182,13 +2349,14 @@ function PlayNodeEditor({
   const autoRestart = (data.autoRestart as boolean) ?? false
   const selectedFileId = (data.audioFileId as string) ?? ''
 
-  // Whether selected file is a tenant-uploaded file (UUID) vs built-in or stream
+  // Whether selected file is a tenant-uploaded file (UUID) vs built-in, platform phrase, or stream
   const isUploadedFile =
     selectedFileId.length > 0 &&
     !selectedFileId.startsWith('local_stream://') &&
     !selectedFileId.startsWith('silence_stream://') &&
     !selectedFileId.startsWith('tone_stream://') &&
-    !selectedFileId.startsWith('__builtin:')
+    !selectedFileId.startsWith('__builtin:') &&
+    !selectedFileId.startsWith('__platform:')
 
   // Clear preview when a different file is selected
   useEffect(() => {
@@ -2346,6 +2514,11 @@ function PlayNodeEditor({
                   ))}
                 </optgroup>
               )}
+              {isPlatformPhraseRef(selectedFileId) && (
+                <optgroup label="Platform Library">
+                  <option value={selectedFileId}>{platformPhraseLabel(selectedFileId)}</option>
+                </optgroup>
+              )}
             </select>
 
             {/* Preview — only for uploaded files */}
@@ -2369,12 +2542,21 @@ function PlayNodeEditor({
                 )}
               </div>
             )}
+
+            {isPlatformPhraseRef(selectedFileId) && !platformOpen && recordPhase === 'idle' && (
+              <button
+                onClick={() => setPlatformOpen(true)}
+                className="mt-2 text-xs text-teal-400 hover:text-teal-300"
+              >
+                ✦ Change platform phrase
+              </button>
+            )}
           </div>
 
-          {/* Upload + Record row */}
-          {recordPhase === 'idle' && (
-            <div className="flex gap-1.5">
-              <label className="flex-1 cursor-pointer">
+          {/* Upload + Record + Platform row */}
+          {recordPhase === 'idle' && !platformOpen && (
+            <div className="flex flex-wrap gap-1.5">
+              <label className="flex-1 min-w-[72px] cursor-pointer">
                 <input
                   type="file"
                   accept=".wav,.mp3,.ogg,.webm,.mp4,audio/*"
@@ -2388,11 +2570,25 @@ function PlayNodeEditor({
               </label>
               <button
                 onClick={startRecording}
-                className="flex-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-600 rounded px-2 py-1.5 transition-colors"
+                className="flex-1 min-w-[72px] text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-600 rounded px-2 py-1.5 transition-colors"
               >
                 ● Record
               </button>
+              <button
+                onClick={() => setPlatformOpen(true)}
+                className="flex-1 min-w-[72px] text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-600 rounded px-2 py-1.5 transition-colors"
+              >
+                ✦ Platform
+              </button>
             </div>
+          )}
+
+          {platformOpen && (
+            <PlatformPhrasePicker
+              current={selectedFileId}
+              onSelect={(ref) => { onChange({ audioFileId: ref }); setPlatformOpen(false) }}
+              onCancel={() => setPlatformOpen(false)}
+            />
           )}
 
           {uploadError && <p className="text-xs text-red-400">{uploadError}</p>}
@@ -2697,6 +2893,8 @@ function WhisperNodeEditor({
   const streamRef = useRef<MediaStream | null>(null)
   const recordBlobRef = useRef<Blob | null>(null)
 
+  const [platformOpen, setPlatformOpen] = useState(false)
+
   useEffect(() => {
     audioFilesApi.list().then(setAudioFiles).catch(() => setAudioFiles([]))
   }, [])
@@ -2716,7 +2914,8 @@ function WhisperNodeEditor({
     !selectedFileId.startsWith('local_stream://') &&
     !selectedFileId.startsWith('silence_stream://') &&
     !selectedFileId.startsWith('tone_stream://') &&
-    !selectedFileId.startsWith('__builtin:')
+    !selectedFileId.startsWith('__builtin:') &&
+    !selectedFileId.startsWith('__platform:')
 
   useEffect(() => {
     if (lastPreviewedId.current !== selectedFileId) {
@@ -2830,6 +3029,11 @@ function WhisperNodeEditor({
               ))}
             </optgroup>
           )}
+          {isPlatformPhraseRef(selectedFileId) && (
+            <optgroup label="Platform Library">
+              <option value={selectedFileId}>{platformPhraseLabel(selectedFileId)}</option>
+            </optgroup>
+          )}
         </select>
 
         {isUploadedFile && (
@@ -2845,11 +3049,18 @@ function WhisperNodeEditor({
             )}
           </div>
         )}
+
+        {isPlatformPhraseRef(selectedFileId) && !platformOpen && recordPhase === 'idle' && (
+          <button onClick={() => setPlatformOpen(true)}
+            className="mt-2 text-xs text-purple-400 hover:text-purple-300">
+            ✦ Change platform phrase
+          </button>
+        )}
       </div>
 
-      {recordPhase === 'idle' && (
-        <div className="flex gap-1.5">
-          <label className="flex-1 cursor-pointer">
+      {recordPhase === 'idle' && !platformOpen && (
+        <div className="flex flex-wrap gap-1.5">
+          <label className="flex-1 min-w-[72px] cursor-pointer">
             <input type="file" accept=".wav,.mp3,.ogg,.webm,.mp4,audio/*" className="hidden"
               onChange={handleUpload} disabled={uploading} />
             <span className="block text-center text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-600 rounded px-2 py-1.5 transition-colors">
@@ -2857,10 +3068,23 @@ function WhisperNodeEditor({
             </span>
           </label>
           <button onClick={startRecording}
-            className="flex-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-600 rounded px-2 py-1.5 transition-colors">
+            className="flex-1 min-w-[72px] text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-600 rounded px-2 py-1.5 transition-colors">
             ● Record
           </button>
+          <button onClick={() => setPlatformOpen(true)}
+            className="flex-1 min-w-[72px] text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-600 rounded px-2 py-1.5 transition-colors">
+            ✦ Platform
+          </button>
         </div>
+      )}
+
+      {platformOpen && (
+        <PlatformPhrasePicker
+          current={selectedFileId}
+          accent="purple"
+          onSelect={(ref) => { onChange({ audioFileId: ref }); setPlatformOpen(false) }}
+          onCancel={() => setPlatformOpen(false)}
+        />
       )}
 
       {uploadError && <p className="text-xs text-red-400">{uploadError}</p>}

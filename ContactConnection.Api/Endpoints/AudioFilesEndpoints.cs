@@ -265,6 +265,24 @@ public static class AudioFilesEndpoints
             return Results.NoContent();
         });
 
+        // GET /api/v1/audio-files/platform/{voice}/{phrase}/stream — preview a platform phrase-library
+        // clip (committed OGG under freeswitch/sounds/_platform/, not tenant-scoped). Same clip the
+        // "__platform:{voice}/{phrase}" flow ref resolves to. Segments restricted to [a-z0-9_].
+        group.MapGet("/platform/{voice}/{phrase}/stream", (
+            string voice,
+            string phrase,
+            IWebHostEnvironment env,
+            IConfiguration config) =>
+        {
+            static bool Safe(string s) => s.Length is > 0 and <= 64 && s.All(c => c is >= 'a' and <= 'z' or >= '0' and <= '9' or '_');
+            if (!Safe(voice) || !Safe(phrase)) return Results.NotFound();
+
+            var diskPath = Path.Combine(ResolveSoundsHostPath(config, env), "_platform", voice, $"{phrase}.ogg");
+            return File.Exists(diskPath)
+                ? Results.File(diskPath, "audio/ogg", $"{voice}-{phrase}.ogg")
+                : Results.NotFound();
+        });
+
         // GET /api/v1/audio-files/{id}/stream — serve file for browser preview
         group.MapGet("/{id:guid}/stream", async (
             Guid id,
