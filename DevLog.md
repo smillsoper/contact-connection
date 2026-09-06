@@ -126,6 +126,7 @@
 | 114 | 2026-09-04 | 9:54 AM PDT | 10:45 AM PDT | 51 min | ~12939 min |
 | 115 | 2026-09-05 | 11:26 AM PDT | 12:19 PM PDT | 53 min | ~12992 min |
 | 116 | 2026-09-05 | 12:29 PM PDT | 1:22 PM PDT | 53 min | ~13045 min |
+| 117 | 2026-09-06 | 10:51 AM PDT | 12:39 PM PDT | ~98 min (108 elapsed − ~10 min PC-crash/reboot gap) | ~13143 min |
 
 ---
 
@@ -5413,3 +5414,63 @@ User configured a Play node with `__platform:will/hold_please_hold` via the new 
 10. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
 11. Consider consolidating the 3 duplicated audio-resolve switches (`TelephonyAudioResolver` + private copies in `PlayNodeHandler`/`WhisperNodeHandler`) and the 3 designer audio pickers.
 12. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.
+
+## Session 117
+
+**Date:** 2026-09-06
+**Start:** 10:51 AM PDT
+**End:** 12:39 PM PDT
+**Duration:** ~98 minutes active (108 elapsed − ~10 min PC-crash/reboot gap)
+**Total Duration:** ~13143 minutes
+
+### Focus
+
+User observation: the first fraction of a second of any played prompt gets clipped — "like the call isn't fully bridged to the audio before it starts to play" — a defect they hear on other businesses' IVRs too. Fixed it three ways, then (found while verifying) fixed periodic hold announcements, which turned out to have never worked.
+
+Also this session: diagnosed the S116 "Play node lost its intermittent-announcement section" report (a node whose settings got half-reset in an earlier test — the `PeriodicAnnouncementEditor` is gated on the Auto-restart checkbox, unchanged since S68); diagnosed dead-air-on-test-call as Cloudflare WARP being on (FreeSWITCH's external profile advertises the pre-WARP ISP IP to Telnyx, so inbound INVITEs never arrive — WARP off + `sofia profile external restart` fixes it); a mid-session graphics-driver BSOD (`dxgmms2.sys`) + CPU thermal trip cost ~10 min (unrelated to the work; all uncommitted changes survived).
+
+### First-syllable clipping — three layers (all live-verified, real inbound call, no clipping on any prompt)
+
+1. **Platform phrase library** — every clip now carries ~400 ms leading silence (ffmpeg `adelay`, `LEAD_IN_MS` env-overridable). All 150 committed OGGs re-encoded in place; `scripts/generate-platform-phrases.mjs` bakes it into future runs. ([[project_platform_tts_phrase_library]])
+
+2. **Lead-in silence priming in the flow engine** — plays `silence_stream://<ms>,0` and waits for it, forcing RTP to start flowing / the far-end jitter buffer to fill before the real prompt:
+   - `AnswerNodeHandler` — after answering, `node["leadInSilenceMs"]` (default **300**, 0 disables) → `BroadcastAsync(silence_stream://{ms},0)` + `Task.Delay(ms+100)` + set `_media_primed`. Published `tf_answer` nodes with no `leadInSilenceMs` in their JSON fall through to 300, so it's on for every existing flow.
+   - `PlayNodeHandler` — optional per-node `leadInSilenceMs` (default **0**), before the broadcast on file / flite-TTS paths. For a prompt after a long silent gap (e.g. slow API call).
+   - Designer: "Lead-in silence (ms)" field on a new `tf_answer` editor block and on `PlayNodeEditor` (non-TTS); `TelNodeData.leadInSilenceMs` + `defaultTelNodeData` defaults.
+
+3. **FreeSWITCH external profile** (`freeswitch/conf/sip_profiles/external.xml`): `suppress-cng=true` (stream real silence RTP, not RFC 3389 comfort-noise, so the media stream stays continuous and the far end stays "awake") + `auto-jitterbuffer-msec=60`.
+
+[[project_media_lead_in_silence]]
+
+### Periodic ("intermittent") hold announcements — were completely non-functional; now working
+
+Root cause: announcements were only evaluated inside `HandlePlaybackStopAsync` (end of the main audio). `local_stream://moh` never fires PLAYBACK_STOP; a multi-minute music track fires it every few minutes — so a 20–60 s interval was dead. Never live-verified before.
+
+- **`PlayAnnouncementService`** (`ContactConnection.Api/Telephony/`, `BackgroundService`, 2 s `PeriodicTimer`, registered in `Program.cs`). Each tick scans live sessions; for a looping `tf_play` (`_play_loop=="true"`, `_play_state=="main"`) whose announcement interval is due (`DueAnnouncement`, `internal static` pure fn; anchor = `_play_last_announcement_at` → falls back to `_play_started_at`) it stamps `_play_state="announcement"` + `_play_announcement_fired_at`, saves, then **`uuid_break` then `uuid_broadcast`** the next playlist entry.
+- **The `uuid_break` first is required** — a bare `uuid_broadcast` on a parked channel *queues behind* the in-progress `uuid_broadcast`-injected MOH playback instead of pre-empting it; symptom is the announcement's `playback(...)` never appearing in the FS log and never playing. This was the whole bug — it took 3 test calls + FS-log inspection to pin down. ([[project_freeswitch_build_constraints]])
+- **`EslBackgroundService.HandlePlaybackStopAsync`** — the `uuid_break` makes the MOH emit its own PLAYBACK_STOP; the handler's `_play_state=="announcement"` branch now distinguishes that MOH-break event from the announcement's own by `Playback-File-Path` (`PlayFilePathsMatch`, suffix match, strips `@@`), with a <1 s time-guard fallback. Only the announcement's own PLAYBACK_STOP resumes MOH + advances `_play_announcement_index`. Removed the old PLAYBACK_STOP-boundary check. Bridge handler now `ClearPlayVars` (all `_play_*`) so a late announcement can't broadcast onto a live agent call.
+- Live-verified: two announcements fired 20 s apart, cycling ann1→ann2, MOH resuming between each — confirmed audible.
+
+[[project_periodic_hold_announcements]]
+
+### State
+
+- Full solution build clean (only pre-existing NU1903/CS8602 warnings). Web `tsc --noEmit` clean.
+- **573 tests pass** — Domain 147, Application 20, Infrastructure 322, Api 84. New: `AnswerNodeHandlerTests` (3), `PlayAnnouncementServiceTests` (10). (`AnswerNodeHandlerTests` in Infrastructure; the +10 resolver tests from S116's `TelephonyAudioResolverTests` are in the 322.)
+- New files: `ContactConnection.Api/Telephony/PlayAnnouncementService.cs`; `tests/ContactConnection.Api.Tests/Telephony/PlayAnnouncementServiceTests.cs`; `tests/ContactConnection.Infrastructure.Tests/Telephony/NodeHandlers/AnswerNodeHandlerTests.cs`.
+- Changed: `EslBackgroundService.cs`, `Program.cs`, `AnswerNodeHandler.cs`, `PlayNodeHandler.cs`, `TelephonyNodePropertiesPanel.tsx`, `telephony-designer.ts`, `external.xml`, `generate-platform-phrases.mjs`, 150 platform OGGs.
+- Committed + pushed: `0957787`.
+
+### Next session — pick up here
+
+1. **#3 from the anti-clipping list (not done)** — prepend silence to the first synthesized chunk on the mod_audio_stream *streaming*-TTS path, or wait for one chunk to buffer before broadcasting. The lead-in on `tf_answer` covers it indirectly (path primed once at answer); the per-node `tf_play` lead-in deliberately skips the streaming path.
+2. Apply `AddTtsSourceToAudioFiles` (S115) to other tenant schemas if/when needed (`tenant_test_contact_center`, `tenant_tms`).
+3. Consolidate the 3 duplicated audio-resolve switches (`TelephonyAudioResolver` + private copies in `PlayNodeHandler`/`WhisperNodeHandler`) and the 3 designer audio pickers.
+4. Agent-vs-softphone SIP registration state visibility on supervisor dashboard ([[project_agent_softphone_registration_visibility]]).
+5. Queue callback v1 rough edges ([[project_queue_callback]]).
+6. Supervisor visibility of `callback_pending` agents / pending queue callbacks; supervisor scheduled-callbacks UI (list/cancel).
+7. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
+8. Telnyx Verified Numbers feature.
+9. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
+10. `cc_timesync` container crash-loops (`chronyd` "Another chronyd may already be running") — harmless (Docker Desktop syncs the VM clock anyway) but noisy; worth removing or fixing the container.
+11. Prior carry-overs: S114 one-time API crash watch; `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.
