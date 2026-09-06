@@ -38,6 +38,18 @@
     <param name="inbound-codec-negotiation" value="generous"/>
     <param name="rtp-timer-name"      value="soft"/>
     <param name="watchdog-enabled"    value="false"/>
+
+    <!-- Don't emit RFC 3389 comfort-noise (CNG) packets when we have nothing to
+         send — stream real silence RTP instead. This keeps the media stream
+         continuous so the far-end jitter buffer stays fed and the path stays
+         "awake"; without it, the first syllable of a prompt is eaten while the
+         carrier/handset ramps its jitter buffer back up (the classic clipped-
+         IVR-greeting defect, worst on mobile with DTX). Pairs with the
+         tf_answer / tf_play "lead-in silence" priming in the flow engine. -->
+    <param name="suppress-cng"        value="true"/>
+    <!-- Adaptive inbound jitter buffer (~60 ms) — smooths trunk network jitter
+         for cleaner DTMF detection and recording quality. -->
+    <param name="auto-jitterbuffer-msec" value="60"/>
   </settings>
 
   <gateways>

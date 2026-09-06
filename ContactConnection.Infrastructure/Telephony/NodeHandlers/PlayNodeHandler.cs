@@ -151,6 +151,19 @@ public class PlayNodeHandler : ITelephonyNodeHandler
 
         StoreTransitions(transitions, ctx.Vars);
 
+        // Optional per-node lead-in silence — plays a short silence burst and waits for it to
+        // finish before the real prompt, priming the RTP path so the first syllable isn't
+        // clipped. tf_answer already does this once right after answer; this is for a prompt
+        // that follows a long silent gap (e.g. a slow API call) where the path may have gone
+        // cold again. Default 0 (rely on the answer-time prime). File / flite-TTS paths only —
+        // the streaming-TTS path returned earlier.
+        var leadInMs = node["leadInSilenceMs"]?.GetValue<int>() ?? 0;
+        if (leadInMs > 0)
+        {
+            await ctx.Esl.BroadcastAsync(ctx.ChannelUuid, $"silence_stream://{leadInMs},0", ct);
+            await Task.Delay(leadInMs + 80, ct);
+        }
+
         // ── Fire the broadcast ───────────────────────────────────────────────────
         _logger.LogInformation(
             "PlayNodeHandler [{Uuid}]: broadcasting '{MediaArg}' loop={Loop} duration={Duration}s",

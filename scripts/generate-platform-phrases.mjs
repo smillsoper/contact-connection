@@ -7,8 +7,7 @@
  * every phrase in every voice, synthesizes the phrase text (English phrases in the `en` voices,
  * Spanish in the `es` voices) via ElevenLabs' documented streaming WebSocket protocol — the same
  * protocol ContactConnection.Infrastructure/Tts/ElevenLabsTtsStreamProvider.cs speaks — then
- * transcodes the PCM to OGG Vorbis 8 kHz mono (identical ffmpeg params to
- * AudioFilesEndpoints.TranscodeToOggAsync) and writes it to:
+ * transcodes the PCM to OGG Vorbis 8 kHz mono and writes it to:
  *
  *     freeswitch/sounds/_platform/{voiceKey}/{phraseKey}.ogg
  *
@@ -16,6 +15,11 @@
  * /usr/share/freeswitch/sounds/contactconnection/_platform/... and is committed to the repo, so
  * the library ships to every environment with no runtime ElevenLabs dependency. Flow JSON refers
  * to a clip as "__platform:{voiceKey}/{phraseKey}"; TelephonyAudioResolver expands that.
+ *
+ * Every clip is transcoded with LEAD_IN_SILENCE_MS (default 400) of digital silence prepended
+ * (ffmpeg `adelay`). This "primes the pump" — RTP is already flowing and the far-end jitter
+ * buffer is full by the time the first word plays — so the leading syllable isn't clipped, the
+ * single most common IVR defect on PSTN/mobile. Override with the LEAD_IN_MS env var (0 disables).
  *
  * Requires: Node 22+ (global WebSocket), ffmpeg on PATH (or FFMPEG_PATH env var),
  *           ELEVENLABS_API_KEY env var.
@@ -44,6 +48,7 @@ const MODEL_ID = 'eleven_flash_v2_5';
 const PCM_RATE = 16000; // ElevenLabs has no pcm_8000; nearest-up, then ffmpeg downsamples to 8k
 const VOICE_SETTINGS = { stability: 0.5, similarity_boost: 0.75, style: 0.0, use_speaker_boost: true, speed: 1.0 };
 const INTER_REQUEST_DELAY_MS = 350;
+const LEAD_IN_SILENCE_MS = Number(process.env.LEAD_IN_MS ?? 400); // prepended to every clip; anti first-syllable-clip
 
 // ---- args -------------------------------------------------------------------
 const args = process.argv.slice(2);
@@ -145,7 +150,9 @@ function wavFromPcm(pcm, sampleRate) {
 
 function transcodeToOgg(wavPath, oggPath) {
   return new Promise((res, rej) => {
-    const p = spawn(FFMPEG, ['-y', '-i', wavPath, '-vn', '-ar', '8000', '-ac', '1', '-c:a', 'libvorbis', '-q:a', '3', oggPath], { stdio: ['ignore', 'ignore', 'pipe'] });
+    const filters = ['aresample=8000'];
+    if (LEAD_IN_SILENCE_MS > 0) filters.push(`adelay=${LEAD_IN_SILENCE_MS}:all=1`);
+    const p = spawn(FFMPEG, ['-y', '-i', wavPath, '-vn', '-af', filters.join(','), '-ac', '1', '-c:a', 'libvorbis', '-q:a', '3', oggPath], { stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = '';
     p.stderr.on('data', (d) => { stderr += d; });
     p.on('error', (e) => rej(new Error(`ffmpeg could not start (${FFMPEG}): ${e.message}`)));

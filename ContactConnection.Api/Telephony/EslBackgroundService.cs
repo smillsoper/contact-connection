@@ -1253,11 +1253,13 @@ public sealed class EslBackgroundService : BackgroundService
                 metServiceLevel: metServiceLevel, ct: ct);
         }
 
-        // Stop any active play loop — the call is now bridged
+        // Stop any active play loop — the call is now bridged. Clear ALL _play_* (not just the two
+        // loop keys) so a periodic-announcement PLAYBACK_STOP that lands right after the bridge
+        // can't re-broadcast MOH onto the live agent call, and PlayAnnouncementService (which gates
+        // on _play_loop) stops considering this session.
         if (bridgeSession.Vars.ContainsKey("_play_media_arg"))
         {
-            bridgeSession.Vars.Remove("_play_media_arg");
-            bridgeSession.Vars.Remove("_play_loop");
+            ClearPlayVars(bridgeSession);
             // Immediately cut the audio; without this FreeSWITCH finishes the current
             // file before the bridge audio starts coming through.
             await esl.BreakChannelAsync(uuid, ct);
@@ -1413,21 +1415,44 @@ public sealed class EslBackgroundService : BackgroundService
             return;
         }
 
-        // ── Announcement just finished — advance index, restart main ────────────
+        // ── Periodic announcement in progress ──────────────────────────────────
+        // PlayAnnouncementService set _play_state="announcement" and fired a uuid_broadcast of the
+        // announcement, which interrupts the looping MOH. That produces TWO PLAYBACK_STOP events:
+        // first the interrupted MOH, then the announcement itself when it finishes. Only the
+        // second one should resume the loop / advance the playlist. Tell them apart by the stopped
+        // file path (Playback-File-Path); if the event carried none, fall back to a ~1 s time
+        // guard off _play_announcement_fired_at (an announcement never ends that fast).
         if (currentState == "announcement")
         {
-            // Advance to the next announcement in the playlist (wraps to 0 after the last)
-            var announcements = GetAnnouncementList(session);
+            var stoppedFile   = vars.GetValueOrDefault("Playback-File-Path", "");
+            var announcements  = GetAnnouncementList(session);
+
+            bool isAnnouncementDone;
+            if (!string.IsNullOrEmpty(stoppedFile))
+            {
+                isAnnouncementDone = announcements.Any(a => PlayFilePathsMatch(a, stoppedFile));
+            }
+            else
+            {
+                var firedRecently =
+                    DateTimeOffset.TryParse(session.Vars.GetValueOrDefault("_play_announcement_fired_at", ""), out var firedAt)
+                    && (DateTimeOffset.UtcNow - firedAt).TotalSeconds < 1.0;
+                isAnnouncementDone = !firedRecently;
+            }
+
+            if (!isAnnouncementDone)
+                return; // this was the MOH interrupt — the announcement is playing now
+
             if (announcements.Count > 0)
             {
                 var currentIdx = int.TryParse(
                     session.Vars.GetValueOrDefault("_play_announcement_index", "0"), out var ci) ? ci : 0;
-                var nextIdx = (currentIdx + 1) % announcements.Count;
-                session.Vars["_play_announcement_index"] = nextIdx.ToString();
+                session.Vars["_play_announcement_index"] = ((currentIdx + 1) % announcements.Count).ToString();
             }
 
             session.Vars["_play_state"]                = "main";
             session.Vars["_play_last_announcement_at"] = DateTimeOffset.UtcNow.ToString("O");
+            session.Vars.Remove("_play_announcement_fired_at");
 
             if (isLoop)
             {
@@ -1441,31 +1466,8 @@ public sealed class EslBackgroundService : BackgroundService
             return;
         }
 
-        // ── Main file finished — check if a periodic announcement is due ─────────
-        var announcementList = GetAnnouncementList(session);
-        if (announcementList.Count > 0
-            && int.TryParse(session.Vars.GetValueOrDefault("_play_announcement_interval", "30"), out var interval))
-        {
-            var lastAtStr = session.Vars.GetValueOrDefault("_play_last_announcement_at", "");
-            var elapsed = DateTimeOffset.TryParse(lastAtStr, out var lastAt)
-                ? (DateTimeOffset.UtcNow - lastAt).TotalSeconds
-                : double.MaxValue;
-
-            if (elapsed >= interval)
-            {
-                var idx = int.TryParse(
-                    session.Vars.GetValueOrDefault("_play_announcement_index", "0"), out var ai) ? ai : 0;
-                var announcementArg = announcementList[idx % announcementList.Count];
-
-                _logger.LogInformation(
-                    "PlaybackStop [{Uuid}]: playing announcement #{Idx}/{Total}", uuid, idx, announcementList.Count);
-                session.Vars["_play_state"] = "announcement";
-                await esl.BroadcastAsync(uuid, announcementArg, ct);
-                await _sessionStore.SaveAsync(session, ct);
-                return;
-            }
-        }
-
+        // ── Main media finished — loop it, or end. (Periodic-announcement timing is driven by
+        //    PlayAnnouncementService, not this boundary — a looping MOH source may never reach it.)
         if (isLoop)
         {
             await esl.BroadcastAsync(uuid, mediaArg, ct);
@@ -1753,6 +1755,18 @@ public sealed class EslBackgroundService : BackgroundService
         if (string.IsNullOrEmpty(json)) return [];
         try { return JsonSerializer.Deserialize<List<string>>(json) ?? []; }
         catch { return []; }
+    }
+
+    /// <summary>Whether a stored play arg and a PLAYBACK_STOP Playback-File-Path refer to the same
+    /// file. FreeSWITCH may report the path with or without leading modifiers (e.g. "@@" offset) or
+    /// a slightly different absolute prefix, so match on either being a suffix of the other.</summary>
+    private static bool PlayFilePathsMatch(string storedArg, string stoppedFile)
+    {
+        if (string.IsNullOrEmpty(storedArg) || string.IsNullOrEmpty(stoppedFile)) return false;
+        var a = storedArg.Split("@@")[0].TrimEnd();
+        return a == stoppedFile
+            || a.EndsWith(stoppedFile, StringComparison.OrdinalIgnoreCase)
+            || stoppedFile.EndsWith(a, StringComparison.OrdinalIgnoreCase);
     }
 
     private static void ClearPlayVars(TelephonyCallSession session)

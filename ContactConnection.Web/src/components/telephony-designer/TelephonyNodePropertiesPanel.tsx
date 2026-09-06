@@ -137,6 +137,25 @@ export default function TelephonyNodePropertiesPanel({
       </div>
 
       {/* Node-type-specific fields */}
+      {type === 'tf_answer' && (
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Lead-in silence (ms)</label>
+          <input
+            type="number"
+            min={0}
+            step={50}
+            className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-blue-500"
+            value={(data.leadInSilenceMs as number) ?? 300}
+            onChange={(e) => set('leadInSilenceMs', parseInt(e.target.value) || 0)}
+          />
+          <p className="text-xs text-gray-500 mt-1.5 leading-snug">
+            After answering, plays this much silence and waits before continuing — primes the audio
+            path so the first words of the next prompt aren&rsquo;t clipped (common on mobile). 300 is a
+            good default; 0 disables.
+          </p>
+        </div>
+      )}
+
       {type === 'tf_reject' && (
         <div>
           <label className="block text-xs text-gray-400 mb-1">Rejection Cause</label>
@@ -2696,6 +2715,25 @@ function PlayNodeEditor({
           />
         </div>
       </div>
+
+      {audioSource !== 'tts' && (
+        <div>
+          <label className={labelCls}>Lead-in silence (ms)</label>
+          <input
+            type="number"
+            min={0}
+            step={50}
+            className={inputCls}
+            value={(data.leadInSilenceMs as number) ?? 0}
+            onChange={(e) => onChange({ leadInSilenceMs: parseInt(e.target.value) || 0 })}
+          />
+          <p className="text-[10px] text-gray-500 mt-1 leading-snug">
+            Silence played (and waited on) before this prompt, to re-prime the audio path so the
+            first syllable isn&rsquo;t clipped. Usually leave 0 — the Answer node primes once already;
+            set ~300 only for a prompt after a long silent gap (e.g. a slow API call).
+          </p>
+        </div>
+      )}
 
       {/* Flags */}
       <div className="flex flex-col gap-1.5">

@@ -70,6 +70,10 @@ export interface TelNodeData extends Record<string, unknown> {
   autoRestart?: boolean
   periodicAnnouncements?: Array<{ fileId: string }>
   periodicAnnouncementIntervalSeconds?: number
+  // tf_answer + tf_play — ms of silence played (and waited on) before proceeding / before the
+  // prompt, to prime the RTP path so the first syllable isn't clipped. tf_answer defaults 300;
+  // tf_play defaults 0 (relies on the answer-time prime). 0 disables.
+  leadInSilenceMs?: number
   // tf_time_of_day
   timezone?: string
   windows?: TimeWindow[]
@@ -406,7 +410,7 @@ export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
     case 'tf_reject':
       return { label: 'Reject Call', cause: 'busy' }
     case 'tf_answer':
-      return { label: 'Answer Call' }
+      return { label: 'Answer Call', leadInSilenceMs: 300 }
     case 'tf_hangup':
       return { label: 'Hang Up' }
     case 'tf_route_to_queue':
@@ -429,6 +433,7 @@ export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
         ttsVoice: 'kal',
         durationSeconds: 0,
         startOffsetSeconds: 0,
+        leadInSilenceMs: 0,
         rememberPosition: false,
         autoRestart: false,
         periodicAnnouncements: [],

@@ -74,6 +74,11 @@ builder.Services.AddHostedService<EslBackgroundService>();
 // Queue poller — every 1 second, notifies newly-available agents of parked calls
 builder.Services.AddHostedService<QueuePollingService>();
 
+// Periodic hold announcements — every 2 seconds, interrupts looping MOH with the next tf_play
+// intermittent announcement when its interval comes due (PLAYBACK_STOP can't drive this for an
+// endless / very long hold source).
+builder.Services.AddHostedService<PlayAnnouncementService>();
+
 // Call trace expiry sweeper — every 1 second, stops traces that hit their duration cap
 builder.Services.AddHostedService<ContactConnection.Api.CallTrace.CallTraceExpiryBackgroundService>();
 
