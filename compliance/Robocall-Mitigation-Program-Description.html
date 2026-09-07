@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Robocall Mitigation Program Description</title>
+<style>
+  @page { size: Letter; margin: 1in; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body {
+    font-family: "Georgia", "Times New Roman", serif;
+    font-size: 11.5pt;
+    line-height: 1.5;
+    color: #111;
+    max-width: 7in;
+    margin: 0 auto;
+    padding: 0.5in 0;
+  }
+  h1 { font-size: 16pt; text-align: center; margin: 0 0 4pt; }
+  h2 {
+    font-size: 12.5pt;
+    margin: 22pt 0 6pt;
+    padding-bottom: 3pt;
+    border-bottom: 1px solid #999;
+    page-break-after: avoid;
+  }
+  h3 { font-size: 11.5pt; margin: 14pt 0 4pt; page-break-after: avoid; }
+  p, li { margin: 0 0 8pt; }
+  ul, ol { margin: 0 0 8pt; padding-left: 22pt; }
+  .subtitle { text-align: center; font-style: italic; color: #444; margin: 0 0 4pt; }
+  .meta { text-align: center; font-size: 10pt; color: #444; margin: 0 0 18pt; }
+  .fill { background: #fff3cd; padding: 0 3px; border: 1px solid #e0c200; font-family: "Courier New", monospace; font-size: 10pt; white-space: nowrap; }
+  .note {
+    background: #eef4ff;
+    border-left: 3px solid #4a72c4;
+    padding: 6pt 10pt;
+    margin: 8pt 0;
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 9.5pt;
+    color: #23407a;
+  }
+  .drafting-box {
+    border: 2px solid #c0392b;
+    background: #fdecea;
+    padding: 14pt 18pt;
+    margin-bottom: 24pt;
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 10pt;
+    color: #7b241c;
+    page-break-after: always;
+  }
+  .drafting-box h2 { color: #7b241c; border-color: #c0392b; margin-top: 0; }
+  table.idblock { border-collapse: collapse; width: 100%; margin: 6pt 0 12pt; font-size: 10.5pt; }
+  table.idblock td { border: 1px solid #bbb; padding: 5pt 8pt; vertical-align: top; }
+  table.idblock td:first-child { width: 38%; font-weight: bold; background: #f4f4f4; }
+  .sig-line { margin-top: 30pt; border-top: 1px solid #111; width: 60%; padding-top: 3pt; font-size: 10pt; }
+  .footer-id { font-size: 9pt; color: #666; text-align: center; margin-top: 24pt; }
+  @media print { .drafting-box { page-break-after: always; } .no-print { display: none; } }
+</style>
+</head>
+<body>
+
+<div class="drafting-box">
+  <h2>DRAFTING NOTES — REMOVE THIS ENTIRE BOX BEFORE FILING</h2>
+  <p><strong>This is a draft, not legal advice.</strong> An officer of Call Center Solutions, LLC &mdash; and, ideally, regulatory counsel &mdash; must review it before submission to the FCC Robocall Mitigation Database (RMD). The RMD certification is made under penalty of perjury.</p>
+  <p><strong>Certification posture:</strong> This document supports <strong>RMD Option 3 &mdash; "No STIR/SHAKEN Implementation"</strong>, with the exemption explanation required by 47 CFR &sect; 64.6305(d)(2)(i) (lack of control over the network infrastructure necessary to implement STIR/SHAKEN). This is the posture confirmed with Telnyx for a downstream originating provider routing all traffic through Telnyx on Telnyx-assigned numbers; under it, Telnyx continues to authenticate the filer's calls. If the filer later acquires its own SPC token and certificate, amend the RMD entry to Option 1 and revise Section 3.</p>
+  <ol>
+    <li>Replace every <span class="fill">[YELLOW BRACKET]</span> with real information.</li>
+    <li>Resolve every blue <em>NOTE</em> callout, then delete the callout.</li>
+    <li><strong>Counsel sign-off:</strong> confirm that the filer has "no control over the network infrastructure necessary to implement STIR/SHAKEN" (Section 3) &mdash; the pure-reseller characterization &mdash; before certifying.</li>
+    <li>Obtain the <strong>FCC Form 499 Filer ID</strong> (USAC E-File) and insert it in Section 1 and the footer.</li>
+    <li>"ContactConnection" is a product/brand name of Call Center Solutions, LLC, not a registered assumed business name &mdash; the RMD "Other DBA Name(s)" field is "None," and this document reflects that.</li>
+    <li>ITG membership is <strong>not</strong> required &mdash; the rule requires only a commitment to respond to traceback requests, which Section 6 provides. Do not claim ITG membership anywhere in this document unless the filer has actually been accepted as a member.</li>
+    <li>Confirm the record-retention period in Section 8 and the responsible-role titles in Sections 2 and 9.</li>
+    <li>The traceback (24-hour) and Commission-notification response commitments in Sections 6&ndash;7 are binding. Confirm the team can meet them.</li>
+  </ol>
+</div>
+
+<h1>Robocall Mitigation Program Description</h1>
+<p class="subtitle">Filed pursuant to 47 CFR &sect;&sect; 64.6305 and 64.6300&ndash;64.6308</p>
+<p class="meta">
+  Call Center Solutions, LLC
+  &nbsp;&bull;&nbsp; FRN 0038864179 &nbsp;&bull;&nbsp; Filing date: <span class="fill">[DATE]</span>
+</p>
+
+<h2>1. Filer Identification</h2>
+<table class="idblock">
+  <tr><td>Legal name of filer</td><td>Call Center Solutions, LLC</td></tr>
+  <tr><td>Doing business as</td><td>None (the platform is marketed under the product name "ContactConnection," which is not a registered assumed business name)</td></tr>
+  <tr><td>Principal business address</td><td>1674 SE Douglas Ave, Roseburg, OR 97470, United States</td></tr>
+  <tr><td>State of formation</td><td>Oregon, United States</td></tr>
+  <tr><td>FCC Registration Number (FRN)</td><td>0038864179</td></tr>
+  <tr><td>FCC Form 499 Filer ID</td><td><span class="fill">[499 FILER ID]</span></td></tr>
+  <tr><td>Operating Company Number (OCN)</td><td>Not applicable &mdash; filer holds no OCN</td></tr>
+  <tr><td>Principals / owners</td><td>Stephen Soper (Owner/Member); William Soper (Owner/Member)</td></tr>
+  <tr><td>Filer classification</td><td>Originating voice service provider (originates calls onto the public switched telephone network on behalf of its enterprise customers), operating as a downstream customer of underlying provider Telnyx LLC</td></tr>
+  <tr><td>Date interstate/international voice operations commenced</td><td><span class="fill">[DATE]</span></td></tr>
+  <tr><td>Robocall mitigation / traceback point of contact</td><td>
+    Name: Stephen Soper<br>
+    Title: Owner/Member<br>
+    Email: stephen@contactconnection.io<br>
+    Direct phone: +1 541 670 4541<br>
+    Availability: business hours, with monitored after-hours escalation
+  </td></tr>
+</table>
+
+<p>Call Center Solutions, LLC (the "Company") operates a multi-tenant contact center software platform, which it markets under the product name "ContactConnection." The Company's enterprise customers ("tenants") use the platform to place outbound business calls and to handle inbound calls, including supervised agent-initiated transfers. The Company originates this traffic onto the PSTN exclusively through its underlying voice service provider, Telnyx LLC ("Telnyx"). The Company does not sell wholesale origination to other carriers and does not act as an intermediate or gateway provider for third-party traffic.</p>
+
+<h2>2. Commitment and Scope</h2>
+<p>The Company is committed to preventing the origination of illegal calls through its platform and to full compliance with the Telephone Consumer Protection Act (47 U.S.C. &sect; 227), the Truth in Caller ID Act (47 U.S.C. &sect; 227(e)), the Commission's implementing rules at 47 CFR &sect; 64.1200, and the robocall mitigation requirements at 47 CFR &sect;&sect; 64.6300&ndash;64.6308.</p>
+<p>This robocall mitigation program applies to all voice traffic the Company originates, whether initiated by a tenant's agents, by automated dialing features of the platform, or by the platform on a tenant's behalf. The program is reviewed at least annually and is updated when the Company's services, call patterns, regulatory obligations, or carrier relationships change. <span class="fill">[RESPONSIBLE ROLE — e.g., "The Owner/Member responsible for compliance"]</span> owns the program and is responsible for its maintenance and enforcement.</p>
+
+<h2>3. Call Authentication (STIR/SHAKEN) and Basis for Non-Implementation</h2>
+<p>The Company originates all PSTN traffic as a downstream customer of Telnyx. The Company does not own, operate, or control the network infrastructure necessary to implement STIR/SHAKEN: it holds no direct access to numbering resources, operates no PSTN interconnection facilities, and does not control the IP network on which caller ID authentication is performed. Any session-processing software the Company operates functions as an application and media server behind Telnyx's trunk, not as a facilities-based carrier network.</p>
+<p>All calls the Company originates are authenticated with the STIR/SHAKEN framework by Telnyx, which has fully implemented STIR/SHAKEN on the IP portions of its network and is registered in the Robocall Mitigation Database.</p>
+<p>Pursuant to 47 CFR &sect; 64.6305(d)(2)(i), the Company is unable to implement STIR/SHAKEN due to this lack of control over the network infrastructure necessary to do so. The Company therefore does not certify to full or partial STIR/SHAKEN implementation, and instead certifies to the robocall mitigation program described in this document, consistent with 47 CFR &sect; 64.6305(a).</p>
+<div class="note">NOTE: If the Company obtains its own SPC token and STIR/SHAKEN certificate and provisions hosted signing with Telnyx, amend the RMD entry to Option 1 (Complete) and replace this section with a statement that all SIP calls the Company originates are signed with the Company's own certificate under its own attestation decisions.</div>
+<h3>Attestation applied by the authenticating provider</h3>
+<p>Attestation is determined and applied by Telnyx as the authenticating provider. In general:</p>
+<ul>
+  <li><strong>Full (A) attestation</strong> applies to calls whose calling telephone number is one assigned to the Company or to the originating tenant by Telnyx and which the Company has confirmed the tenant is authorized to use.</li>
+  <li><strong>Partial (B) attestation</strong> applies to calls placed with a calling number the Company cannot affirmatively verify as assigned to the tenant &mdash; for example, the original caller's number carried through on a supervised agent-initiated transfer to the tenant's own customer service line. Such use is permitted only after the tenant has been vetted, has represented in writing that it is authorized to use the number, and the use case has been reviewed.</li>
+  <li>The Company does <strong>not</strong> knowingly originate calls with inaccurate, false, or misleading caller identification information, and does not permit tenants to do so. Caller ID pass-through on transfers is limited to preserving a legitimate originating party's number to the tenant's own customer-facing line; it is not offered as a general caller ID spoofing capability.</li>
+</ul>
+
+<h2>4. Reasonable Steps to Avoid Originating Illegal Traffic</h2>
+
+<h3>4.1 Customer due diligence ("Know Your Customer")</h3>
+<p>Before a tenant is enabled for outbound calling, the Company performs onboarding due diligence that includes:</p>
+<ul>
+  <li>Verification of the tenant's legal business identity, physical address, and website or public business presence;</li>
+  <li>Identification and verification of an authorized signer and a designated compliance contact for the tenant;</li>
+  <li>A written description of the tenant's intended use case, target audience, expected call volumes and calling patterns, and the basis on which the tenant obtains prior express (or prior express written) consent from called parties;</li>
+  <li>Screening of the tenant, its principals, and its stated use case against prohibited-use categories and against publicly available enforcement and complaint information;</li>
+  <li>Verification of the tenant's right to use any calling telephone number it intends to present as caller ID, including numbers not assigned through the platform.</li>
+</ul>
+<p>Tenants presenting elevated risk (high-volume automated outbound, lead-generation calling, or debt/collections use cases) receive enhanced review and heightened ongoing monitoring, and may be required to provide consent records on request.</p>
+
+<h3>4.2 Contractual obligations</h3>
+<p>The Company's customer agreement and Acceptable Use Policy require every tenant to:</p>
+<ul>
+  <li>Comply with the TCPA, the Truth in Caller ID Act, the Telemarketing Sales Rule, state telemarketing and autodialer laws, and all applicable FCC rules;</li>
+  <li>Place calls only to parties from whom the tenant holds the legally required level of consent, and honor revocation of consent;</li>
+  <li>Transmit accurate, non-misleading caller identification information, and use only telephone numbers the tenant is authorized to use;</li>
+  <li>Refrain from originating unlawful robocalls or spoofed calls, and from using the platform for fraud, impersonation, or harassment;</li>
+  <li>Maintain and produce, on the Company's request, records evidencing consent and campaign compliance;</li>
+  <li>Cooperate with traceback and regulatory inquiries routed through the Company.</li>
+</ul>
+<p>The agreement reserves to the Company the right to throttle, suspend, or terminate a tenant &mdash; immediately and without prior notice where warranted &mdash; for violation of these terms or for originating suspected illegal traffic.</p>
+
+<h3>4.3 Know Your Upstream / Downstream Provider</h3>
+<p>Telnyx is the Company's sole underlying voice service provider for PSTN origination and termination. The Company has confirmed that Telnyx is registered in the Robocall Mitigation Database, has implemented STIR/SHAKEN, participates in industry traceback, and maintains its own acceptable-use and anti-fraud controls. The Company does not accept or carry voice traffic originated by other providers.</p>
+
+<h3>4.4 Number and caller ID controls</h3>
+<ul>
+  <li>Telephone numbers used for outbound calling are provisioned through Telnyx and associated with a specific tenant in the platform;</li>
+  <li>The platform validates outbound caller ID against configured, tenant-authorized numbers; it does not allow agents to enter arbitrary free-form caller ID at call time;</li>
+  <li>Pass-through of an inbound caller's number on a supervised transfer is a per-tenant setting, disabled by default, enabled only after review, and restricted to transfers to the tenant's own customer service destinations;</li>
+  <li>Caller ID pass-through is never used to originate cold outbound campaigns under a number the tenant does not control.</li>
+</ul>
+
+<h3>4.5 Traffic monitoring and analytics</h3>
+<p>The Company retains call detail records for all originated traffic and monitors them &mdash; through automated analytics and periodic manual review &mdash; for patterns indicative of illegal or fraudulent robocalling, including:</p>
+<ul>
+  <li>Sudden or sustained spikes in call volume relative to a tenant's onboarded profile;</li>
+  <li>High proportions of very short-duration calls, low answer-seizure ratios, or high busy/no-answer/invalid-number rates;</li>
+  <li>Sequential or dictionary dialing of number ranges;</li>
+  <li>Rapid rotation of calling numbers ("snowshoeing"), or calling-number / called-number reuse patterns associated with abuse;</li>
+  <li>Calls placed outside permissible calling hours for the called party's time zone;</li>
+  <li>Elevated complaint or traceback activity associated with a tenant or a calling number.</li>
+</ul>
+<p>Defined thresholds generate alerts to the Company's mitigation contact for investigation. The Company may suspend a campaign, a calling number, or a tenant pending investigation.</p>
+
+<h3>4.6 Consent, calling hours, and do-not-call</h3>
+<p>The platform provides mechanisms for tenants to record and reference the consent basis for their contacts, to suppress contacts who have revoked consent or requested no further calls (an internal do-not-call list), and to enforce calling-window restrictions. Tenants remain contractually responsible for consent and for scrubbing against the National Do-Not-Call Registry and any applicable state registries where their calling requires it.</p>
+
+<h3>4.7 Complaint handling</h3>
+<p>The Company maintains a monitored channel at <span class="fill">[ABUSE/COMPLAINT EMAIL]</span> for complaints regarding calls originated through its platform. Complaints are logged, associated with the responsible tenant and calling number, investigated, and used as an input to the monitoring and enforcement process described above.</p>
+
+<h2>5. Mitigation of Identified Illegal Traffic</h2>
+<p>When the Company identifies illegal traffic originated through its platform &mdash; whether through its own monitoring, a customer or consumer complaint, a traceback, or a notification from the Commission or law enforcement &mdash; it will:</p>
+<ol>
+  <li>Promptly investigate, including review of call detail records, the tenant's onboarding file and use case, and any consent records the tenant can produce;</li>
+  <li>Take effective mitigating action, which may include blocking the offending calling number or campaign, throttling or suspending the tenant's outbound calling, and, where the conduct is confirmed or the tenant is unresponsive, terminating the tenant's access;</li>
+  <li>Document the investigation, the action taken, and the date, and retain that record;</li>
+  <li>Where a notification from the Commission is involved, respond as described in Section 7.</li>
+</ol>
+
+<h2>6. Cooperation with Traceback</h2>
+<p>The Company commits to respond fully and within 24 hours to all traceback requests from the Commission, from civil and criminal law enforcement, and from the industry traceback consortium (USTelecom's Industry Traceback Group). Specifically, the Company will:</p>
+<ul>
+  <li>Acknowledge and substantively respond to a traceback request within 24 hours;</li>
+  <li>Identify the tenant that originated the traffic and, as applicable, the immediately upstream source;</li>
+  <li>Take the mitigation steps in Section 5 where a traceback identifies illegal traffic the Company originated;</li>
+  <li>Maintain a designated traceback point of contact (Section 1) and keep that contact information current in the RMD.</li>
+</ul>
+<p>Membership in the Industry Traceback Group is not a prerequisite to this cooperation, and the Company's commitment to respond fully applies whether or not it is an ITG member.</p>
+
+<h2>7. Response to Commission Notification of Suspected Illegal Traffic</h2>
+<p>Upon receiving a notification from the Commission under 47 CFR &sect; 64.1200(n)(2) that the Company is originating or transmitting suspected illegal traffic, the Company will:</p>
+<ol>
+  <li>Promptly investigate the identified traffic;</li>
+  <li>Report the results of its investigation to the Commission and to the Enforcement Bureau within the timeframe specified in the notification (or, if none is specified, within 14 days);</li>
+  <li>If the Company determines that the identified traffic is illegal, promptly take effective mitigating action, including the steps described in Section 5, and describe that action in its report;</li>
+  <li>If the Company concludes the traffic is legal, provide the Commission with an explanation of why, and the steps taken to reach that conclusion, within the same timeframe.</li>
+</ol>
+<p>The Company understands that failure to respond, or to mitigate confirmed illegal traffic, may result in downstream providers being authorized or required to block traffic from the Company.</p>
+
+<h2>8. Recordkeeping</h2>
+<p>The Company retains, for no less than <span class="fill">[24 months — confirm]</span>: tenant onboarding and due-diligence files; call detail records for originated traffic; monitoring alerts and investigations; complaint records; traceback correspondence and responses; and Commission notifications and the Company's responses. Records are made available to the Commission and to the Industry Traceback Group on request.</p>
+
+<h2>9. Governance and Review</h2>
+<p>Responsibility for this program rests with <span class="fill">[NAME / ROLE]</span>. The program, its thresholds, and the supporting platform controls are reviewed at least annually and after any material change to the Company's services or calling patterns. Personnel involved in tenant onboarding, monitoring, and abuse response receive periodic training on these obligations.</p>
+
+<h2>10. Certification</h2>
+<p>I, <span class="fill">[OFFICER NAME]</span>, am <span class="fill">[OFFICER TITLE]</span> of Call Center Solutions, LLC and am authorized to make this certification on its behalf. I have personal knowledge of the matters stated in this Robocall Mitigation Program Description. I certify that all calls the Company originates are subject to a robocall mitigation program consistent with 47 CFR &sect; 64.6305(a); that the Company has instituted the robocall mitigation practices described above; that the Company has not implemented the STIR/SHAKEN authentication framework on any portion of its network because it lacks control over the network infrastructure necessary to do so, as explained in Section 3 and as contemplated by 47 CFR &sect; 64.6305(d)(2)(i); that no prior certification of the Company has been removed by Commission action and the Company has not been prohibited from filing in the Robocall Mitigation Database; and that the Company commits to respond fully and within 24 hours to all traceback requests from the Commission, law enforcement, and the industry traceback consortium, and to cooperate with such entities in investigating and stopping any illegal robocallers that use its service to originate calls. I declare under penalty of perjury that the foregoing is true and correct.</p>
+
+<p class="sig-line">Signature</p>
+<p style="font-size:10pt; margin-top:4pt;">
+  Name: <span class="fill">[OFFICER NAME]</span><br>
+  Title: <span class="fill">[OFFICER TITLE]</span><br>
+  Date: <span class="fill">[DATE]</span>
+</p>
+
+<p class="footer-id">
+  Call Center Solutions, LLC &mdash; Robocall Mitigation Program Description &mdash; FRN 0038864179 &mdash; 499 Filer ID <span class="fill">[FILER ID]</span>
+</p>
+
+</body>
+</html>

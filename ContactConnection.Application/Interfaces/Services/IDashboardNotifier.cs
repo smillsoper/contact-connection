@@ -21,6 +21,18 @@ public interface IDashboardNotifier
         string state,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// An agent's SIP softphone registered or unregistered with FreeSWITCH — pushed to the
+    /// tenant's supervisor dashboards so the "phone actually there" signal stays live without
+    /// polling. Separate from <see cref="NotifyAgentStateChangedAsync"/> (agent status).
+    /// </summary>
+    Task NotifyAgentRegistrationChangedAsync(
+        Guid tenantId,
+        Guid agentId,
+        bool registered,
+        DateTimeOffset? since,
+        CancellationToken ct = default);
+
     /// <summary>A tf_voicemail node just captured a caller message — push it to the tenant's supervisor dashboards.</summary>
     Task NotifyVoicemailReceivedAsync(
         Guid tenantId,

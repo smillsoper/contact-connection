@@ -89,10 +89,14 @@ public static class TtsStreamRelayEndpoints
         // the connection can stall once the OS receive buffer fills.
         _ = DrainIncomingAsync(socket, logger, ct);
 
+        // Lead-in silence prepended to the vendor stream — see RunSynthesisAsync. Env/config
+        // override: FreeSWITCH__TtsStreamLeadInSilenceMs. 0 disables.
+        var leadInMs = config.GetValue<int?>("FreeSWITCH:TtsStreamLeadInSilenceMs") ?? 300;
+
         var forwardedAny = false;
         try
         {
-            forwardedAny = await RunSynthesisAsync(request, socket, providerFactory, credentialStore, logger, ct);
+            forwardedAny = await RunSynthesisAsync(request, socket, providerFactory, credentialStore, leadInMs, logger, ct);
         }
         finally
         {
@@ -147,6 +151,7 @@ public static class TtsStreamRelayEndpoints
         WebSocket socket,
         ITtsStreamProviderFactory providerFactory,
         ITenantCredentialStore credentialStore,
+        int leadInMs,
         ILogger logger,
         CancellationToken ct)
     {
@@ -182,6 +187,21 @@ public static class TtsStreamRelayEndpoints
         var sentAny = false;
         try
         {
+            // Lead-in silence: the first real chunk's uuid_broadcast otherwise starts before RTP
+            // is flowing steadily to the far end, clipping the opening syllable — the same defect
+            // S117 fixed on the file / flite-TTS paths with silence_stream priming. This path was
+            // deliberately left for a follow-up. Prepending one silent chunk here rides the exact
+            // same chunk pipeline as every vendor chunk (mod_audio_stream::play → uuid_broadcast):
+            // it plays first, gets RTP moving and the far-end jitter buffer filled, and the real
+            // audio that follows is clean. No break/preempt logic needed. 8 kHz mono s16le zeros —
+            // mod_audio_stream resamples per frame, so the rate need not match the vendor's chunks.
+            if (leadInMs > 0)
+            {
+                var silenceFrame = BuildRawSilenceFrame(leadInMs, sampleRateHz: 8000);
+                await socket.SendAsync(Encoding.UTF8.GetBytes(silenceFrame), WebSocketMessageType.Text, true, ct);
+                sentAny = true;
+            }
+
             await foreach (var chunk in provider.SynthesizeAsync(synthesisRequest, ct))
             {
                 var frame = JsonSerializer.Serialize(new
@@ -205,6 +225,27 @@ public static class TtsStreamRelayEndpoints
         }
 
         return sentAny;
+    }
+
+    /// <summary>
+    /// A single mod_audio_stream "streamAudio" frame of raw PCM silence — <paramref name="ms"/>
+    /// milliseconds of 16-bit signed little-endian mono zeros at <paramref name="sampleRateHz"/>.
+    /// Prepended to a vendor TTS stream as its first chunk so RTP is already flowing before the
+    /// real audio plays (see RunSynthesisAsync). Internal for TtsStreamRelaySilenceTests.
+    /// </summary>
+    internal static string BuildRawSilenceFrame(int ms, int sampleRateHz)
+    {
+        var pcm = new byte[ms * sampleRateHz / 1000 * 2];
+        return JsonSerializer.Serialize(new
+        {
+            type = "streamAudio",
+            data = new
+            {
+                audioDataType = "raw",
+                sampleRate = sampleRateHz,
+                audioData = Convert.ToBase64String(pcm),
+            },
+        });
     }
 
     private static async Task StopFreeswitchStreamAsync(string channelUuid, IConfiguration config, ILogger logger, CancellationToken ct)

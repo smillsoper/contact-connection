@@ -56,6 +56,7 @@ public static class DashboardWidgetsEndpoints
             IAgentGroupRepository agentGroups,
             IAgentRepository agents,
             IAgentStateStore stateStore,
+            IAgentRegistrationStore registrationStore,
             TenantContext tenantContext,
             CancellationToken ct) =>
         {
@@ -74,13 +75,20 @@ public static class DashboardWidgetsEndpoints
                 var code = state?.Code ?? AgentStateCodes.LoggedOut;
                 if (loggedInOnly == true && code == AgentStateCodes.LoggedOut) continue;
 
+                // SIP softphone registration — a signal distinct from the agent's status above.
+                var reg = string.IsNullOrWhiteSpace(agent.SipExtension)
+                    ? null
+                    : registrationStore.Get(tenantId, agent.SipExtension!);
+
                 result.Add(new
                 {
-                    agent_id    = agent.Id,
-                    name        = $"{agent.FirstName} {agent.LastName}",
-                    state_code  = code,
-                    state_label = state?.Label ?? "Logged Out",
-                    since       = state?.SetAt,
+                    agent_id          = agent.Id,
+                    name              = $"{agent.FirstName} {agent.LastName}",
+                    state_code        = code,
+                    state_label       = state?.Label ?? "Logged Out",
+                    since             = state?.SetAt,
+                    registered        = reg is not null,
+                    registered_since  = reg?.Since,
                 });
             }
 

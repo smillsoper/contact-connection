@@ -36,6 +36,10 @@ internal sealed class NoOpDashboardNotifier : IDashboardNotifier
         Guid tenantId, Guid campaignId, string state, CancellationToken ct = default) =>
         Task.CompletedTask;
 
+    public Task NotifyAgentRegistrationChangedAsync(
+        Guid tenantId, Guid agentId, bool registered, DateTimeOffset? since, CancellationToken ct = default) =>
+        Task.CompletedTask;
+
     public Task NotifyVoicemailReceivedAsync(
         Guid tenantId, Guid campaignId, Guid voicemailId, Guid callRecordId, string? callerId,
         int durationSeconds, DateTimeOffset createdAt, CancellationToken ct = default) =>

@@ -127,6 +127,7 @@
 | 115 | 2026-09-05 | 11:26 AM PDT | 12:19 PM PDT | 53 min | ~12992 min |
 | 116 | 2026-09-05 | 12:29 PM PDT | 1:22 PM PDT | 53 min | ~13045 min |
 | 117 | 2026-09-06 | 10:51 AM PDT | 12:39 PM PDT | ~98 min (108 elapsed − ~10 min PC-crash/reboot gap) | ~13143 min |
+| 118 | 2026-09-07 | 11:08 AM PDT | 12:21 PM PDT | 73 min | ~13216 min |
 
 ---
 
@@ -5473,4 +5474,78 @@ Root cause: announcements were only evaluated inside `HandlePlaybackStopAsync` (
 8. Telnyx Verified Numbers feature.
 9. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
 10. `cc_timesync` container crash-loops (`chronyd` "Another chronyd may already be running") — harmless (Docker Desktop syncs the VM clock anyway) but noisy; worth removing or fixing the container.
+11. Prior carry-overs: S114 one-time API crash watch; `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 118
+
+**Date:** 2026-09-07
+**Start:** 11:08 AM PDT
+**End:** 12:21 PM PDT
+**Duration:** 73 minutes
+**Total Duration:** ~13216 minutes
+
+### Focus
+
+Two threads. **First ~half — regulatory consulting (no code):** Telnyx STIR/SHAKEN attestation for transferring the caller's ANI (B-attestation path, Caller ID Override `ani_override_type=always`+blank, FCC 8th R&O), then drafting the FCC Robocall Mitigation Database filing for Call Center Solutions, LLC. **Second half — dev:** top items from S117's "pick up here" list, then live-verified with the user.
+
+### Robocall Mitigation Database filing (consulting — paused)
+
+- Legal entity **Call Center Solutions, LLC** (FRN 0038864179); "ContactConnection" is a product name, **not** a DBA. RMD posture = **Option 3 "No STIR/SHAKEN Implementation"** + the 47 CFR §64.6305(d)(2)(i) "lack of control over network infrastructure" basis (pure reseller through Telnyx) — confirmed with Telnyx; keeps Telnyx signing our calls.
+- Deliverable: `compliance/Robocall-Mitigation-Program-Description.{html,pdf}` (FCC-structured, headless-Chrome render). Draft, not filed.
+- **Blocked on budget:** FCC Form 499-A → 499 Filer ID (USAC E-File contributor path; activity = Interconnected VoIP), and a paid commercial **DC Agent for Service of Process** (47 U.S.C. §413). ITG/tracebacks.org registration confirmed **not** required. Deferred to closer to release. Detail: memory `project_robocall_mitigation_rmd` + `project_telnyx_attestation_ani_passthrough`.
+
+### #1 — Streaming-TTS lead-in silence (S117 anti-clipping list item 1) — LIVE-VERIFIED
+
+- `TtsStreamRelayEndpoints.RunSynthesisAsync` prepends one raw-PCM silence chunk (`BuildRawSilenceFrame(ms, 8000)`, s16le zeros) before the vendor stream, riding the identical `mod_audio_stream::play` → `uuid_broadcast` pipeline — no new break/preempt logic. Config `FreeSWITCH:TtsStreamLeadInSilenceMs` (default 300, 0 disables). Fires only after provider/credential resolution (fast-fail preserved).
+- Tests: `TtsStreamRelaySilenceTests` (3). Live-verified (real inbound, ElevenLabs streaming voice): no first-syllable clipping.
+
+### #2 — Supervisor SIP registration visibility ([[project_agent_softphone_registration_visibility]]) — LIVE-VERIFIED
+
+Push-based, no polling (per `feedback_dashboard_realtime_push`):
+
+- **`IAgentRegistrationStore`** (Application) + **`AgentRegistrationStore`** (Infrastructure, singleton) — in-memory `ConcurrentDictionary<(tenantId, ext), since>`; `Set` keeps earliest `since`; `ReplaceAll` for reconnect resync.
+- **`EslBackgroundService`** — subscription gains `sofia::register sofia::unregister sofia::expire`; `HandleSofiaRegistrationAsync` maps event `from-user`+`from-host` → subdomain (`ExtractSubdomain`, mirrors `FreeSwitchDirectoryEndpoints`) → tenant → agent by `SipExtension` → store update + notify. `SeedRegistrationsAsync` runs after every ESL (re)connect (`show registrations as json` → `ReplaceAll`).
+- **`IDashboardNotifier.NotifyAgentRegistrationChangedAsync`** + **`IFlowHubClient.ReceiveAgentRegistrationSnapshot`** → `supervisor:{tenantId}` group. `NoOpDashboardNotifier` (Worker) updated.
+- **`GET /api/v1/dashboard-widgets/agent-list`** — rows gain `registered` + `registered_since`.
+- **Web** — `DashboardRegistrationLiveContext` + `useDashboardLiveRegistration`; `DashboardBuilderPage` listener + nested provider; `AgentListWidget` new **"Phone"** column (green REG / hollow OFF).
+- Tests: `AgentRegistrationStoreTests` (7).
+
+### #2 follow-ons (found + fixed during live verify) — LIVE-VERIFIED
+
+- **New-agent gap in `AgentListWidget`**: it only patched existing rows, so an agent logging in mid-view didn't appear until manual refresh. Added `refetchIfUnknown(agentId)` — a state OR registration event for an unknown agent triggers a debounced (250ms) full refetch; `knownIdsRef` Set synced with `rows`. Patch-in-place unchanged for known agents.
+- **Auto-Unavailable on softphone loss** (user's idea): `HandleSofiaRegistrationAsync` unregister/expire branch — if the agent is `Available` or `Acw`, force `Unavailable` / label **"Softphone Offline"** via `_stateStore.SetAsync` (fires the dashboard push + agent_state_history write). Stops `EligibleAgentRanker` routing into a dead transport. **Not** auto-restored on re-register. Left alone: OnCall / CallbackPending / Break / Lunch / LoggedOut.
+
+### Data cleanup — `tenant_test_tenant`
+
+Dashboard showed phantom active calls. Root cause: calls left non-terminal when the API was killed mid-call in prior sessions (no reconciliation sweep). Fixed non-destructively:
+- `call_state_history`: appended 21 terminal `abandoned` rows (`detail='stale-cleanup-s118'`, `sequence=max+1`) for records whose latest state was non-terminal. Verified 0 remain.
+- `call_records`: closed 96 rows with `call_end_at IS NULL` → `call_end_at=now()`, `overall_status='incomplete'` (no `abandoned` value for that column; `incomplete` matches the 296 already closed that way).
+- Redis: clean, no stale `telephony:session:*` — display data only, nothing live.
+
+### #8 (S117 list) — verified done
+
+Both dev tenant schemas already have `20260905183603_AddTtsSourceToAudioFiles` as latest — the platform "run tenant migrations" button worked. Scratched.
+
+### State
+
+- Full solution build clean (pre-existing NU1903 + 6 CS8602 warnings only). Web `tsc --noEmit` clean.
+- **583 tests pass** — Domain 147, Application 20, Infrastructure 329, Api 87. New: `TtsStreamRelaySilenceTests` (3, Api), `AgentRegistrationStoreTests` (7, Infra).
+- New files: `ContactConnection.Application/Interfaces/Services/IAgentRegistrationStore.cs`; `ContactConnection.Infrastructure/Telephony/AgentRegistrationStore.cs`; `compliance/Robocall-Mitigation-Program-Description.{html,pdf}`; the 2 test files.
+- Changed: `TtsStreamRelayEndpoints.cs`, `IDashboardNotifier.cs`, `FlowHub.cs`, `DashboardNotifier.cs`, `EslBackgroundService.cs`, `DashboardWidgetsEndpoints.cs`, `ServiceCollectionExtensions.cs` (Infra), `NoOpNotifiers.cs` (Worker), `dashboardWidgets.ts`, `DashboardLiveContext.ts`, `DashboardBuilderPage.tsx`, `AgentListWidget.tsx`.
+- Not yet committed.
+
+### Next session — pick up here
+
+1. Live-verify registration auto-Unavailable **edge cases**: `Acw`→offline, graceful-logout ordering, network-blip re-register (agent stays Unavailable).
+2. **NEW hardening item — orphaned-call reconciliation sweep**: on API boot, close any `call_records` / `call_state_history` calls left non-terminal with no live Redis `telephony:session:*`. Prevents the phantom-active-call buildup cleaned up manually this session.
+3. Consolidate the 3 duplicated audio-resolve switches (`TelephonyAudioResolver` + private copies in `PlayNodeHandler`/`WhisperNodeHandler`) and the 3 designer audio pickers.
+4. Queue callback v1 rough edges ([[project_queue_callback]]).
+5. Supervisor visibility of `callback_pending` agents / pending queue callbacks; supervisor scheduled-callbacks UI (list/cancel). (`callback_pending` agent *state* already shows in the widgets.)
+6. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
+7. Telnyx Verified Numbers feature.
+8. Resume the RMD filing when budget allows (499 Filer ID + DC agent) — see `project_robocall_mitigation_rmd`.
+9. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
+10. `cc_timesync` container crash-loops — harmless but noisy; remove or fix.
 11. Prior carry-overs: S114 one-time API crash watch; `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.

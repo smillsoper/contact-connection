@@ -227,6 +227,10 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IAgentStateHistoryRepository, AgentStateHistoryRepository>();
         services.AddSingleton<IAgentStateStore, AgentStateStore>();
 
+        // SIP registration presence per agent extension — in-memory, seeded + kept live from
+        // FreeSWITCH by EslBackgroundService. Distinct from agent status (see IAgentRegistrationStore).
+        services.AddSingleton<IAgentRegistrationStore, AgentRegistrationStore>();
+
         // Call trace — persistence (scoped, EF) + subscription matching (singleton, Redis-backed
         // so state is consistent across API instances)
         services.AddScoped<ICallTraceEventRepository, CallTraceEventRepository>();

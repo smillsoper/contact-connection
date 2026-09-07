@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using ContactConnection.Api.Hubs;
+using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
 using ContactConnection.Domain.Entities;
@@ -32,6 +33,8 @@ public sealed class EslBackgroundService : BackgroundService
     private readonly ILogger<EslClient> _eslClientLogger;
     private readonly ITelephonyCallSessionStore _sessionStore;
     private readonly IAgentStateStore _stateStore;
+    private readonly IAgentRegistrationStore _registrationStore;
+    private readonly IDashboardNotifier _dashboardNotifier;
     private readonly TtsPlaybackCoordinator _ttsPlaybackCoordinator;
 
     public EslBackgroundService(
@@ -42,6 +45,8 @@ public sealed class EslBackgroundService : BackgroundService
         ILogger<EslClient> eslClientLogger,
         ITelephonyCallSessionStore sessionStore,
         IAgentStateStore stateStore,
+        IAgentRegistrationStore registrationStore,
+        IDashboardNotifier dashboardNotifier,
         TtsPlaybackCoordinator ttsPlaybackCoordinator)
     {
         _hub                    = hub;
@@ -51,6 +56,8 @@ public sealed class EslBackgroundService : BackgroundService
         _eslClientLogger        = eslClientLogger;
         _sessionStore           = sessionStore;
         _stateStore             = stateStore;
+        _registrationStore      = registrationStore;
+        _dashboardNotifier      = dashboardNotifier;
         _ttsPlaybackCoordinator = ttsPlaybackCoordinator;
     }
 
@@ -89,9 +96,15 @@ public sealed class EslBackgroundService : BackgroundService
             "CHANNEL_PARK CHANNEL_ANSWER CHANNEL_HANGUP CHANNEL_HANGUP_COMPLETE CHANNEL_BRIDGE CHANNEL_UNBRIDGE " +
             "CHANNEL_HOLD CHANNEL_UNHOLD PLAYBACK_STOP " +
             "CUSTOM mod_audio_stream::connect mod_audio_stream::play mod_audio_stream::disconnect mod_audio_stream::error " +
-            "contactconnection::ivr_done contactconnection::vm_done contactconnection::xfer_failed", ct);
+            "contactconnection::ivr_done contactconnection::vm_done contactconnection::xfer_failed " +
+            "sofia::register sofia::unregister sofia::expire", ct);
 
         _logger.LogInformation("ESL connected to FreeSWITCH at {Host}:{Port}", host, port);
+
+        // Resync agent SIP-registration presence to FreeSWITCH's own table on every (re)connect —
+        // events only carry deltas from here on. Non-fatal: a failure just leaves the supervisor
+        // dashboard's registration column stale until the next register/unregister event.
+        await SeedRegistrationsAsync(esl, ct);
 
         while (!ct.IsCancellationRequested)
         {
@@ -1531,7 +1544,146 @@ public sealed class EslBackgroundService : BackgroundService
             case "contactconnection::xfer_failed":
                 await HandleXferFailedAsync(vars, esl, ct);
                 break;
+            case "sofia::register":
+                await HandleSofiaRegistrationAsync(vars, registered: true, ct);
+                break;
+            case "sofia::unregister":
+            case "sofia::expire":
+                await HandleSofiaRegistrationAsync(vars, registered: false, ct);
+                break;
         }
+    }
+
+    /// <summary>
+    /// sofia::register / ::unregister / ::expire — an agent softphone's SIP registration state
+    /// changed. Maps the event's from-user + from-host to (tenant, agent), updates the in-memory
+    /// <see cref="IAgentRegistrationStore"/>, and pushes a live snapshot to the tenant's supervisor
+    /// dashboards. from-host is the per-tenant SIP domain (e.g. "acme.sip.contactconnection.io"),
+    /// so its leading label is the tenant subdomain — same scheme FreeSwitchDirectoryEndpoints uses.
+    /// </summary>
+    private async Task HandleSofiaRegistrationAsync(
+        Dictionary<string, string> vars, bool registered, CancellationToken ct)
+    {
+        var extension = vars.GetValueOrDefault("from-user") ?? vars.GetValueOrDefault("username");
+        var host      = vars.GetValueOrDefault("from-host") ?? vars.GetValueOrDefault("realm");
+        var subdomain = ExtractSubdomain(host);
+        if (string.IsNullOrWhiteSpace(extension) || subdomain is null) return;
+
+        using var scope = _scopeFactory.CreateScope();
+        var tenants = scope.ServiceProvider.GetRequiredService<ITenantRepository>();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
+
+        var tenant = await tenants.GetBySubdomainAsync(subdomain, ct);
+        if (tenant is null) return;
+
+        await using var db = dbFactory.Create(tenant.SchemaName);
+        var agent = await db.Agents
+            .Where(a => a.SipExtension == extension && a.IsActive)
+            .Select(a => new { a.Id })
+            .FirstOrDefaultAsync(ct);
+        if (agent is null) return;
+
+        DateTimeOffset? since = null;
+        if (registered)
+        {
+            var now = DateTimeOffset.UtcNow;
+            _registrationStore.Set(tenant.Id, extension, now);
+            since = _registrationStore.Get(tenant.Id, extension)?.Since ?? now;
+        }
+        else
+        {
+            _registrationStore.Remove(tenant.Id, extension);
+            // A softphone that's gone can't take calls — an Available (or ACW, which auto-expires
+            // to Available) agent would otherwise stay routable and be delivered a call that rings
+            // into a dead transport. Force Unavailable so routing skips them and the dashboard is
+            // honest. Not auto-restored on re-register: the agent re-picks Available when ready
+            // (a network blip that drops the registration is exactly when calls shouldn't resume
+            // silently). Other states are left alone — they're already non-routable or transient
+            // with their own exit (OnCall, CallbackPending, Break/Lunch, LoggedOut).
+            var current = await _stateStore.GetAsync(tenant.Id, agent.Id, ct);
+            if (current?.Code is AgentStateCodes.Available or AgentStateCodes.Acw)
+            {
+                await _stateStore.SetAsync(
+                    tenant.Id, agent.Id, tenant.SchemaName,
+                    new AgentStateEntry(AgentStateCodes.Unavailable, "Softphone Offline", null, DateTimeOffset.UtcNow),
+                    ct);
+                _logger.LogInformation(
+                    "SIP registration [{Sub}/{Ext}] agent {AgentId} was {Prev} — forced Unavailable (softphone offline)",
+                    subdomain, extension, agent.Id, current.Code);
+            }
+        }
+
+        _logger.LogInformation(
+            "SIP registration [{Sub}/{Ext}] agent {AgentId} → {State}",
+            subdomain, extension, agent.Id, registered ? "registered" : "unregistered");
+
+        await _dashboardNotifier.NotifyAgentRegistrationChangedAsync(tenant.Id, agent.Id, registered, since, ct);
+    }
+
+    /// <summary>
+    /// One-shot resync of every agent's SIP-registration presence from <c>show registrations</c>.
+    /// Runs after each ESL (re)connect so a supervisor dashboard opened right after an API restart
+    /// isn't blank until agents happen to re-register.
+    /// </summary>
+    private async Task SeedRegistrationsAsync(EslClient esl, CancellationToken ct)
+    {
+        try
+        {
+            var json = await esl.RunCommandAsync("show registrations as json", ct);
+            if (string.IsNullOrWhiteSpace(json) || json.StartsWith("-ERR", StringComparison.OrdinalIgnoreCase))
+            {
+                _registrationStore.ReplaceAll([]);
+                _logger.LogInformation("Seeded 0 agent SIP registration(s) — FreeSWITCH returned no registration data");
+                return;
+            }
+
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("rows", out var rows) || rows.ValueKind != JsonValueKind.Array)
+            {
+                // `show registrations as json` with zero registrations returns {"row_count":0} and no "rows".
+                _registrationStore.ReplaceAll([]);
+                _logger.LogInformation("Seeded 0 agent SIP registration(s)");
+                return;
+            }
+
+            using var scope = _scopeFactory.CreateScope();
+            var tenants = scope.ServiceProvider.GetRequiredService<ITenantRepository>();
+            var subdomainToTenantId = new Dictionary<string, Guid?>(StringComparer.OrdinalIgnoreCase);
+            var now = DateTimeOffset.UtcNow;
+            var snapshot = new List<(Guid, string, DateTimeOffset)>();
+
+            foreach (var row in rows.EnumerateArray())
+            {
+                var ext = row.TryGetProperty("reg_user", out var u) ? u.GetString() : null;
+                var realm = row.TryGetProperty("realm", out var r) ? r.GetString() : null;
+                var subdomain = ExtractSubdomain(realm);
+                if (string.IsNullOrWhiteSpace(ext) || subdomain is null) continue;
+
+                if (!subdomainToTenantId.TryGetValue(subdomain, out var tenantId))
+                {
+                    tenantId = (await tenants.GetBySubdomainAsync(subdomain, ct))?.Id;
+                    subdomainToTenantId[subdomain] = tenantId;
+                }
+                if (tenantId is { } tid) snapshot.Add((tid, ext, now));
+            }
+
+            _registrationStore.ReplaceAll(snapshot);
+            _logger.LogInformation("Seeded {Count} agent SIP registration(s) from FreeSWITCH", snapshot.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "SeedRegistrationsAsync failed — supervisor registration column may be briefly stale");
+        }
+    }
+
+    // "acme.sip.contactconnection.io" → "acme"; an IP or empty string → null (not tenant-resolvable).
+    // Mirrors FreeSwitchDirectoryEndpoints.ExtractSubdomain.
+    private static string? ExtractSubdomain(string? domain)
+    {
+        if (string.IsNullOrWhiteSpace(domain)) return null;
+        if (System.Net.IPAddress.TryParse(domain, out _)) return null;
+        var dot = domain.IndexOf('.');
+        return dot > 0 ? domain[..dot] : domain;
     }
 
     /// <summary>

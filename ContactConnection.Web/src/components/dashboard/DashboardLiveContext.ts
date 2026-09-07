@@ -12,6 +12,12 @@ export interface CallStateEvent {
   state: string
 }
 
+export interface AgentRegistrationEvent {
+  agentId: string
+  registered: boolean
+  since: string | null
+}
+
 // Broadcasts the most recent supervisor:{tenantId} agent-state push to every widget on the
 // canvas. Widgets decide for themselves whether the event is relevant (e.g. AgentListWidget
 // patches a matching row; AgentStateCounterWidget just re-fetches its aggregate).
@@ -27,4 +33,11 @@ export const DashboardCallStateLiveContext = createContext<CallStateEvent | null
 
 export function useDashboardLiveCallState() {
   return useContext(DashboardCallStateLiveContext)
+}
+
+// Same idea, for SIP softphone registration presence — separate from agent status.
+export const DashboardRegistrationLiveContext = createContext<AgentRegistrationEvent | null>(null)
+
+export function useDashboardLiveRegistration() {
+  return useContext(DashboardRegistrationLiveContext)
 }

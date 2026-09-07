@@ -87,6 +87,10 @@ public interface IFlowHubClient
     /// <summary>Broadcast to supervisor dashboards — a call in this campaign changed queue/routing state.</summary>
     Task ReceiveCallStateSnapshot(string campaignId, string state);
 
+    /// <summary>Broadcast to supervisor dashboards — an agent's SIP softphone registered/unregistered
+    /// with FreeSWITCH. Distinct from ReceiveAgentStateSnapshot (that's agent status).</summary>
+    Task ReceiveAgentRegistrationSnapshot(string agentId, bool registered, string? sinceIso);
+
     /// <summary>Broadcast to supervisor dashboards — a tf_voicemail node captured a new caller message.</summary>
     Task ReceiveVoicemail(
         string voicemailId, string campaignId, string callRecordId,

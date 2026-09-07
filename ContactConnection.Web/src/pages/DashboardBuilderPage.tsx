@@ -17,8 +17,8 @@ import AgentStateCounterWidget from '../components/dashboard/widgets/AgentStateC
 import AgentListWidget from '../components/dashboard/widgets/AgentListWidget'
 import CallStateByCampaignWidget from '../components/dashboard/widgets/CallStateByCampaignWidget'
 import {
-  DashboardLiveContext, DashboardCallStateLiveContext,
-  type AgentStateEvent, type CallStateEvent,
+  DashboardLiveContext, DashboardCallStateLiveContext, DashboardRegistrationLiveContext,
+  type AgentStateEvent, type CallStateEvent, type AgentRegistrationEvent,
 } from '../components/dashboard/DashboardLiveContext'
 
 const GridLayoutWithWidth = WidthProvider(GridLayout)
@@ -67,6 +67,7 @@ export default function DashboardBuilderPage() {
   const [configuringId, setConfiguringId] = useState<string | null>(null)
   const [liveEvent, setLiveEvent] = useState<AgentStateEvent | null>(null)
   const [liveCallEvent, setLiveCallEvent] = useState<CallStateEvent | null>(null)
+  const [liveRegEvent, setLiveRegEvent] = useState<AgentRegistrationEvent | null>(null)
   // Opening an existing dashboard defaults to view-only, even for a manager — most visits are
   // "just looking," not editing, and a blank canvas has nothing to view, so it starts in edit
   // mode instead. editMode (not isEditing alone) is what every edit-affordance below actually
@@ -140,6 +141,10 @@ export default function DashboardBuilderPage() {
 
     connection.on('receiveCallStateSnapshot', (campaignId: string, state: string) => {
       setLiveCallEvent({ campaignId, state })
+    })
+
+    connection.on('receiveAgentRegistrationSnapshot', (agentId: string, registered: boolean, sinceIso: string | null) => {
+      setLiveRegEvent({ agentId, registered, since: sinceIso })
     })
 
     connection.start()
@@ -327,6 +332,7 @@ export default function DashboardBuilderPage() {
         ) : (
           <DashboardLiveContext.Provider value={liveEvent}>
           <DashboardCallStateLiveContext.Provider value={liveCallEvent}>
+          <DashboardRegistrationLiveContext.Provider value={liveRegEvent}>
             <GridLayoutWithWidth
               className="layout"
               layout={layout}
@@ -363,6 +369,7 @@ export default function DashboardBuilderPage() {
                 {editMode ? 'Drag a widget from the palette above to get started.' : 'This dashboard has no widgets yet.'}
               </div>
             )}
+          </DashboardRegistrationLiveContext.Provider>
           </DashboardCallStateLiveContext.Provider>
           </DashboardLiveContext.Provider>
         )}

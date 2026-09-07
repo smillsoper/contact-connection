@@ -12,6 +12,9 @@ export interface AgentListRow {
   state_code: string
   state_label: string
   since: string | null
+  /** SIP softphone registered with FreeSWITCH — distinct from state_code (agent status). */
+  registered: boolean
+  registered_since: string | null
 }
 
 export interface CampaignStateCountRow {
