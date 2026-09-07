@@ -26,6 +26,18 @@ export interface CampaignStateCountRow {
   post_agent: number
 }
 
+export interface PendingQueueCallbackRow {
+  call_record_id: string
+  campaign_id: string
+  caller_number: string
+  callback_number: string | null
+  queued_since: string | null
+  attempts: number
+  max_attempts: number
+  reserved_agent_id: string | null
+  retry_after: string | null
+}
+
 function buildQuery(params: WidgetFilterConfig): string {
   const parts: string[] = []
   if (params.campaignId) parts.push(`campaignId=${params.campaignId}`)
@@ -44,4 +56,7 @@ export const dashboardWidgetsApi = {
 
   callStateByCampaign: (params: WidgetFilterConfig) =>
     api.get<CampaignStateCountRow[]>(`/api/v1/dashboard-widgets/call-state-by-campaign${buildQuery(params)}`),
+
+  pendingQueueCallbacks: (params: WidgetFilterConfig) =>
+    api.get<PendingQueueCallbackRow[]>(`/api/v1/dashboard-widgets/pending-queue-callbacks${buildQuery(params)}`),
 }

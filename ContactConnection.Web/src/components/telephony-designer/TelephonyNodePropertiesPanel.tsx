@@ -24,7 +24,9 @@ import SearchableSelect from '../SearchableSelect'
 import RichTextEditor, { type RichTextEditorHandle } from '../designer/RichTextEditor'
 
 // Node types that need one or more of the shared name→id dropdowns (agents, flows, campaigns, gateways).
-const NEEDS_PICKERS: TelephonyNodeType[] = ['tf_transfer', 'tf_route_to_queue', 'tf_script_pop', 'tf_check_agent_availability']
+const NEEDS_PICKERS: TelephonyNodeType[] = [
+  'tf_transfer', 'tf_route_to_queue', 'tf_script_pop', 'tf_check_agent_availability', 'tf_scheduled_callback',
+]
 
 interface PickerData {
   agents: AgentRecord[]

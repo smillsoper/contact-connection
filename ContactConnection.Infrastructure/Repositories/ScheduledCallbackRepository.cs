@@ -32,6 +32,18 @@ public class ScheduledCallbackRepository : IScheduledCallbackRepository
         return await q.OrderByDescending(c => c.RequestedAt).Take(limit).ToListAsync(ct);
     }
 
+    public async Task<IReadOnlyList<ScheduledCallback>> ListForTenantAsync(
+        string? status, IReadOnlyCollection<Guid>? campaignIds, int limit, CancellationToken ct = default)
+    {
+        var q = Db.ScheduledCallbacks.AsQueryable();
+        if (!string.IsNullOrWhiteSpace(status))
+            q = q.Where(c => c.Status == status);
+        if (campaignIds is { Count: > 0 })
+            q = q.Where(c => campaignIds.Contains(c.CampaignId));
+
+        return await q.OrderByDescending(c => c.RequestedAt).Take(limit).ToListAsync(ct);
+    }
+
     public async Task<IReadOnlyList<ScheduledCallback>> ListPendingByNumberAsync(
         Guid campaignId, string callbackNumber, CancellationToken ct = default)
     {

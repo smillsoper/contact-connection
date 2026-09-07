@@ -1,4 +1,4 @@
-export type DashboardWidgetType = 'agent_state_counter' | 'agent_list' | 'call_state_by_campaign'
+export type DashboardWidgetType = 'agent_state_counter' | 'agent_list' | 'call_state_by_campaign' | 'callbacks'
 
 export interface WidgetFilterConfig {
   campaignId?: string
@@ -43,9 +43,15 @@ export const WIDGET_META: Record<DashboardWidgetType, WidgetMeta> = {
     defaultSize: { w: 8, h: 8 },
     minSize: { w: 5, h: 5 },
   },
+  callbacks: {
+    type: 'callbacks',
+    label: 'Callbacks',
+    defaultSize: { w: 5, h: 8 },
+    minSize: { w: 4, h: 5 },
+  },
 }
 
-export const WIDGET_TYPES: DashboardWidgetType[] = ['agent_state_counter', 'agent_list', 'call_state_by_campaign']
+export const WIDGET_TYPES: DashboardWidgetType[] = ['agent_state_counter', 'agent_list', 'call_state_by_campaign', 'callbacks']
 
 // Which filter fields each widget's config modal should show — agent-scoped widgets support
 // Client/Campaign/Agent Group + Logged-in-only; call-scoped widgets only support Client/Campaign
@@ -61,6 +67,7 @@ export const WIDGET_FILTER_FIELDS: Record<DashboardWidgetType, WidgetFilterField
   agent_state_counter: { client: true, campaign: true, group: true, loggedInOnly: true },
   agent_list: { client: true, campaign: true, group: true, loggedInOnly: true },
   call_state_by_campaign: { client: true, campaign: true, group: false, loggedInOnly: false },
+  callbacks: { client: true, campaign: true, group: false, loggedInOnly: false },
 }
 
 export function newWidgetId(): string {

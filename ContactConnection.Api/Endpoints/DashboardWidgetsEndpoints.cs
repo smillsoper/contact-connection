@@ -95,6 +95,49 @@ public static class DashboardWidgetsEndpoints
             return Results.Ok(result);
         });
 
+        // Parked queue-callback placeholders — callers who opted out of holding but keep their
+        // queue position, waiting for the delivery engine to reach an available agent. These
+        // live only as Redis sessions (no DB row), flagged _queue_callback=true. See
+        // project_queue_callback. campaignId/clientId scope the same way as the other widgets.
+        group.MapGet("/pending-queue-callbacks", async (
+            Guid? campaignId,
+            Guid? clientId,
+            ICampaignRepository campaigns,
+            ITelephonyCallSessionStore sessions,
+            TenantContext tenantContext,
+            CancellationToken ct) =>
+        {
+            if (tenantContext.Current is null) return Results.Unauthorized();
+            var tenantId = tenantContext.Current.Id;
+
+            HashSet<Guid>? scope = null;
+            if (campaignId is { } cid) scope = [cid];
+            else if (clientId is { } clid)
+                scope = (await campaigns.GetAllAsync(clid, ct)).Select(c => c.Id).ToHashSet();
+
+            var all = await sessions.GetAllAsync(ct);
+            var rows = all
+                .Where(s => s.TenantId == tenantId
+                            && s.Vars.GetValueOrDefault("_queue_callback") == "true"
+                            && (scope is null || scope.Contains(s.CampaignId)))
+                .Select(s => new
+                {
+                    call_record_id    = s.CallRecordId,
+                    campaign_id       = s.CampaignId,
+                    caller_number     = s.CallerNumber,
+                    callback_number   = s.Vars.GetValueOrDefault("_queue_callback_number"),
+                    queued_since      = s.Vars.GetValueOrDefault("_in_queue_at"),
+                    attempts          = ParseIntOrZero(s.Vars.GetValueOrDefault("_queue_callback_attempts")),
+                    max_attempts      = ParseIntOrZero(s.Vars.GetValueOrDefault("_queue_callback_max_attempts")),
+                    reserved_agent_id = s.Vars.GetValueOrDefault("_queue_callback_reserved_agent_id"),
+                    retry_after       = s.Vars.GetValueOrDefault("_queue_callback_retry_after"),
+                })
+                .OrderBy(r => r.queued_since ?? "")
+                .ToList();
+
+            return Results.Ok(rows);
+        });
+
         // Real-time count of active (non-terminal) calls per campaign, bucketed into the
         // same 4 visual states CCXOne uses: PreQueue / InQueue / WithAgent / PostAgent.
         // "routing" (agent selected, bridge not yet confirmed) folds into WithAgent — it's a
@@ -167,6 +210,8 @@ public static class DashboardWidgetsEndpoints
             return Results.Ok(result);
         });
     }
+
+    private static int ParseIntOrZero(string? s) => int.TryParse(s, out var n) ? n : 0;
 
     private static readonly string[] AllStateCodes =
     [

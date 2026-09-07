@@ -13,6 +13,7 @@ public static class ScheduledCallbacksEndpoints
 {
     public static IEndpointRouteBuilder MapScheduledCallbacksEndpoints(this IEndpointRouteBuilder app)
     {
+        app.MapGet("/api/v1/scheduled-callbacks", ListForTenant).RequireAuthorization();
         app.MapGet("/api/v1/scheduled-callbacks/{id:guid}", GetById).RequireAuthorization();
         app.MapPost("/api/v1/scheduled-callbacks/{id:guid}/cancel", Cancel).RequireAuthorization();
         app.MapGet("/api/v1/call-records/{callRecordId:guid}/scheduled-callbacks", ListForCall).RequireAuthorization();
@@ -45,6 +46,26 @@ public static class ScheduledCallbacksEndpoints
             return Results.BadRequest(new { error = $"invalid status '{status}'." });
 
         var list = await repo.ListByCampaignAsync(campaignId, status, Math.Clamp(limit ?? 100, 1, 500), ct);
+        return Results.Ok(list.Select(ToResponse));
+    }
+
+    // Tenant-wide list for the supervisor dashboard's Callbacks widget. Optional status +
+    // campaign/client scope (client → every campaign under it); newest request first.
+    private static async Task<IResult> ListForTenant(
+        string? status, Guid? campaignId, Guid? clientId, int? limit,
+        IScheduledCallbackRepository repo, ICampaignRepository campaigns,
+        TenantContext tenant, CancellationToken ct)
+    {
+        if (tenant.Current is null) return Results.Unauthorized();
+        if (status is not null && !ScheduledCallbackStatus.IsValid(status))
+            return Results.BadRequest(new { error = $"invalid status '{status}'." });
+
+        IReadOnlyCollection<Guid>? scope = null;
+        if (campaignId is { } cid) scope = [cid];
+        else if (clientId is { } clid)
+            scope = (await campaigns.GetAllAsync(clid, ct)).Select(c => c.Id).ToList();
+
+        var list = await repo.ListForTenantAsync(status, scope, Math.Clamp(limit ?? 100, 1, 500), ct);
         return Results.Ok(list.Select(ToResponse));
     }
 

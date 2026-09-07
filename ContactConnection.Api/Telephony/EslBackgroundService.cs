@@ -1089,14 +1089,17 @@ public sealed class EslBackgroundService : BackgroundService
                 }
                 else if (session.Vars.ContainsKey("_left_for_callback"))
                 {
-                    // The caller booked a callback via tf_request_callback and then hung up — this
-                    // is neither an abandon nor a completion. The Callback row's own lifecycle
-                    // (completed / abandoned / expired) is the authoritative outcome; here we just
-                    // close the timeline for this inbound leg.
+                    // The caller booked a *scheduled* callback (tf_scheduled_callback) and hung up.
+                    // (Queue-callback placeholders never reach here — they return at the guard above.)
+                    // The inbound leg is genuinely finished: the ScheduledCallback row is a separate
+                    // entity that will spawn its own outbound call record when it fires. Close this
+                    // timeline with a terminal state — not an abandon (the caller got what they came
+                    // for), and not a plain post_agent, which the dashboard would count as a call
+                    // that never ended.
                     await callStateRecorder.RecordAsync(
                         session.TenantId, session.TenantSchemaName, record.Id,
-                        CallHistoryState.PostAgent, session.CampaignId, agentId: null,
-                        detail: "Call ended — callback pending", ct: ct);
+                        CallHistoryState.Completed, session.CampaignId, agentId: null,
+                        detail: "Call ended — callback scheduled", ct: ct);
                 }
                 else if (session.Vars.ContainsKey("_queued"))
                 {

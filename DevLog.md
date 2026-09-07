@@ -128,6 +128,7 @@
 | 116 | 2026-09-05 | 12:29 PM PDT | 1:22 PM PDT | 53 min | ~13045 min |
 | 117 | 2026-09-06 | 10:51 AM PDT | 12:39 PM PDT | ~98 min (108 elapsed − ~10 min PC-crash/reboot gap) | ~13143 min |
 | 118 | 2026-09-07 | 11:08 AM PDT | 12:21 PM PDT | 73 min | ~13216 min |
+| 119 | 2026-09-07 | 12:26 PM PDT | 1:39 PM PDT | 73 min | ~13289 min |
 
 ---
 
@@ -5549,3 +5550,68 @@ Both dev tenant schemas already have `20260905183603_AddTtsSourceToAudioFiles` a
 9. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
 10. `cc_timesync` container crash-loops — harmless but noisy; remove or fix.
 11. Prior carry-overs: S114 one-time API crash watch; `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 119
+
+**Date:** 2026-09-07
+**Start:** 12:26 PM PDT
+**End:** 1:39 PM PDT
+**Duration:** 73 minutes
+**Total Duration:** ~13289 minutes
+
+### Focus
+
+Item #5 from S118's list — supervisor visibility of pending queue callbacks + scheduled callbacks (list/cancel). Built the widget, then live-verified with the user, fixing **4 bugs** surfaced during testing (one a latent production bug).
+
+### #3 — Callbacks dashboard widget (built + live-verified)
+
+**Backend:**
+- `GET /api/v1/scheduled-callbacks` — tenant-wide list (`status`/`campaignId`/`clientId`/`limit`); new `IScheduledCallbackRepository.ListForTenantAsync(status, campaignIds?, limit)`.
+- `GET /api/v1/dashboard-widgets/pending-queue-callbacks` — enumerates parked `_queue_callback` Redis placeholders (via `ITelephonyCallSessionStore.GetAllAsync`), campaign/client-scoped; projects caller #, queued-since (`_in_queue_at`), attempts, reserved-agent.
+
+**Frontend:**
+- New `callbacks` widget type in `types/dashboard.ts` (auto-registers in palette + config modal via the data-driven maps) + `WidgetIcon` glyph.
+- `scheduledCallbacks.ts` API module (list + cancel).
+- `CallbacksWidget.tsx` — two sections: *In queue for callback* (caller, waiting timer, attempts, "dialing" badge when `reserved_agent_id` set) and *Scheduled* (number, due-in countdown, attempts, **Cancel** button). Debounced refetch on the dashboard's existing `ReceiveAgentStateSnapshot` / `ReceiveCallStateSnapshot` pushes (event-driven, not interval polling). `callback_pending` agent *state* already shows in AgentList/AgentStateCounter (S112) — this fills the two missing *lists*.
+
+**Known edge (deferred):** the pure Worker due-scan tick (`scheduled`→`attempted`) has no coincident agent/call-state push until the API-side originate fires (~instant in practice). A dedicated push would need a Worker→hub Redis relay — no pub/sub in the codebase today.
+
+### Bugs found + fixed during live verification
+
+1. **Growing PostAgent count on the Call-State widget — scheduled-callback inbound leg never terminal.** `EslBackgroundService` hangup handler's `_left_for_callback` branch wrote a non-terminal `post_agent` ("Call ended — callback pending") as the final `call_state_history` row. Correct for queue callbacks (placeholder lives, caught earlier at the `_queue_callback` guard) but wrong for scheduled callbacks (inbound leg is genuinely done). Now writes terminal `CallHistoryState.Completed` ("Call ended — callback scheduled").
+2. **Cancel button 400'd.** `POST /scheduled-callbacks/{id}/cancel` rejects a completely empty request body even though `CancelScheduledCallbackRequest?` is nullable (minimal-API body binding). Fixed the client to always send `{ reason }`.
+3. **`tf_scheduled_callback` "Route answered call to flow" + "Queue campaign" dropdowns empty.** The node type was missing from `NEEDS_PICKERS` in `TelephonyNodePropertiesPanel.tsx`, so the shared agent/flow/campaign picker fetch never ran for it. Added `'tf_scheduled_callback'`.
+4. **LATENT PROD BUG — Worker double-creates every inbound `call_record`.** `ContactConnection.Worker/FreeSwitchEslService` is a legacy CHANNEL_PARK→create-CallRecord translator predating the API's `EslBackgroundService`; both subscribe to `CHANNEL_PARK` and both create a record. Harmless only because the Worker isn't normally run in dev — surfaced when the Worker was started this session for `ScheduledCallbackProcessingService`. Every inbound call got 2 records (API's flow-driven + Worker's stub); hangup finalized the stub, orphaning the API's in `active`/`post_agent`. **Fix:** removed `AddHostedService<FreeSwitchEslService>()` from Worker `Program.cs` with an explanatory comment; class left as dead code pending deletion. Worker's other services (subscriptions, recording merge, scheduled callbacks) open their own ESL connections and don't depend on it. Verified Worker no longer subscribes to `CHANNEL_PARK`.
+
+### Live-verify session support
+
+- Diagnosed scheduled-callback `invalid_time` rejections: tenant `test-tenant` timezone was `America/Chicago` while the user is Pacific → entered times were parsed 2h off (and one past the `to 17:00` allowed window). Changed `public.tenants.timezone` for `test-tenant` → `America/Los_Angeles`.
+- **Started `ContactConnection.Worker`** (`dotnet run`) — it wasn't running; scheduled callbacks never fired without it. `ScheduledCallbackProcessingService` (gateway=telnyx) confirmed placing outbound legs.
+- Data cleanup (`tenant_test_tenant`): appended terminal `completed` rows for 3 + 1 orphaned scheduled-callback / Worker-double-record calls across two passes; closed the matching open `call_records`. Final state verified: 0 non-terminal call states, 0 open call records.
+- `dotnet watch` crashed once mid-session on a hot-reload EnC bug (`ArgumentException: same key 0`) — restarted clean.
+
+### State
+
+- Full solution build clean (pre-existing NU1903 + 6 CS8602 warnings only). Web `tsc --noEmit` clean.
+- **583 tests pass** — Domain 147, Application 20, Infrastructure 329, Api 87. (No new tests this session — repo/endpoint additions follow the existing untested-by-convention pattern; the bug fixes were verified live.)
+- New files: `ContactConnection.Web/src/api/scheduledCallbacks.ts`; `ContactConnection.Web/src/components/dashboard/widgets/CallbacksWidget.tsx`.
+- Changed: `ScheduledCallbacksEndpoints.cs`, `DashboardWidgetsEndpoints.cs`, `IScheduledCallbackRepository.cs`, `ScheduledCallbackRepository.cs`, `EslBackgroundService.cs`, `Worker/Program.cs`, `dashboardWidgets.ts`, `types/dashboard.ts`, `WidgetIcon.tsx`, `DashboardBuilderPage.tsx`, `TelephonyNodePropertiesPanel.tsx`.
+- Not yet committed.
+
+### Next session — pick up here
+
+1. **Delete the dead `ContactConnection.Worker/FreeSwitchEslService.cs`** (+ `Infrastructure/FreeSwitchEsl/` if nothing else references it) — it's unregistered as of this session.
+2. **NEW hardening item — orphaned-call reconciliation sweep**: on API boot, close any `call_records` / `call_state_history` calls left non-terminal with no live Redis `telephony:session:*`.
+3. Worker→dashboard realtime: a Redis pub/sub relay so Worker-driven state changes (scheduled-callback attempt/complete, subscription shipments) push to supervisor dashboards without the widget leaning on incidental agent/call-state events.
+4. `tf_scheduled_callback` designer: show the tenant timezone next to the Time field (this session's `invalid_time` confusion).
+5. Consolidate the 3 duplicated audio-resolve switches + 3 designer audio pickers.
+6. Queue callback v1 rough edges ([[project_queue_callback]]); caller-answered-then-bridge-fails + simple-bridge paths still only unit-tested.
+7. Live-verify the S118 registration auto-Unavailable edge cases (`Acw`→offline, graceful-logout ordering, blip re-register).
+8. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
+9. Telnyx Verified Numbers feature.
+10. Resume the RMD filing when budget allows (499 Filer ID + DC agent) — see `project_robocall_mitigation_rmd`.
+11. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
+12. `cc_timesync` container crash-loops — remove or fix.
+13. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.

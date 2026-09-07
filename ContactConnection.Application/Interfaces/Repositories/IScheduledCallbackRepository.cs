@@ -18,6 +18,11 @@ public interface IScheduledCallbackRepository
     Task<IReadOnlyList<ScheduledCallback>> ListByCampaignAsync(
         Guid campaignId, string? status, int limit, CancellationToken ct = default);
 
+    /// <summary>Tenant-wide list (supervisor dashboard). <paramref name="status"/> null = all;
+    /// <paramref name="campaignIds"/> null = every campaign. Newest request first.</summary>
+    Task<IReadOnlyList<ScheduledCallback>> ListForTenantAsync(
+        string? status, IReadOnlyCollection<Guid>? campaignIds, int limit, CancellationToken ct = default);
+
     /// <summary>Non-terminal rows for this number — used to cancel a pending callback when the
     /// caller reaches an agent another way.</summary>
     Task<IReadOnlyList<ScheduledCallback>> ListPendingByNumberAsync(

@@ -16,6 +16,7 @@ import WidgetConfigModal from '../components/dashboard/WidgetConfigModal'
 import AgentStateCounterWidget from '../components/dashboard/widgets/AgentStateCounterWidget'
 import AgentListWidget from '../components/dashboard/widgets/AgentListWidget'
 import CallStateByCampaignWidget from '../components/dashboard/widgets/CallStateByCampaignWidget'
+import CallbacksWidget from '../components/dashboard/widgets/CallbacksWidget'
 import {
   DashboardLiveContext, DashboardCallStateLiveContext, DashboardRegistrationLiveContext,
   type AgentStateEvent, type CallStateEvent, type AgentRegistrationEvent,
@@ -28,6 +29,7 @@ function renderWidget(type: DashboardWidgetType, config: WidgetFilterConfig) {
     case 'agent_state_counter':      return <AgentStateCounterWidget config={config} />
     case 'agent_list':                return <AgentListWidget config={config} />
     case 'call_state_by_campaign':    return <CallStateByCampaignWidget config={config} />
+    case 'callbacks':                 return <CallbacksWidget config={config} />
   }
 }
 

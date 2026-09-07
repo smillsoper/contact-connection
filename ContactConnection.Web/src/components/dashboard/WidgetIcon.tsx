@@ -31,5 +31,13 @@ export default function WidgetIcon({ type }: { type: DashboardWidgetType }) {
           <rect x="17" y="6" width="4" height="7" rx="0.5" fill="#eab308" />
         </svg>
       )
+    case 'callbacks':
+      return (
+        <svg viewBox="0 0 24 24" className="w-7 h-7" fill="none" stroke="#9ca3af" strokeWidth="1.5">
+          <path d="M4 5c0 8 7 15 15 15l1.5-3.5-4-2-1.8 1.8c-2.5-1.2-4.6-3.3-5.8-5.8L10.7 8l-2-4z" />
+          <circle cx="18" cy="6" r="4" fill="none" stroke="#0ea5e9" strokeWidth="1.5" />
+          <path d="M18 4v2.2l1.4 1" stroke="#0ea5e9" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      )
   }
 }
