@@ -132,6 +132,7 @@
 | 120 | 2026-09-08 | 7:33 AM PDT | 8:05 AM PDT | 32 min | ~13321 min |
 | 121 | 2026-09-08 | 8:08 AM PDT | 8:27 AM PDT | 19 min | ~13340 min |
 | 122 | 2026-09-08 | 8:30 AM PDT | 8:40 AM PDT | 10 min | ~13350 min |
+| 123 | 2026-09-08 | 8:43 AM PDT | 8:57 AM PDT | 14 min | ~13364 min |
 
 ---
 
@@ -5872,6 +5873,84 @@ Chicago-tenant mismatch). Web-only change.
 
 1. Consolidate the 3 duplicated audio-resolve switches (`TelephonyAudioResolver` + private copies
    in `PlayNodeHandler`/`WhisperNodeHandler`) + the 3 designer audio pickers.
+2. Queue callback v1 rough edges ([[project_queue_callback]]); caller-answered-then-bridge-fails +
+   simple-bridge paths still only unit-tested.
+3. Live-verify the S118 registration auto-Unavailable edge cases (`Acw`→offline, graceful-logout
+   ordering, blip re-register).
+4. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
+5. Telnyx Verified Numbers feature.
+6. Resume the RMD filing when budget allows (499 Filer ID + DC agent) — see
+   `project_robocall_mitigation_rmd`.
+7. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
+8. `cc_timesync` container crash-loops — remove or fix.
+9. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit;
+   `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test
+   coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 123
+
+**Date:** 2026-09-08
+**Start:** 8:43 AM PDT
+**End:** 8:57 AM PDT
+**Duration:** 14 minutes
+**Total Duration:** ~13364 minutes
+
+### Focus
+
+S122 list #1 — audio-resolve consolidation — plus a user-reported designer bug: a streaming-TTS
+node (e.g. ElevenLabs) shows "Flite (offline)" as the selected tab when you click back to it.
+
+### Bug — properties-panel picker state leaking across node selections
+
+Neither designer's properties panel was keyed by node id, so selecting a different node kept the
+same React component instance and its children's `useState` — including `TtsVoicePicker`'s
+`mode` tab. The previously-selected node's tab (flite) carried over.
+
+- `key={selectedNode.id}` on `<TelephonyNodePropertiesPanel>` (`TelephonyDesignerPage.tsx`) and
+  `<NodePropertiesPanel>` (`FlowDesignerPage.tsx`) — every field/picker now re-initialises from
+  the newly-selected node. Fixes the reported case and the whole class of stale-selection bugs;
+  also means the panel's recorder cleanup effect fires on node switch instead of a recording
+  silently continuing.
+- `ttsServiceApi.getStatus()` is now module-cached (tenant-stable for a design session) so keying
+  the panel doesn't refetch it on every node click — four picker components each call it.
+
+### Consolidation — telephony audio resolve
+
+`PlayNodeHandler` and `WhisperNodeHandler` each carried a private `ResolveFileArgAsync` that
+byte-for-byte duplicated `TelephonyAudioResolver.ResolveFileArgAsync` (stream URIs / `__builtin:`
+/ `__platform:` / tenant-file GUID lookup). Both collapsed to a one-line delegation to the shared
+static; dropped the now-unused `Microsoft.EntityFrameworkCore` usings; refreshed the resolver's
+docstring. −36 net lines. All 6 telephony audio call sites (Play, Whisper, IvrMenu, Record,
+Transfer, Voicemail) now hit one implementation.
+
+### Deferred — frontend 3-picker consolidation
+
+`AudioFilePicker`, `PlayNodeEditor`'s inline picker, and `WhisperNodeEditor`'s inline picker are
+~3 copies of ~450 lines of upload/record/preview/TTS-save/platform-phrase UI in one 3,200-line
+file (`TelephonyNodePropertiesPanel.tsx`). Deduping into one parametrised `<AudioPicker>` is a
+real refactor with regression risk on an actively-used feature — flagged for its own focused
+session rather than a rushed pass.
+
+### State
+
+- `dotnet build` clean (pre-existing NU1903 + CS8602 only). **604 tests pass** — Domain 147,
+  Application 20, Infrastructure 350, Api 87. `TelephonyAudioResolverTests` covers the now-shared
+  path; no new tests (pure delegation, no behavior change). Web `tsc --noEmit` + `npm run build`
+  clean.
+- Changed: `PlayNodeHandler.cs`, `WhisperNodeHandler.cs`, `TelephonyAudioResolver.cs`,
+  `Web/src/api/ttsService.ts`, `Web/src/pages/TelephonyDesignerPage.tsx`,
+  `Web/src/pages/FlowDesignerPage.tsx`.
+- Not live-verified in a browser — the `key` fix is a standard React idiom, build-verified; the
+  backend change is a behavior-preserving dedup covered by the test suite. Left for a user
+  click-through of the exact TTS-picker scenario.
+
+### Next session — pick up here
+
+1. **Frontend audio-picker consolidation** — one parametrised `<AudioPicker>` replacing the 3
+   near-duplicate copies in `TelephonyNodePropertiesPanel.tsx`; test each path (upload / record /
+   preview / TTS-save / platform phrase / stream / builtin) per editor after.
 2. Queue callback v1 rough edges ([[project_queue_callback]]); caller-answered-then-bridge-fails +
    simple-bridge paths still only unit-tested.
 3. Live-verify the S118 registration auto-Unavailable edge cases (`Acw`→offline, graceful-logout

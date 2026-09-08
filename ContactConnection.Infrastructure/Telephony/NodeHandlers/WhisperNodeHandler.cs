@@ -1,7 +1,6 @@
 using System.Text.Json.Nodes;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Infrastructure.Data;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -81,31 +80,8 @@ public class WhisperNodeHandler : ITelephonyNodeHandler
         return new TelephonyNodeResult(null, "whisper_playing");
     }
 
-    private async Task<string?> ResolveFileArgAsync(
-        string audioFileId, TelephonyFlowContext ctx, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(audioFileId)) return null;
-
-        if (audioFileId.StartsWith("local_stream://") ||
-            audioFileId.StartsWith("silence_stream://") ||
-            audioFileId.StartsWith("tone_stream://"))
-            return audioFileId;
-
-        if (audioFileId.StartsWith("__builtin:"))
-            return audioFileId["__builtin:".Length..];
-
-        if (audioFileId.StartsWith("__platform:"))
-            return TelephonyAudioResolver.ResolvePlatformPhraseArg(_config, audioFileId["__platform:".Length..]);
-
-        if (!Guid.TryParse(audioFileId, out var fileId)) return null;
-
-        await using var db  = _factory.Create(ctx.TenantSchemaName);
-        var audioFile       = await db.AudioFiles.FirstOrDefaultAsync(f => f.Id == fileId, ct);
-        if (audioFile is null) return null;
-
-        var containerBase = _config["FreeSWITCH:SoundsContainerPath"]
-            ?? "/usr/share/freeswitch/sounds/contactconnection";
-
-        return $"{containerBase}/{ctx.TenantSchemaName}/{audioFile.StoredFileName}";
-    }
+    // Shared with every other telephony node handler — see TelephonyAudioResolver.
+    private Task<string?> ResolveFileArgAsync(
+        string audioFileId, TelephonyFlowContext ctx, CancellationToken ct) =>
+        TelephonyAudioResolver.ResolveFileArgAsync(_factory, _config, audioFileId, ctx.TenantSchemaName, ct);
 }

@@ -617,7 +617,10 @@ function DesignerCanvas({
 
         {/* Properties panel */}
         {selectedNode && (
+          // key by node id so every field/picker re-initialises from the newly-selected node
+          // (keeps per-node sub-editor state from leaking across selections).
           <NodePropertiesPanel
+            key={selectedNode.id}
             node={selectedNode}
             isEntry={entryNodeId === selectedNode.id}
             onUpdate={updateNodeData}

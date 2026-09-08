@@ -482,7 +482,11 @@ function DesignerCanvas() {
         </div>
 
         {selectedNode && (
+          // key by node id so every field/picker re-initialises from the newly-selected node —
+          // without it, sub-picker state (e.g. the TTS provider tab) leaks from the previous node
+          // and can show the wrong thing as "selected".
           <TelephonyNodePropertiesPanel
+            key={selectedNode.id}
             node={selectedNode}
             entryNodeId={entryNodeId}
             onChange={onNodeChange}

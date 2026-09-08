@@ -12,8 +12,8 @@ namespace ContactConnection.Infrastructure.Telephony;
 /// volume), and tenant-uploaded file GUIDs (looked up in the tenant schema, resolved to a
 /// container path under SoundsContainerPath).
 ///
-/// PlayNodeHandler and WhisperNodeHandler each carry their own private copy of this logic; new
-/// call sites (IvrMenuNodeHandler) use this shared version.
+/// Every telephony node handler that resolves designer audio (Play, Whisper, IvrMenu, Record,
+/// Transfer, Voicemail) calls this one implementation.
 /// </summary>
 public static class TelephonyAudioResolver
 {
@@ -58,7 +58,6 @@ public static class TelephonyAudioResolver
     /// the shared sounds volume. Platform-wide (not tenant-scoped), synthesized once by
     /// scripts/generate-platform-phrases.mjs, so no DB lookup and no tenant schema segment. Both
     /// path segments are restricted to [a-z0-9_] — anything else (incl. traversal) yields null.
-    /// Public so PlayNodeHandler/WhisperNodeHandler's own copies of the resolve switch can share it.
     /// </summary>
     public static string? ResolvePlatformPhraseArg(IConfiguration config, string voiceAndPhrase)
     {
