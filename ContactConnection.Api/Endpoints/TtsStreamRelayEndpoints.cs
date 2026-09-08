@@ -1,21 +1,24 @@
-using System.Net.WebSockets;
-using System.Text;
+using System.Diagnostics;
 using System.Text.Json;
-using ContactConnection.Api.Telephony;
 using ContactConnection.Application.Interfaces.Services;
+using Microsoft.AspNetCore.Http.Features;
 
 namespace ContactConnection.Api.Endpoints;
 
 /// <summary>
-/// The WebSocket server mod_audio_stream's "uuid_audio_stream ... start" connects to.
-/// FreeSWITCH sends the correlation token (via the command's "metadata" argument) as the
-/// first text message; we look up the real request (stashed in Redis by PlayNodeHandler)
-/// keyed by that token, resolve the tenant's chosen ITtsStreamProvider and credentials, and
-/// stream synthesized audio back as mod_audio_stream's "streamAudio" JSON frames. Caller
-/// audio arriving as binary frames is drained and discarded — this path is TTS-out only.
+/// GET /relay/tts-mp3/{token} — the URL <see cref="ITtsStreamingService.PrepareStreamUrlAsync"/>
+/// hands back (as <c>shout://…</c>). FreeSWITCH's mod_shout GETs it (libcurl → mpg123) and plays
+/// it progressively into the live call.
 ///
-/// No bearer auth — internal-network only (FreeSWITCH container → API host), same posture
-/// as FreeSwitchDirectoryEndpoints.
+/// The handler looks up the real request (stashed in Redis by the streaming service, keyed by
+/// the token), resolves the tenant's chosen <see cref="ITtsStreamProvider"/> + credentials,
+/// synthesizes speech as raw PCM, pipes it through ffmpeg to a single continuous CBR MP3 stream,
+/// and writes that to the response body as it encodes. One HTTP response = one continuous
+/// playback = one PLAYBACK_STOP — no per-chunk uuid_broadcast, no mod_audio_stream event
+/// plumbing, no inter-chunk stutter.
+///
+/// No bearer auth — internal-network only (FreeSWITCH container → API host), same posture as
+/// FreeSwitchDirectoryEndpoints.
 /// </summary>
 public static class TtsStreamRelayEndpoints
 {
@@ -24,49 +27,37 @@ public static class TtsStreamRelayEndpoints
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 
+    // ffmpeg output: fixed 22.05 kHz mono CBR MP3. `-write_xing 0` drops the VBR/LAME header
+    // (which would force the muxer to buffer the whole file to count frames) so ffmpeg emits a
+    // pure frame stream mpg123 can sync on immediately. FreeSWITCH resamples to the call codec.
+    private const string FfmpegOutArgs = "-ar 22050 -ac 1 -c:a libmp3lame -b:a 32k -write_xing 0 -flush_packets 1 -f mp3 pipe:1";
+
     public static IEndpointRouteBuilder MapTtsStreamRelayEndpoints(this IEndpointRouteBuilder app)
     {
-        app.Map("/relay/tts-stream", Handle).AllowAnonymous();
+        app.MapGet("/relay/tts-mp3/{token}", Handle).AllowAnonymous();
         return app;
     }
 
     private static async Task Handle(
+        string token,
         HttpContext context,
         ITtsStreamProviderFactory providerFactory,
         ITenantCredentialStore credentialStore,
         ITelephonyCallSessionStore cache,
-        TtsPlaybackCoordinator coordinator,
         IConfiguration config,
         ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
-        var logger = loggerFactory.CreateLogger("TtsStreamRelay");
-
-        if (!context.WebSockets.IsWebSocketRequest)
-        {
-            context.Response.StatusCode = StatusCodes.Status400BadRequest;
-            return;
-        }
-
-        using var socket = await context.WebSockets.AcceptWebSocketAsync();
-
-        var token = await ReceiveTextAsync(socket, ct);
-        if (string.IsNullOrWhiteSpace(token))
-        {
-            logger.LogWarning("TTS relay: connection closed with no correlation token");
-            await CloseAsync(socket, "no token", ct);
-            return;
-        }
+        var logger = loggerFactory.CreateLogger("TtsMp3Relay");
 
         var cacheKey = $"tts_relay:{token}";
         var payloadJson = await cache.GetKeyAsync(cacheKey, ct);
         if (payloadJson is null)
         {
-            logger.LogWarning("TTS relay: unknown or expired correlation token {Token}", token);
-            await CloseAsync(socket, "unknown token", ct);
+            logger.LogWarning("TTS relay: unknown or expired token {Token}", token);
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
             return;
         }
-        await cache.DeleteKeyAsync(cacheKey, ct); // single-use
 
         TtsStreamRelayRequest? request;
         try
@@ -76,85 +67,15 @@ public static class TtsStreamRelayEndpoints
         catch (JsonException ex)
         {
             logger.LogError(ex, "TTS relay: malformed cached payload for token {Token}", token);
-            await CloseAsync(socket, "bad payload", ct);
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
             return;
         }
         if (request is null)
         {
-            await CloseAsync(socket, "bad payload", ct);
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
             return;
         }
 
-        // We never need caller audio for TTS-out, but must keep draining incoming frames or
-        // the connection can stall once the OS receive buffer fills.
-        _ = DrainIncomingAsync(socket, logger, ct);
-
-        // Lead-in silence prepended to the vendor stream — see RunSynthesisAsync. Env/config
-        // override: FreeSWITCH__TtsStreamLeadInSilenceMs. 0 disables.
-        var leadInMs = config.GetValue<int?>("FreeSWITCH:TtsStreamLeadInSilenceMs") ?? 300;
-
-        var forwardedAny = false;
-        try
-        {
-            forwardedAny = await RunSynthesisAsync(request, socket, providerFactory, credentialStore, leadInMs, logger, ct);
-        }
-        finally
-        {
-            // mod_audio_stream deletes every temp file it wrote for this session the moment it
-            // processes "uuid_audio_stream stop" — calling that before EslBackgroundService's
-            // local play queue has actually finished playing everything silently deletes chunks
-            // still sitting in that queue out from under uuid_broadcast (live-verified: first
-            // chunk plays, then dead air, flow never resumes). Skip the wait entirely when
-            // nothing was ever forwarded (provider/credential failure, zero audio) — matches the
-            // old fast-fail behavior for that case, nothing to wait for.
-            if (forwardedAny)
-            {
-                await MarkStreamCompleteAsync(request.ChannelUuid, cache, CancellationToken.None);
-                logger.LogInformation(
-                    "TTS relay [{Uuid}]: waiting for local playback queue to drain before stopping", request.ChannelUuid);
-                await coordinator.WaitForDrainAsync(request.ChannelUuid, TimeSpan.FromSeconds(45), CancellationToken.None);
-            }
-
-            // Verified live: closing only our side of the WebSocket is not enough. mod_audio_
-            // stream's underlying WebSocket library auto-reconnects on any close, including a
-            // normal one we initiate — without this ESL-side stop, FreeSWITCH retries the
-            // connection in a tight loop indefinitely after every synthesis, successful or not.
-            //
-            // CancellationToken.None here deliberately — this is cleanup that must run even
-            // when the request's own `ct` is already cancelled (e.g. the WS connection was torn
-            // down abruptly). Passing `ct` through was the actual bug behind the reconnect storm:
-            // it made the ESL connect throw immediately, silently skipping the stop command.
-            await StopFreeswitchStreamAsync(request.ChannelUuid, config, logger, CancellationToken.None);
-            await CloseAsync(socket, "done", CancellationToken.None);
-        }
-    }
-
-    /// <summary>
-    /// Flags the channel's session as "no more streaming-TTS chunks are coming" — set here,
-    /// directly by the relay, rather than waited on indirectly via mod_audio_stream's own
-    /// disconnect event, because that event only fires as a *result* of the stop command this
-    /// very flag is gating (waiting on it would deadlock). EslBackgroundService's play-queue
-    /// drain (HandleStreamChunkFinishedAsync) reads this to decide "resume the flow now" vs.
-    /// "stay idle, more chunks may still be queued."
-    /// </summary>
-    private static async Task MarkStreamCompleteAsync(string channelUuid, ITelephonyCallSessionStore cache, CancellationToken ct)
-    {
-        var session = await cache.GetAsync(channelUuid, ct);
-        if (session is null) return;
-        session.Vars["_play_stream_disconnected"] = "true";
-        await cache.SaveAsync(session, ct);
-    }
-
-    /// <summary>Returns true if at least one audio chunk was actually forwarded to FreeSWITCH.</summary>
-    private static async Task<bool> RunSynthesisAsync(
-        TtsStreamRelayRequest request,
-        WebSocket socket,
-        ITtsStreamProviderFactory providerFactory,
-        ITenantCredentialStore credentialStore,
-        int leadInMs,
-        ILogger logger,
-        CancellationToken ct)
-    {
         ITtsStreamProvider provider;
         try
         {
@@ -163,7 +84,8 @@ public static class TtsStreamRelayEndpoints
         catch (InvalidOperationException ex)
         {
             logger.LogError(ex, "TTS relay: no provider for key {ProviderKey}", request.ProviderKey);
-            return false;
+            context.Response.StatusCode = StatusCodes.Status502BadGateway;
+            return;
         }
 
         var credentials = new Dictionary<string, string>();
@@ -174,141 +96,128 @@ public static class TtsStreamRelayEndpoints
             if (value is null)
             {
                 logger.LogWarning(
-                    "TTS relay: tenant {Tenant} has no '{Field}' credential configured for provider {Provider}",
+                    "TTS relay: tenant {Tenant} has no '{Field}' credential for provider {Provider}",
                     request.TenantSubdomain, field, request.ProviderKey);
-                return false;
+                context.Response.StatusCode = StatusCodes.Status502BadGateway;
+                return;
             }
             credentials[field] = value;
         }
 
+        // Lead-in silence prepended to the encoder — RTP is otherwise not flowing steadily to the
+        // far end when the first real audio starts, clipping the opening syllable (same defect
+        // S117 fixed on the file / flite paths). tf_answer primes once; this covers a prompt after
+        // a longer gap. Config: FreeSWITCH:TtsStreamLeadInSilenceMs, 0 disables.
+        var leadInMs = config.GetValue<int?>("FreeSWITCH:TtsStreamLeadInSilenceMs") ?? 300;
+        var ffmpegExe = config["FreeSWITCH:FfmpegPath"] ?? "ffmpeg";
+
+        context.Response.ContentType = "audio/mpeg";
+        context.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
+
         var synthesisRequest = new TtsStreamRequest(
             request.Text, request.VoiceId, credentials, request.PreferredSampleRateHz, request.ProviderSettings);
 
-        var sentAny = false;
         try
         {
-            // Lead-in silence: the first real chunk's uuid_broadcast otherwise starts before RTP
-            // is flowing steadily to the far end, clipping the opening syllable — the same defect
-            // S117 fixed on the file / flite-TTS paths with silence_stream priming. This path was
-            // deliberately left for a follow-up. Prepending one silent chunk here rides the exact
-            // same chunk pipeline as every vendor chunk (mod_audio_stream::play → uuid_broadcast):
-            // it plays first, gets RTP moving and the far-end jitter buffer filled, and the real
-            // audio that follows is clean. No break/preempt logic needed. 8 kHz mono s16le zeros —
-            // mod_audio_stream resamples per frame, so the rate need not match the vendor's chunks.
-            if (leadInMs > 0)
-            {
-                var silenceFrame = BuildRawSilenceFrame(leadInMs, sampleRateHz: 8000);
-                await socket.SendAsync(Encoding.UTF8.GetBytes(silenceFrame), WebSocketMessageType.Text, true, ct);
-                sentAny = true;
-            }
-
-            await foreach (var chunk in provider.SynthesizeAsync(synthesisRequest, ct))
-            {
-                var frame = JsonSerializer.Serialize(new
-                {
-                    type = "streamAudio",
-                    data = new
-                    {
-                        audioDataType = "raw",
-                        sampleRate = chunk.SampleRateHz,
-                        audioData = Convert.ToBase64String(chunk.Data.Span),
-                    },
-                });
-                await socket.SendAsync(Encoding.UTF8.GetBytes(frame), WebSocketMessageType.Text, true, ct);
-                sentAny = true;
-            }
+            await StreamMp3Async(synthesisRequest, provider, ffmpegExe, leadInMs, context, logger, ct);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException)
         {
-            logger.LogError(ex, "TTS relay: synthesis failed for tenant {Tenant} provider {Provider}",
-                request.TenantSubdomain, request.ProviderKey);
+            logger.LogInformation("TTS relay [{Token}]: client disconnected mid-stream", token);
         }
-
-        return sentAny;
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "TTS relay [{Token}]: synthesis/encode failed", token);
+        }
+        finally
+        {
+            await cache.DeleteKeyAsync(cacheKey, CancellationToken.None);
+        }
     }
 
     /// <summary>
-    /// A single mod_audio_stream "streamAudio" frame of raw PCM silence — <paramref name="ms"/>
-    /// milliseconds of 16-bit signed little-endian mono zeros at <paramref name="sampleRateHz"/>.
-    /// Prepended to a vendor TTS stream as its first chunk so RTP is already flowing before the
-    /// real audio plays (see RunSynthesisAsync). Internal for TtsStreamRelaySilenceTests.
+    /// Pumps provider PCM → ffmpeg stdin and ffmpeg stdout (CBR MP3) → the HTTP response, both
+    /// concurrently, so audio streams out as it's synthesized. The first chunk's actual sample
+    /// rate is read before ffmpeg starts (each provider produces one rate for the whole synthesis).
     /// </summary>
-    internal static string BuildRawSilenceFrame(int ms, int sampleRateHz)
+    private static async Task StreamMp3Async(
+        TtsStreamRequest request,
+        ITtsStreamProvider provider,
+        string ffmpegExe,
+        int leadInMs,
+        HttpContext context,
+        ILogger logger,
+        CancellationToken ct)
     {
-        var pcm = new byte[ms * sampleRateHz / 1000 * 2];
-        return JsonSerializer.Serialize(new
+        await using var enumerator = provider.SynthesizeAsync(request, ct).GetAsyncEnumerator(ct);
+
+        if (!await enumerator.MoveNextAsync())
         {
-            type = "streamAudio",
-            data = new
-            {
-                audioDataType = "raw",
-                sampleRate = sampleRateHz,
-                audioData = Convert.ToBase64String(pcm),
-            },
+            logger.LogWarning("TTS relay: provider yielded no audio");
+            return;
+        }
+
+        var firstChunk = enumerator.Current;
+        var rate = firstChunk.SampleRateHz;
+
+        var psi = new ProcessStartInfo(ffmpegExe)
+        {
+            Arguments              = $"-hide_banner -loglevel error -f s16le -ar {rate} -ac 1 -i pipe:0 {FfmpegOutArgs}",
+            UseShellExecute        = false,
+            CreateNoWindow         = true,
+            RedirectStandardInput  = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError  = true,
+        };
+        using var proc = Process.Start(psi)
+            ?? throw new InvalidOperationException(
+                "ffmpeg could not be started. Ensure it is installed and on PATH (or set FreeSWITCH:FfmpegPath).");
+
+        var stderrTask = proc.StandardError.ReadToEndAsync(CancellationToken.None);
+
+        // If the client (mod_shout) drops mid-stream, kill ffmpeg so it doesn't linger.
+        using var killOnAbort = ct.Register(() =>
+        {
+            try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); } catch { /* already gone */ }
         });
-    }
 
-    private static async Task StopFreeswitchStreamAsync(string channelUuid, IConfiguration config, ILogger logger, CancellationToken ct)
-    {
-        try
+        var pumpIn = Task.Run(async () =>
         {
-            var host = config["FreeSWITCH:Host"] ?? "127.0.0.1";
-            var port = int.Parse(config["FreeSWITCH:EslPort"] ?? "8021");
-            var pass = config["FreeSWITCH:EslPassword"] ?? "ClueCon";
-
-            await using var esl = new EslClient();
-            await esl.ConnectAsync(host, port, pass, ct);
-            await esl.StopAudioStreamAsync(channelUuid, ct);
-            logger.LogInformation("TTS relay: sent uuid_audio_stream stop for channel {Uuid}", channelUuid);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "TTS relay: failed to send uuid_audio_stream stop for channel {Uuid}", channelUuid);
-        }
-    }
-
-    private static async Task<string?> ReceiveTextAsync(WebSocket socket, CancellationToken ct)
-    {
-        var buffer = new byte[4 * 1024];
-        using var ms = new MemoryStream();
-        WebSocketReceiveResult result;
-        do
-        {
-            result = await socket.ReceiveAsync(buffer, ct);
-            if (result.MessageType == WebSocketMessageType.Close) return null;
-            ms.Write(buffer, 0, result.Count);
-        } while (!result.EndOfMessage);
-
-        return Encoding.UTF8.GetString(ms.ToArray());
-    }
-
-    /// <summary>Keeps reading and discarding frames so the socket never stalls; exits on close/error.</summary>
-    private static async Task DrainIncomingAsync(WebSocket socket, ILogger logger, CancellationToken ct)
-    {
-        var buffer = new byte[8 * 1024];
-        try
-        {
-            while (socket.State == WebSocketState.Open)
+            try
             {
-                var result = await socket.ReceiveAsync(buffer, ct);
-                if (result.MessageType == WebSocketMessageType.Close) break;
+                var stdin = proc.StandardInput.BaseStream;
+                if (leadInMs > 0)
+                {
+                    var silence = new byte[leadInMs * rate / 1000 * 2];
+                    await stdin.WriteAsync(silence, ct);
+                }
+                await stdin.WriteAsync(firstChunk.Data, ct);
+                while (await enumerator.MoveNextAsync())
+                    await stdin.WriteAsync(enumerator.Current.Data, ct);
+                await stdin.FlushAsync(ct);
             }
-        }
-        catch (OperationCanceledException) { }
-        catch (WebSocketException) { } // socket closed from the send side concurrently — expected
-        catch (Exception ex)
-        {
-            logger.LogDebug(ex, "TTS relay: drain loop ended");
-        }
-    }
+            finally
+            {
+                proc.StandardInput.Close(); // EOF → ffmpeg flushes trailing MP3 frames and exits
+            }
+        }, ct);
 
-    private static async Task CloseAsync(WebSocket socket, string reason, CancellationToken ct)
-    {
-        if (socket.State != WebSocketState.Open) return;
-        try
+        var pumpOut = Task.Run(async () =>
         {
-            await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, reason, CancellationToken.None);
-        }
-        catch { /* best-effort */ }
+            var buffer = new byte[8 * 1024];
+            var stdout = proc.StandardOutput.BaseStream;
+            int read;
+            while ((read = await stdout.ReadAsync(buffer, ct)) > 0)
+            {
+                await context.Response.Body.WriteAsync(buffer.AsMemory(0, read), ct);
+                await context.Response.Body.FlushAsync(ct);
+            }
+        }, ct);
+
+        await Task.WhenAll(pumpIn, pumpOut);
+        await proc.WaitForExitAsync(CancellationToken.None);
+
+        if (proc.ExitCode != 0 && !ct.IsCancellationRequested)
+            logger.LogWarning("TTS relay: ffmpeg exited {Code}: {Stderr}", proc.ExitCode, (await stderrTask).Trim());
     }
 }

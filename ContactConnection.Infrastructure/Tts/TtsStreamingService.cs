@@ -87,8 +87,8 @@ public sealed class TtsStreamingService : ITtsStreamingService
         return new TtsStreamingProviderInfo(provider, preference.SettingsJson);
     }
 
-    public async Task StartStreamAsync(
-        TelephonyFlowContext ctx, TtsStreamingProviderInfo provider, string text, string voiceId,
+    public async Task<string> PrepareStreamUrlAsync(
+        string tenantSubdomain, TtsStreamingProviderInfo provider, string text, string voiceId,
         CancellationToken ct = default)
     {
         Dictionary<string, string>? providerSettings = null;
@@ -101,14 +101,13 @@ public sealed class TtsStreamingService : ITtsStreamingService
             catch (JsonException ex)
             {
                 _logger.LogWarning(ex,
-                    "TtsStreamingService [{Uuid}]: malformed TTS settings JSON for provider {Provider} — ignoring",
-                    ctx.ChannelUuid, provider.ProviderKey);
+                    "TtsStreamingService: malformed TTS settings JSON for provider {Provider} — ignoring",
+                    provider.ProviderKey);
             }
         }
 
         var relayRequest = new TtsStreamRelayRequest(
-            ctx.ChannelUuid,
-            ctx.TenantSubdomain,
+            tenantSubdomain,
             provider.ProviderKey,
             voiceId,
             text.Replace("\n", " "),
@@ -117,14 +116,19 @@ public sealed class TtsStreamingService : ITtsStreamingService
 
         var token = Guid.NewGuid().ToString("N");
         await _sessionStore.SetKeyAsync(
-            $"tts_relay:{token}", JsonSerializer.Serialize(relayRequest, RelayJsonOpts), TimeSpan.FromSeconds(30), ct);
+            $"tts_relay:{token}", JsonSerializer.Serialize(relayRequest, RelayJsonOpts), TimeSpan.FromSeconds(60), ct);
 
-        var wssUrl = _config["FreeSWITCH:TtsRelayWsUrl"] ?? "ws://host.docker.internal:5135/relay/tts-stream";
+        // Configured as http(s)://host:port/relay/tts-mp3 — mod_shout takes shout:// (plain) or
+        // shouts:// (TLS); strip the scheme and prefix accordingly.
+        var httpBase = (_config["FreeSWITCH:TtsRelayHttpUrl"] ?? "http://host.docker.internal:5135/relay/tts-mp3").TrimEnd('/');
+        var shoutUrl = httpBase.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+            ? $"shouts://{httpBase["https://".Length..]}/{token}"
+            : $"shout://{httpBase.Replace("http://", "", StringComparison.OrdinalIgnoreCase)}/{token}";
 
         _logger.LogInformation(
-            "TtsStreamingService [{Uuid}]: streaming TTS via provider={Provider} voice={Voice}",
-            ctx.ChannelUuid, provider.ProviderKey, voiceId);
+            "TtsStreamingService: prepared streaming TTS URL for provider={Provider} voice={Voice} token={Token}",
+            provider.ProviderKey, voiceId, token);
 
-        await ctx.Esl!.StartAudioStreamAsync(ctx.ChannelUuid, wssUrl, "mono", "8k", token, ct);
+        return shoutUrl;
     }
 }

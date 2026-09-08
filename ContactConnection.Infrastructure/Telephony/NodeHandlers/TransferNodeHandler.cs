@@ -288,15 +288,12 @@ public class TransferNodeHandler : ITelephonyNodeHandler
         var provider = await _tts.ResolveProviderAsync(ctx.TenantSchemaName, ct);
         if (provider is not null)
         {
-            // EslBackgroundService.HandleAudioStreamPlayAsync only broadcasts a decoded chunk
-            // when the session is flagged "_play_state=streaming" (the same var PlayNodeHandler
-            // sets for tf_play) — without it every mod_audio_stream::play event for this stream is
-            // silently dropped and nothing is ever heard. No "_play_next_*" here: unlike tf_play,
-            // this announcement doesn't own the flow's continuation (the caller already committed
-            // to its own transition synchronously), so FireEndTransitionAsync finding no
-            // "_play_next_tts_finished" once the stream ends is expected — it just clears the vars.
-            ctx.Vars["_play_state"] = "streaming";
-            await _tts.StartStreamAsync(ctx, provider, tts, voice, ct);
+            // Fire-and-forget, same as the file path above: one continuous MP3 broadcast. This
+            // announcement doesn't own the flow's continuation (the caller already committed to
+            // its own transition synchronously), so no _play_* bookkeeping is needed — the
+            // eventual PLAYBACK_STOP has nothing to resume and is a harmless no-op.
+            var streamUrl = await _tts.PrepareStreamUrlAsync(ctx.TenantSubdomain, provider, tts, voice, ct);
+            await ctx.Esl.BroadcastAsync(ctx.ChannelUuid, streamUrl, ct);
             return;
         }
 

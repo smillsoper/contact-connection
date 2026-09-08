@@ -8,31 +8,34 @@ namespace ContactConnection.Infrastructure.Telephony.NodeHandlers;
 
 /// <summary>
 /// Plays a pre-bridge announcement on the agent's leg only — an audio file, or (audioSource
-/// = "tts") free text spoken by flite. Streaming-vendor TTS is not offered here yet: the
-/// mod_audio_stream chunk pipeline in EslBackgroundService is keyed to a caller session and
-/// doesn't handle a stream on the agent channel — see TtsVoicePicker's flitOnly note.
+/// = "tts") free text spoken by flite or, when the tenant has a TTS-streaming vendor configured,
+/// that vendor's voice via one continuous MP3 stream (same shout:// broadcast tf_play uses).
 ///
 /// Requires that AnswerQueuedCall stored "_agent_uuid" in the caller session before
 /// firing the agent_selected event branch. The caller and agent are NOT bridged until
 /// this branch reaches tf_end (which calls BridgeChannelsAsync).
 ///
 /// PLAYBACK_STOP on the agent's channel UUID → EslBackgroundService looks up
-/// whisper:{agentUuid} → callerUuid → resumes from "_whisper_next_default" node.
+/// whisper:{agentUuid} → callerUuid → resumes from "_whisper_next_default" node. A streamed
+/// whisper fires exactly one such PLAYBACK_STOP, so that resume path is unchanged.
 /// </summary>
 public class WhisperNodeHandler : ITelephonyNodeHandler
 {
     public string NodeType => "tf_whisper";
 
     private readonly ITenantDbContextFactory _factory;
+    private readonly ITtsStreamingService _tts;
     private readonly IConfiguration _config;
     private readonly ILogger<WhisperNodeHandler> _logger;
 
     public WhisperNodeHandler(
         ITenantDbContextFactory factory,
+        ITtsStreamingService tts,
         IConfiguration config,
         ILogger<WhisperNodeHandler> logger)
     {
         _factory = factory;
+        _tts     = tts;
         _config  = config;
         _logger  = logger;
     }
@@ -73,17 +76,29 @@ public class WhisperNodeHandler : ITelephonyNodeHandler
                 return new TelephonyNodeResult(nextNodeId, "default");
             }
 
-            // flite "tts" file-string on the AGENT channel. Same channel-var indirection as
-            // PlayNodeHandler: uuid_broadcast's arg parser is "<uuid> <path> [leg]", so a <path>
-            // containing raw spaces folds the leg flag into the path — routing the text through
-            // ${cc_tts_text} keeps the command line space-free. FreeSWITCH does not URL-decode
-            // the text segment, so literal spaces are required (percent-encoding gets read aloud).
-            var sanitizedText = ttsText.Replace("\n", " ");
-            await ctx.Esl.SetChannelVarAsync(agentUuid, "cc_tts_text", sanitizedText, ct);
-            mediaArg = $"tts://flite|{ttsVoice}|${{cc_tts_text}}";
-            _logger.LogInformation(
-                "WhisperNodeHandler [{Uuid}]: TTS via flite voice={Voice} on agent channel {AgentUuid}",
-                ctx.ChannelUuid, ttsVoice, agentUuid);
+            var provider = await _tts.ResolveProviderAsync(ctx.TenantSchemaName, ct);
+            if (provider is not null)
+            {
+                // Streaming vendor voice — one continuous MP3 broadcast on the AGENT channel.
+                mediaArg = await _tts.PrepareStreamUrlAsync(ctx.TenantSubdomain, provider, ttsText, ttsVoice, ct);
+                _logger.LogInformation(
+                    "WhisperNodeHandler [{Uuid}]: streaming TTS via {Url} on agent channel {AgentUuid}",
+                    ctx.ChannelUuid, mediaArg, agentUuid);
+            }
+            else
+            {
+                // flite "tts" file-string on the AGENT channel. Same channel-var indirection as
+                // PlayNodeHandler: uuid_broadcast's arg parser is "<uuid> <path> [leg]", so a
+                // <path> containing raw spaces folds the leg flag into the path — routing the text
+                // through ${cc_tts_text} keeps the command line space-free. FreeSWITCH does not
+                // URL-decode the text segment, so literal spaces are required.
+                var sanitizedText = ttsText.Replace("\n", " ");
+                await ctx.Esl.SetChannelVarAsync(agentUuid, "cc_tts_text", sanitizedText, ct);
+                mediaArg = $"tts://flite|{ttsVoice}|${{cc_tts_text}}";
+                _logger.LogInformation(
+                    "WhisperNodeHandler [{Uuid}]: TTS via flite voice={Voice} on agent channel {AgentUuid}",
+                    ctx.ChannelUuid, ttsVoice, agentUuid);
+            }
         }
         else
         {

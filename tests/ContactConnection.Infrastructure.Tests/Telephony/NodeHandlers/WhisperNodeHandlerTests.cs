@@ -19,11 +19,13 @@ public class WhisperNodeHandlerTests
     private const string CallerUuid = "caller-uuid-1";
     private const string AgentUuid = "agent-uuid-1";
 
-    private static WhisperNodeHandler NewHandler()
+    private static WhisperNodeHandler NewHandler(Mock<ITtsStreamingService>? tts = null)
     {
         var config = new ConfigurationBuilder().AddInMemoryCollection().Build();
         return new WhisperNodeHandler(
-            new Mock<ITenantDbContextFactory>().Object, config, NullLogger<WhisperNodeHandler>.Instance);
+            new Mock<ITenantDbContextFactory>().Object,
+            (tts ?? new Mock<ITtsStreamingService>()).Object,
+            config, NullLogger<WhisperNodeHandler>.Instance);
     }
 
     private static TelephonyFlowContext Ctx(IEslCommander? esl, bool withAgent = true)
@@ -102,6 +104,30 @@ public class WhisperNodeHandlerTests
 
         esl.Verify(e => e.BroadcastAsync(
             AgentUuid, "tts://flite|kal|${cc_tts_text}", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Tts_StreamingVendorConfigured_BroadcastsShoutUrlOnAgentLeg()
+    {
+        var esl = NewEsl();
+        var tts = new Mock<ITtsStreamingService>();
+        tts.Setup(t => t.ResolveProviderAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TtsStreamingProviderInfo("elevenlabs", null));
+        tts.Setup(t => t.PrepareStreamUrlAsync("test-tenant", It.IsAny<TtsStreamingProviderInfo>(), "hello agent", "voice-xyz", It.IsAny<CancellationToken>()))
+            .ReturnsAsync("shout://host.docker.internal:5135/relay/tts-mp3/abc123");
+
+        var node = Node("tts");
+        node["ttsText"] = "hello agent";
+        node["ttsVoice"] = "voice-xyz";
+
+        var result = await NewHandler(tts).ExecuteAsync(node, Ctx(esl.Object));
+
+        Assert.Equal("whisper_playing", result.TransitionTaken);
+        esl.Verify(e => e.BroadcastAsync(
+            AgentUuid, "shout://host.docker.internal:5135/relay/tts-mp3/abc123", It.IsAny<CancellationToken>()), Times.Once);
+        // No flite fallback when a vendor is configured.
+        esl.Verify(e => e.SetChannelVarAsync(
+            It.IsAny<string>(), "cc_tts_text", It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

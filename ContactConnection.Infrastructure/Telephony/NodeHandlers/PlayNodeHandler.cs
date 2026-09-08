@@ -196,12 +196,20 @@ public class PlayNodeHandler : ITelephonyNodeHandler
                 "PlayNodeHandler [{Uuid}]: autoRestart is not supported for streaming TTS — ignoring",
                 ctx.ChannelUuid);
 
-        ctx.Vars["_play_state"]        = "streaming";
+        // One continuous MP3 stream, broadcast exactly like a file: the single PLAYBACK_STOP it
+        // fires is picked up by EslBackgroundService.HandlePlaybackStopAsync's non-loop path,
+        // which calls FireEndTransitionAsync(... "tts") → resumes at _play_next_tts_finished.
+        var streamUrl = await _tts.PrepareStreamUrlAsync(ctx.TenantSubdomain, provider, ttsText, ttsVoice, ct);
+
+        ctx.Vars["_play_media_arg"]    = streamUrl;
+        ctx.Vars["_play_loop"]         = "false";
         ctx.Vars["_play_audio_source"] = "tts";
+        ctx.Vars["_play_state"]        = "main";
         ctx.Vars["_play_started_at"]   = DateTimeOffset.UtcNow.ToString("O");
         StoreTransitions(transitions, ctx.Vars);
 
-        await _tts.StartStreamAsync(ctx, provider, ttsText, ttsVoice, ct);
+        _logger.LogInformation("PlayNodeHandler [{Uuid}]: streaming TTS via {Url}", ctx.ChannelUuid, streamUrl);
+        await ctx.Esl!.BroadcastAsync(ctx.ChannelUuid, streamUrl, ct);
 
         return new TelephonyNodeResult(null, "playing");
     }

@@ -77,12 +77,23 @@ public class ElevenLabsTtsStreamProvider : ITtsStreamProvider
         {
             using var messageBytes = new MemoryStream();
             WebSocketReceiveResult result;
-            do
+            try
             {
-                result = await socket.ReceiveAsync(buffer, ct);
-                if (result.MessageType == WebSocketMessageType.Close) break;
-                messageBytes.Write(buffer, 0, result.Count);
-            } while (!result.EndOfMessage);
+                do
+                {
+                    result = await socket.ReceiveAsync(buffer, ct);
+                    if (result.MessageType == WebSocketMessageType.Close) break;
+                    messageBytes.Write(buffer, 0, result.Count);
+                } while (!result.EndOfMessage);
+            }
+            catch (WebSocketException ex)
+            {
+                // ElevenLabs frequently drops the TCP connection right after the final audio
+                // frame without a clean close handshake. By this point every "audio" message has
+                // already been yielded, so this is end-of-stream, not a failure.
+                _logger.LogInformation("ElevenLabs TTS: socket closed without a close frame ({Msg}) — treating as end of stream", ex.Message);
+                break;
+            }
 
             if (result.MessageType == WebSocketMessageType.Close)
             {

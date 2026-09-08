@@ -1658,20 +1658,16 @@ const TTS_VOICES = [
  * just reflects whatever's configured and lets the user paste that vendor's voice ID/name. The
  * underlying node field is still a single plain string either way; the engine decides how to
  * interpret it purely from whether a streaming provider is configured (see ITtsStreamingService).
- *
- * `flitOnly` hides the vendor tab entirely — used by tf_whisper, whose engine handler only does
- * flite (the streaming chunk pipeline is caller-session-keyed and doesn't run on the agent leg).
+ * Used by tf_play and tf_whisper alike — both support the streaming vendor voice.
  */
 function TtsVoicePicker({
   value,
   onChange,
   accent = 'teal',
-  flitOnly = false,
 }: {
   value: string
   onChange: (voice: string) => void
   accent?: 'teal' | 'indigo' | 'purple'
-  flitOnly?: boolean
 }) {
   const [status, setStatus] = useState<TtsServiceStatus | null>(null)
   useEffect(() => {
@@ -1682,10 +1678,10 @@ function TtsVoicePicker({
   // Start on whichever tab already matches the stored value — a non-flite, non-empty value means
   // this node was already pointed at a vendor voice id.
   const [mode, setMode] = useState<'flite' | 'service'>(
-    !flitOnly && value && !isFliteVoice ? 'service' : 'flite',
+    value && !isFliteVoice ? 'service' : 'flite',
   )
 
-  const showServiceTab = status?.configured && !flitOnly
+  const showServiceTab = status?.configured
 
   const labelCls = 'block text-xs text-gray-400 mb-1'
   const inputCls = `w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-${accent}-500`
@@ -1735,13 +1731,6 @@ function TtsVoicePicker({
             voice ID/name from that vendor's account.
           </p>
         </>
-      )}
-
-      {flitOnly && status?.configured && (
-        <p className="text-[10px] text-gray-500 mt-1 leading-snug">
-          Whisper announcements use flite only for now — your {status.providerName ?? status.providerKey} streaming
-          voice isn&rsquo;t wired to the agent leg yet.
-        </p>
       )}
     </div>
   )
@@ -2082,15 +2071,15 @@ function WhisperNodeEditor({
               onChange={(e) => onChange({ ttsText: e.target.value })}
             />
             <p className="text-xs text-gray-500 mt-1">
-              Spoken on the agent&rsquo;s ear only, before the bridge. Requires{' '}
-              <span className="font-mono text-purple-400">freeswitch-mod-flite</span> in the FreeSWITCH container.
+              Spoken on the agent&rsquo;s ear only, before the bridge. Flite needs{' '}
+              <span className="font-mono text-purple-400">freeswitch-mod-flite</span> in the container; a configured
+              streaming vendor is used instead when set.
             </p>
           </div>
           <TtsVoicePicker
             value={(data.ttsVoice as string) ?? 'kal'}
             onChange={(v) => onChange({ ttsVoice: v })}
             accent="purple"
-            flitOnly
           />
         </>
       )}
