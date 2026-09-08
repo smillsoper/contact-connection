@@ -135,6 +135,7 @@
 | 123 | 2026-09-08 | 8:43 AM PDT | 8:57 AM PDT | 14 min | ~13364 min |
 | 124 | 2026-09-08 | 9:02 AM PDT | 9:33 AM PDT | 31 min | ~13395 min |
 | 125 | 2026-09-08 | 9:54 AM PDT | 10:32 AM PDT | 38 min | ~13433 min |
+| 126 | 2026-09-08 | 10:50 AM PDT | 11:51 AM PDT | 61 min | ~13494 min |
 
 ---
 
@@ -6125,6 +6126,104 @@ clip is a finite WAV, no conflict.
 5. Telnyx Verified Numbers feature.
 6. Resume the RMD filing when budget allows (499 Filer ID + DC agent) — see
    `project_robocall_mitigation_rmd`.
+7. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
+8. `cc_timesync` container crash-loops — remove or fix.
+9. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit;
+   `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test
+   coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 126
+
+**Date:** 2026-09-08
+**Start:** 10:50 AM PDT
+**End:** 11:51 AM PDT
+**Duration:** 61 minutes
+**Total Duration:** ~13494 minutes
+
+### Focus
+
+Eliminate the streaming-vendor-TTS inter-chunk stutter by replacing the `mod_audio_stream`
+per-chunk pipeline with one continuous MP3 stream (a `shout://` broadcast). **WIP — committed
+(`dbe7d9d`) with a known completion regression; fix is Session 127.** See memory
+[[project_streaming_tts_playback]] for the full state.
+
+### What was built
+
+- **`GET /relay/tts-mp3/{token}`** (`TtsStreamRelayEndpoints.cs`, rewritten from the WS relay):
+  resolves the Redis-stashed `TtsStreamRelayRequest` (no longer carries `ChannelUuid`),
+  synthesizes PCM via the unchanged `ITtsStreamProvider`, pipes it through **ffmpeg** to a single
+  CBR MP3 (`-write_xing 0` so the muxer doesn't buffer the whole file), streamed to the chunked
+  HTTP response as it encodes. Kills ffmpeg + cancels the provider on `RequestAborted`.
+- **`ITtsStreamingService`**: `StartStreamAsync(ctx,…)` → `PrepareStreamUrlAsync(tenantSubdomain,
+  provider, text, voiceId) → string` — returns `shout://…/relay/tts-mp3/{token}` (config
+  `FreeSWITCH:TtsRelayHttpUrl`). No ESL work.
+- **`PlayNodeHandler` / `TransferNodeHandler` / `WhisperNodeHandler`** `uuid_broadcast` that URL
+  like a file. FreeSWITCH's **mod_shout** (already built + loaded; libcurl → mpg123) plays it.
+- **Deleted**: WS relay body, `mod_audio_stream::*` ESL subscription + `HandleAudioStreamPlayAsync`
+  / `HandleStreamChunkFinishedAsync` / `HandleAudioStreamFinishedAsync` / `GetStreamQueue`,
+  `TtsPlaybackCoordinator`, `_play_stream_*` bookkeeping, `HandleCustomEventAsync`'s `eventBody`
+  param. `mod_audio_stream` module stays loaded (future STT); `EslClient.StartAudioStreamAsync`/
+  `StopAudioStreamAsync` kept.
+- **`ElevenLabsTtsStreamProvider`**: treats ElevenLabs' post-`isFinal` dirty WS close (no close
+  frame) as end-of-stream — was surfacing as "synthesis/encode failed" on every success.
+- **`TtsVoicePicker`**: `flitOnly` prop removed — `tf_whisper` now offers the streaming vendor
+  voice (S125 had gated it off).
+- **`appsettings.json`**: `FreeSWITCH:TtsRelayHttpUrl` default added.
+
+### Verified
+
+- **Blip is GONE** — user heard full messages with no stutter on real inbound calls through
+  tf_play, tf_transfer, and tf_whisper (streaming ElevenLabs).
+- `curl /relay/tts-mp3/{token}` → real ElevenLabs synth → valid CBR MP3 (`mp3 / 22050 / mono /
+  32 kbps`). `fs_cli playback(shout://…)` → `mod_shout.c:726 Opening stream` → played to
+  completion → `NORMAL_CLEARING`.
+
+### Known regression (Session 127 fix)
+
+`uuid_broadcast` of a `shout://` **finite** HTTP stream **never fires `PLAYBACK_STOP`** — mod_shout
+treats it as an infinite Icecast source and keeps the displaced playback alive on body EOF
+(`uuid_break` / `uuid_broadcast stop` don't stop it either — all tested live). So:
+- **tf_play**: audio plays fully, flow **stuck** at the node (no `tts_finished`).
+- **tf_whisper**: agent hears the whisper, `whisper:{agentUuid}` `PLAYBACK_STOP` never fires →
+  caller/agent likely **never bridge**.
+- **tf_transfer**: `PlayAnnouncementAsync` `uuid_broadcast`s + returns → transfer fires **while
+  the announcement plays**. Spec: announcement must finish first; fire-immediately only when no
+  announcement is configured.
+
+**Fix** (established `ivr_collect`/`vm_record` pattern — a **foreground** `playback` in a dialplan
+extension DOES see EOF, tested):
+1. New `tts-play` dialplan extension: `<playback data="${cc_tts_url}"/>` → `<event
+   Event-Subclass=contactconnection::tts_done/>` → `<park/>`.
+2. tf_play: `SetChannelVar(cc_tts_url)` + `uuid_transfer {uuid} tts_play XML default`; store the
+   `tts_finished` continuation; `_tts_in_progress` park guard; `EslBackgroundService` subscribes
+   `contactconnection::tts_done` → fires the transition.
+3. tf_transfer: play the announcement foreground before the bridge for campaign/agent/flow
+   destinations (extend the `xfer_bridge` pattern).
+4. tf_whisper streaming: same `tts_play` transfer on the agent leg → `tts_done` → existing
+   whisper→bridge resume (verify `_agent_uuid` / pending bridge survives the transfer). Flite
+   whisper unchanged.
+5. Live-verify all three against ElevenLabs on `test-tenant` (voice `21m00Tcm4TlvDq8ikWAM`).
+
+### State
+
+- `dotnet build` + `npm run build` + `tsc --noEmit` clean. **607 tests pass** — Domain 147,
+  Application 20, Infrastructure 356 (+1 whisper streaming test), Api 84 (−3, deleted obsolete
+  `TtsStreamRelaySilenceTests`).
+- Deleted: `ContactConnection.Api/Telephony/TtsPlaybackCoordinator.cs`,
+  `tests/…/TtsStreamRelaySilenceTests.cs`.
+- Committed + pushed `dbe7d9d`.
+
+### Next session — pick up here
+
+1. **Streaming-TTS completion fix** — the `tts_play` dialplan extension (see above). Fixes tf_play
+   transition, tf_whisper bridge, tf_transfer announcement-before-transfer, in one pass.
+2. Queue callback v1 rough edges ([[project_queue_callback]]).
+3. Live-verify S118 registration auto-Unavailable edge cases.
+4. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
+5. Telnyx Verified Numbers feature.
+6. Resume the RMD filing when budget allows.
 7. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
 8. `cc_timesync` container crash-loops — remove or fix.
 9. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit;
