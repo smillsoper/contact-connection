@@ -134,6 +134,7 @@
 | 122 | 2026-09-08 | 8:30 AM PDT | 8:40 AM PDT | 10 min | ~13350 min |
 | 123 | 2026-09-08 | 8:43 AM PDT | 8:57 AM PDT | 14 min | ~13364 min |
 | 124 | 2026-09-08 | 9:02 AM PDT | 9:33 AM PDT | 31 min | ~13395 min |
+| 125 | 2026-09-08 | 9:54 AM PDT | 10:32 AM PDT | 38 min | ~13433 min |
 
 ---
 
@@ -6037,5 +6038,95 @@ near-duplicate audio pickers in `TelephonyNodePropertiesPanel.tsx` into one comp
 6. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
 7. `cc_timesync` container crash-loops — remove or fix.
 8. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit;
+   `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test
+   coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 125
+
+**Date:** 2026-09-08
+**Start:** 9:54 AM PDT
+**End:** 10:32 AM PDT
+**Duration:** 38 minutes
+**Total Duration:** ~13433 minutes
+
+### Focus
+
+A detour before queue-callback rough edges: the tf_whisper node had no TTS option (user noticed).
+Brought it to parity with tf_play — TTS-source mode + the "Generate TTS clip" button.
+
+### tf_whisper — Text-to-Speech announcement mode
+
+- **`WhisperNodeHandler`** — new `audioSource` branch (mirrors `PlayNodeHandler`):
+  `audioSource == "tts"` speaks `ttsText` via flite on the **agent** channel
+  (`SetChannelVarAsync(agentUuid, "cc_tts_text", …)` + `BroadcastAsync(agentUuid,
+  "tts://flite|{voice}|${cc_tts_text}")` — same channel-var indirection PlayNode uses so
+  uuid_broadcast's `<uuid> <path> [leg]` parser doesn't fold the leg flag into a space-containing
+  path). Empty text → skip the whisper, resume the `default` transition. The `tts://` broadcast
+  fires PLAYBACK_STOP like a file, so the existing `whisper:{agentUuid}` → `HandleWhisperPlaybackStopAsync`
+  resume path is unchanged.
+- **Streaming-vendor TTS deliberately not offered on whisper** — the `mod_audio_stream` chunk
+  pipeline in `EslBackgroundService` (`HandleAudioStreamPlayAsync` / chunk-queue PLAYBACK_STOP /
+  `HandleAudioStreamFinishedAsync`) is all keyed to a caller session by the stream channel uuid;
+  a stream on the agent leg has no such session. `TtsVoicePicker` gains a `flitOnly` prop that
+  hides the vendor tab and shows a one-line "not wired to the agent leg yet" note when a vendor
+  is configured. **Next session builds this** — see below.
+- **Designer** — `WhisperNodeEditor` gains an "Announcement Source" (File / Text to Speech) toggle
+  matching PlayNode; TTS mode = text box + `<TtsVoicePicker accent="purple" flitOnly>`.
+  `defaultTelNodeData('tf_whisper')` now seeds `audioSource`/`audioFileId`/`ttsText`/`ttsVoice`;
+  `WhisperNode.tsx` canvas shows the TTS text preview / "⚠ no TTS text".
+- **5 new `WhisperNodeHandlerTests`** — file→broadcast-on-agent-leg, flite-tts (newline collapse,
+  cc_tts_text on the agent channel), default voice `kal`, empty-text→skip-and-resume, no-agent→error.
+
+### "Generate TTS clip" button — now on every audio-file picker
+
+User's follow-up: the "✦ Generate TTS" button synthesizes a **saved, reusable AudioFile** (like an
+upload or recording) — it's not the per-call live-TTS source mode, so it belongs on every audio
+slot, not just Transfer/Voicemail/IVR/QueueCallback. Removed the `allowTtsClip` prop from
+`AudioPicker` entirely; the "✦ Generate TTS" button and "✎ Edit & regenerate this TTS clip" link
+are now gated only on `ttsStatus?.configured` (the real gate — no vendor, no button). Play and
+Whisper file-mode pickers get it for free. Whisper keeps `builtins="builtin-only"` — a synthesized
+clip is a finite WAV, no conflict.
+
+### State
+
+- `dotnet build` + `npm run build` + web `tsc --noEmit` clean. **609 tests pass** — Domain 147,
+  Application 20, Infrastructure 355 (+5), Api 87.
+- Changed: `WhisperNodeHandler.cs`, `AudioPicker.tsx`, `TelephonyNodePropertiesPanel.tsx`,
+  `nodes/WhisperNode.tsx`, `types/telephony-designer.ts`. New: `WhisperNodeHandlerTests.cs`.
+- **Live-verified** (user click-through + real call): whisper works with all features — Audio File
+  mode (built-in / upload / record / platform phrase / Generate TTS clip) and flite TTS mode.
+
+### Next session — pick up here
+
+1. **Live-streamed TTS on the agent leg for tf_whisper.** Generalize the `mod_audio_stream`
+   handling in `EslBackgroundService` so a stream can run on the agent channel:
+   - `ITtsStreamingService.StartStreamAsync` — add a target-channel param (default `ctx.ChannelUuid`);
+     `TtsStreamRelayRequest` channel + `StartAudioStreamAsync` use it.
+   - `WhisperNodeHandler` — tts branch: if `ResolveProviderAsync` returns a provider, set a
+     `_whisper_streaming` marker on the caller session and `StartStreamAsync(..., agentUuid)`.
+   - `EslBackgroundService`:
+     - `HandleAudioStreamPlayAsync` — currently returns early when there's no session for the
+       stream uuid; add a whisper path (`whisper:{uuid}` reverse lookup) that broadcasts each
+       decoded chunk on the agent leg with its own chunk-queue bookkeeping.
+     - `HandlePlaybackStopAsync` — the `whisper:{uuid}` branch must NOT resume while
+       `_whisper_streaming` is set (those PLAYBACK_STOPs are per-chunk); only `mod_audio_stream::disconnect`
+       ends a streamed whisper.
+     - `HandleAudioStreamFinishedAsync` — `whisper:{uuid}` lookup → route to
+       `HandleWhisperPlaybackStopAsync`.
+   - Drop `flitOnly` from the whisper `TtsVoicePicker` once wired.
+   - Live-verify against a real streaming vendor (ElevenLabs on test-tenant).
+2. Queue callback v1 rough edges ([[project_queue_callback]]); caller-answered-then-bridge-fails +
+   simple-bridge paths still only unit-tested.
+3. Live-verify the S118 registration auto-Unavailable edge cases (`Acw`→offline, graceful-logout
+   ordering, blip re-register).
+4. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
+5. Telnyx Verified Numbers feature.
+6. Resume the RMD filing when budget allows (499 Filer ID + DC agent) — see
+   `project_robocall_mitigation_rmd`.
+7. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
+8. `cc_timesync` container crash-loops — remove or fix.
+9. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit;
    `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test
    coverage; retire the `.cc` softphone route.

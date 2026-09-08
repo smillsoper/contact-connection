@@ -197,7 +197,9 @@ export function PlatformPhrasePicker({
 /**
  * Full-featured audio picker for a single audio-file slot: select (built-in options + tenant
  * clips), preview, upload, in-browser record → review → name → save, platform phrase library, and
- * (when the tenant has a TTS vendor and `allowTtsClip`) synthesize-and-save a named reusable clip.
+ * — when the tenant has a TTS vendor configured — synthesize-and-save a named reusable clip
+ * ("Generate TTS"; that clip is a plain saved AudioFile, distinct from Play/Whisper's per-call
+ * live-TTS source mode).
  *
  * The single home for this UI — the Play, Whisper, Transfer, Voicemail, IVR Menu and Queue
  * Callback editors all render one instance per slot. Recording/saving under an instance always
@@ -206,8 +208,6 @@ export function PlatformPhrasePicker({
  * Props that vary by host:
  *   - `builtins`: 'all' offers hold/tone streams too; 'builtin-only' restricts to finite WAV
  *     built-ins (Whisper — looping streams never fire PLAYBACK_STOP so the bridge never triggers).
- *   - `allowTtsClip`: Play/Whisper set false — they have their own TTS-source path and don't offer
- *     saving a clip from this slot.
  *   - `onAudioFilesChange`: lets the Play editor feed its periodic-announcement playlist the same
  *     (shared, cached) clip list.
  */
@@ -219,7 +219,6 @@ export function AudioPicker({
   blankLabel = '— Select audio —',
   helpText,
   builtins = 'all',
-  allowTtsClip = true,
   onAudioFilesChange,
 }: {
   value: string
@@ -229,7 +228,6 @@ export function AudioPicker({
   blankLabel?: string
   helpText?: React.ReactNode
   builtins?: 'all' | 'builtin-only'
-  allowTtsClip?: boolean
   onAudioFilesChange?: (files: AudioFileRecord[]) => void
 }) {
   const { files: audioFiles, addFile, updateFile } = useAudioFiles()
@@ -268,9 +266,8 @@ export function AudioPicker({
   const [platformOpen, setPlatformOpen] = useState(false)
 
   useEffect(() => {
-    if (!allowTtsClip) return
     ttsServiceApi.getStatus().then(setTtsStatus).catch(() => setTtsStatus({ configured: false }))
-  }, [allowTtsClip])
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -500,7 +497,7 @@ export function AudioPicker({
               {previewLoading ? 'Loading…' : '▶ Preview selected file'}
             </button>
           )}
-          {allowTtsClip && selectedFile?.isTtsGenerated && recordPhase === 'idle' && ttsPhase === 'idle' && (
+          {selectedFile?.isTtsGenerated && recordPhase === 'idle' && ttsPhase === 'idle' && (
             <button
               onClick={() => openTtsForm(selectedFile)}
               className={`block text-xs text-${accent}-400 hover:text-${accent}-300 mt-1`}
@@ -548,7 +545,7 @@ export function AudioPicker({
           >
             ✦ Platform
           </button>
-          {allowTtsClip && ttsStatus?.configured && (
+          {ttsStatus?.configured && (
             <button
               onClick={() => openTtsForm()}
               className="flex-1 min-w-[72px] text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-600 rounded px-2 py-1.5 transition-colors"

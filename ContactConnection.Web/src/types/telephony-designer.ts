@@ -59,7 +59,7 @@ export interface TelNodeData extends Record<string, unknown> {
   announceTtsText?: string
   announceTtsVoice?: string
   screenPopFlowId?: string         // CRM script flow the receiving agent gets instead of the campaign default
-  // tf_play
+  // tf_play, tf_whisper
   audioSource?: 'file' | 'tts'
   audioFileId?: string
   ttsText?: string
@@ -162,8 +162,7 @@ export interface TelNodeData extends Record<string, unknown> {
   // tf_queue_callback — virtual hold (keeps queue position, dials the caller back when an agent is free)
   // (numberSource / collectedVar / maxAttempts shared with tf_scheduled_callback above)
   connectAudioFileId?: string       // played to the caller when the callback connects, before the bridge; blank = built-in prompt
-  // tf_whisper
-  // (audioFileId reused from tf_play)
+  // tf_whisper — audioSource / audioFileId / ttsText / ttsVoice reused from tf_play
   // tf_on_custom_event
   eventName?: string
 }
@@ -506,7 +505,7 @@ export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
         maxAttempts: 3, connectAudioFileId: '',
       }
     case 'tf_whisper':
-      return { label: 'Whisper', audioFileId: '' }
+      return { label: 'Whisper', audioSource: 'file', audioFileId: '', ttsText: '', ttsVoice: 'kal' }
     case 'tf_on_agent_selected':
       return { label: 'Agent Selected' }
     case 'tf_on_agent_answer':

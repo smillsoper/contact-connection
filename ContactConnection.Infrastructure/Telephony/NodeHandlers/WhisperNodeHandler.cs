@@ -7,7 +7,10 @@ using Microsoft.Extensions.Logging;
 namespace ContactConnection.Infrastructure.Telephony.NodeHandlers;
 
 /// <summary>
-/// Plays an audio file on the agent's leg only (pre-bridge whisper announcement).
+/// Plays a pre-bridge announcement on the agent's leg only — an audio file, or (audioSource
+/// = "tts") free text spoken by flite. Streaming-vendor TTS is not offered here yet: the
+/// mod_audio_stream chunk pipeline in EslBackgroundService is keyed to a caller session and
+/// doesn't handle a stream on the agent channel — see TtsVoicePicker's flitOnly note.
 ///
 /// Requires that AnswerQueuedCall stored "_agent_uuid" in the caller session before
 /// firing the agent_selected event branch. The caller and agent are NOT bridged until
@@ -49,19 +52,49 @@ public class WhisperNodeHandler : ITelephonyNodeHandler
             return new TelephonyNodeResult(null, "error");
         }
 
-        var audioFileId = node["audioFileId"]?.GetValue<string>() ?? "";
-        var mediaArg    = await ResolveFileArgAsync(audioFileId, ctx, ct);
-        if (mediaArg is null)
-        {
-            _logger.LogWarning("WhisperNodeHandler [{Uuid}]: could not resolve audio file '{Id}'", ctx.ChannelUuid, audioFileId);
-            return new TelephonyNodeResult(null, "error");
-        }
-
         // Store the continuation node ID so PLAYBACK_STOP can resume from it
         var transitions = node["transitions"]?.AsObject();
         var nextNodeId  = transitions?["default"]?.GetValue<string>();
         if (!string.IsNullOrEmpty(nextNodeId))
             ctx.Vars["_whisper_next_default"] = nextNodeId;
+
+        var audioSource = node["audioSource"]?.GetValue<string>() ?? "file";
+        string? mediaArg;
+
+        if (audioSource == "tts")
+        {
+            var ttsText  = node["ttsText"]?.GetValue<string>() ?? "";
+            var ttsVoice = node["ttsVoice"]?.GetValue<string>() ?? "kal";
+            if (string.IsNullOrWhiteSpace(ttsText))
+            {
+                _logger.LogWarning(
+                    "WhisperNodeHandler [{Uuid}]: TTS text is empty — skipping whisper, resuming flow",
+                    ctx.ChannelUuid);
+                return new TelephonyNodeResult(nextNodeId, "default");
+            }
+
+            // flite "tts" file-string on the AGENT channel. Same channel-var indirection as
+            // PlayNodeHandler: uuid_broadcast's arg parser is "<uuid> <path> [leg]", so a <path>
+            // containing raw spaces folds the leg flag into the path — routing the text through
+            // ${cc_tts_text} keeps the command line space-free. FreeSWITCH does not URL-decode
+            // the text segment, so literal spaces are required (percent-encoding gets read aloud).
+            var sanitizedText = ttsText.Replace("\n", " ");
+            await ctx.Esl.SetChannelVarAsync(agentUuid, "cc_tts_text", sanitizedText, ct);
+            mediaArg = $"tts://flite|{ttsVoice}|${{cc_tts_text}}";
+            _logger.LogInformation(
+                "WhisperNodeHandler [{Uuid}]: TTS via flite voice={Voice} on agent channel {AgentUuid}",
+                ctx.ChannelUuid, ttsVoice, agentUuid);
+        }
+        else
+        {
+            var audioFileId = node["audioFileId"]?.GetValue<string>() ?? "";
+            mediaArg = await ResolveFileArgAsync(audioFileId, ctx, ct);
+            if (mediaArg is null)
+            {
+                _logger.LogWarning("WhisperNodeHandler [{Uuid}]: could not resolve audio file '{Id}'", ctx.ChannelUuid, audioFileId);
+                return new TelephonyNodeResult(null, "error");
+            }
+        }
 
         ctx.Vars["_whisper_media_arg"] = mediaArg;
 

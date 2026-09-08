@@ -1658,15 +1658,20 @@ const TTS_VOICES = [
  * just reflects whatever's configured and lets the user paste that vendor's voice ID/name. The
  * underlying node field is still a single plain string either way; the engine decides how to
  * interpret it purely from whether a streaming provider is configured (see ITtsStreamingService).
+ *
+ * `flitOnly` hides the vendor tab entirely — used by tf_whisper, whose engine handler only does
+ * flite (the streaming chunk pipeline is caller-session-keyed and doesn't run on the agent leg).
  */
 function TtsVoicePicker({
   value,
   onChange,
   accent = 'teal',
+  flitOnly = false,
 }: {
   value: string
   onChange: (voice: string) => void
   accent?: 'teal' | 'indigo' | 'purple'
+  flitOnly?: boolean
 }) {
   const [status, setStatus] = useState<TtsServiceStatus | null>(null)
   useEffect(() => {
@@ -1676,7 +1681,11 @@ function TtsVoicePicker({
   const isFliteVoice = TTS_VOICES.some((v) => v.value === value)
   // Start on whichever tab already matches the stored value — a non-flite, non-empty value means
   // this node was already pointed at a vendor voice id.
-  const [mode, setMode] = useState<'flite' | 'service'>(value && !isFliteVoice ? 'service' : 'flite')
+  const [mode, setMode] = useState<'flite' | 'service'>(
+    !flitOnly && value && !isFliteVoice ? 'service' : 'flite',
+  )
+
+  const showServiceTab = status?.configured && !flitOnly
 
   const labelCls = 'block text-xs text-gray-400 mb-1'
   const inputCls = `w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-${accent}-500`
@@ -1685,7 +1694,7 @@ function TtsVoicePicker({
     <div>
       <label className={labelCls}>Voice</label>
 
-      {status?.configured && (
+      {showServiceTab && (
         <div className="flex gap-1 mb-1.5">
           {(['flite', 'service'] as const).map((m) => (
             <button
@@ -1701,13 +1710,13 @@ function TtsVoicePicker({
                   : 'bg-gray-800 border-gray-600 text-gray-400 hover:text-gray-200'
               }`}
             >
-              {m === 'flite' ? 'Flite (offline)' : status.providerName ?? status.providerKey}
+              {m === 'flite' ? 'Flite (offline)' : status?.providerName ?? status?.providerKey}
             </button>
           ))}
         </div>
       )}
 
-      {mode === 'flite' ? (
+      {(showServiceTab ? mode : 'flite') === 'flite' ? (
         <select className={inputCls} value={isFliteVoice ? value : 'kal'} onChange={(e) => onChange(e.target.value)}>
           {TTS_VOICES.map((v) => (
             <option key={v.value} value={v.value}>{v.label}</option>
@@ -1726,6 +1735,13 @@ function TtsVoicePicker({
             voice ID/name from that vendor's account.
           </p>
         </>
+      )}
+
+      {flitOnly && status?.configured && (
+        <p className="text-[10px] text-gray-500 mt-1 leading-snug">
+          Whisper announcements use flite only for now — your {status.providerName ?? status.providerKey} streaming
+          voice isn&rsquo;t wired to the agent leg yet.
+        </p>
       )}
     </div>
   )
@@ -1774,7 +1790,6 @@ function PlayNodeEditor({
         <AudioPicker
           value={(data.audioFileId as string) ?? ''}
           onChange={(id) => onChange({ audioFileId: id })}
-          allowTtsClip={false}
         />
       )}
 
@@ -2020,16 +2035,65 @@ function WhisperNodeEditor({
   data: TelNodeData
   onChange: (patch: Partial<TelNodeData>) => void
 }) {
+  const audioSource = (data.audioSource as string) ?? 'file'
+  const labelCls = 'block text-xs text-gray-400 mb-1'
+  const inputCls = 'w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-purple-500'
+
   return (
     <div className="flex flex-col gap-3">
-      <AudioPicker
-        value={(data.audioFileId as string) ?? ''}
-        onChange={(id) => onChange({ audioFileId: id })}
-        accent="purple"
-        label="Audio File (plays on agent's ear only)"
-        builtins="builtin-only"
-        allowTtsClip={false}
-      />
+      <div>
+        <label className={labelCls}>Announcement Source</label>
+        <div className="flex gap-1">
+          {(['file', 'tts'] as const).map((src) => (
+            <button
+              key={src}
+              onClick={() => onChange({ audioSource: src })}
+              className={`flex-1 text-xs rounded py-1.5 border transition-colors ${
+                audioSource === src
+                  ? 'bg-purple-700 border-purple-600 text-white'
+                  : 'bg-gray-800 border-gray-600 text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              {src === 'file' ? 'Audio File' : 'Text to Speech (TTS)'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {audioSource === 'file' && (
+        <AudioPicker
+          value={(data.audioFileId as string) ?? ''}
+          onChange={(id) => onChange({ audioFileId: id })}
+          accent="purple"
+          label="Audio File (plays on agent's ear only)"
+          builtins="builtin-only"
+        />
+      )}
+
+      {audioSource === 'tts' && (
+        <>
+          <div>
+            <label className={labelCls}>Announcement text</label>
+            <textarea
+              rows={2}
+              className={`${inputCls} resize-y`}
+              placeholder="Text to speak on the agent's ear…"
+              value={(data.ttsText as string) ?? ''}
+              onChange={(e) => onChange({ ttsText: e.target.value })}
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Spoken on the agent&rsquo;s ear only, before the bridge. Requires{' '}
+              <span className="font-mono text-purple-400">freeswitch-mod-flite</span> in the FreeSWITCH container.
+            </p>
+          </div>
+          <TtsVoicePicker
+            value={(data.ttsVoice as string) ?? 'kal'}
+            onChange={(v) => onChange({ ttsVoice: v })}
+            accent="purple"
+            flitOnly
+          />
+        </>
+      )}
 
       <div className="bg-gray-800 border border-gray-700 rounded p-2 text-xs text-gray-400 leading-relaxed">
         <strong className="text-gray-300 block mb-1">Exit handle:</strong>
