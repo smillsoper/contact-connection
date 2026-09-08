@@ -71,6 +71,25 @@
       </condition>
     </extension>
 
+    <!-- Foreground playback for streaming-vendor TTS (tf_play / tf_whisper) and for tf_transfer's
+         pre-handoff announcement. PlayNodeHandler / WhisperNodeHandler / TransferNodeHandler set
+         cc_tts_url (a shout:// MP3 stream, a tenant audio file, or a tts://flite string) then
+         `uuid_transfer <uuid> tts_play XML default` into here.
+         A *foreground* playback of a finite shout:// stream DOES see HTTP-body EOF and return —
+         unlike `uuid_broadcast`, whose displaced playback mod_shout keeps alive forever (it treats
+         the stream as an infinite Icecast source). We then emit contactconnection::tts_done and
+         re-park; the re-park is ignored by the CHANNEL_PARK handler (destination == "tts_play",
+         or _tts_in_progress / _announce_in_progress on the session, or cc_whisper on the agent leg). -->
+    <extension name="tts-play">
+      <condition field="destination_number" expression="^tts_play$">
+        <action application="answer"/>
+        <action application="playback" data="${cc_tts_url}"/>
+        <action application="event"
+                data="Event-Name=CUSTOM,Event-Subclass=contactconnection::tts_done"/>
+        <action application="park"/>
+      </condition>
+    </extension>
+
     <!-- Blind transfer target for the tf_transfer node's external_number destination.
          TransferNodeHandler sets cc_xfer_dest (a sofia/gateway/… or sofia/external/sip:… dial
          string) + cc_xfer_announce, then `uuid_transfer <uuid> xfer_bridge XML default`.

@@ -213,6 +213,10 @@ public static class ServiceCollectionExtensions
         // Call session store (singleton — Redis operations are inherently stateless)
         services.AddSingleton<ITelephonyCallSessionStore, RedisCallSessionStore>();
 
+        // In-process rendezvous: a node handler blocking on a foreground tts_play playback ↔ the
+        // ESL loop seeing contactconnection::tts_done. Singleton — one API instance owns the ESL link.
+        services.AddSingleton<ITelephonyPlaybackSignal, TelephonyPlaybackSignal>();
+
         // Telephony flow engine (scoped — used by EslBackgroundService per call via IServiceScope)
         services.AddScoped<ITelephonyFlowEngine, TelephonyFlowEngine>();
 

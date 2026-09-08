@@ -48,6 +48,8 @@ public class WhisperNodeHandlerTests
            .Returns(Task.CompletedTask);
         esl.Setup(e => e.BroadcastAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
            .Returns(Task.CompletedTask);
+        esl.Setup(e => e.TransferAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+           .Returns(Task.CompletedTask);
         return esl;
     }
 
@@ -107,7 +109,7 @@ public class WhisperNodeHandlerTests
     }
 
     [Fact]
-    public async Task Tts_StreamingVendorConfigured_BroadcastsShoutUrlOnAgentLeg()
+    public async Task Tts_StreamingVendorConfigured_TransfersAgentLegIntoTtsPlay()
     {
         var esl = NewEsl();
         var tts = new Mock<ITtsStreamingService>();
@@ -123,8 +125,12 @@ public class WhisperNodeHandlerTests
         var result = await NewHandler(tts).ExecuteAsync(node, Ctx(esl.Object));
 
         Assert.Equal("whisper_playing", result.TransitionTaken);
-        esl.Verify(e => e.BroadcastAsync(
-            AgentUuid, "shout://host.docker.internal:5135/relay/tts-mp3/abc123", It.IsAny<CancellationToken>()), Times.Once);
+        // Streaming shout:// can't be uuid_broadcast (mod_shout never ends it) — foreground
+        // playback in tts_play on the AGENT leg instead. tts_done drives the whisper→bridge resume.
+        esl.Verify(e => e.SetChannelVarAsync(
+            AgentUuid, "cc_tts_url", "shout://host.docker.internal:5135/relay/tts-mp3/abc123", It.IsAny<CancellationToken>()), Times.Once);
+        esl.Verify(e => e.TransferAsync(AgentUuid, "tts_play", "XML", "default", It.IsAny<CancellationToken>()), Times.Once);
+        esl.Verify(e => e.BroadcastAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         // No flite fallback when a vendor is configured.
         esl.Verify(e => e.SetChannelVarAsync(
             It.IsAny<string>(), "cc_tts_text", It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);

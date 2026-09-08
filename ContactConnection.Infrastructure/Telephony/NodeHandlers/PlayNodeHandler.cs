@@ -17,14 +17,14 @@ namespace ContactConnection.Infrastructure.Telephony.NodeHandlers;
 ///   tts  — one of two paths, chosen per-tenant:
 ///          - No TtsStreaming preference (default): FreeSWITCH tts:// file string via flite,
 ///            fired with uuid_broadcast. Requires freeswitch-mod-flite in the container.
-///          - TtsStreaming preference configured: routed through mod_audio_stream + the Api's
-///            /relay/tts-stream WebSocket relay to an external vendor (Azure, ElevenLabs, ...)
-///            via ITtsStreamProvider, fired with uuid_audio_stream. See ITtsStreamingService.
+///          - TtsStreaming preference configured: one continuous shout:// MP3 from the Api's
+///            /relay/tts-mp3 endpoint (external vendor via ITtsStreamProvider), played *foreground*
+///            in the tts_play dialplan extension via uuid_transfer. See StartStreamingTtsAsync.
 ///
 /// The node fires the media and returns immediately (fire-and-forget). Continuation is handled
-/// by EslBackgroundService: PLAYBACK_STOP for the uuid_broadcast paths (file, flite tts), or
-/// mod_audio_stream::disconnect for the streaming tts path — both ultimately call
-/// TelephonyFlowEngine.ResumeFromNodeAsync via the same "_play_next_{transition}" session vars.
+/// by EslBackgroundService: PLAYBACK_STOP for the uuid_broadcast paths (file, flite tts), or the
+/// contactconnection::tts_done CUSTOM event for the streaming tts path — both ultimately call
+/// TelephonyFlowEngine.ResumeFromNodeAsync on the node's "tts_finished" / "end_of_stream" transition.
 /// </summary>
 public class PlayNodeHandler : ITelephonyNodeHandler
 {
@@ -175,12 +175,14 @@ public class PlayNodeHandler : ITelephonyNodeHandler
     }
 
     /// <summary>
-    /// Arms the live mod_audio_stream session via the shared ITtsStreamingService, then lays down
-    /// this node's own continuation bookkeeping — same session-var convention as the
-    /// uuid_broadcast path so EslBackgroundService's existing FireEndTransitionAsync
-    /// ("tts_finished" transition) works unchanged, only the triggering FreeSWITCH event differs
-    /// (mod_audio_stream::disconnect, not PLAYBACK_STOP). No "_play_media_arg" — nothing to
-    /// loop/re-broadcast on this path.
+    /// Streaming-vendor TTS: one continuous shout:// MP3. It can't be <c>uuid_broadcast</c>ed like a
+    /// file — mod_shout treats the HTTP stream as an infinite Icecast source and never fires
+    /// PLAYBACK_STOP on body EOF, so the flow would hang here forever. Instead <c>uuid_transfer</c>
+    /// the caller into the <c>tts_play</c> dialplan extension, whose *foreground* playback does see
+    /// EOF; it then emits <c>contactconnection::tts_done</c> and re-parks. EslBackgroundService's
+    /// HandleTtsDoneAsync resolves <c>_tts_next_finished</c> and resumes the flow — the same
+    /// "tts_finished" transition the flite path takes, just off a CUSTOM event instead of
+    /// PLAYBACK_STOP. No "_play_*" bookkeeping (nothing to loop/re-broadcast).
     /// </summary>
     private async Task<TelephonyNodeResult> StartStreamingTtsAsync(
         TelephonyFlowContext ctx,
@@ -196,21 +198,23 @@ public class PlayNodeHandler : ITelephonyNodeHandler
                 "PlayNodeHandler [{Uuid}]: autoRestart is not supported for streaming TTS — ignoring",
                 ctx.ChannelUuid);
 
-        // One continuous MP3 stream, broadcast exactly like a file: the single PLAYBACK_STOP it
-        // fires is picked up by EslBackgroundService.HandlePlaybackStopAsync's non-loop path,
-        // which calls FireEndTransitionAsync(... "tts") → resumes at _play_next_tts_finished.
         var streamUrl = await _tts.PrepareStreamUrlAsync(ctx.TenantSubdomain, provider, ttsText, ttsVoice, ct);
 
-        ctx.Vars["_play_media_arg"]    = streamUrl;
-        ctx.Vars["_play_loop"]         = "false";
-        ctx.Vars["_play_audio_source"] = "tts";
-        ctx.Vars["_play_state"]        = "main";
-        ctx.Vars["_play_started_at"]   = DateTimeOffset.UtcNow.ToString("O");
-        StoreTransitions(transitions, ctx.Vars);
+        // Resume on the TTS-Finished handle, falling back to the generic playback-done / default
+        // handle — a node switched from file to TTS in the designer often still has its edge on
+        // end_of_stream / default rather than the tts_finished handle. Mirrors FireEndTransitionAsync.
+        ctx.Vars["_tts_in_progress"]  = "true";
+        ctx.Vars["_tts_next_finished"] =
+            transitions?["tts_finished"]?.GetValue<string>()
+            ?? transitions?["end_of_stream"]?.GetValue<string>()
+            ?? transitions?["default"]?.GetValue<string>()
+            ?? string.Empty;
 
-        _logger.LogInformation("PlayNodeHandler [{Uuid}]: streaming TTS via {Url}", ctx.ChannelUuid, streamUrl);
-        await ctx.Esl!.BroadcastAsync(ctx.ChannelUuid, streamUrl, ct);
+        _logger.LogInformation("PlayNodeHandler [{Uuid}]: streaming TTS via {Url} → tts_play", ctx.ChannelUuid, streamUrl);
+        await ctx.Esl!.SetChannelVarAsync(ctx.ChannelUuid, "cc_tts_url", streamUrl, ct);
+        await ctx.Esl!.TransferAsync(ctx.ChannelUuid, "tts_play", "XML", "default", ct);
 
+        // Terminal — EslBackgroundService resumes from the contactconnection::tts_done event.
         return new TelephonyNodeResult(null, "playing");
     }
 

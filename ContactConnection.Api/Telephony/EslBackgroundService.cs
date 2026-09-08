@@ -35,6 +35,7 @@ public sealed class EslBackgroundService : BackgroundService
     private readonly IAgentStateStore _stateStore;
     private readonly IAgentRegistrationStore _registrationStore;
     private readonly IDashboardNotifier _dashboardNotifier;
+    private readonly ITelephonyPlaybackSignal _playbackSignal;
 
     public EslBackgroundService(
         IHubContext<FlowHub, IFlowHubClient> hub,
@@ -45,7 +46,8 @@ public sealed class EslBackgroundService : BackgroundService
         ITelephonyCallSessionStore sessionStore,
         IAgentStateStore stateStore,
         IAgentRegistrationStore registrationStore,
-        IDashboardNotifier dashboardNotifier)
+        IDashboardNotifier dashboardNotifier,
+        ITelephonyPlaybackSignal playbackSignal)
     {
         _hub                    = hub;
         _scopeFactory           = scopeFactory;
@@ -56,6 +58,7 @@ public sealed class EslBackgroundService : BackgroundService
         _stateStore             = stateStore;
         _registrationStore      = registrationStore;
         _dashboardNotifier      = dashboardNotifier;
+        _playbackSignal         = playbackSignal;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -83,13 +86,14 @@ public sealed class EslBackgroundService : BackgroundService
 
         await using var esl = new EslClient(_eslClientLogger);
         await esl.ConnectAsync(host, port, pass, ct);
-        // Streaming TTS now plays as one continuous MP3 via mod_shout (a plain uuid_broadcast of a
-        // shout:// URL), so there's no mod_audio_stream per-chunk event lifecycle to subscribe to
-        // — its single PLAYBACK_STOP is handled like any other file broadcast.
+        // Streaming TTS plays as one continuous shout:// MP3 foreground in the tts_play dialplan
+        // extension (mod_shout never fires PLAYBACK_STOP on a finite stream, so a uuid_broadcast
+        // would hang) — the extension emits contactconnection::tts_done when the playback returns.
         await esl.SubscribeAsync(
             "CHANNEL_PARK CHANNEL_ANSWER CHANNEL_HANGUP CHANNEL_HANGUP_COMPLETE CHANNEL_BRIDGE CHANNEL_UNBRIDGE " +
             "CHANNEL_HOLD CHANNEL_UNHOLD PLAYBACK_STOP " +
             "CUSTOM contactconnection::ivr_done contactconnection::vm_done contactconnection::xfer_failed " +
+            "contactconnection::tts_done " +
             "sofia::register sofia::unregister sofia::expire", ct);
 
         _logger.LogInformation("ESL connected to FreeSWITCH at {Host}:{Port}", host, port);
@@ -185,6 +189,20 @@ public sealed class EslBackgroundService : BackgroundService
             || ivrSession?.Vars.GetValueOrDefault("_vm_in_progress") == "true")
         {
             _logger.LogInformation("CHANNEL_PARK {Uuid}: returned from voicemail recording — not a new call", channelUuid);
+            return;
+        }
+
+        // Same idea for streaming-vendor TTS: tf_play / tf_whisper / tf_transfer's announcement
+        // uuid_transfer the channel into the tts_play extension for a foreground playback, which
+        // re-parks when it finishes. contactconnection::tts_done drives the resume. (The whisper
+        // agent leg also carries cc_whisper=true and is already skipped above.)
+        if (destination == "tts_play"
+            || rawDestination == "tts_play"
+            || transferSource.Contains("tts_play")
+            || ivrSession?.Vars.GetValueOrDefault("_tts_in_progress") == "true"
+            || ivrSession?.Vars.GetValueOrDefault("_announce_in_progress") == "true")
+        {
+            _logger.LogInformation("CHANNEL_PARK {Uuid}: returned from TTS playback — not a new call", channelUuid);
             return;
         }
 
@@ -546,6 +564,63 @@ public sealed class EslBackgroundService : BackgroundService
         await scope.ServiceProvider
             .GetRequiredService<ITelephonyFlowEngine>()
             .ResumeFromNodeAsync(session.ChannelUuid, target, esl, ct);
+    }
+
+    /// <summary>
+    /// The tts_play dialplan extension finished a foreground streaming-vendor TTS playback (or a
+    /// tf_transfer announcement) and emitted this event. Three cases, by how the channel got there:
+    ///   whisper agent leg (whisper:{uuid} reverse key)  → resume the agent_selected branch → bridge
+    ///   tf_transfer announcement (_announce_in_progress) → just release the awaiting handler
+    ///   tf_play (_tts_in_progress)                       → resume the caller flow on tts_finished
+    /// </summary>
+    private async Task HandleTtsDoneAsync(
+        Dictionary<string, string> vars, EslClient esl, CancellationToken ct)
+    {
+        var uuid = vars.GetValueOrDefault("Unique-ID");
+        if (string.IsNullOrEmpty(uuid)) return;
+
+        // 1. Streaming whisper: the event fires on the AGENT leg; whisper:{agentUuid} → callerUuid.
+        var whisperCallerUuid = await _sessionStore.GetKeyAsync($"whisper:{uuid}", ct);
+        if (whisperCallerUuid is not null)
+        {
+            _logger.LogInformation("tts_done {Uuid}: streaming whisper finished → resume + bridge", uuid);
+            await ResumeAfterWhisperAsync(uuid, whisperCallerUuid, esl, ct);
+            return;
+        }
+
+        var session = await ResolveSessionAsync(uuid, vars, ct);
+        if (session is null)
+        {
+            _logger.LogDebug("tts_done {Uuid}: no session — ignoring", uuid);
+            return;
+        }
+
+        // 2. tf_transfer pre-handoff announcement: the node handler is blocked in PlayAnnouncementAsync.
+        if (session.Vars.GetValueOrDefault("_announce_in_progress") == "true")
+        {
+            _logger.LogInformation("tts_done {Uuid}: transfer announcement finished → release handler", uuid);
+            session.Vars.Remove("_announce_in_progress");
+            await _sessionStore.SaveAsync(session, ct);
+            _playbackSignal.Signal(uuid);
+            return;
+        }
+
+        // 3. tf_play streaming TTS: resume on the node's tts_finished transition.
+        if (session.Vars.GetValueOrDefault("_tts_in_progress") == "true")
+        {
+            var next = session.Vars.GetValueOrDefault("_tts_next_finished");
+            session.Vars.Remove("_tts_in_progress");
+            session.Vars.Remove("_tts_next_finished");
+            await _sessionStore.SaveAsync(session, ct);
+
+            _logger.LogInformation(
+                "tts_done {Uuid}: tf_play streaming TTS finished → {Next}",
+                uuid, string.IsNullOrEmpty(next) ? "(no tts_finished transition — dead-end)" : next);
+            await ResumeAsync(session.ChannelUuid, next, esl, ct);
+            return;
+        }
+
+        _logger.LogDebug("tts_done {Uuid}: no matching in-progress marker — ignoring", uuid);
     }
 
     /// <summary>
@@ -1379,16 +1454,26 @@ public sealed class EslBackgroundService : BackgroundService
         var uuid = vars.GetValueOrDefault("Unique-ID");
         if (string.IsNullOrEmpty(uuid)) return;
 
-        // Check if this PLAYBACK_STOP is from the agent's whisper channel (reverse mapping)
+        // Check if this PLAYBACK_STOP is from the agent's whisper channel (reverse mapping).
         var whisperCallerUuid = await _sessionStore.GetKeyAsync($"whisper:{uuid}", ct);
         if (whisperCallerUuid is not null)
         {
-            await HandleWhisperPlaybackStopAsync(uuid, whisperCallerUuid, esl, ct);
+            await ResumeAfterWhisperAsync(uuid, whisperCallerUuid, esl, ct);
             return;
         }
 
         var session = await _sessionStore.GetAsync(uuid, ct);
-        if (session is null || !session.Vars.ContainsKey("_play_media_arg")) return;
+        if (session is null) return;
+
+        // A foreground tts_play playback (tf_play streaming TTS, or a tf_transfer announcement) also
+        // fires PLAYBACK_STOP on completion — but its continuation is driven by the
+        // contactconnection::tts_done event that follows, not here. Ignore it so a stale _play_*
+        // var from an earlier tf_play can't be mistaken for this playback ending.
+        if (session.Vars.GetValueOrDefault("_tts_in_progress") == "true"
+            || session.Vars.GetValueOrDefault("_announce_in_progress") == "true")
+            return;
+
+        if (!session.Vars.ContainsKey("_play_media_arg")) return;
 
         var isLoop     = session.Vars.GetValueOrDefault("_play_loop") == "true";
         var mediaArg   = session.Vars["_play_media_arg"];
@@ -1487,8 +1572,15 @@ public sealed class EslBackgroundService : BackgroundService
         EslClient esl,
         CancellationToken ct)
     {
-        var transitionKey = audioSource == "tts" ? "tts_finished" : "end_of_stream";
-        var nextNode = session.Vars.GetValueOrDefault($"_play_next_{transitionKey}");
+        // TTS-Finished handle first for a tts node, then the generic playback-done / default handle
+        // — a node switched from file to TTS in the designer often still has its edge on
+        // end_of_stream / default. tf_play streaming TTS (HandleTtsDoneAsync) resolves the same way.
+        string? nextNode = audioSource == "tts"
+            ? session.Vars.GetValueOrDefault("_play_next_tts_finished")
+            : null;
+        nextNode ??= session.Vars.GetValueOrDefault("_play_next_end_of_stream");
+        nextNode ??= session.Vars.GetValueOrDefault("_play_next_default");
+        var transitionKey = audioSource == "tts" ? "tts_finished/end_of_stream/default" : "end_of_stream/default";
         ClearPlayVars(session);
         await _sessionStore.SaveAsync(session, ct);
 
@@ -1516,6 +1608,9 @@ public sealed class EslBackgroundService : BackgroundService
                 break;
             case "contactconnection::vm_done":
                 await HandleVmDoneAsync(vars, esl, ct);
+                break;
+            case "contactconnection::tts_done":
+                await HandleTtsDoneAsync(vars, esl, ct);
                 break;
             case "contactconnection::xfer_failed":
                 await HandleXferFailedAsync(vars, esl, ct);
@@ -1691,11 +1786,13 @@ public sealed class EslBackgroundService : BackgroundService
     }
 
     /// <summary>
-    /// PLAYBACK_STOP fired on the agent's parked channel (whisper announcement finished).
-    /// Resumes the agent_selected event branch from the node after tf_whisper, which will
-    /// eventually hit tf_end and call BridgeChannelsAsync to connect caller and agent.
+    /// The whisper announcement on the agent's parked channel finished — via PLAYBACK_STOP
+    /// (file / flite <c>uuid_broadcast</c>) or contactconnection::tts_done (streaming, played
+    /// foreground in tts_play). Resumes the agent_selected event branch from the node after
+    /// tf_whisper, which eventually hits tf_end and calls BridgeChannelsAsync to connect caller
+    /// and agent.
     /// </summary>
-    private async Task HandleWhisperPlaybackStopAsync(
+    private async Task ResumeAfterWhisperAsync(
         string agentUuid, string callerUuid, EslClient esl, CancellationToken ct)
     {
         _logger.LogInformation("WhisperPlaybackStop: agent={AgentUuid} caller={CallerUuid}", agentUuid, callerUuid);

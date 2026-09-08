@@ -9,15 +9,17 @@ namespace ContactConnection.Infrastructure.Telephony.NodeHandlers;
 /// <summary>
 /// Plays a pre-bridge announcement on the agent's leg only — an audio file, or (audioSource
 /// = "tts") free text spoken by flite or, when the tenant has a TTS-streaming vendor configured,
-/// that vendor's voice via one continuous MP3 stream (same shout:// broadcast tf_play uses).
+/// that vendor's voice via a foreground shout:// MP3 in the tts_play dialplan extension.
 ///
 /// Requires that AnswerQueuedCall stored "_agent_uuid" in the caller session before
 /// firing the agent_selected event branch. The caller and agent are NOT bridged until
 /// this branch reaches tf_end (which calls BridgeChannelsAsync).
 ///
-/// PLAYBACK_STOP on the agent's channel UUID → EslBackgroundService looks up
-/// whisper:{agentUuid} → callerUuid → resumes from "_whisper_next_default" node. A streamed
-/// whisper fires exactly one such PLAYBACK_STOP, so that resume path is unchanged.
+/// Resume (both are keyed on the agent channel UUID → whisper:{agentUuid} → callerUuid →
+/// "_whisper_next_default"):
+///   file / flite  — uuid_broadcast on the agent leg → PLAYBACK_STOP → HandleWhisperPlaybackStopAsync
+///   streaming     — uuid_transfer the agent leg into tts_play → contactconnection::tts_done →
+///                   HandleTtsDoneAsync (whisper branch) → ResumeWhisperAsync
 /// </summary>
 public class WhisperNodeHandler : ITelephonyNodeHandler
 {
@@ -79,11 +81,22 @@ public class WhisperNodeHandler : ITelephonyNodeHandler
             var provider = await _tts.ResolveProviderAsync(ctx.TenantSchemaName, ct);
             if (provider is not null)
             {
-                // Streaming vendor voice — one continuous MP3 broadcast on the AGENT channel.
-                mediaArg = await _tts.PrepareStreamUrlAsync(ctx.TenantSubdomain, provider, ttsText, ttsVoice, ct);
+                // Streaming vendor voice — one continuous shout:// MP3. Same reason as tf_play: it
+                // can't be uuid_broadcast (mod_shout never fires PLAYBACK_STOP on a finite stream),
+                // so uuid_transfer the AGENT leg into the tts_play extension for a foreground
+                // playback. tts_done → EslBackgroundService.HandleTtsDoneAsync sees whisper:{agentUuid}
+                // and runs the same whisper→bridge resume the flite PLAYBACK_STOP path takes.
+                var streamUrl = await _tts.PrepareStreamUrlAsync(ctx.TenantSubdomain, provider, ttsText, ttsVoice, ct);
                 _logger.LogInformation(
-                    "WhisperNodeHandler [{Uuid}]: streaming TTS via {Url} on agent channel {AgentUuid}",
-                    ctx.ChannelUuid, mediaArg, agentUuid);
+                    "WhisperNodeHandler [{Uuid}]: streaming TTS via {Url} → tts_play on agent channel {AgentUuid}",
+                    ctx.ChannelUuid, streamUrl, agentUuid);
+
+                // Brief settle window for WebRTC ICE/DTLS after the SIP 200 OK (originate returns
+                // +OK before media flows). 600ms is ample for a local-network handshake.
+                await Task.Delay(600, ct);
+                await ctx.Esl.SetChannelVarAsync(agentUuid, "cc_tts_url", streamUrl, ct);
+                await ctx.Esl.TransferAsync(agentUuid, "tts_play", "XML", "default", ct);
+                return new TelephonyNodeResult(null, "whisper_playing");
             }
             else
             {

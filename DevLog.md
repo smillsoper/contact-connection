@@ -136,6 +136,7 @@
 | 124 | 2026-09-08 | 9:02 AM PDT | 9:33 AM PDT | 31 min | ~13395 min |
 | 125 | 2026-09-08 | 9:54 AM PDT | 10:32 AM PDT | 38 min | ~13433 min |
 | 126 | 2026-09-08 | 10:50 AM PDT | 11:51 AM PDT | 61 min | ~13494 min |
+| 127 | 2026-09-08 | 11:52 AM PDT | 1:02 PM PDT | 70 min | ~13564 min |
 
 ---
 
@@ -6229,3 +6230,94 @@ extension DOES see EOF, tested):
 9. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit;
    `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test
    coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 127
+
+**Date:** 2026-09-08
+**Start:** 11:52 AM PDT
+**End:** 1:02 PM PDT
+**Duration:** 70 minutes
+**Total Duration:** ~13564 minutes
+
+### Focus
+
+Complete the S126 streaming-vendor-TTS regression: route streaming TTS through a **foreground
+`playback` in a dialplan extension** (`tts_play`) + a `contactconnection::tts_done` CUSTOM event,
+the established `ivr_collect` / `vm_record` pattern. See memory [[project_streaming_tts_playback]].
+
+### What was built
+
+- **`freeswitch/conf/dialplan/default.xml`** — new `tts-play` extension: `answer` → foreground
+  `playback ${cc_tts_url}` → `event contactconnection::tts_done` → `park`. A *foreground* playback
+  of a finite `shout://` stream sees HTTP-body EOF and returns (unlike `uuid_broadcast`).
+- **`PlayNodeHandler.StartStreamingTtsAsync`** — sets `cc_tts_url` + `_tts_in_progress` /
+  `_tts_next_finished`, `uuid_transfer`s the caller into `tts_play` instead of `uuid_broadcast`.
+  Dropped the `_play_*` bookkeeping on this path. Completion transition resolves
+  `tts_finished` → `end_of_stream` → `default` (a designer node switched from file→TTS keeps its
+  edge on the generic handle).
+- **`WhisperNodeHandler`** — streaming path `uuid_transfer`s the **agent leg** into `tts_play`;
+  flite/file paths unchanged.
+- **`EslBackgroundService`** — subscribes `contactconnection::tts_done`; new `HandleTtsDoneAsync`
+  (whisper-leg / tf_transfer-announcement / tf_play branches); `CHANNEL_PARK` + `PLAYBACK_STOP`
+  guards for `tts_play` / `_tts_in_progress` / `_announce_in_progress`; renamed
+  `HandleWhisperPlaybackStopAsync` → `ResumeAfterWhisperAsync` (shared by PLAYBACK_STOP + tts_done).
+  `FireEndTransitionAsync` gets the same `tts_finished → end_of_stream → default` fallback.
+- **`ITelephonyPlaybackSignal` / `TelephonyPlaybackSignal`** — new singleton, per-channel
+  `TaskCompletionSource` rendezvous with a short latch. Used by `TransferNodeHandler` to await the
+  announcement. **This approach did not hold up in live testing — to be removed next session.**
+- **`TransferNodeHandler.PlayAnnouncementAsync`** — resolves file/streaming/flite to one media
+  arg, plays it foreground in `tts_play`, awaits `ITelephonyPlaybackSignal` (30s cap) before
+  enqueue / flow-switch.
+- Tests: `TransferNodeHandlerTests` + `WhisperNodeHandlerTests` updated to the tts_play flow;
+  new `TelephonyPlaybackSignalTests` (+4). **611 tests pass**, `dotnet build` + `tsc --noEmit`
+  clean (only the pre-existing `Microsoft.OpenApi` NU1903 advisory).
+
+### Live-verified (real inbound calls, `test-tenant` → ElevenLabs)
+
+- **tf_play streaming TTS** ✅ — transitions to the next node after the stream ends (via
+  `tts_done` → `_tts_next_finished`, using the `end_of_stream`/`default` fallback — the test flow
+  node had no `tts_finished` edge).
+- **tf_whisper streaming TTS** ✅ — whisper plays on the agent leg and the call bridges (resume
+  driven by the agent-leg `PLAYBACK_STOP` + `whisper:{agentUuid}` key; `tts_done` is a harmless
+  second signal).
+
+### NOT working — tf_transfer announcement (fix next session)
+
+The "block the node handler ~30s awaiting `tts_done`" design is architecturally unsound and failed
+in the log:
+- `_playbackSignal.Signal()` is never called → `HandleTtsDoneAsync`'s announce branch doesn't
+  match. `_announce_in_progress` lives only in Redis and races the flow engine's session
+  lifecycle (the engine holds a stale in-memory session for the whole 30s wait and overwrites on
+  return), so the marker isn't reliably present when `tts_done` fires.
+- The 30s-timeout fallback then hands the caller off while it's still parked in `tts_play`; the
+  extension's trailing `park` even gets **misprocessed as a fresh DID call**
+  (`CHANNEL_PARK DID … notifying 1 immediately-available agent`). Caller leg torn down; whisper
+  resume bridges the agent to a dead leg → agent UI stuck with a running timer.
+
+### Next session — pick up here
+
+1. **tf_transfer → deferred continuation** (drop `ITelephonyPlaybackSignal`): `PlayAnnouncementAsync`
+   stashes the pending handoff (target campaign / eligible agent, screen-pop override) in
+   `ctx.Vars`, sets `_announce_in_progress` **in `ctx.Vars`** (engine persists it), transfers to
+   `tts_play`, returns terminal immediately — no blocking, no timeout. `HandleTtsDoneAsync`'s
+   announce branch performs the enqueue / `SwitchFlowAsync` on `tts_done`, then clears the markers.
+   Same pattern as `ivr_done` / `vm_done`.
+2. **Caller-liveness guard** — a dead caller leg must abort delivery and reset agent state
+   (agent auto-answered + bridged to nothing, timer running).
+3. **`tts_play` re-park misprocessed as a new DID call** — `HandleChannelParkAsync` guard needs to
+   catch this case even after the announce markers are cleared.
+4. **`ElevenLabsTtsStreamProvider` close exception** — S126's "dirty close = normal end-of-stream"
+   fix has a gap: `WebSocketException` still thrown from `CloseAsyncPrivate` after `isFinal`
+   (`ElevenLabsTtsStreamProvider.cs:138`). Non-fatal (audio still plays) but logs a scary
+   `synthesis/encode failed` stack on some synths.
+5. Then re-run the full 3-node live verification.
+
+### Carry-overs (unchanged from S126)
+
+Queue callback v1 rough edges; S118 registration auto-Unavailable edge cases; recording tail
+(beep wiring, retention purge, `tf_secure_collect`); Telnyx Verified Numbers; RMD filing;
+`contactconnection.io` SPF/DKIM/DMARC; `cc_timesync` crash-loop; `CommitmentEvents` JSONB
+`ValueComparer`; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader
+`FlowEngine` test coverage; retire the `.cc` softphone route.

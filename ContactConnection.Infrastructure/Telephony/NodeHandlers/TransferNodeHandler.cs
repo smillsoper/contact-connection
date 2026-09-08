@@ -37,6 +37,7 @@ public class TransferNodeHandler : ITelephonyNodeHandler
     private readonly ITelephonyCallSessionStore _sessionStore;
     private readonly ITtsStreamingService _tts;
     private readonly ITtsFileSynthesizer _fileSynth;
+    private readonly ITelephonyPlaybackSignal _playbackSignal;
     private readonly IServiceProvider _services;
     private readonly IConfiguration _config;
     private readonly ILogger<TransferNodeHandler> _logger;
@@ -48,6 +49,7 @@ public class TransferNodeHandler : ITelephonyNodeHandler
         ITelephonyCallSessionStore sessionStore,
         ITtsStreamingService tts,
         ITtsFileSynthesizer fileSynth,
+        ITelephonyPlaybackSignal playbackSignal,
         IServiceProvider services,
         IConfiguration config,
         ILogger<TransferNodeHandler> logger)
@@ -58,6 +60,7 @@ public class TransferNodeHandler : ITelephonyNodeHandler
         _sessionStore      = sessionStore;
         _tts               = tts;
         _fileSynth         = fileSynth;
+        _playbackSignal    = playbackSignal;
         _services          = services;
         _config            = config;
         _logger            = logger;
@@ -264,41 +267,78 @@ public class TransferNodeHandler : ITelephonyNodeHandler
     // ── announcement ─────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Used by every destination except external_number — the channel is still live under our
-    /// own ESL commands here, so a configured vendor gets played via the live mod_audio_stream
-    /// path (same as tf_play), not a pre-synthesized file. Fire-and-forget, same as the plain
-    /// uuid_broadcast this replaces: nothing downstream waits on the announcement finishing.
+    /// Used by every destination except external_number — the channel is still live under our own
+    /// ESL commands here. Plays the configured announcement (audio file → streaming vendor →
+    /// flite, first match wins) <em>foreground</em> in the <c>tts_play</c> dialplan extension and
+    /// blocks until it finishes, so the caller isn't enqueued / the flow isn't switched while the
+    /// announcement is still audible. A streaming (shout://) announcement can't be fire-and-forget
+    /// anyway — mod_shout never fires PLAYBACK_STOP on a finite stream. No announcement configured
+    /// → returns immediately (fire-immediately handoff).
+    ///
+    /// tts_play emits <c>contactconnection::tts_done</c>; EslBackgroundService.HandleTtsDoneAsync
+    /// sees <c>_announce_in_progress</c> on the session and releases the <see cref="_playbackSignal"/>
+    /// this method is awaiting.
     /// </summary>
     private async Task PlayAnnouncementAsync(JsonObject node, TelephonyFlowContext ctx, CancellationToken ct)
     {
         if (ctx.Esl is null) return;
 
-        var fileArg = await TelephonyAudioResolver.ResolveFileArgAsync(
-            _factory, _config, node["announceAudioFileId"]?.GetValue<string>(), ctx.TenantSchemaName, ct);
-        if (fileArg is not null)
+        var announceArg = await ResolveLiveAnnouncementArgAsync(node, ctx, ct);
+        if (announceArg is null) return;   // nothing configured → immediate handoff
+
+        var uuid = ctx.ChannelUuid;
+        var waitTask = _playbackSignal.WaitAsync(uuid, TimeSpan.FromSeconds(30), ct);
+
+        // The engine only writes ctx.Vars back after this handler returns, so drop the marker
+        // straight into the session store for HandleTtsDoneAsync / HandleChannelParkAsync to see
+        // during the await. The engine's post-return SaveAsync (of a session copy that never had
+        // this key) clears it again; RemoveSessionVar makes that removal explicit for safety.
+        var session = await _sessionStore.GetAsync(uuid, ct);
+        if (session is not null)
         {
-            await ctx.Esl.BroadcastAsync(ctx.ChannelUuid, fileArg, ct);
-            return;
+            session.Vars["_announce_in_progress"] = "true";
+            await _sessionStore.SaveAsync(session, ct);
         }
 
+        try
+        {
+            _logger.LogInformation("TransferNodeHandler [{Uuid}]: announcement → tts_play ({Arg})", uuid, announceArg);
+            await ctx.Esl.SetChannelVarAsync(uuid, "cc_tts_url", announceArg, ct);
+            await ctx.Esl.TransferAsync(uuid, "tts_play", "XML", "default", ct);
+
+            if (!await waitTask)
+                _logger.LogWarning(
+                    "TransferNodeHandler [{Uuid}]: announcement did not signal done within 30s — proceeding with handoff", uuid);
+        }
+        finally
+        {
+            ctx.RemoveSessionVar("_announce_in_progress");
+        }
+    }
+
+    /// <summary>
+    /// Resolves the live-channel announcement to a single <c>playback</c>-ready media arg: a tenant
+    /// audio file, else a streaming-vendor shout:// URL, else a flite tts string (with the text
+    /// routed through <c>cc_xfer_announce_text</c> to keep the arg space-free). Null when the node
+    /// has no announcement configured.
+    /// </summary>
+    private async Task<string?> ResolveLiveAnnouncementArgAsync(
+        JsonObject node, TelephonyFlowContext ctx, CancellationToken ct)
+    {
+        var fileArg = await TelephonyAudioResolver.ResolveFileArgAsync(
+            _factory, _config, node["announceAudioFileId"]?.GetValue<string>(), ctx.TenantSchemaName, ct);
+        if (fileArg is not null) return fileArg;
+
         var tts = node["announceTtsText"]?.GetValue<string>();
-        if (string.IsNullOrWhiteSpace(tts)) return;
+        if (string.IsNullOrWhiteSpace(tts)) return null;
         var voice = node["announceTtsVoice"]?.GetValue<string>() ?? "kal";
 
         var provider = await _tts.ResolveProviderAsync(ctx.TenantSchemaName, ct);
         if (provider is not null)
-        {
-            // Fire-and-forget, same as the file path above: one continuous MP3 broadcast. This
-            // announcement doesn't own the flow's continuation (the caller already committed to
-            // its own transition synchronously), so no _play_* bookkeeping is needed — the
-            // eventual PLAYBACK_STOP has nothing to resume and is a harmless no-op.
-            var streamUrl = await _tts.PrepareStreamUrlAsync(ctx.TenantSubdomain, provider, tts, voice, ct);
-            await ctx.Esl.BroadcastAsync(ctx.ChannelUuid, streamUrl, ct);
-            return;
-        }
+            return await _tts.PrepareStreamUrlAsync(ctx.TenantSubdomain, provider, tts, voice, ct);
 
-        await ctx.Esl.SetChannelVarAsync(ctx.ChannelUuid, "cc_xfer_announce_text", tts.Replace("\n", " ").Trim(), ct);
-        await ctx.Esl.BroadcastAsync(ctx.ChannelUuid, $"tts://flite|{voice}|${{cc_xfer_announce_text}}", ct);
+        await ctx.Esl!.SetChannelVarAsync(ctx.ChannelUuid, "cc_xfer_announce_text", tts.Replace("\n", " ").Trim(), ct);
+        return $"tts://flite|{voice}|${{cc_xfer_announce_text}}";
     }
 
     /// <summary>
