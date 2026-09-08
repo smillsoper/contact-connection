@@ -95,4 +95,9 @@ public interface IFlowHubClient
     Task ReceiveVoicemail(
         string voicemailId, string campaignId, string callRecordId,
         string callerId, int durationSeconds, string createdAtIso);
+
+    /// <summary>Broadcast to supervisor dashboards — a scheduled callback changed state
+    /// (attempted / expired / abandoned / connected / cancelled / rescheduled). campaignId may be
+    /// empty ("00000000-…") when the change isn't campaign-scoped.</summary>
+    Task ReceiveScheduledCallbackChanged(string campaignId, string change);
 }

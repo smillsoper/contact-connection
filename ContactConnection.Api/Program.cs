@@ -86,6 +86,11 @@ builder.Services.AddHostedService<ContactConnection.Api.CallTrace.CallTraceExpir
 // don't linger as phantom active calls on the supervisor dashboard. Runs once, ~20s after boot.
 builder.Services.AddHostedService<OrphanedCallReconciliationService>();
 
+// Worker → API supervisor-dashboard relay — subscribes to the Redis channel the Worker publishes
+// dashboard changes on (it has no SignalR hub) and re-emits them through this instance's real
+// IDashboardNotifier.
+builder.Services.AddHostedService<ContactConnection.Api.Realtime.DashboardRelaySubscriber>();
+
 // JWT Bearer authentication
 var signingKey = builder.Configuration["Jwt:SigningKey"]
     ?? throw new InvalidOperationException("Jwt:SigningKey is not configured.");

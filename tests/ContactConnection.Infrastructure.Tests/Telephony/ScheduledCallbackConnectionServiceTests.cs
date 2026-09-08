@@ -24,13 +24,15 @@ public class ScheduledCallbackConnectionServiceTests
         new(new DbContextOptionsBuilder<TenantDbContext>().UseInMemoryDatabase(name).Options);
 
     private readonly Mock<ICallStateHistoryRecorder> _stateRecorder = new();
+    private readonly Mock<IDashboardNotifier> _dashboard = new();
 
     private ScheduledCallbackConnectionService NewService(string dbName)
     {
         var factory = new Mock<ITenantDbContextFactory>();
         factory.Setup(f => f.Create(It.IsAny<string>())).Returns(() => Db(dbName));
         return new ScheduledCallbackConnectionService(
-            factory.Object, _stateRecorder.Object, NullLogger<ScheduledCallbackConnectionService>.Instance);
+            factory.Object, _stateRecorder.Object, _dashboard.Object,
+            NullLogger<ScheduledCallbackConnectionService>.Instance);
     }
 
     private static ScheduledCallback Attempted(string dbName, int maxAttempts = 3, int attemptsMade = 1)

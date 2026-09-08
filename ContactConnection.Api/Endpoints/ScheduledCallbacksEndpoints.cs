@@ -1,4 +1,5 @@
 using ContactConnection.Application.Interfaces.Repositories;
+using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
 using ContactConnection.Domain.Entities;
 
@@ -71,7 +72,8 @@ public static class ScheduledCallbacksEndpoints
 
     private static async Task<IResult> Cancel(
         Guid id, CancelScheduledCallbackRequest? body,
-        IScheduledCallbackRepository repo, TenantContext tenant, CancellationToken ct)
+        IScheduledCallbackRepository repo, TenantContext tenant,
+        IDashboardNotifier dashboard, CancellationToken ct)
     {
         if (tenant.Current is null) return Results.Unauthorized();
         var cb = await repo.GetByIdAsync(id, ct);
@@ -84,6 +86,7 @@ public static class ScheduledCallbacksEndpoints
 
         cb.Cancel(string.IsNullOrWhiteSpace(body?.Reason) ? "Cancelled by supervisor." : body!.Reason!.Trim());
         await repo.SaveChangesAsync(ct);
+        await dashboard.NotifyScheduledCallbackChangedAsync(tenant.Current.Id, cb.CampaignId, "cancelled", ct);
         return Results.Ok(ToResponse(cb));
     }
 

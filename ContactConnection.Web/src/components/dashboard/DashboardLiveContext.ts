@@ -18,6 +18,11 @@ export interface AgentRegistrationEvent {
   since: string | null
 }
 
+export interface ScheduledCallbackEvent {
+  campaignId: string
+  change: string
+}
+
 // Broadcasts the most recent supervisor:{tenantId} agent-state push to every widget on the
 // canvas. Widgets decide for themselves whether the event is relevant (e.g. AgentListWidget
 // patches a matching row; AgentStateCounterWidget just re-fetches its aggregate).
@@ -40,4 +45,14 @@ export const DashboardRegistrationLiveContext = createContext<AgentRegistrationE
 
 export function useDashboardLiveRegistration() {
   return useContext(DashboardRegistrationLiveContext)
+}
+
+// Scheduled-callback lifecycle (attempted / expired / abandoned / connected / cancelled /
+// rescheduled). Most of these happen in the Worker's due-scan tick with no coincident agent- or
+// call-state push — this dedicated channel lets the Callbacks widget refresh on a real callback
+// change instead of piggy-backing on unrelated activity.
+export const DashboardScheduledCallbackLiveContext = createContext<ScheduledCallbackEvent | null>(null)
+
+export function useDashboardLiveScheduledCallback() {
+  return useContext(DashboardScheduledCallbackLiveContext)
 }

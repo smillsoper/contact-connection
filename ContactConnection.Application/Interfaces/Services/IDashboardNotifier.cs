@@ -43,4 +43,18 @@ public interface IDashboardNotifier
         int durationSeconds,
         DateTimeOffset createdAt,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// A scheduled callback changed state (attempted / expired / abandoned / connected / cancelled
+    /// / rescheduled). Pushed to the tenant's supervisor dashboards so the Callbacks widget's
+    /// "Scheduled" list refreshes without leaning on an incidental agent- or call-state event —
+    /// most of these transitions happen in the Worker's due-scan tick with no coincident push.
+    /// <paramref name="campaignId"/> may be <see cref="Guid.Empty"/> when the change isn't
+    /// campaign-scoped (the widget then always treats it as relevant).
+    /// </summary>
+    Task NotifyScheduledCallbackChangedAsync(
+        Guid tenantId,
+        Guid campaignId,
+        string change,
+        CancellationToken ct = default);
 }

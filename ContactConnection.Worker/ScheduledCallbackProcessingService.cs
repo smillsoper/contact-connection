@@ -35,6 +35,7 @@ public sealed class ScheduledCallbackProcessingService : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConfiguration _config;
     private readonly ILogger<ScheduledCallbackProcessingService> _logger;
+    private readonly IDashboardNotifier _dashboard;
 
     private readonly string _eslHost;
     private readonly int _eslPort;
@@ -45,11 +46,13 @@ public sealed class ScheduledCallbackProcessingService : BackgroundService
     public ScheduledCallbackProcessingService(
         IServiceScopeFactory scopeFactory,
         IConfiguration config,
-        ILogger<ScheduledCallbackProcessingService> logger)
+        ILogger<ScheduledCallbackProcessingService> logger,
+        IDashboardNotifier dashboard)
     {
         _scopeFactory = scopeFactory;
         _config       = config;
         _logger       = logger;
+        _dashboard    = dashboard;
 
         _eslHost           = config["FreeSWITCH:Host"] ?? config.GetSection("FreeSwitchEsl")["Host"] ?? "127.0.0.1";
         _eslPort           = int.TryParse(config["FreeSWITCH:EslPort"], out var p) ? p
@@ -137,6 +140,7 @@ public sealed class ScheduledCallbackProcessingService : BackgroundService
                 {
                     callback.MarkExpired("Attempt window closed without a successful contact.");
                     expired++;
+                    await _dashboard.NotifyScheduledCallbackChangedAsync(tenantId, callback.CampaignId, "expired", ct);
                     continue;
                 }
 
@@ -159,6 +163,8 @@ public sealed class ScheduledCallbackProcessingService : BackgroundService
                             detail: $"Scheduled callback abandoned after {callback.AttemptCount} attempt(s)",
                             abandonType: CallAbandonType.CallbackAbandon, ct: ct);
                     }
+                    await _dashboard.NotifyScheduledCallbackChangedAsync(
+                        tenantId, callback.CampaignId, abandoned ? "abandoned" : "rescheduled", ct);
                     continue;
                 }
 
@@ -197,6 +203,7 @@ public sealed class ScheduledCallbackProcessingService : BackgroundService
                 // and links it via IScheduledCallbackConnectionService.MarkConnectedAsync.
                 callback.MarkAttempted();
                 await db.SaveChangesAsync(ct);
+                await _dashboard.NotifyScheduledCallbackChangedAsync(tenantId, callback.CampaignId, "attempted", ct);
 
                 esl ??= await ConnectEslAsync(ct);
                 var digits  = new string(callback.CallbackNumber.Where(c => char.IsDigit(c) || c == '+').ToArray());

@@ -2,7 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { dashboardWidgetsApi, type PendingQueueCallbackRow } from '../../../api/dashboardWidgets'
 import { scheduledCallbacksApi, type ScheduledCallback } from '../../../api/scheduledCallbacks'
 import type { WidgetFilterConfig } from '../../../types/dashboard'
-import { useDashboardLiveAgentState, useDashboardLiveCallState } from '../DashboardLiveContext'
+import {
+  useDashboardLiveAgentState,
+  useDashboardLiveCallState,
+  useDashboardLiveScheduledCallback,
+} from '../DashboardLiveContext'
 
 function ago(iso: string | null): string {
   if (!iso) return '—'
@@ -29,6 +33,7 @@ export default function CallbacksWidget({ config }: { config: WidgetFilterConfig
   const [cancelling, setCancelling] = useState<Set<string>>(new Set())
   const liveEvent = useDashboardLiveAgentState()
   const liveCall = useDashboardLiveCallState()
+  const liveScb = useDashboardLiveScheduledCallback()
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const load = useCallback(() => {
@@ -54,14 +59,17 @@ export default function CallbacksWidget({ config }: { config: WidgetFilterConfig
     return () => clearInterval(id)
   }, [])
 
-  // Callback lifecycle shows up as agent-state (→ callback_pending) and call-state pushes on
-  // this dashboard's SignalR feed — debounce-refetch on either rather than interval-polling.
+  // Refetch triggers, all debounced together:
+  //   - liveScb: dedicated scheduled-callback lifecycle push (attempted/expired/abandoned/…) —
+  //     the Worker's due-scan tick relays these via Redis → the API's SignalR hub.
+  //   - liveEvent / liveCall: the queue-callback ("virtual hold") half genuinely rides agent
+  //     state (→ callback_pending) and call state, so keep listening to those too.
   useEffect(() => {
-    if (!liveEvent && !liveCall) return
+    if (!liveEvent && !liveCall && !liveScb) return
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(load, 400)
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
-  }, [liveEvent, liveCall, load])
+  }, [liveEvent, liveCall, liveScb, load])
 
   async function handleCancel(id: string) {
     setCancelling((prev) => new Set(prev).add(id))

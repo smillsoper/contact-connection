@@ -6,16 +6,19 @@ namespace ContactConnection.Worker;
 /// <summary>
 /// No-op stand-ins for the SignalR-backed notifier interfaces and <see cref="IEslCommanderFactory"/>
 /// that <c>ContactConnection.Api</c>'s Program.cs registers (real implementations there hold
-/// <c>IHubContext&lt;...&gt;</c> / open an ESL socket). The Worker host has no hubs and never
-/// resolves these methods on any of its own code paths — see project memory
-/// <c>project_worker_dev_boot</c> — but <c>AddInfrastructure()</c> registers services
-/// (FlowEngine, TelephonyFlowEngine, AgentStateStore, CallStateHistoryRecorder, CallTraceRecorder,
+/// <c>IHubContext&lt;...&gt;</c> / open an ESL socket). The Worker host has no hubs and doesn't
+/// resolve these on its own code paths — see project memory <c>project_worker_dev_boot</c> — but
+/// <c>AddInfrastructure()</c> registers services (FlowEngine, TelephonyFlowEngine, CallTraceRecorder,
 /// CallRecordingController) that take these interfaces as constructor dependencies. Without *some*
 /// registration, <c>Host.CreateApplicationBuilder</c>'s <c>ValidateOnBuild</c> (on by default in
 /// Development) fails at startup even though nothing would ever call them.
 ///
-/// If a Worker code path ever does end up depending on one of these for real behavior (not just
-/// build-time constructibility), give it a genuine implementation instead of routing through here.
+/// <c>IDashboardNotifier</c> is the exception — it's registered with a real
+/// <c>RedisPublishingDashboardNotifier</c> in Program.cs, because the Worker's due-scan services
+/// genuinely do push dashboard changes (relayed to the API's SignalR hub over Redis).
+///
+/// If another Worker code path ever needs one of these for real behavior (not just build-time
+/// constructibility), give it a genuine implementation instead of routing through here.
 /// </summary>
 internal sealed class NoOpFlowNotifier : IFlowNotifier
 {
@@ -23,26 +26,6 @@ internal sealed class NoOpFlowNotifier : IFlowNotifier
         Task.CompletedTask;
 
     public Task PushErrorAsync(Guid sessionId, string message, CancellationToken ct = default) =>
-        Task.CompletedTask;
-}
-
-internal sealed class NoOpDashboardNotifier : IDashboardNotifier
-{
-    public Task NotifyAgentStateChangedAsync(
-        Guid tenantId, Guid agentId, string stateCode, string label, DateTimeOffset since,
-        CancellationToken ct = default) => Task.CompletedTask;
-
-    public Task NotifyCallStateChangedAsync(
-        Guid tenantId, Guid campaignId, string state, CancellationToken ct = default) =>
-        Task.CompletedTask;
-
-    public Task NotifyAgentRegistrationChangedAsync(
-        Guid tenantId, Guid agentId, bool registered, DateTimeOffset? since, CancellationToken ct = default) =>
-        Task.CompletedTask;
-
-    public Task NotifyVoicemailReceivedAsync(
-        Guid tenantId, Guid campaignId, Guid voicemailId, Guid callRecordId, string? callerId,
-        int durationSeconds, DateTimeOffset createdAt, CancellationToken ct = default) =>
         Task.CompletedTask;
 }
 

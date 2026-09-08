@@ -32,4 +32,9 @@ public class DashboardNotifier(IHubContext<FlowHub, IFlowHubClient> hubContext) 
             .ReceiveVoicemail(
                 voicemailId.ToString(), campaignId.ToString(), callRecordId.ToString(),
                 callerId ?? "", durationSeconds, createdAt.ToString("O"));
+
+    public Task NotifyScheduledCallbackChangedAsync(
+        Guid tenantId, Guid campaignId, string change, CancellationToken ct = default) =>
+        hubContext.Clients.Group($"supervisor:{tenantId}")
+            .ReceiveScheduledCallbackChanged(campaignId.ToString(), change);
 }

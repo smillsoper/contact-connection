@@ -130,6 +130,7 @@
 | 118 | 2026-09-07 | 11:08 AM PDT | 12:21 PM PDT | 73 min | ~13216 min |
 | 119 | 2026-09-07 | 12:26 PM PDT | 1:39 PM PDT | 73 min | ~13289 min |
 | 120 | 2026-09-08 | 7:33 AM PDT | 8:05 AM PDT | 32 min | ~13321 min |
+| 121 | 2026-09-08 | 8:08 AM PDT | 8:27 AM PDT | 19 min | ~13340 min |
 
 ---
 
@@ -5716,5 +5717,108 @@ done by hand in S118 and S119.
 9. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
 10. `cc_timesync` container crash-loops — remove or fix.
 11. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit;
+    `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test
+    coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 121
+
+**Date:** 2026-09-08
+**Start:** 8:08 AM PDT
+**End:** 8:27 AM PDT
+**Duration:** 19 minutes
+**Total Duration:** ~13340 minutes
+
+### Focus
+
+Item #1 from S120's list — a Redis pub/sub relay so Worker-driven changes reach supervisor
+dashboards live (the Worker has no SignalR hub). Built, tested, live-verified end-to-end.
+
+### Worker → API supervisor-dashboard relay
+
+- **`DashboardRelayMessage`** + **`DashboardRelayKind`** (`Infrastructure/Realtime`) — one flat
+  envelope for every `IDashboardNotifier` method; `Kind` is the discriminator, channel constant
+  `contactconnection:dashboard-relay`.
+- **`RedisPublishingDashboardNotifier : IDashboardNotifier`** (`Infrastructure/Realtime`) — the
+  Worker's real notifier now (replaces `NoOpDashboardNotifier`, which was deleted). Serializes
+  each call and `PublishAsync`es it. Fire-and-forget by design — a dropped dashboard push must
+  never fail the Worker job that triggered it (publish wrapped in try/catch).
+- **`DashboardRelayDispatcher`** (static, `Infrastructure/Realtime`) — `TryParse` + `DispatchAsync`
+  back to an `IDashboardNotifier`. Unknown `Kind` → returns false (forward-compat), garbage JSON →
+  null, neither throws. Kept pure so it's unit-testable without a host.
+- **`DashboardRelaySubscriber : BackgroundService`** (`Api/Realtime`) — subscribes to the channel
+  and re-emits each message through this instance's real hub-backed `IDashboardNotifier`. Every
+  API instance subscribes; SignalR's existing Redis backplane fans the resulting group send to
+  whichever instance holds each supervisor connection. Logs `relayed '{Kind}' for tenant {id}`
+  on each success. Registered as a hosted service in `Program.cs`.
+- No loop: the API keeps the SignalR `DashboardNotifier` as its `IDashboardNotifier`; only the
+  Worker publishes.
+
+### Dedicated scheduled-callback dashboard event
+
+So the Callbacks widget refreshes on a real callback change instead of piggy-backing on unrelated
+agent/call-state pushes (S119's known edge).
+
+- **`IDashboardNotifier.NotifyScheduledCallbackChangedAsync(tenantId, campaignId, change, ct)`**
+  + **`IFlowHubClient.ReceiveScheduledCallbackChanged(campaignId, change)`** + `DashboardNotifier`
+  impl (relayed automatically by the machinery above).
+- Emitted from:
+  - Worker `ScheduledCallbackProcessingService` — `expired`, `attempted`, `abandoned` /
+    `rescheduled` (stale-attempt sweep). Injected `IDashboardNotifier` (singleton) into the ctor.
+  - Api `ScheduledCallbackConnectionService` — `connected`, `abandoned` / `rescheduled`.
+  - Api scheduled-callbacks `cancel` endpoint — `cancelled`.
+- **Frontend** — `DashboardScheduledCallbackLiveContext` + `useDashboardLiveScheduledCallback`
+  (`DashboardLiveContext.ts`); `DashboardBuilderPage.tsx` `.on('receiveScheduledCallbackChanged')`
+  + nested provider; `CallbacksWidget.tsx` adds it to the debounced refetch trigger (kept the
+  agent/call-state triggers too — the queue-callback "virtual hold" half genuinely rides those).
+
+### Incidental fix
+
+`ContactConnection.Web/src/types/telephony-designer.ts` had a duplicate `targetCampaignId?: string`
+in `TelNodeData` (one under tf_transfer, one under tf_scheduled_callback) — `tsc -b` (`npm run
+build`) failed on TS2300. Pre-existing since ~S117 (confirmed by stashing this session's changes
+and re-running against the S120 baseline); `tsc --noEmit`, the DevLog's usual web-clean check,
+never caught it. Removed the duplicate, left a pointer comment.
+
+### State
+
+- Full solution build clean (pre-existing NU1903 + CS8602 warnings only). `npm run build` green.
+  Web `tsc --noEmit` clean.
+- **604 tests pass** — Domain 147, Application 20, Infrastructure 350 (+11), Api 87. New:
+  `DashboardRelayDispatcherTests` (7), `RedisPublishingDashboardNotifierTests` (4, against a real
+  local Redis — publish + wire format proven together, incl. a full publish → parse → dispatch →
+  mocked-notifier round trip).
+- New files: `Infrastructure/Realtime/{DashboardRelayMessage,RedisPublishingDashboardNotifier,DashboardRelayDispatcher}.cs`;
+  `Api/Realtime/DashboardRelaySubscriber.cs`; the two test files.
+- Changed: `IDashboardNotifier.cs`, `FlowHub.cs`, `Api/Hubs/DashboardNotifier.cs`, `Api/Program.cs`,
+  `ScheduledCallbacksEndpoints.cs`, `Infrastructure/Telephony/ScheduledCallbackConnectionService.cs`,
+  `Worker/Program.cs`, `Worker/NoOpNotifiers.cs`, `Worker/ScheduledCallbackProcessingService.cs`,
+  `ScheduledCallbackConnectionServiceTests.cs`, and the 4 web files above.
+- **Live-verified** against the running local stack: (1) `redis-cli PUBLISH
+  contactconnection:dashboard-relay '{...scheduled_callback...}'` → API logged
+  `DashboardRelaySubscriber: relayed 'scheduled_callback' for tenant b56c86f6…`; (2) full
+  Worker→Redis→API path — inserted an expired `scheduled_callbacks` row on `test-tenant`, started
+  the Worker, its 30s tick logged `ScheduledCallbacks [test-tenant]: 0 placed, 1 expired`, the API
+  subscriber logged a second `relayed 'scheduled_callback'`, and the DB row moved to
+  `status=expired`. Scratch row deleted; API + Worker stopped afterward (not restarted).
+
+### Next session — pick up here
+
+1. `tf_scheduled_callback` designer: show the tenant timezone next to the Time field (S119's
+   `invalid_time` confusion).
+2. Consolidate the 3 duplicated audio-resolve switches (`TelephonyAudioResolver` + private copies
+   in `PlayNodeHandler`/`WhisperNodeHandler`) + the 3 designer audio pickers.
+3. Queue callback v1 rough edges ([[project_queue_callback]]); caller-answered-then-bridge-fails +
+   simple-bridge paths still only unit-tested.
+4. Live-verify the S118 registration auto-Unavailable edge cases (`Acw`→offline, graceful-logout
+   ordering, blip re-register).
+5. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
+6. Telnyx Verified Numbers feature.
+7. Resume the RMD filing when budget allows (499 Filer ID + DC agent) — see
+   `project_robocall_mitigation_rmd`.
+8. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
+9. `cc_timesync` container crash-loops — remove or fix.
+10. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit;
     `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test
     coverage; retire the `.cc` softphone route.

@@ -152,7 +152,7 @@ export interface TelNodeData extends Record<string, unknown> {
   scheduledDateValue?: string      // date text or {{variable}} (e.g. "2026-09-10", "9/10/2026")
   scheduledTimeValue?: string      // time text or {{variable}} (e.g. "14:30", "2:30 PM"); blank => 09:00
   targetFlowId?: string            // telephony flow the answered leg runs (should NOT re-offer callback)
-  targetCampaignId?: string        // optional campaign context for the answered leg's queue
+  // targetCampaignId (campaign context for the answered leg's queue) is declared once under tf_transfer above.
   allowedDays?: string             // optional CSV of 0-6 (0=Sun) the callback may land on
   allowedStartTime?: string        // optional "HH:mm" earliest local time-of-day
   allowedEndTime?: string          // optional "HH:mm" latest local time-of-day

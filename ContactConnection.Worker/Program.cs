@@ -1,5 +1,6 @@
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Infrastructure.Extensions;
+using ContactConnection.Infrastructure.Realtime;
 using ContactConnection.Worker;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -34,7 +35,10 @@ builder.Services.AddInfrastructure(builder.Configuration);
 // project memory project_worker_dev_boot.
 builder.Services.AddScoped<IFlowNotifier, NoOpFlowNotifier>();
 builder.Services.AddScoped<ICallTraceNotifier, NoOpCallTraceNotifier>();
-builder.Services.AddSingleton<IDashboardNotifier, NoOpDashboardNotifier>();
+// Real implementation, not a no-op: the Worker's due-scan services (scheduled callbacks) make
+// dashboard-relevant changes that supervisors should see live. It has no SignalR hub, so this
+// publishes to a Redis channel the API's DashboardRelaySubscriber forwards to the real hub.
+builder.Services.AddSingleton<IDashboardNotifier, RedisPublishingDashboardNotifier>();
 builder.Services.AddSingleton<IEslCommanderFactory, NoOpEslCommanderFactory>();
 
 builder.Services.AddHostedService<SubscriptionProcessingService>();

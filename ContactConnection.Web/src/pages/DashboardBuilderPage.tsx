@@ -19,7 +19,9 @@ import CallStateByCampaignWidget from '../components/dashboard/widgets/CallState
 import CallbacksWidget from '../components/dashboard/widgets/CallbacksWidget'
 import {
   DashboardLiveContext, DashboardCallStateLiveContext, DashboardRegistrationLiveContext,
+  DashboardScheduledCallbackLiveContext,
   type AgentStateEvent, type CallStateEvent, type AgentRegistrationEvent,
+  type ScheduledCallbackEvent,
 } from '../components/dashboard/DashboardLiveContext'
 
 const GridLayoutWithWidth = WidthProvider(GridLayout)
@@ -70,6 +72,7 @@ export default function DashboardBuilderPage() {
   const [liveEvent, setLiveEvent] = useState<AgentStateEvent | null>(null)
   const [liveCallEvent, setLiveCallEvent] = useState<CallStateEvent | null>(null)
   const [liveRegEvent, setLiveRegEvent] = useState<AgentRegistrationEvent | null>(null)
+  const [liveScbEvent, setLiveScbEvent] = useState<ScheduledCallbackEvent | null>(null)
   // Opening an existing dashboard defaults to view-only, even for a manager — most visits are
   // "just looking," not editing, and a blank canvas has nothing to view, so it starts in edit
   // mode instead. editMode (not isEditing alone) is what every edit-affordance below actually
@@ -147,6 +150,11 @@ export default function DashboardBuilderPage() {
 
     connection.on('receiveAgentRegistrationSnapshot', (agentId: string, registered: boolean, sinceIso: string | null) => {
       setLiveRegEvent({ agentId, registered, since: sinceIso })
+    })
+
+    connection.on('receiveScheduledCallbackChanged', (campaignId: string, change: string) => {
+      // New object each time so a repeat of the same change still re-triggers widget effects.
+      setLiveScbEvent({ campaignId, change })
     })
 
     connection.start()
@@ -335,6 +343,7 @@ export default function DashboardBuilderPage() {
           <DashboardLiveContext.Provider value={liveEvent}>
           <DashboardCallStateLiveContext.Provider value={liveCallEvent}>
           <DashboardRegistrationLiveContext.Provider value={liveRegEvent}>
+          <DashboardScheduledCallbackLiveContext.Provider value={liveScbEvent}>
             <GridLayoutWithWidth
               className="layout"
               layout={layout}
@@ -371,6 +380,7 @@ export default function DashboardBuilderPage() {
                 {editMode ? 'Drag a widget from the palette above to get started.' : 'This dashboard has no widgets yet.'}
               </div>
             )}
+          </DashboardScheduledCallbackLiveContext.Provider>
           </DashboardRegistrationLiveContext.Provider>
           </DashboardCallStateLiveContext.Provider>
           </DashboardLiveContext.Provider>

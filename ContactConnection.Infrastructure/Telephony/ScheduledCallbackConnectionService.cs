@@ -9,6 +9,7 @@ namespace ContactConnection.Infrastructure.Telephony;
 public class ScheduledCallbackConnectionService(
     ITenantDbContextFactory dbFactory,
     ICallStateHistoryRecorder callStateRecorder,
+    IDashboardNotifier dashboardNotifier,
     ILogger<ScheduledCallbackConnectionService> logger) : IScheduledCallbackConnectionService
 {
     public async Task<bool> MarkConnectedAsync(
@@ -34,6 +35,9 @@ public class ScheduledCallbackConnectionService(
         callback.LinkConnectedCallRecord(connectedCallRecordId);
         callback.MarkCompleted();
         await db.SaveChangesAsync(ct);
+
+        await dashboardNotifier.NotifyScheduledCallbackChangedAsync(
+            tenantId, callback.CampaignId, "connected", ct);
 
         logger.LogInformation(
             "ScheduledCallbackConnectionService: callback {CallbackId} completed — connected call record {RecordId}",
@@ -64,6 +68,9 @@ public class ScheduledCallbackConnectionService(
         var abandoned = callback.MarkNoAnswer(
             string.IsNullOrWhiteSpace(cause) ? "Callback leg did not connect." : $"No answer ({cause}).");
         await db.SaveChangesAsync(ct);
+
+        await dashboardNotifier.NotifyScheduledCallbackChangedAsync(
+            tenantId, callback.CampaignId, abandoned ? "abandoned" : "rescheduled", ct);
 
         if (abandoned)
         {
