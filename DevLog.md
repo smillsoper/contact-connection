@@ -129,6 +129,7 @@
 | 117 | 2026-09-06 | 10:51 AM PDT | 12:39 PM PDT | ~98 min (108 elapsed − ~10 min PC-crash/reboot gap) | ~13143 min |
 | 118 | 2026-09-07 | 11:08 AM PDT | 12:21 PM PDT | 73 min | ~13216 min |
 | 119 | 2026-09-07 | 12:26 PM PDT | 1:39 PM PDT | 73 min | ~13289 min |
+| 120 | 2026-09-08 | 7:33 AM PDT | 8:05 AM PDT | 32 min | ~13321 min |
 
 ---
 
@@ -5615,3 +5616,105 @@ Item #5 from S118's list — supervisor visibility of pending queue callbacks + 
 11. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
 12. `cc_timesync` container crash-loops — remove or fix.
 13. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 120
+
+**Date:** 2026-09-08
+**Start:** 7:33 AM PDT
+**End:** 8:05 AM PDT
+**Duration:** 32 minutes
+**Total Duration:** ~13321 minutes
+
+### Focus
+
+Items #1 and #2 from S119's "pick up here" list: delete the dead Worker ESL service, then build
+the orphaned-call reconciliation sweep. Both built, tested, and live-verified.
+
+### #1 — Deleted dead `ContactConnection.Worker/FreeSwitchEslService.cs`
+
+Unregistered in S119 (it double-created every inbound `call_record` alongside the API's
+`EslBackgroundService`). Deleted outright. `Infrastructure/FreeSwitchEsl/` kept —
+`FreeSwitchEslClient`/`EslEvent` are still used by `ScheduledCallbackProcessingService`. The
+explanatory block in `Worker/Program.cs` reworded to past tense.
+
+### #2 — Orphaned-call reconciliation sweep (NEW API hardening item — built + live-verified)
+
+Closes calls a previous process left non-terminal (hard restart / crash / dev Ctrl-C), so they
+stop lingering as phantom active calls on the supervisor dashboard. Automates the manual cleanup
+done by hand in S118 and S119.
+
+- **`IOrphanedCallReconciler`** (Application) + **`OrphanedCallReconciler`** (Infrastructure) —
+  per active tenant (`public.tenants WHERE is_active`, same as `HandleHangupByTenantScanAsync`):
+  1. `call_records` with `call_end_at IS NULL` and `created_at` older than the grace window →
+     `record.Complete()` (leaves `active`, stamps `call_end_at`; derives `incomplete` when there
+     are no completed interactions).
+  2. `call_state_history` timelines whose latest row is non-terminal → append a terminal
+     `completed` row (`detail = "Reconciled on API startup — no live telephony session"`).
+  Both steps skip any call that still has a live Redis `telephony:session:*` — matched by
+  `CallRecordId` **or** `ContactIdExternal` == a live session's `ChannelUuid` (globally unique,
+  so one flat set spans all tenants). Per-tenant `try/catch` so one bad schema doesn't abort the
+  rest.
+- **Terminal row written straight through the repo at `max(sequence) + 1`**, not via
+  `ICallStateHistoryRecorder` — its Redis `callstate:seq:{id}` counter has a 24h TTL, and a call
+  dead long enough to need reconciling may have lost it; a restarted-from-1 sequence would sort
+  behind the dangling row (`DISTINCT ON ... ORDER BY sequence DESC`) and leave the phantom in
+  place. Dashboard push done directly via `IDashboardNotifier.NotifyCallStateChangedAsync`.
+- **`ICallStateHistoryRepository`** — new `GetNonTerminalCallsAsync` (raw SQL `DISTINCT ON`,
+  mirrors `GetActiveStateCountsAsync`) returning `List<NonTerminalCall(CallRecordId, CampaignId)>`;
+  new `GetMaxSequenceAsync` (LINQ `MaxAsync`).
+- **`OrphanedCallReconciliationService : BackgroundService`** (Api) — runs the sweep once, a
+  short delay after boot. Config (all optional): `Telephony:OrphanReconciliation:Enabled`
+  (default true), `:StartupDelaySeconds` (20), `:MinAgeMinutes` (15, read by the reconciler).
+  Registered in `Program.cs` alongside the other hosted services; `IOrphanedCallReconciler`
+  registered scoped in `AddInfrastructure`.
+- Tests: **`OrphanedCallReconcilerTests`** (10, Infrastructure) — grace-window skip, both
+  live-session guards (by record id / by channel uuid), already-closed record ignored,
+  vanished-record history row skipped, terminal row at `maxSequence + 1` with dashboard notify,
+  both sweeps in one pass, inactive-tenant skip.
+
+### State
+
+- Full solution build clean (pre-existing NU1903 + CS8602 warnings only, 10 total). No web changes.
+- **593 tests pass** — Domain 147, Application 20, Infrastructure 339 (+10), Api 87.
+- New files: `ContactConnection.Application/Interfaces/Services/IOrphanedCallReconciler.cs`;
+  `ContactConnection.Infrastructure/Telephony/OrphanedCallReconciler.cs`;
+  `ContactConnection.Api/Telephony/OrphanedCallReconciliationService.cs`;
+  `tests/ContactConnection.Infrastructure.Tests/Telephony/OrphanedCallReconcilerTests.cs`.
+- Changed: `ICallStateHistoryRepository.cs`, `CallStateHistoryRepository.cs`,
+  `ServiceCollectionExtensions.cs` (Infra), `ContactConnection.Api/Program.cs`,
+  `ContactConnection.Worker/Program.cs`. Deleted: `ContactConnection.Worker/FreeSwitchEslService.cs`.
+- **Live-verified** against the running local stack as `test-tenant`: seeded 3 scratch orphans —
+  (A) 90-min-old open record + dangling `routing` tail → record closed to `incomplete`, terminal
+  `completed` row appended at sequence 4 (max 3 + 1); (B) 3-min-old open record → skipped (inside
+  15-min grace); (C) 30-min-old open record **with a live Redis `telephony:session:*`** → skipped,
+  record and timeline untouched. Summary line: "1 call record(s) and 1 state timeline(s) closed
+  across 2 tenant(s)". All scratch rows + the Redis key deleted afterward; `tenant_test_tenant`
+  back to 0 open call records.
+- Leftover S119 `dotnet watch` (API) + `dotnet run` (Worker) were killed to build and **not**
+  restarted.
+- Committed + pushed.
+
+### Next session — pick up here
+
+1. Worker→dashboard realtime: a Redis pub/sub relay so Worker-driven state changes
+   (scheduled-callback attempt/complete, subscription shipments) push to supervisor dashboards
+   without the widget leaning on incidental agent/call-state events.
+2. `tf_scheduled_callback` designer: show the tenant timezone next to the Time field (S119's
+   `invalid_time` confusion).
+3. Consolidate the 3 duplicated audio-resolve switches (`TelephonyAudioResolver` + private copies
+   in `PlayNodeHandler`/`WhisperNodeHandler`) + 3 designer audio pickers.
+4. Queue callback v1 rough edges ([[project_queue_callback]]); caller-answered-then-bridge-fails +
+   simple-bridge paths still only unit-tested.
+5. Live-verify the S118 registration auto-Unavailable edge cases (`Acw`→offline, graceful-logout
+   ordering, blip re-register).
+6. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
+7. Telnyx Verified Numbers feature.
+8. Resume the RMD filing when budget allows (499 Filer ID + DC agent) — see
+   `project_robocall_mitigation_rmd`.
+9. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
+10. `cc_timesync` container crash-loops — remove or fix.
+11. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit;
+    `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test
+    coverage; retire the `.cc` softphone route.

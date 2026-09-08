@@ -41,14 +41,13 @@ builder.Services.AddHostedService<SubscriptionProcessingService>();
 builder.Services.AddHostedService<RecordingMergeService>();
 builder.Services.AddHostedService<ScheduledCallbackProcessingService>();
 
-// NOT hosted: FreeSwitchEslService. It's a legacy CHANNEL_PARK→create-CallRecord translator
-// that predates ContactConnection.Api's EslBackgroundService, which now owns the entire inbound
-// telephony lifecycle (routing, flow engine, call records, hangup finalization). Running both
-// makes every inbound call create TWO call records — the API's (real, flow-driven) and the
-// Worker's (a bare stub) — and only one gets finalized on hangup, orphaning the other in a
-// non-terminal state on the supervisor dashboard. The class is left in the project as dead
-// code pending removal; the Worker's remaining hosted services (subscriptions, recording merge,
-// scheduled callbacks) open their own ESL connections as needed and don't depend on it.
+// Historical note: a legacy FreeSwitchEslService (CHANNEL_PARK→create-CallRecord translator)
+// once lived here. It predated ContactConnection.Api's EslBackgroundService, which now owns the
+// entire inbound telephony lifecycle (routing, flow engine, call records, hangup finalization).
+// Running both made every inbound call create TWO call records — the API's (real, flow-driven)
+// and the Worker's (a bare stub) — orphaning one in a non-terminal state on the supervisor
+// dashboard. It was unregistered in Session 119 and the dead class deleted in Session 120. The
+// Worker's hosted services below open their own ESL connections as needed.
 
 var host = builder.Build();
 host.Run();

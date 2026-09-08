@@ -58,4 +58,50 @@ public class CallStateHistoryRepository(ITenantDbContextFactory factory) : ICall
 
         return results;
     }
+
+    /// <summary>
+    /// "Latest row per call, filtered to the non-terminal ones" — same top-1-per-group shape as
+    /// <see cref="GetActiveStateCountsAsync"/> (EF's LINQ provider can't translate it), so this
+    /// also drops to raw SQL via Postgres's DISTINCT ON.
+    /// </summary>
+    public async Task<List<NonTerminalCall>> GetNonTerminalCallsAsync(
+        string tenantSchemaName, CancellationToken ct = default)
+    {
+        await using var db = factory.Create(tenantSchemaName);
+        var conn = (NpgsqlConnection)db.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync(ct);
+
+        const string sql = """
+            WITH latest AS (
+                SELECT DISTINCT ON (call_record_id) call_record_id, campaign_id, state
+                FROM call_state_history
+                ORDER BY call_record_id, sequence DESC
+            )
+            SELECT call_record_id, campaign_id
+            FROM latest
+            WHERE state NOT IN (@completed, @abandoned)
+            """;
+
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("completed", CallHistoryState.Completed);
+        cmd.Parameters.AddWithValue("abandoned", CallHistoryState.Abandoned);
+
+        var results = new List<NonTerminalCall>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            results.Add(new NonTerminalCall(reader.GetGuid(0), reader.GetGuid(1)));
+
+        return results;
+    }
+
+    public async Task<int> GetMaxSequenceAsync(
+        string tenantSchemaName, Guid callRecordId, CancellationToken ct = default)
+    {
+        await using var db = factory.Create(tenantSchemaName);
+        return await db.CallStateHistory
+            .Where(e => e.CallRecordId == callRecordId)
+            .Select(e => (int?)e.Sequence)
+            .MaxAsync(ct) ?? 0;
+    }
 }

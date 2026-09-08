@@ -82,6 +82,10 @@ builder.Services.AddHostedService<PlayAnnouncementService>();
 // Call trace expiry sweeper — every 1 second, stops traces that hit their duration cap
 builder.Services.AddHostedService<ContactConnection.Api.CallTrace.CallTraceExpiryBackgroundService>();
 
+// Startup sweep — closes calls a previous process left non-terminal (hard restart/crash) so they
+// don't linger as phantom active calls on the supervisor dashboard. Runs once, ~20s after boot.
+builder.Services.AddHostedService<OrphanedCallReconciliationService>();
+
 // JWT Bearer authentication
 var signingKey = builder.Configuration["Jwt:SigningKey"]
     ?? throw new InvalidOperationException("Jwt:SigningKey is not configured.");

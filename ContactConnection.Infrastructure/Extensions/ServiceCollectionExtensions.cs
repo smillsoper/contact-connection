@@ -241,6 +241,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICallStateHistoryRepository, CallStateHistoryRepository>();
         services.AddScoped<ICallStateHistoryRecorder, CallStateHistoryRecorder>();
 
+        // Startup sweep that closes calls a dead process left non-terminal (driven by the API's
+        // OrphanedCallReconciliationService hosted service).
+        services.AddScoped<IOrphanedCallReconciler, OrphanedCallReconciler>();
+
         // Scheduled callback — the Worker's ScheduledCallbackProcessingService places/expires outbound
         // legs; this service lands the terminal state from the ESL path (connected / no-answer).
         services.AddScoped<IScheduledCallbackConnectionService, ScheduledCallbackConnectionService>();
