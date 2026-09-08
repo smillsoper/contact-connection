@@ -133,6 +133,7 @@
 | 121 | 2026-09-08 | 8:08 AM PDT | 8:27 AM PDT | 19 min | ~13340 min |
 | 122 | 2026-09-08 | 8:30 AM PDT | 8:40 AM PDT | 10 min | ~13350 min |
 | 123 | 2026-09-08 | 8:43 AM PDT | 8:57 AM PDT | 14 min | ~13364 min |
+| 124 | 2026-09-08 | 9:02 AM PDT | 9:33 AM PDT | 31 min | ~13395 min |
 
 ---
 
@@ -5962,5 +5963,79 @@ session rather than a rushed pass.
 7. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
 8. `cc_timesync` container crash-loops — remove or fix.
 9. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit;
+   `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test
+   coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 124
+
+**Date:** 2026-09-08
+**Start:** 9:02 AM PDT
+**End:** 9:33 AM PDT
+**Duration:** 31 minutes
+**Total Duration:** ~13395 minutes
+
+### Focus
+
+S123 list #1, deferred as its own session — the frontend 3-picker dedup. Consolidated the three
+near-duplicate audio pickers in `TelephonyNodePropertiesPanel.tsx` into one component.
+
+### New `src/components/telephony-designer/AudioPicker.tsx` (672 lines)
+
+- **`AudioPicker`** — single component replacing `AudioFilePicker`, `PlayNodeEditor`'s inline
+  picker, and `WhisperNodeEditor`'s inline picker (each ~440–470 lines). Host-varying props:
+  - `builtins`: `'all'` (hold/tone streams offered) | `'builtin-only'` (finite WAV built-ins only
+    — Whisper: looping streams never fire PLAYBACK_STOP so the bridge would never trigger).
+  - `allowTtsClip`: Play/Whisper pass `false` — they have their own TTS-source path and don't
+    offer "Generate/regenerate a saved TTS clip" from the file slot; also skips the
+    `ttsServiceApi.getStatus()` fetch in that case.
+  - `accent` / `label` / `blankLabel` / `helpText` / `onAudioFilesChange` (unchanged from
+    `AudioFilePicker`).
+- **`PlatformPhrasePicker`** — moved here verbatim.
+- **`useAudioFiles()`** — module-cached shared clip list (`_cache` + subscriber set + `addFile`/
+  `updateFile` mutators). Bonus fix: S123's per-node panel keying was refetching
+  `audioFilesApi.list()` on every node click — now fetched once per tab session and shared, and a
+  clip uploaded/recorded/regenerated in one slot appears in every other slot (and the Play node's
+  periodic-announcement dropdown) immediately. Safe because the telephony designer pickers are the
+  only `audioFilesApi` consumers in the app — 100% of the mutation surface goes through the store.
+
+### `TelephonyNodePropertiesPanel.tsx`: 3,229 → 2,088 lines (−1,141)
+
+- Deleted `AudioFilePicker`, `PlatformPhrasePicker`, `getBestMimeType`/`mimeToExt`/`fmtTime`,
+  `RecordPhase`, `AudioAccent`; trimmed the `../../api/audioFiles` import to the two symbols
+  `PeriodicAnnouncementEditor` still needs.
+- `PlayNodeEditor` file-mode collapsed to `<AudioPicker allowTtsClip={false}>` (keeps its own
+  Audio-Source toggle + `TtsVoicePicker` for TTS mode); it now reads the shared `useAudioFiles()`
+  list to feed `PeriodicAnnouncementEditor`.
+- `WhisperNodeEditor` collapsed to `<AudioPicker accent="purple" builtins="builtin-only"
+  allowTtsClip={false}>` + its exit-handle box.
+- The 5 existing `<AudioFilePicker>` call sites (Queue Callback, Transfer, Voicemail, IVR Menu
+  prompt + invalid) → `<AudioPicker>` (name only; props unchanged).
+
+### State
+
+- No backend changes. Web `tsc --noEmit` clean (with `noUnusedLocals`/`noUnusedParameters` — so
+  every removed import/helper is genuinely gone). `npm run build` clean.
+- New file: `ContactConnection.Web/src/components/telephony-designer/AudioPicker.tsx`.
+  Changed: `TelephonyNodePropertiesPanel.tsx`.
+- **Live-verified** (user click-through): for Play (Audio File + TTS modes), Whisper, and a
+  general editor — select built-in, upload, record→review→save, preview, ✦ Platform phrase pick +
+  change; ✦ Generate TTS + Edit & regenerate on a general editor; Whisper dropdown correctly
+  limited to WAV built-ins. All confirmed working.
+
+### Next session — pick up here
+
+1. Queue callback v1 rough edges ([[project_queue_callback]]); caller-answered-then-bridge-fails +
+   simple-bridge paths still only unit-tested.
+2. Live-verify the S118 registration auto-Unavailable edge cases (`Acw`→offline, graceful-logout
+   ordering, blip re-register).
+3. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
+4. Telnyx Verified Numbers feature.
+5. Resume the RMD filing when budget allows (499 Filer ID + DC agent) — see
+   `project_robocall_mitigation_rmd`.
+6. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
+7. `cc_timesync` container crash-loops — remove or fix.
+8. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit;
    `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test
    coverage; retire the `.cc` softphone route.
