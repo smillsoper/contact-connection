@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import type { Node } from '@xyflow/react'
 import type { TelNodeData, TelephonyNodeType, TimeWindow, TelVariableAssignment } from '../../types/telephony-designer'
 import { TELEPHONY_NODE_META } from '../../types/telephony-designer'
-import { TIMEZONE_GROUPS } from '../../utils/timezones'
+import { TIMEZONE_GROUPS, timezoneLabel } from '../../utils/timezones'
+import { useTenantTimezone } from '../../hooks/useTenantTimezone'
 import {
   audioFilesApi,
   BUILTIN_AUDIO_GROUPS,
@@ -76,6 +77,12 @@ export default function TelephonyNodePropertiesPanel({
   const isEventNode = meta.handles === 'source-only'
 
   const set = (field: string, value: unknown) => onChange(node.id, { [field]: value })
+
+  // Tenant timezone — scheduled-callback date/time and the allowed window are parsed in it
+  // server-side; surface it human-readably next to those fields so a booked time isn't entered
+  // in the wrong zone (same label format as onboarding — see utils/timezones).
+  const tenantTz = useTenantTimezone()
+  const tenantTzLabel = tenantTz ? timezoneLabel(tenantTz) : 'the tenant timezone'
 
   // General API Definitions for tf_general_api_call nodes — fetched lazily
   const [generalApis, setGeneralApis] = useState<GeneralApiSummary[]>([])
@@ -428,7 +435,8 @@ export default function TelephonyNodePropertiesPanel({
           </div>
           <p className="text-xs text-gray-500 -mt-1">
             Literal or <span className="font-mono">{'{{variable}}'}</span> — capture the date/time however you like
-            (IVR, DTMF, agent). Parsed in the tenant timezone; blank time = 09:00.
+            (IVR, DTMF, agent). Parsed in{' '}
+            <span className="text-gray-300">{tenantTzLabel}</span>; blank time = 09:00.
           </p>
 
           <div>
@@ -478,8 +486,8 @@ export default function TelephonyNodePropertiesPanel({
               />
             </div>
             <p className="text-xs text-gray-500 mt-1">
-              Days = CSV of 0–6 (0 = Sun). A booked time outside this window takes
-              <span className="text-amber-300"> invalid_time</span>.
+              Days = CSV of 0–6 (0 = Sun); times are <span className="text-gray-300">{tenantTzLabel}</span>.
+              A booked time outside this window takes <span className="text-amber-300">invalid_time</span>.
             </p>
           </div>
 

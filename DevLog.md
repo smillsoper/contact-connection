@@ -131,6 +131,7 @@
 | 119 | 2026-09-07 | 12:26 PM PDT | 1:39 PM PDT | 73 min | ~13289 min |
 | 120 | 2026-09-08 | 7:33 AM PDT | 8:05 AM PDT | 32 min | ~13321 min |
 | 121 | 2026-09-08 | 8:08 AM PDT | 8:27 AM PDT | 19 min | ~13340 min |
+| 122 | 2026-09-08 | 8:30 AM PDT | 8:40 AM PDT | 10 min | ~13350 min |
 
 ---
 
@@ -5822,3 +5823,65 @@ never caught it. Removed the duplicate, left a pointer comment.
 10. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit;
     `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test
     coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 122
+
+**Date:** 2026-09-08
+**Start:** 8:30 AM PDT
+**End:** 8:40 AM PDT
+**Duration:** 10 minutes
+**Total Duration:** ~13350 minutes
+
+### Focus
+
+Item #1 from S121's list — the `tf_scheduled_callback` designer now shows the tenant timezone
+next to the date/time fields, human-readably (S119's `invalid_time` confusion was a Pacific-user /
+Chicago-tenant mismatch). Web-only change.
+
+### Timezone hint on scheduled-callback nodes
+
+- **`src/api/tenant.ts`** (new) — `getCurrentTenant()` → `GET /api/v1/tenants/me` (already returns
+  `timezone`); module-level promise cache since name/timezone are stable for a tab session, a
+  failed fetch clears the cache for retry.
+- **`src/hooks/useTenantTimezone.ts`** (new) — returns the tenant's IANA zone (or null until
+  loaded), best-effort.
+- **`TelephonyNodePropertiesPanel.tsx`** (`tf_scheduled_callback`) — the Date/Time hint now reads
+  "Parsed in **Pacific Time (PT)**; blank time = 09:00" and the allowed-window hint names the zone
+  too ("times are **Pacific Time (PT)**"). Falls back to "the tenant timezone" until the fetch
+  lands.
+- **`NodePropertiesPanel.tsx`** (CRM designer's `scheduled_callback` node) — same hint. The two
+  designers are separate components (S85), so both were wired.
+- **Consistency:** uses `timezoneLabel()` from `utils/timezones.ts`, which returns the exact same
+  `label` strings ("Pacific Time (PT)", "Eastern Time (ET)", …) that `OnboardingPage` and
+  `ProvisionTenantPage` render from `TIMEZONES` — that util is the platform's single timezone
+  list. `timezoneLabel` had no callers before this; it was written for exactly this.
+
+### State
+
+- No backend changes. Web `tsc --noEmit` clean; `npm run build` clean.
+- New files: `ContactConnection.Web/src/api/tenant.ts`,
+  `ContactConnection.Web/src/hooks/useTenantTimezone.ts`.
+- Changed: `TelephonyNodePropertiesPanel.tsx`, `NodePropertiesPanel.tsx`.
+- **Live-verified** the data path: `GET /api/v1/tenants/me` on `test-tenant` (real API, minted dev
+  JWT) returned `"timezone":"America/Los_Angeles"` → `timezoneLabel()` maps it to
+  "Pacific Time (PT)". JSX render is covered by tsc/build. Scratch JWT-minter deleted after.
+
+### Next session — pick up here
+
+1. Consolidate the 3 duplicated audio-resolve switches (`TelephonyAudioResolver` + private copies
+   in `PlayNodeHandler`/`WhisperNodeHandler`) + the 3 designer audio pickers.
+2. Queue callback v1 rough edges ([[project_queue_callback]]); caller-answered-then-bridge-fails +
+   simple-bridge paths still only unit-tested.
+3. Live-verify the S118 registration auto-Unavailable edge cases (`Acw`→offline, graceful-logout
+   ordering, blip re-register).
+4. Recording tail leftovers: beep wiring, retention purge job, `tf_secure_collect`.
+5. Telnyx Verified Numbers feature.
+6. Resume the RMD filing when budget allows (499 Filer ID + DC agent) — see
+   `project_robocall_mitigation_rmd`.
+7. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
+8. `cc_timesync` container crash-loops — remove or fix.
+9. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit;
+   `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test
+   coverage; retire the `.cc` softphone route.

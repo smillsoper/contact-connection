@@ -6,6 +6,8 @@ import VariablePanel from './VariablePanel'
 import { computeAncestorVars } from '../../utils/flowGraph'
 import { flowsApi } from '../../api/flows'
 import type { FlowSummary, GeneralApiSummary } from '../../api/flows'
+import { useTenantTimezone } from '../../hooks/useTenantTimezone'
+import { timezoneLabel } from '../../utils/timezones'
 
 const PRESET_MASKS = [
   { label: 'None', value: '' },
@@ -49,6 +51,11 @@ export default function NodePropertiesPanel({
 
   // Variable panel toggle for set_variable node
   const [varPanelOpen, setVarPanelOpen] = useState(false)
+
+  // Tenant timezone — shown next to the scheduled_callback date/time, which is parsed in it
+  // server-side. Same label format as onboarding (utils/timezones).
+  const tenantTz = useTenantTimezone()
+  const tenantTzLabel = tenantTz ? timezoneLabel(tenantTz) : 'the tenant timezone'
 
   // Flow list for execute_flow / transition_to_flow nodes — fetched lazily
   const [availableFlows, setAvailableFlows] = useState<FlowSummary[]>([])
@@ -480,7 +487,7 @@ export default function NodePropertiesPanel({
             </div>
             <p className="text-[10px] text-gray-500 -mt-1 leading-snug">
               Literal or <span className="font-mono">{'{{variable}}'}</span> — capture the date/time however the flow
-              likes. Parsed in the tenant timezone; blank time = 09:00.
+              likes. Parsed in <span className="text-gray-300">{tenantTzLabel}</span>; blank time = 09:00.
             </p>
 
             <div className="flex flex-col gap-1">
