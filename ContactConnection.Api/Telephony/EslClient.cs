@@ -212,6 +212,18 @@ public sealed class EslClient(ILogger<EslClient>? logger = null) : IOwnedEslComm
     public Task BroadcastAsync(string uuid, string mediaArg, CancellationToken ct = default) =>
         SendApiAsync($"uuid_broadcast {uuid} {mediaArg} aleg", ct);
 
+    /// <summary>
+    /// uuid_displace &lt;uuid&gt; [start|stop] &lt;file&gt; [&lt;limit&gt;] [mux] — start mixes the media into
+    /// the channel's audio both ways (<c>mux</c>) with no time limit (<c>0</c>); stop takes the
+    /// same file string. Used for the recording-notification beep.
+    /// </summary>
+    public Task DisplaceAsync(string uuid, string action, string mediaArg, CancellationToken ct = default) =>
+        SendApiAsync(
+            action == "start"
+                ? $"uuid_displace {uuid} start {mediaArg} 0 mux"
+                : $"uuid_displace {uuid} stop {mediaArg}",
+            ct);
+
     public Task BridgeChannelsAsync(string uuid1, string uuid2, CancellationToken ct = default) =>
         SendApiAsync($"uuid_bridge {uuid1} {uuid2}", ct);
 

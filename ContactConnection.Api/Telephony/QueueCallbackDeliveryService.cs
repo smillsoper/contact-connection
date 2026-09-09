@@ -41,6 +41,15 @@ public sealed class QueueCallbackDeliveryService(
     private const string DefaultConnectPrompt = "ivr/ivr-hold_connect_call.wav";
     private const int RetryCooloffSeconds = 60;
 
+    // How long to let the connect prompt play before handing to delivery — the simple-bridge path
+    // bridges instantly and would otherwise cut it off. Off the ESL loop, so blocking is fine.
+    private int ConnectPromptSettleMs =>
+        int.TryParse(config["FreeSWITCH:QueueCallback:ConnectPromptSettleMs"], out var m) && m >= 0 ? m : 3000;
+    // Bridge failures after the caller already answered → re-queue rather than abandon, up to this
+    // many times (then abandon, to bound an endless loop against a genuinely broken softphone).
+    private int MaxBridgeRetries =>
+        int.TryParse(config["FreeSWITCH:QueueCallback:MaxBridgeRetries"], out var n) && n >= 0 ? n : 2;
+
     private string EslHost => config["FreeSWITCH:Host"] ?? "127.0.0.1";
     private int    EslPort => int.TryParse(config["FreeSWITCH:EslPort"], out var p) ? p : 8021;
     private string EslPass => config["FreeSWITCH:EslPassword"] ?? "ClueCon";
@@ -178,10 +187,10 @@ public sealed class QueueCallbackDeliveryService(
         record.SetContactIdExternal(newChannelUuid);
         await db.SaveChangesAsync(ct);
 
-        // Connect prompt to the caller, then hand to the normal delivery path for the reserved agent.
+        // The connect prompt is played (and waited on) in BridgeToReservedAgentAsync, off the ESL
+        // loop — playing it here + returning would let the simple-bridge delivery path bridge over
+        // the top of it.
         var mediaArg = await ResolveConnectMediaAsync(connectAudio, tenantSchema, ct);
-        try { await esl.BroadcastAsync(newChannelUuid, $"{mediaArg} aleg", ct); }
-        catch (Exception ex) { logger.LogDebug(ex, "QueueCallback {Uuid}: connect prompt broadcast failed (non-fatal)", newChannelUuid); }
 
         // Honor the campaign's agent answer mode. For AutoAnswerBestAgent the reserved agent's
         // softphone must auto-answer the bridge INVITE with no click — mirror the normal auto-
@@ -207,46 +216,95 @@ public sealed class QueueCallbackDeliveryService(
         // — doing that here would freeze the whole ESL read loop. Fire-and-forget with its own DI
         // scope (this method's scope dies when the CHANNEL_PARK handler returns).
         _ = Task.Run(() => BridgeToReservedAgentAsync(
-            record.Id, record.CampaignId, tenantId, tenantSchema, tenantSubdomain, agentId, newChannelUuid, autoAnswer));
+            record.Id, record.CampaignId, tenantId, tenantSchema, tenantSubdomain, agentId,
+            newChannelUuid, mediaArg, autoAnswer));
 
         return true;
     }
 
     /// <summary>
-    /// Runs off the ESL event loop (see <see cref="ConnectAnsweredLegAsync"/>). Resolves
-    /// <see cref="QueuedCallDeliveryService"/> and <see cref="ICallStateHistoryRecorder"/> from a
-    /// fresh scope (both are scoped and the caller's scope is already gone), and opens its own
-    /// short-lived ESL connection for the failure-path hangup rather than touching the shared
-    /// read-loop socket.
+    /// Runs off the ESL event loop (see <see cref="ConnectAnsweredLegAsync"/>). Plays the connect
+    /// prompt and waits for it (the simple-bridge delivery path bridges instantly and would cut it
+    /// off), then hands to <see cref="QueuedCallDeliveryService.DeliverAsync"/>. Resolves scoped
+    /// services from a fresh scope (the caller's is gone) and uses its own short-lived ESL
+    /// connection rather than the shared read-loop socket.
+    ///
+    /// On bridge failure the caller is still on the line, so — up to <see cref="MaxBridgeRetries"/>
+    /// times — they're put back in the queue (with MOH) rather than dropped; only after that is it
+    /// a callback abandon.
     /// </summary>
     private async Task BridgeToReservedAgentAsync(
         Guid recordId, Guid campaignId, Guid tenantId, string tenantSchema, string tenantSubdomain,
-        Guid agentId, string channelUuid, bool autoAnswer)
+        Guid agentId, string channelUuid, string connectMediaArg, bool autoAnswer)
     {
         try
         {
+            await using var esl = new EslClient(eslLogger);
+            await esl.ConnectAsync(EslHost, EslPort, EslPass, CancellationToken.None);
+
+            // Connect prompt to the caller, then let it play out before delivery bridges.
+            try { await esl.BroadcastAsync(channelUuid, connectMediaArg, CancellationToken.None); }
+            catch (Exception ex) { logger.LogDebug(ex, "QueueCallback {Uuid}: connect prompt broadcast failed (non-fatal)", channelUuid); }
+            if (ConnectPromptSettleMs > 0)
+                await Task.Delay(ConnectPromptSettleMs, CancellationToken.None);
+
             using var scope = scopeFactory.CreateScope();
             var delivery = scope.ServiceProvider.GetRequiredService<QueuedCallDeliveryService>();
 
-            var result = await delivery.DeliverAsync(
-                tenantId, tenantSchema, tenantSubdomain, recordId, agentId, CancellationToken.None);
+            DeliveryResult result;
+            try
+            {
+                result = await delivery.DeliverAsync(
+                    tenantId, tenantSchema, tenantSubdomain, recordId, agentId, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                // The simple-bridge path throws (not returns) when the agent's softphone can't be
+                // resolved — normalise it to a failed result so the re-queue / abandon path runs.
+                logger.LogWarning(ex, "QueueCallback: DeliverAsync threw for {RecordId} — treating as bridge failure", recordId);
+                result = new DeliveryResult(false, ex.Message);
+            }
             if (result.Success) return;
-
-            logger.LogWarning(
-                "QueueCallback: delivery to reserved agent {AgentId} failed for {RecordId}: {Error} — releasing agent, hanging up caller",
-                agentId, recordId, result.ErrorDetail);
 
             if (autoAnswer)
                 await hub.Clients.Group($"agent:{agentId}").ReceiveAutoConnectFailed(recordId.ToString());
             await ReleaseAgentAsync(tenantId, tenantSchema, agentId, CancellationToken.None);
 
-            await using (var esl = new EslClient(eslLogger))
+            var recorder = scope.ServiceProvider.GetRequiredService<ICallStateHistoryRecorder>();
+            var session  = await sessionStore.GetAsync(channelUuid, CancellationToken.None);
+            var fails    = ParseInt(session?.Vars.GetValueOrDefault("_qcb_bridge_fails")) + 1;
+
+            if (session is not null && fails <= MaxBridgeRetries)
             {
-                await esl.ConnectAsync(EslHost, EslPort, EslPass, CancellationToken.None);
-                await esl.HangupChannelAsync(channelUuid, CancellationToken.None);
+                // Caller is still connected — put them back in queue instead of abandoning.
+                logger.LogWarning(
+                    "QueueCallback: bridge to reserved agent {AgentId} failed for {RecordId} ({Error}) — re-queuing caller (attempt {Fails}/{Max})",
+                    agentId, recordId, result.ErrorDetail, fails, MaxBridgeRetries);
+
+                session.Vars["_queued"]           = "true";
+                session.Vars["_in_queue_at"]      = DateTimeOffset.UtcNow.ToString("O");
+                session.Vars["_qcb_bridge_fails"] = fails.ToString();
+                session.Vars.Remove("_eligible_agents");   // QueuePollingService re-ranks
+                session.Vars.Remove("_assigned_agent_id");
+                session.Vars.Remove("_pending_agent_id");
+                session.Vars.Remove("_pending_interaction_id");
+                await sessionStore.SaveAsync(session, CancellationToken.None);
+
+                try { await esl.BroadcastAsync(channelUuid, "local_stream://moh", CancellationToken.None); }
+                catch (Exception ex) { logger.LogDebug(ex, "QueueCallback {Uuid}: re-queue MOH broadcast failed (non-fatal)", channelUuid); }
+
+                await recorder.RecordAsync(
+                    tenantId, tenantSchema, recordId, CallHistoryState.InQueue, campaignId,
+                    agentId: null, detail: $"Re-queued after callback bridge failure #{fails}",
+                    ct: CancellationToken.None);
+                return;
             }
 
-            var recorder = scope.ServiceProvider.GetRequiredService<ICallStateHistoryRecorder>();
+            logger.LogWarning(
+                "QueueCallback: bridge to reserved agent {AgentId} failed for {RecordId} ({Error}) — retries exhausted, hanging up caller + callback abandon",
+                agentId, recordId, result.ErrorDetail);
+
+            await esl.HangupChannelAsync(channelUuid, CancellationToken.None);
             await recorder.RecordAsync(
                 tenantId, tenantSchema, recordId, CallHistoryState.Abandoned, campaignId,
                 agentId: null, detail: "Queue callback connected but agent bridge failed",

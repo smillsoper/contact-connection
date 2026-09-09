@@ -113,6 +113,44 @@ public class CallRecordingControllerTests
         h.Factory.Verify(f => f.CreateAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    // ── notification beep ──────────────────────────────────────────────────
+
+    private const string DefaultBeepTone = "tone_stream://%(250,14000,1400);loops=-1";
+
+    [Fact]
+    public async Task StartAsync_Beep_StartsDisplaceTone()
+    {
+        var h = new Harness();
+        await h.Controller.StartAsync(Cmd(), new RecordingStartOptions { Beep = true }, h.Esl.Object);
+        h.Esl.Verify(e => e.DisplaceAsync(Uuid, "start", DefaultBeepTone, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task StartAsync_NoBeep_DoesNotDisplace()
+    {
+        var h = new Harness();
+        await h.Controller.StartAsync(Cmd(), new RecordingStartOptions { Beep = false }, h.Esl.Object);
+        h.Esl.Verify(e => e.DisplaceAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task StopAsync_AfterBeepStart_StopsDisplaceTone()
+    {
+        var h = new Harness();
+        await h.Controller.StartAsync(Cmd(), new RecordingStartOptions { Beep = true }, h.Esl.Object);
+        await h.Controller.StopAsync(Cmd(), h.Esl.Object);
+        h.Esl.Verify(e => e.DisplaceAsync(Uuid, "stop", DefaultBeepTone, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task StopAsync_WithoutBeep_DoesNotStopDisplace()
+    {
+        var h = new Harness();
+        await h.Controller.StartAsync(Cmd(), new RecordingStartOptions { Beep = false }, h.Esl.Object);
+        await h.Controller.StopAsync(Cmd(), h.Esl.Object);
+        h.Esl.Verify(e => e.DisplaceAsync(It.IsAny<string>(), "stop", It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     // ── mask / unmask / stop ───────────────────────────────────────────────
 
     [Fact]

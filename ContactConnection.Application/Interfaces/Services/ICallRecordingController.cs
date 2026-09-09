@@ -73,6 +73,13 @@ public record RecordingStartOptions
 
     /// <summary>Hard cap on the recording's length in seconds; 0 = unlimited.</summary>
     public int LimitSeconds { get; init; }
+
+    /// <summary>
+    /// Play a periodic notification beep (audible to both parties, captured on the recording)
+    /// while recording — a compliance requirement in some jurisdictions. Driven by the campaign's
+    /// <c>RecordingBeepEnabled</c>. Stopped when the recording stops / on disconnect.
+    /// </summary>
+    public bool Beep { get; init; }
 }
 
 /// <summary>A <see cref="RecordingCommand"/> plus the mask-specific fields.</summary>

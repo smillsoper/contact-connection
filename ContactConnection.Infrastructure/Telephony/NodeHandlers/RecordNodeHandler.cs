@@ -108,6 +108,7 @@ public class RecordNodeHandler : ITelephonyNodeHandler
             {
                 Stereo       = campaign?.RecordStereo ?? true,
                 LimitSeconds = node["recordLimitSeconds"]?.GetValue<int>() ?? 0,
+                Beep         = campaign?.RecordingBeepEnabled ?? false,
             };
 
             var outcome = await _recording.StartAsync(command, options, ctx.Esl, ct);
