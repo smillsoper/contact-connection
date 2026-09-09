@@ -137,6 +137,7 @@
 | 125 | 2026-09-08 | 9:54 AM PDT | 10:32 AM PDT | 38 min | ~13433 min |
 | 126 | 2026-09-08 | 10:50 AM PDT | 11:51 AM PDT | 61 min | ~13494 min |
 | 127 | 2026-09-08 | 11:52 AM PDT | 1:02 PM PDT | 70 min | ~13564 min |
+| 128 | 2026-09-09 | 10:21 AM PDT | 10:54 AM PDT | 33 min | ~13597 min |
 
 ---
 
@@ -6321,3 +6322,82 @@ Queue callback v1 rough edges; S118 registration auto-Unavailable edge cases; re
 `contactconnection.io` SPF/DKIM/DMARC; `cc_timesync` crash-loop; `CommitmentEvents` JSONB
 `ValueComparer`; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader
 `FlowEngine` test coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 128
+
+**Date:** 2026-09-09
+**Start:** 10:21 AM PDT
+**End:** 10:54 AM PDT
+**Duration:** 33 minutes
+**Total Duration:** ~13597 minutes
+
+### Focus
+
+Finish the S127 streamed-TTS work: fix the tf_transfer pre-handoff announcement. S127's approach —
+block the node handler ~30s awaiting `contactconnection::tts_done` via `ITelephonyPlaybackSignal`
+— was structurally broken: the block sat on the single ESL event-loop thread, the only thread
+that can read the `tts_done` event and release the wait, so it timed out every time and then
+processed the event backlog out of order. See memory [[project_streaming_tts_playback]].
+
+### What was built
+
+- **tf_transfer announcement → deferred continuation** (same shape as tf_ivr_menu / tf_voicemail):
+  - `PlayAnnouncementAsync` now returns `bool`. First pass: resolve the announcement (file →
+    streaming vendor → flite), `SetChannelVar cc_tts_url`, `uuid_transfer` into `tts_play`, stash
+    `_announce_in_progress` + `_announce_replay_node` in `ctx.Vars` (engine persists them), return
+    `true` → each destination (`agent` / `campaign_queue` / `telephony_flow`) returns terminal
+    `("transferring")`. **No blocking, no timeout, ESL loop stays free.**
+  - `HandleTtsDoneAsync`: on `_announce_in_progress` / `_announce_replay_node`, set `_announce_done`
+    and `ResumeFromNodeAsync` the tf_transfer node. Second pass: `PlayAnnouncementAsync` sees
+    `_announce_done`, clears both markers via `RemoveSessionVar`, returns `false` → the handoff
+    runs in a normal flow dispatch (so `_switch_campaign_id` / `ApplyPendingSessionMutations` /
+    `ICallStateHistoryRecorder` all behave as designed).
+  - `CHANNEL_PARK` + `PLAYBACK_STOP` guards also match `_announce_replay_node` so the `tts_play`
+    re-park isn't taken for a fresh DID call (`destination` prefers `cc_did`, which stays the
+    original DID across the transfer).
+- **Deleted** `ITelephonyPlaybackSignal` / `TelephonyPlaybackSignal` / `TelephonyPlaybackSignalTests`
+  + DI registration; reverted the `TransferNodeHandler` / `EslBackgroundService` ctor params.
+- **`ElevenLabsTtsStreamProvider`**: wrapped the courtesy `CloseAsync` in try/catch — ElevenLabs
+  routinely half-closes the TCP right after the final frame, which was logging
+  `synthesis/encode failed` on otherwise-successful synths.
+- **Removed a buggy liveness gate**: first live test abandoned the deferred transfer because
+  `esl.ChannelExistsAsync` (a new inline `uuid_exists`) returned `false` for a live channel — an
+  inline api/response on the shared read-loop socket races the event stream. Redundant anyway: a
+  caller that hangs up during the announcement has its session deleted by
+  `HandleChannelHangupAsync`, so `ResolveSessionAsync` returns null and we bail there.
+  `EslClient.ChannelExistsAsync` deleted.
+
+### Live-verified (real inbound call, `test-tenant` → ElevenLabs, agent ext 1000)
+
+**tf_transfer with a streaming-TTS announcement ✅** — announcement starts within a few seconds,
+plays in full with no blips, then transfer → screen-pop → whisper → CRM script pop → caller
+bridged to the agent. tf_play and tf_whisper remain ✅ from S127. **All three streaming-TTS
+telephony nodes are now verified end-to-end.**
+
+### Watch item (not a blocker)
+
+The first tf_transfer attempt had ~1 min of dead air before the announcement audio; it did not
+recur on the successful run. Almost certainly a cold-start artifact — first ElevenLabs WS
+connection of the session / ffmpeg process cold / `host.docker.internal` DNS miss inside the FS
+container. Revisit only if it shows up on a warm path.
+
+### State
+
+- `dotnet build` + `dotnet test` (608 pass; Infra 357 = −4 deleted signal tests +1
+  deferred-second-pass test) + `tsc --noEmit` clean.
+- Commits: `e4c3c88` (deferred rework), `0d90bf5` (drop liveness gate). Pushed.
+
+### Next session — pick up here
+
+1. Streaming TTS is done. Remaining telephony carry-overs: queue callback v1 rough edges
+   ([[project_queue_callback]]); live-verify S118 registration auto-Unavailable edge cases;
+   recording tail (beep wiring, retention purge job, `tf_secure_collect`).
+2. Telnyx Verified Numbers feature.
+3. Resume the RMD filing when budget allows.
+4. Email deliverability: SPF/DKIM/DMARC for `contactconnection.io`.
+5. `cc_timesync` container crash-loops — remove or fix.
+6. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit;
+   `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test
+   coverage; retire the `.cc` softphone route.
