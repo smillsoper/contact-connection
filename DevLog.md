@@ -138,6 +138,7 @@
 | 126 | 2026-09-08 | 10:50 AM PDT | 11:51 AM PDT | 61 min | ~13494 min |
 | 127 | 2026-09-08 | 11:52 AM PDT | 1:02 PM PDT | 70 min | ~13564 min |
 | 128 | 2026-09-09 | 10:21 AM PDT | 10:54 AM PDT | 33 min | ~13597 min |
+| 129 | 2026-09-09 | 10:56 AM PDT | 11:21 AM PDT | 25 min | ~13622 min |
 
 ---
 
@@ -6401,3 +6402,85 @@ container. Revisit only if it shows up on a warm path.
 6. Prior carry-overs: `CallRecord.CommitmentEvents` JSONB `ValueComparer` retrofit;
    `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader `FlowEngine` test
    coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 129
+
+**Date:** 2026-09-09
+**Start:** 10:56 AM PDT
+**End:** 11:21 AM PDT
+**Duration:** 25 minutes
+**Total Duration:** ~13622 minutes
+
+### Focus
+
+Group A telephony cleanup: recording-tail retention purge + two queue-callback v1 rough edges.
+First verified two housekeeping items the user flagged as already done:
+
+- **Dead code** — `ContactConnection.Worker/FreeSwitchEslService.cs` was already deleted (S120);
+  only a historical comment at `Worker/Program.cs:48` remains. `Infrastructure/FreeSwitchEsl/`
+  (`EslEvent.cs` + `FreeSwitchEslClient.cs`) is **live** — `ScheduledCallbackProcessingService`
+  `new`s `FreeSwitchEslClient` for its own ESL socket. Nothing to delete. [[project_worker_dev_boot]]
+  updated.
+- **S118 registration visibility** — user confirmed live-verified. [[project_agent_softphone_registration_visibility]]
+  + memory index marked done.
+
+### What was built
+
+**Recording retention purge job**
+- **`ContactConnection.Worker/RecordingRetentionService`** — peer to `RecordingMergeService`.
+  Per active tenant, per poll (`Recording:Retention:PollHours`, default 12), pulls a batch of the
+  oldest still-retained recordings; for each past its campaign's `RecordingRetentionDays`
+  (measured from `CallEndAt ?? RecordingStoppedAt ?? CreatedAt`) deletes the merged-output blob
+  (`{prefix}/{id}/merged.*`), the screen-capture blobs (`screen/{id}`), and the raw call-audio
+  `.wav` on disk, then `CallRecord.MarkRecordingPurged("retention_expired")`. Per-campaign window
+  applied in memory (a short-window campaign shouldn't wait behind older calls on a long one);
+  no-campaign records fall back to `Recording:Retention:DefaultDays` (90). Recording event
+  trail + call record itself are kept — only media goes.
+- **`ICallRecordRepository.FindRetainedRecordingIdsOldestFirstAsync`** + impl (retained + a
+  recording start timestamp, ordered by oldest call).
+- **`appsettings.json`** — `Recording:Retention` block; registered in `Worker/Program.cs`.
+- 3 repo tests (`CallRecordRepositoryRetentionTests`) — Infra 357 → 360.
+
+**Queue-callback v1 rough edges** ([[project_queue_callback]])
+- **#1 — `DeliverAsync` inline on the ESL event loop.** `ConnectAnsweredLegAsync` keeps the fast
+  synchronous work inline (session re-key, `SetContactIdExternal`, connect prompt, the
+  `ReceiveAutoConnecting` SignalR push). Delivery + bridge-failure handling move to a new
+  `BridgeToReservedAgentAsync` fired via `_ = Task.Run(...)` — its own DI scope (resolves
+  `QueuedCallDeliveryService` + `ICallStateHistoryRecorder`, both scoped, since the caller's
+  scope is torn down when the CHANNEL_PARK handler returns) and its own short-lived `EslClient`
+  for the failure-path hangup (not the shared read-loop socket).
+  `QueueCallbackDeliveryService` gains `IServiceScopeFactory`.
+- **#3 — `connectAudioFileId` picker.** The designer already uses the shared `<AudioPicker>`
+  (done in the S124 picker consolidation). The live gap was `ResolveConnectMediaAsync`, a bespoke
+  resolver that passed `__platform:{voice}/{phrase}` refs through verbatim (unplayable) — now
+  delegates to the shared `TelephonyAudioResolver.ResolveFileArgAsync` (file GUID / `__builtin:` /
+  `__platform:` / stream URIs), built-in prompt on null.
+
+### Still open (deferred — need a live stack)
+
+- Recording **beep wiring** (`Campaign.RecordingBeepEnabled` → `uuid_displace … tone_stream:// … mux`).
+- Queue-callback **#2** (connect-prompt clip on the simple-bridge path — "may clip", unconfirmed)
+  and **#4** (bridge-fail after the caller answered → abandon with no re-queue).
+- **`tf_secure_collect`** guided-DTMF node — its own session.
+
+### State
+
+- `dotnet build` + `dotnet test` (611 pass — Domain 147, App 20, Infra 360, Api 84) + `tsc
+  --noEmit` all clean. No new migrations.
+- Commit `fb06dc9` (pushed).
+
+### Next session — pick up here
+
+1. Live-test session: recording **beep** + queue-callback **#2 & #4** (all need a real call).
+2. `tf_secure_collect` guided-DTMF node.
+3. Then a bigger Group D piece (Chat System / HubService / Integrations / Reporting) or Group B
+   telephony features (Telnyx Verified Numbers / ANI passthrough / DNC registry).
+
+### Carry-overs (unchanged)
+
+RMD filing; `.cc → .io` migration tail (Telnyx onboarding + SIP config + `.cc` retirement);
+`contactconnection.io` SPF/DKIM/DMARC; `cc_timesync` crash-loop; `CommitmentEvents` JSONB
+`ValueComparer`; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader
+`FlowEngine` test coverage; retire the `.cc` softphone route.
