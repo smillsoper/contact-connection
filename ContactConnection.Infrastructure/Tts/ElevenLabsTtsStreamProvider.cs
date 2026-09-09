@@ -135,7 +135,19 @@ public class ElevenLabsTtsStreamProvider : ITtsStreamProvider
         }
 
         if (socket.State == WebSocketState.Open)
-            await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None);
+        {
+            try
+            {
+                await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None);
+            }
+            catch (WebSocketException ex)
+            {
+                // ElevenLabs routinely half-closes the TCP connection right after the final audio
+                // frame, so this courtesy close handshake throws. Every audio chunk is already
+                // yielded by now — swallow it instead of surfacing "synthesis/encode failed".
+                _logger.LogDebug("ElevenLabs TTS: courtesy close failed ({Msg}) — ignoring", ex.Message);
+            }
+        }
     }
 
     private static object BuildVoiceSettings(IReadOnlyDictionary<string, string>? settings) => new

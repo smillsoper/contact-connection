@@ -25,9 +25,7 @@ public class TransferNodeHandlerTests
         new(new DbContextOptionsBuilder<TenantDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
 
-    private TransferNodeHandler NewHandler(
-        Dictionary<string, string?>? config = null, TenantDbContext? db = null,
-        ITelephonyPlaybackSignal? playbackSignal = null)
+    private TransferNodeHandler NewHandler(Dictionary<string, string?>? config = null, TenantDbContext? db = null)
     {
         var cfg = new ConfigurationBuilder()
             .AddInMemoryCollection(config ?? new Dictionary<string, string?>())
@@ -48,7 +46,6 @@ public class TransferNodeHandlerTests
             new Mock<ITelephonyCallSessionStore>().Object,
             new Mock<ITtsStreamingService>().Object,
             new Mock<ITtsFileSynthesizer>().Object,
-            playbackSignal ?? new TelephonyPlaybackSignal(),
             sp, cfg, NullLogger<TransferNodeHandler>.Instance);
     }
 
@@ -254,24 +251,26 @@ public class TransferNodeHandlerTests
     }
 
     [Fact]
-    public async Task Announcement_BuiltinFile_PlayedForegroundInTtsPlay()
+    public async Task Announcement_BuiltinFile_DefersHandoffIntoTtsPlay()
     {
         var esl = NewEsl();
         var flowId = Guid.NewGuid();
         _engine.Setup(x => x.SwitchFlowAsync(Uuid, flowId, It.IsAny<IEslCommander>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        var ctx = Ctx(esl.Object);
 
-        // Pre-latch the "playback finished" signal so the handler's wait returns immediately
-        // (in production, EslBackgroundService fires this off contactconnection::tts_done).
-        var signal = new TelephonyPlaybackSignal();
-        signal.Signal(Uuid);
-
-        await NewHandler(playbackSignal: signal).ExecuteAsync(
+        var result = await NewHandler().ExecuteAsync(
             Node("telephony_flow", new JsonObject { ["targetTelephonyFlowId"] = flowId.ToString(), ["announceAudioFileId"] = "__builtin:/hold.wav" }),
-            Ctx(esl.Object));
+            ctx);
 
+        // First pass: announcement fired into tts_play, node returns terminal, handoff deferred.
+        Assert.Equal("transferring", result.TransitionTaken);
+        Assert.Null(result.NextNodeId);
         esl.Verify(e => e.SetChannelVarAsync(Uuid, "cc_tts_url", "/hold.wav", It.IsAny<CancellationToken>()), Times.Once);
         esl.Verify(e => e.TransferAsync(Uuid, "tts_play", "XML", "default", It.IsAny<CancellationToken>()), Times.Once);
         esl.Verify(e => e.BroadcastAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Equal("true", ctx.Vars["_announce_in_progress"]);
+        Assert.Equal("tf_transfer_1", ctx.Vars["_announce_replay_node"]);
+        _engine.Verify(x => x.SwitchFlowAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<IEslCommander>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -281,10 +280,7 @@ public class TransferNodeHandlerTests
         var flowId = Guid.NewGuid();
         _engine.Setup(x => x.SwitchFlowAsync(Uuid, flowId, It.IsAny<IEslCommander>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
-        var signal = new TelephonyPlaybackSignal();
-        signal.Signal(Uuid);
-
-        await NewHandler(playbackSignal: signal).ExecuteAsync(
+        await NewHandler().ExecuteAsync(
             Node("telephony_flow", new JsonObject
             {
                 ["targetTelephonyFlowId"] = flowId.ToString(),
@@ -296,5 +292,28 @@ public class TransferNodeHandlerTests
         esl.Verify(e => e.SetChannelVarAsync(Uuid, "cc_xfer_announce_text", "Please hold while we transfer you.", It.IsAny<CancellationToken>()), Times.Once);
         esl.Verify(e => e.SetChannelVarAsync(Uuid, "cc_tts_url", "tts://flite|slt|${cc_xfer_announce_text}", It.IsAny<CancellationToken>()), Times.Once);
         esl.Verify(e => e.TransferAsync(Uuid, "tts_play", "XML", "default", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Announcement_SecondPass_SkipsAnnouncement_AndProceedsWithHandoff()
+    {
+        var esl = NewEsl();
+        var flowId = Guid.NewGuid();
+        _engine.Setup(x => x.SwitchFlowAsync(Uuid, flowId, It.IsAny<IEslCommander>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+
+        var ctx = Ctx(esl.Object);
+        // HandleTtsDoneAsync sets this before re-running the node.
+        ctx.Vars["_announce_done"] = "true";
+        ctx.Vars["_announce_replay_node"] = "tf_transfer_1";
+
+        var result = await NewHandler().ExecuteAsync(
+            Node("telephony_flow", new JsonObject { ["targetTelephonyFlowId"] = flowId.ToString(), ["announceAudioFileId"] = "__builtin:/hold.wav" }),
+            ctx);
+
+        Assert.Equal("transferred", result.TransitionTaken);
+        _engine.Verify(x => x.SwitchFlowAsync(Uuid, flowId, It.IsAny<IEslCommander>(), It.IsAny<CancellationToken>()), Times.Once);
+        esl.Verify(e => e.TransferAsync(Uuid, "tts_play", "XML", "default", It.IsAny<CancellationToken>()), Times.Never);
+        Assert.True(ctx.VarsToRemove.Contains("_announce_done"));
+        Assert.True(ctx.VarsToRemove.Contains("_announce_replay_node"));
     }
 }

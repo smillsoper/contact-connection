@@ -24,8 +24,12 @@ namespace ContactConnection.Infrastructure.Telephony.NodeHandlers;
 ///                     extension emits contactconnection::xfer_failed and re-parks so
 ///                     EslBackgroundService can follow the <c>failed</c> handle.
 ///
-/// Announcement (announceAudioFileId → announceTtsText fallback) is played to the caller before the
-/// handoff: inline for external_number (in the dialplan), fire-and-forget uuid_broadcast otherwise.
+/// Announcement (announceAudioFileId → announceTtsText fallback), for every destination except
+/// external_number, is played to the caller <em>foreground</em> in the <c>tts_play</c> dialplan
+/// extension. The node returns terminal after firing it and is re-run by
+/// EslBackgroundService.HandleTtsDoneAsync on <c>contactconnection::tts_done</c> — deferred
+/// continuation, the same shape as tf_ivr_menu / tf_voicemail. external_number plays its
+/// announcement inline in the <c>xfer_bridge</c> extension.
 /// </summary>
 public class TransferNodeHandler : ITelephonyNodeHandler
 {
@@ -37,7 +41,6 @@ public class TransferNodeHandler : ITelephonyNodeHandler
     private readonly ITelephonyCallSessionStore _sessionStore;
     private readonly ITtsStreamingService _tts;
     private readonly ITtsFileSynthesizer _fileSynth;
-    private readonly ITelephonyPlaybackSignal _playbackSignal;
     private readonly IServiceProvider _services;
     private readonly IConfiguration _config;
     private readonly ILogger<TransferNodeHandler> _logger;
@@ -49,7 +52,6 @@ public class TransferNodeHandler : ITelephonyNodeHandler
         ITelephonyCallSessionStore sessionStore,
         ITtsStreamingService tts,
         ITtsFileSynthesizer fileSynth,
-        ITelephonyPlaybackSignal playbackSignal,
         IServiceProvider services,
         IConfiguration config,
         ILogger<TransferNodeHandler> logger)
@@ -60,7 +62,6 @@ public class TransferNodeHandler : ITelephonyNodeHandler
         _sessionStore      = sessionStore;
         _tts               = tts;
         _fileSynth         = fileSynth;
-        _playbackSignal    = playbackSignal;
         _services          = services;
         _config            = config;
         _logger            = logger;
@@ -113,7 +114,8 @@ public class TransferNodeHandler : ITelephonyNodeHandler
             return Follow(transitions, "failed");
         }
 
-        await PlayAnnouncementAsync(node, ctx, ct);
+        if (await PlayAnnouncementAsync(node, ctx, ct))
+            return new TelephonyNodeResult(null, "transferring");
 
         // Deliver via the same queue path as campaign_queue (single-agent eligible list) rather than
         // an inline bridge — the direct BridgeToAgentAsync races the channel settling right after the
@@ -143,7 +145,8 @@ public class TransferNodeHandler : ITelephonyNodeHandler
         if (!Guid.TryParse(node["targetTelephonyFlowId"]?.GetValue<string>(), out var flowId))
             return Follow(transitions, "failed");
 
-        await PlayAnnouncementAsync(node, ctx, ct);
+        if (await PlayAnnouncementAsync(node, ctx, ct))
+            return new TelephonyNodeResult(null, "transferring");
 
         // Resolve lazily — the engine depends on the handler set, so constructor injection would cycle.
         var engine = _services.GetRequiredService<ITelephonyFlowEngine>();
@@ -231,7 +234,8 @@ public class TransferNodeHandler : ITelephonyNodeHandler
             }
         }
 
-        await PlayAnnouncementAsync(node, ctx, ct);
+        if (await PlayAnnouncementAsync(node, ctx, ct))
+            return new TelephonyNodeResult(null, "transferring");
 
         var ranked = await _ranker.GetRankedEligibleAgentsAsync(db, ctx.TenantId, targetCampaignId, ct: ct);
         var eligible = target.RingStrategy == CampaignRingStrategy.RingTopNByProficiency
@@ -267,53 +271,56 @@ public class TransferNodeHandler : ITelephonyNodeHandler
     // ── announcement ─────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Used by every destination except external_number — the channel is still live under our own
-    /// ESL commands here. Plays the configured announcement (audio file → streaming vendor →
-    /// flite, first match wins) <em>foreground</em> in the <c>tts_play</c> dialplan extension and
-    /// blocks until it finishes, so the caller isn't enqueued / the flow isn't switched while the
-    /// announcement is still audible. A streaming (shout://) announcement can't be fire-and-forget
-    /// anyway — mod_shout never fires PLAYBACK_STOP on a finite stream. No announcement configured
-    /// → returns immediately (fire-immediately handoff).
+    /// Deferred-continuation announcement for every destination except external_number. First pass:
+    /// resolve the configured announcement (audio file → streaming vendor → flite, first match
+    /// wins), <c>uuid_transfer</c> the caller into the <c>tts_play</c> extension for a foreground
+    /// playback, and return <c>true</c> — the caller must return a terminal result.
+    /// EslBackgroundService.HandleTtsDoneAsync re-runs this node on
+    /// <c>contactconnection::tts_done</c>, this time with <c>_announce_done</c> set, so the second
+    /// pass returns <c>false</c> and the handoff proceeds. Nothing configured also returns
+    /// <c>false</c> (fire-immediately).
     ///
-    /// tts_play emits <c>contactconnection::tts_done</c>; EslBackgroundService.HandleTtsDoneAsync
-    /// sees <c>_announce_in_progress</c> on the session and releases the <see cref="_playbackSignal"/>
-    /// this method is awaiting.
+    /// A shout:// announcement can't be fire-and-forget (mod_shout never fires PLAYBACK_STOP on a
+    /// finite stream), and blocking the handler while awaiting the event proved unreliable — the
+    /// flow engine holds a stale session for the whole wait. Deferred continuation avoids both.
     /// </summary>
-    private async Task PlayAnnouncementAsync(JsonObject node, TelephonyFlowContext ctx, CancellationToken ct)
+    /// <returns><c>true</c> when the announcement was fired and the caller must return terminal;
+    /// <c>false</c> to proceed with the handoff (nothing to play, or the post-announcement pass).</returns>
+    private async Task<bool> PlayAnnouncementAsync(JsonObject node, TelephonyFlowContext ctx, CancellationToken ct)
     {
-        if (ctx.Esl is null) return;
+        if (ctx.Esl is null) return false;
+
+        // Second pass — tts_done resumed us here after the announcement finished.
+        if (ctx.Vars.ContainsKey("_announce_done"))
+        {
+            ctx.RemoveSessionVar("_announce_done");
+            ctx.RemoveSessionVar("_announce_replay_node");
+            return false;
+        }
 
         var announceArg = await ResolveLiveAnnouncementArgAsync(node, ctx, ct);
-        if (announceArg is null) return;   // nothing configured → immediate handoff
+        if (announceArg is null) return false;   // nothing configured → immediate handoff
 
-        var uuid = ctx.ChannelUuid;
-        var waitTask = _playbackSignal.WaitAsync(uuid, TimeSpan.FromSeconds(30), ct);
-
-        // The engine only writes ctx.Vars back after this handler returns, so drop the marker
-        // straight into the session store for HandleTtsDoneAsync / HandleChannelParkAsync to see
-        // during the await. The engine's post-return SaveAsync (of a session copy that never had
-        // this key) clears it again; RemoveSessionVar makes that removal explicit for safety.
-        var session = await _sessionStore.GetAsync(uuid, ct);
-        if (session is not null)
+        var replayNode = node["nodeId"]?.GetValue<string>();
+        if (string.IsNullOrEmpty(replayNode))
         {
-            session.Vars["_announce_in_progress"] = "true";
-            await _sessionStore.SaveAsync(session, ct);
+            // No node id to come back to — play it fire-and-forget and proceed (best effort).
+            _logger.LogWarning(
+                "TransferNodeHandler [{Uuid}]: node has no id — announcement played fire-and-forget", ctx.ChannelUuid);
+            await ctx.Esl.BroadcastAsync(ctx.ChannelUuid, announceArg, ct);
+            return false;
         }
 
-        try
-        {
-            _logger.LogInformation("TransferNodeHandler [{Uuid}]: announcement → tts_play ({Arg})", uuid, announceArg);
-            await ctx.Esl.SetChannelVarAsync(uuid, "cc_tts_url", announceArg, ct);
-            await ctx.Esl.TransferAsync(uuid, "tts_play", "XML", "default", ct);
-
-            if (!await waitTask)
-                _logger.LogWarning(
-                    "TransferNodeHandler [{Uuid}]: announcement did not signal done within 30s — proceeding with handoff", uuid);
-        }
-        finally
-        {
-            ctx.RemoveSessionVar("_announce_in_progress");
-        }
+        // Markers go in ctx.Vars so the flow engine persists them — HandleTtsDoneAsync and the
+        // CHANNEL_PARK / PLAYBACK_STOP guards read them off the session.
+        ctx.Vars["_announce_in_progress"] = "true";
+        ctx.Vars["_announce_replay_node"] = replayNode;
+        await ctx.Esl.SetChannelVarAsync(ctx.ChannelUuid, "cc_tts_url", announceArg, ct);
+        await ctx.Esl.TransferAsync(ctx.ChannelUuid, "tts_play", "XML", "default", ct);
+        _logger.LogInformation(
+            "TransferNodeHandler [{Uuid}]: announcement → tts_play ({Arg}); deferring handoff to tts_done",
+            ctx.ChannelUuid, announceArg);
+        return true;
     }
 
     /// <summary>

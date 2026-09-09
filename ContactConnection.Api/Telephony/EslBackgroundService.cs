@@ -35,7 +35,6 @@ public sealed class EslBackgroundService : BackgroundService
     private readonly IAgentStateStore _stateStore;
     private readonly IAgentRegistrationStore _registrationStore;
     private readonly IDashboardNotifier _dashboardNotifier;
-    private readonly ITelephonyPlaybackSignal _playbackSignal;
 
     public EslBackgroundService(
         IHubContext<FlowHub, IFlowHubClient> hub,
@@ -46,8 +45,7 @@ public sealed class EslBackgroundService : BackgroundService
         ITelephonyCallSessionStore sessionStore,
         IAgentStateStore stateStore,
         IAgentRegistrationStore registrationStore,
-        IDashboardNotifier dashboardNotifier,
-        ITelephonyPlaybackSignal playbackSignal)
+        IDashboardNotifier dashboardNotifier)
     {
         _hub                    = hub;
         _scopeFactory           = scopeFactory;
@@ -58,7 +56,6 @@ public sealed class EslBackgroundService : BackgroundService
         _stateStore             = stateStore;
         _registrationStore      = registrationStore;
         _dashboardNotifier      = dashboardNotifier;
-        _playbackSignal         = playbackSignal;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -195,12 +192,16 @@ public sealed class EslBackgroundService : BackgroundService
         // Same idea for streaming-vendor TTS: tf_play / tf_whisper / tf_transfer's announcement
         // uuid_transfer the channel into the tts_play extension for a foreground playback, which
         // re-parks when it finishes. contactconnection::tts_done drives the resume. (The whisper
-        // agent leg also carries cc_whisper=true and is already skipped above.)
+        // agent leg also carries cc_whisper=true and is already skipped above.) The session-var
+        // checks matter because `destination` prefers cc_did, which stays the original DID across
+        // the transfer — so a tts_play re-park with no transfer_source would otherwise look like a
+        // fresh DID call. _announce_replay_node covers the tf_transfer window through the re-run.
         if (destination == "tts_play"
             || rawDestination == "tts_play"
             || transferSource.Contains("tts_play")
             || ivrSession?.Vars.GetValueOrDefault("_tts_in_progress") == "true"
-            || ivrSession?.Vars.GetValueOrDefault("_announce_in_progress") == "true")
+            || ivrSession?.Vars.GetValueOrDefault("_announce_in_progress") == "true"
+            || !string.IsNullOrEmpty(ivrSession?.Vars.GetValueOrDefault("_announce_replay_node")))
         {
             _logger.LogInformation("CHANNEL_PARK {Uuid}: returned from TTS playback — not a new call", channelUuid);
             return;
@@ -569,9 +570,9 @@ public sealed class EslBackgroundService : BackgroundService
     /// <summary>
     /// The tts_play dialplan extension finished a foreground streaming-vendor TTS playback (or a
     /// tf_transfer announcement) and emitted this event. Three cases, by how the channel got there:
-    ///   whisper agent leg (whisper:{uuid} reverse key)  → resume the agent_selected branch → bridge
-    ///   tf_transfer announcement (_announce_in_progress) → just release the awaiting handler
-    ///   tf_play (_tts_in_progress)                       → resume the caller flow on tts_finished
+    ///   whisper agent leg (whisper:{uuid} reverse key)        → resume agent_selected branch → bridge
+    ///   tf_transfer announcement (_announce_replay_node set)   → re-run the tf_transfer node
+    ///   tf_play (_tts_in_progress)                             → resume the caller flow on tts_finished
     /// </summary>
     private async Task HandleTtsDoneAsync(
         Dictionary<string, string> vars, EslClient esl, CancellationToken ct)
@@ -595,13 +596,30 @@ public sealed class EslBackgroundService : BackgroundService
             return;
         }
 
-        // 2. tf_transfer pre-handoff announcement: the node handler is blocked in PlayAnnouncementAsync.
-        if (session.Vars.GetValueOrDefault("_announce_in_progress") == "true")
+        // 2. tf_transfer pre-handoff announcement finished — re-run the tf_transfer node (deferred
+        //    continuation). _announce_done tells PlayAnnouncementAsync to skip the announcement on
+        //    this pass and proceed straight to the handoff. _announce_replay_node stays set until
+        //    that second pass consumes it, so the CHANNEL_PARK guard keeps recognising the re-park.
+        var replayNode = session.Vars.GetValueOrDefault("_announce_replay_node");
+        if (session.Vars.GetValueOrDefault("_announce_in_progress") == "true" || !string.IsNullOrEmpty(replayNode))
         {
-            _logger.LogInformation("tts_done {Uuid}: transfer announcement finished → release handler", uuid);
             session.Vars.Remove("_announce_in_progress");
+            session.Vars["_announce_done"] = "true";
             await _sessionStore.SaveAsync(session, ct);
-            _playbackSignal.Signal(uuid);
+
+            if (string.IsNullOrEmpty(replayNode))
+            {
+                _logger.LogWarning("tts_done {Uuid}: announcement finished but no replay node — call stays parked", uuid);
+                return;
+            }
+            if (!await esl.ChannelExistsAsync(uuid, ct))
+            {
+                _logger.LogInformation("tts_done {Uuid}: caller gone during announcement — abandoning deferred transfer", uuid);
+                return;
+            }
+
+            _logger.LogInformation("tts_done {Uuid}: transfer announcement finished → re-running {Node}", uuid, replayNode);
+            await ResumeAsync(session.ChannelUuid, replayNode, esl, ct);
             return;
         }
 
@@ -1470,7 +1488,8 @@ public sealed class EslBackgroundService : BackgroundService
         // contactconnection::tts_done event that follows, not here. Ignore it so a stale _play_*
         // var from an earlier tf_play can't be mistaken for this playback ending.
         if (session.Vars.GetValueOrDefault("_tts_in_progress") == "true"
-            || session.Vars.GetValueOrDefault("_announce_in_progress") == "true")
+            || session.Vars.GetValueOrDefault("_announce_in_progress") == "true"
+            || !string.IsNullOrEmpty(session.Vars.GetValueOrDefault("_announce_replay_node")))
             return;
 
         if (!session.Vars.ContainsKey("_play_media_arg")) return;

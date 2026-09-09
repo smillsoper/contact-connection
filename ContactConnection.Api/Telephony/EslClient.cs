@@ -209,6 +209,14 @@ public sealed class EslClient(ILogger<EslClient>? logger = null) : IOwnedEslComm
     public Task<string?> RunCommandAsync(string command, CancellationToken ct = default) =>
         SendApiBodyAsync(command, ct);
 
+    /// <summary><c>uuid_exists</c> — whether the channel is still up. Used to abandon a deferred
+    /// handoff when the caller dropped while an announcement was playing.</summary>
+    public async Task<bool> ChannelExistsAsync(string uuid, CancellationToken ct = default)
+    {
+        var body = await SendApiBodyAsync($"uuid_exists {uuid}", ct);
+        return string.Equals(body?.Trim(), "true", StringComparison.OrdinalIgnoreCase);
+    }
+
     public Task BroadcastAsync(string uuid, string mediaArg, CancellationToken ct = default) =>
         SendApiAsync($"uuid_broadcast {uuid} {mediaArg} aleg", ct);
 
