@@ -39,6 +39,13 @@ public interface ICallRecordingController
     void ForgetChannel(string channelUuid);
 
     /// <summary>
+    /// Channel UUIDs of live recordings whose campaign has the notification beep enabled and that
+    /// are not currently in a masked segment. <c>RecordingBeepService</c> plays the periodic tone
+    /// on both legs of each of these every tick.
+    /// </summary>
+    IReadOnlyCollection<string> BeepingChannels();
+
+    /// <summary>
     /// Closes the recording audit trail on hangup: forgets the channel and appends a
     /// <c>stop</c> event (source <c>disconnect</c>). No ESL — FreeSWITCH already stopped the
     /// physical recording when the channel died. Call only when a recording was started and

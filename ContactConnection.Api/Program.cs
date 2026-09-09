@@ -78,6 +78,10 @@ builder.Services.AddHostedService<QueuePollingService>();
 // endless / very long hold source).
 builder.Services.AddHostedService<PlayAnnouncementService>();
 
+// Call-recording notification beep — periodic short tone on both legs of recordings whose
+// campaign enabled RecordingBeepEnabled.
+builder.Services.AddHostedService<ContactConnection.Api.Telephony.RecordingBeepService>();
+
 // Call trace expiry sweeper — every 1 second, stops traces that hit their duration cap
 builder.Services.AddHostedService<ContactConnection.Api.CallTrace.CallTraceExpiryBackgroundService>();
 

@@ -21,11 +21,11 @@ public sealed class CallRecordingController : ICallRecordingController
 
     private readonly string _recordingsBase;
     private readonly int _defaultMaxMaskSeconds;
-    private readonly string _beepToneStream;
 
     // channelUuid -> the CTS that cancels its pending forced-unmask
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _watchdogs = new();
-    // channelUuid of recordings that started with a notification beep, so StopAsync can end it
+    // channelUuid of live recordings that want the periodic notification beep — RecordingBeepService
+    // reads this each tick and plays the tone on both legs of those calls.
     private readonly ConcurrentDictionary<string, byte> _beeping = new();
 
     public CallRecordingController(
@@ -41,11 +41,6 @@ public sealed class CallRecordingController : ICallRecordingController
         _recordingsBase = (config["FreeSWITCH:RecordingsContainerPath"] ?? "/var/lib/freeswitch/recordings").TrimEnd('/');
         _defaultMaxMaskSeconds =
             int.TryParse(config["Recording:MaxMaskSeconds"], out var v) && v > 0 ? v : 180;
-        // Looping teletone: <on>ms of tone, <off>ms silence, repeat forever. Both parties hear it
-        // and it lands on the recording (proof the notification played). Overridable per deployment.
-        _beepToneStream = config["Recording:BeepToneStream"] is { Length: > 0 } bt
-            ? bt
-            : "tone_stream://%(250,14000,1400);loops=-1";
     }
 
     public Task<RecordingActionOutcome> StartAsync(
@@ -59,10 +54,7 @@ public sealed class CallRecordingController : ICallRecordingController
             await e.RecordAsync(command.ChannelUuid, RecordingEventAction.Start, path, options.LimitSeconds, ct);
 
             if (options.Beep)
-            {
-                await e.DisplaceAsync(command.ChannelUuid, "start", _beepToneStream, ct);
-                _beeping[command.ChannelUuid] = 0;
-            }
+                _beeping[command.ChannelUuid] = 0;   // RecordingBeepService plays the tone on its tick
 
             var evt = RecordingEvent.Start(UtcNow(), command.Source, command.NodeId, path);
             await PersistAsync(command, evt, ct);
@@ -76,11 +68,10 @@ public sealed class CallRecordingController : ICallRecordingController
         RecordingCommand command, IEslCommander? esl = null, CancellationToken ct = default)
     {
         DisarmWatchdog(command.ChannelUuid);
+        _beeping.TryRemove(command.ChannelUuid, out _);
         return RunAsync(esl, async e =>
         {
             await e.RecordAsync(command.ChannelUuid, RecordingEventAction.Stop, PathFor(command), 0, ct);
-            if (_beeping.TryRemove(command.ChannelUuid, out _))
-                await e.DisplaceAsync(command.ChannelUuid, "stop", _beepToneStream, ct);
             var evt = RecordingEvent.Stop(UtcNow(), command.Source, command.NodeId, command.Reason);
             await PersistAsync(command, evt, ct);
             _logger.LogInformation("Recording stopped [{Uuid}] call={CallRecordId} source={Source}",
@@ -126,13 +117,18 @@ public sealed class CallRecordingController : ICallRecordingController
     public void ForgetChannel(string channelUuid)
     {
         DisarmWatchdog(channelUuid);
-        _beeping.TryRemove(channelUuid, out _);   // channel gone — the displace dies with it
+        _beeping.TryRemove(channelUuid, out _);
     }
+
+    // Skip the beep during a masked segment (an active watchdog == a live mask) so the tone
+    // doesn't land in the middle of sensitive-data DTMF entry.
+    public IReadOnlyCollection<string> BeepingChannels() =>
+        _beeping.Keys.Where(u => !_watchdogs.ContainsKey(u)).ToArray();
 
     public async Task FinalizeOnDisconnectAsync(RecordingCommand command, CancellationToken ct = default)
     {
         DisarmWatchdog(command.ChannelUuid);
-        _beeping.TryRemove(command.ChannelUuid, out _);   // channel gone — the displace dies with it
+        _beeping.TryRemove(command.ChannelUuid, out _);
         var evt = RecordingEvent.Stop(
             UtcNow(), RecordingEventSource.Disconnect, command.NodeId, command.Reason ?? "call_disconnected");
         await PersistAsync(command, evt, ct);

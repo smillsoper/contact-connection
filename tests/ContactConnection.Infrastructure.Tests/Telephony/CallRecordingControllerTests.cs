@@ -113,42 +113,48 @@ public class CallRecordingControllerTests
         h.Factory.Verify(f => f.CreateAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // ── notification beep ──────────────────────────────────────────────────
-
-    private const string DefaultBeepTone = "tone_stream://%(250,14000,1400);loops=-1";
+    // ── notification beep (BeepingChannels feeds RecordingBeepService) ─────
 
     [Fact]
-    public async Task StartAsync_Beep_StartsDisplaceTone()
+    public async Task StartAsync_Beep_MarksChannelBeeping()
     {
         var h = new Harness();
         await h.Controller.StartAsync(Cmd(), new RecordingStartOptions { Beep = true }, h.Esl.Object);
-        h.Esl.Verify(e => e.DisplaceAsync(Uuid, "start", DefaultBeepTone, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Contains(Uuid, h.Controller.BeepingChannels());
     }
 
     [Fact]
-    public async Task StartAsync_NoBeep_DoesNotDisplace()
+    public async Task StartAsync_NoBeep_NotBeeping()
     {
         var h = new Harness();
         await h.Controller.StartAsync(Cmd(), new RecordingStartOptions { Beep = false }, h.Esl.Object);
-        h.Esl.Verify(e => e.DisplaceAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.DoesNotContain(Uuid, h.Controller.BeepingChannels());
     }
 
     [Fact]
-    public async Task StopAsync_AfterBeepStart_StopsDisplaceTone()
+    public async Task StopAsync_RemovesChannelFromBeeping()
     {
         var h = new Harness();
         await h.Controller.StartAsync(Cmd(), new RecordingStartOptions { Beep = true }, h.Esl.Object);
         await h.Controller.StopAsync(Cmd(), h.Esl.Object);
-        h.Esl.Verify(e => e.DisplaceAsync(Uuid, "stop", DefaultBeepTone, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.DoesNotContain(Uuid, h.Controller.BeepingChannels());
     }
 
     [Fact]
-    public async Task StopAsync_WithoutBeep_DoesNotStopDisplace()
+    public async Task MaskedChannel_ExcludedFromBeeping_ThenRestoredOnUnmask()
     {
         var h = new Harness();
-        await h.Controller.StartAsync(Cmd(), new RecordingStartOptions { Beep = false }, h.Esl.Object);
-        await h.Controller.StopAsync(Cmd(), h.Esl.Object);
-        h.Esl.Verify(e => e.DisplaceAsync(It.IsAny<string>(), "stop", It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        await h.Controller.StartAsync(Cmd(), new RecordingStartOptions { Beep = true }, h.Esl.Object);
+
+        await h.Controller.MaskAsync(new RecordingMaskCommand
+        {
+            ChannelUuid = Uuid, CallRecordId = CallRecordId, TenantSchemaName = Schema,
+            Source = RecordingEventSource.CustomEvent,
+        }, h.Esl.Object);
+        Assert.DoesNotContain(Uuid, h.Controller.BeepingChannels());
+
+        await h.Controller.UnmaskAsync(Cmd(), h.Esl.Object);
+        Assert.Contains(Uuid, h.Controller.BeepingChannels());
     }
 
     // ── mask / unmask / stop ───────────────────────────────────────────────
