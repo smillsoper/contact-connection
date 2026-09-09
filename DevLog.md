@@ -139,6 +139,7 @@
 | 127 | 2026-09-08 | 11:52 AM PDT | 1:02 PM PDT | 70 min | ~13564 min |
 | 128 | 2026-09-09 | 10:21 AM PDT | 10:54 AM PDT | 33 min | ~13597 min |
 | 129 | 2026-09-09 | 10:56 AM PDT | 11:21 AM PDT | 25 min | ~13622 min |
+| 130 | 2026-09-09 | 11:23 AM PDT | 12:25 PM PDT | 62 min | ~13684 min |
 
 ---
 
@@ -6484,3 +6485,87 @@ RMD filing; `.cc → .io` migration tail (Telnyx onboarding + SIP config + `.cc`
 `contactconnection.io` SPF/DKIM/DMARC; `cc_timesync` crash-loop; `CommitmentEvents` JSONB
 `ValueComparer`; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint authz; broader
 `FlowEngine` test coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 130
+
+**Date:** 2026-09-09
+**Start:** 11:23 AM PDT
+**End:** 12:25 PM PDT
+**Duration:** 62 minutes
+**Total Duration:** ~13684 minutes
+
+### Focus
+
+Recording notification beep + queue-callback v1 rough edges #2 and #4 — implement, then live-test.
+Commits `bdbd2fd` (first pass) and `ddd080d` (beep rework after live test).
+
+### Built + live-verified
+
+- **Queue-callback #2 — connect-prompt clip on the simple-bridge path ✅.** The prompt + a settle
+  delay (`FreeSWITCH:QueueCallback:ConnectPromptSettleMs`, default 3000) moved into
+  `BridgeToReservedAgentAsync` (off the ESL loop) *before* `DeliverAsync`, so the instant
+  simple-bridge no longer bridges over the top of it. User confirmed the full prompt now plays.
+
+### Built, live-tested, needs more work
+
+- **Recording notification beep.** First pass drove it from `CallRecordingController` via
+  `uuid_displace <uuid> start <tone> 0 mux`. Live test: **one-directional** — the caller heard the
+  beep, the agent didn't. Reworked (`ddd080d`):
+  - `RecordingStartOptions.Beep` ← `Campaign.RecordingBeepEnabled` in `RecordNodeHandler`.
+  - `CallRecordingController` tracks a `_beeping` set only; `ICallRecordingController.BeepingChannels()`
+    = beep-enabled live recordings not currently masked (armed mask watchdog == live mask).
+  - New **`RecordingBeepService`** (API hosted) — every `Recording:BeepIntervalSeconds` (default 15)
+    does `uuid_broadcast <uuid> tone_stream://%(250,0,1400) both` on each beeping channel. One
+    lazily-created `EslClient`, reconnects on fault.
+  - Reverted `IEslCommander.DisplaceAsync`; added concrete `EslClient.BroadcastToBothLegsAsync`.
+  - **Not yet live-verified** — `uuid_broadcast … both` over a live bridge needs a real call. Also
+    still need to confirm the beep lands on the merged recording.
+  - See [[project_recording_notification_beep]].
+
+- **Queue-callback #4 — bridge-fail-after-answer re-queue. Not working, redesign next session.**
+  Implemented: on `DeliverAsync` failure, up to `FreeSWITCH:QueueCallback:MaxBridgeRetries`
+  (default 2) re-queue the caller (`_queued` + fresh `_in_queue_at` + `_qcb_bridge_fails` +
+  `local_stream://moh`) instead of abandoning; `DeliverAsync` throw normalised to a failed result.
+  **Live test exposed:** (a) `QueuePollingService` re-delivery loops on the same dead agent every
+  tick and **bypasses `_qcb_bridge_fails`** — unbounded, caller in dead air; (b) `local_stream://moh`
+  produced no audio and a post-flow callback caller has no MOH loop anyway.
+  **Next-session plan (user's):** on bridge failure, re-queue AND resume the flow on the
+  `tf_queue_callback` node's `failed` branch — runs whatever the tenant wired (queue MOH loop,
+  alt destination), giving real audio + a real path. Still needs a retry bound.
+
+### New list items (from the user, S130)
+
+- **Callback "Playing greeting" softphone indicator** — when the callback caller connects and a
+  callback greeting is configured, the reserved agent's softphone should show "Playing greeting"
+  so they don't talk over it. → [[project_queue_callback]] / [[project_agent_connect_tone]].
+- **Agent connect tone before *every* bridge** — a short beep in the agent's ear right before any
+  call bridges to them (all delivery paths, not just queued callback) so they know when the caller
+  can hear them. Distinct from the compliance recording beep. → new [[project_agent_connect_tone]].
+
+### Bug found (pre-existing, untriaged)
+
+- **`tf_play` file node with a `__platform:` OGG plays nothing** on live calls ("Play Queue
+  Greeting" between route_to_queue and the IVR menu). OGG exists, path resolves, engine
+  transitions correctly (S129 `end_of_stream/default` fallback working). Not from S127–130
+  changes. Needs FreeSWITCH-side logs. → [[project_platform_tts_phrase_library]].
+
+### State
+
+- `dotnet build` + `dotnet test` (615 pass — Domain 147, App 20, Infra 364, Api 84) + `tsc
+  --noEmit` clean. No new migrations. Commits `bdbd2fd`, `ddd080d` (pushed).
+
+### Next session — pick up here
+
+1. **Live-test the reworked recording beep** (`uuid_broadcast … both`) — both parties + on the
+   recording. If `both` also proves disruptive, fall back to per-leg or accept caller-only.
+2. **Queue-callback #4** — re-queue + resume the node's `failed` branch (with a retry bound).
+3. Diagnose the `__platform:` OGG greeting with FS logs.
+4. Then: `tf_secure_collect`; agent connect tone; "Playing greeting" indicator.
+
+### Carry-overs (unchanged)
+
+RMD filing; `.cc → .io` migration tail; `contactconnection.io` SPF/DKIM/DMARC; `cc_timesync`
+crash-loop; `CommitmentEvents` JSONB `ValueComparer`; `ServiceLevelThresholdSeconds` widget;
+Dashboards endpoint authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.
