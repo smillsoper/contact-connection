@@ -612,12 +612,10 @@ public sealed class EslBackgroundService : BackgroundService
                 _logger.LogWarning("tts_done {Uuid}: announcement finished but no replay node — call stays parked", uuid);
                 return;
             }
-            if (!await esl.ChannelExistsAsync(uuid, ct))
-            {
-                _logger.LogInformation("tts_done {Uuid}: caller gone during announcement — abandoning deferred transfer", uuid);
-                return;
-            }
 
+            // Liveness: a caller that hung up during the announcement has already had its session
+            // deleted by HandleChannelHangupAsync, so ResolveSessionAsync above would have returned
+            // null. (An inline `uuid_exists` on the shared read-loop socket is not reliable here.)
             _logger.LogInformation("tts_done {Uuid}: transfer announcement finished → re-running {Node}", uuid, replayNode);
             await ResumeAsync(session.ChannelUuid, replayNode, esl, ct);
             return;
