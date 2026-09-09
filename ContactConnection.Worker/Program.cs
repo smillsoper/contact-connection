@@ -43,6 +43,7 @@ builder.Services.AddSingleton<IEslCommanderFactory, NoOpEslCommanderFactory>();
 
 builder.Services.AddHostedService<SubscriptionProcessingService>();
 builder.Services.AddHostedService<RecordingMergeService>();
+builder.Services.AddHostedService<RecordingRetentionService>();
 builder.Services.AddHostedService<ScheduledCallbackProcessingService>();
 
 // Historical note: a legacy FreeSwitchEslService (CHANNEL_PARK→create-CallRecord translator)

@@ -29,4 +29,13 @@ public class CallRecordRepository : ICallRecordRepository
 
     public Task SaveChangesAsync(CancellationToken ct = default) =>
         Db.SaveChangesAsync(ct);
+
+    public async Task<IReadOnlyList<Guid>> FindRetainedRecordingIdsOldestFirstAsync(
+        int limit, CancellationToken ct = default) =>
+        await Db.CallRecords
+            .Where(r => r.RecordingRetained && r.RecordingStartedAt != null)
+            .OrderBy(r => r.CallEndAt ?? r.CreatedAt)
+            .Select(r => r.Id)
+            .Take(limit)
+            .ToListAsync(ct);
 }

@@ -2,8 +2,10 @@ using ContactConnection.Api.Hubs;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Domain.Entities;
 using ContactConnection.Infrastructure.Data;
+using ContactConnection.Infrastructure.Telephony;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ContactConnection.Api.Telephony;
 
@@ -31,6 +33,7 @@ public sealed class QueueCallbackDeliveryService(
     IHubContext<FlowHub, IFlowHubClient> hub,
     ICallStateHistoryRecorder callStateRecorder,
     QueuedCallDeliveryService queuedCallDelivery,
+    IServiceScopeFactory scopeFactory,
     IConfiguration config,
     ILogger<QueueCallbackDeliveryService> logger,
     ILogger<EslClient> eslLogger)
@@ -199,28 +202,71 @@ public sealed class QueueCallbackDeliveryService(
             "QueueCallback: caller answered on {Uuid} (record {RecordId}) — bridging to reserved agent {AgentId} (autoAnswer={AutoAnswer}, ani={Ani})",
             newChannelUuid, record.Id, agentId, autoAnswer, ani);
 
-        var result = await queuedCallDelivery.DeliverAsync(
-            tenantId, tenantSchema, tenantSubdomain, record.Id, agentId, ct);
-
-        if (!result.Success)
-        {
-            logger.LogWarning(
-                "QueueCallback: delivery to reserved agent {AgentId} failed for {RecordId}: {Error} — releasing agent, hanging up caller",
-                agentId, record.Id, result.ErrorDetail);
-            if (autoAnswer)
-                await hub.Clients.Group($"agent:{agentId}").ReceiveAutoConnectFailed(record.Id.ToString());
-            await ReleaseAgentAsync(tenantId, tenantSchema, agentId, ct);
-            await esl.HangupChannelAsync(newChannelUuid, ct);
-            await callStateRecorder.RecordAsync(
-                tenantId, tenantSchema, record.Id, CallHistoryState.Abandoned, record.CampaignId,
-                agentId: null, detail: "Queue callback connected but agent bridge failed",
-                abandonType: CallAbandonType.CallbackAbandon, ct: ct);
-            record.Complete();
-            await db.SaveChangesAsync(ct);
-            await sessionStore.DeleteAsync(newChannelUuid, ct);
-        }
+        // Hand off to the reserved agent OFF the ESL event loop. DeliverAsync originates the
+        // agent's softphone and can block the caller ~30s (originate_timeout) if it's unreachable
+        // — doing that here would freeze the whole ESL read loop. Fire-and-forget with its own DI
+        // scope (this method's scope dies when the CHANNEL_PARK handler returns).
+        _ = Task.Run(() => BridgeToReservedAgentAsync(
+            record.Id, record.CampaignId, tenantId, tenantSchema, tenantSubdomain, agentId, newChannelUuid, autoAnswer));
 
         return true;
+    }
+
+    /// <summary>
+    /// Runs off the ESL event loop (see <see cref="ConnectAnsweredLegAsync"/>). Resolves
+    /// <see cref="QueuedCallDeliveryService"/> and <see cref="ICallStateHistoryRecorder"/> from a
+    /// fresh scope (both are scoped and the caller's scope is already gone), and opens its own
+    /// short-lived ESL connection for the failure-path hangup rather than touching the shared
+    /// read-loop socket.
+    /// </summary>
+    private async Task BridgeToReservedAgentAsync(
+        Guid recordId, Guid campaignId, Guid tenantId, string tenantSchema, string tenantSubdomain,
+        Guid agentId, string channelUuid, bool autoAnswer)
+    {
+        try
+        {
+            using var scope = scopeFactory.CreateScope();
+            var delivery = scope.ServiceProvider.GetRequiredService<QueuedCallDeliveryService>();
+
+            var result = await delivery.DeliverAsync(
+                tenantId, tenantSchema, tenantSubdomain, recordId, agentId, CancellationToken.None);
+            if (result.Success) return;
+
+            logger.LogWarning(
+                "QueueCallback: delivery to reserved agent {AgentId} failed for {RecordId}: {Error} — releasing agent, hanging up caller",
+                agentId, recordId, result.ErrorDetail);
+
+            if (autoAnswer)
+                await hub.Clients.Group($"agent:{agentId}").ReceiveAutoConnectFailed(recordId.ToString());
+            await ReleaseAgentAsync(tenantId, tenantSchema, agentId, CancellationToken.None);
+
+            await using (var esl = new EslClient(eslLogger))
+            {
+                await esl.ConnectAsync(EslHost, EslPort, EslPass, CancellationToken.None);
+                await esl.HangupChannelAsync(channelUuid, CancellationToken.None);
+            }
+
+            var recorder = scope.ServiceProvider.GetRequiredService<ICallStateHistoryRecorder>();
+            await recorder.RecordAsync(
+                tenantId, tenantSchema, recordId, CallHistoryState.Abandoned, campaignId,
+                agentId: null, detail: "Queue callback connected but agent bridge failed",
+                abandonType: CallAbandonType.CallbackAbandon, ct: CancellationToken.None);
+
+            await using var db = dbFactory.Create(tenantSchema);
+            var record = await db.CallRecords.FirstOrDefaultAsync(r => r.Id == recordId);
+            if (record is not null)
+            {
+                record.Complete();
+                await db.SaveChangesAsync();
+            }
+            await sessionStore.DeleteAsync(channelUuid, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "QueueCallback: background bridge to reserved agent {AgentId} for record {RecordId} threw",
+                agentId, recordId);
+        }
     }
 
     // ── 3. The callback leg never answered ──────────────────────────────────────
@@ -299,20 +345,17 @@ public sealed class QueueCallbackDeliveryService(
             .ReceiveAgentStateChange(AgentStateCodes.Available, "Available", null);
     }
 
+    /// <summary>
+    /// Resolve the designer's connect-prompt audio ref to a FreeSWITCH-playable arg via the shared
+    /// <see cref="TelephonyAudioResolver"/> — same handling as Play / Whisper / Transfer, so a file
+    /// GUID, <c>__builtin:</c>, <c>__platform:</c> phrase, or stream URI all work. Anything blank or
+    /// unresolvable falls back to the built-in "please hold, connecting you" prompt.
+    /// </summary>
     private async Task<string> ResolveConnectMediaAsync(string connectAudio, string tenantSchema, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(connectAudio)) return DefaultConnectPrompt;
-        if (connectAudio.StartsWith("__builtin:")) return connectAudio["__builtin:".Length..];
-        if (connectAudio.Contains("://") || connectAudio.Contains('/')) return connectAudio;
-        if (!Guid.TryParse(connectAudio, out var fileId)) return DefaultConnectPrompt;
-
-        await using var db = dbFactory.Create(tenantSchema);
-        var file = await db.AudioFiles.FirstOrDefaultAsync(f => f.Id == fileId, ct);
-        if (file is null) return DefaultConnectPrompt;
-
-        var containerBase = config["FreeSWITCH:SoundsContainerPath"]
-            ?? "/usr/share/freeswitch/sounds/contactconnection";
-        return $"{containerBase}/{tenantSchema}/{file.StoredFileName}";
+        var resolved = await TelephonyAudioResolver.ResolveFileArgAsync(
+            dbFactory, config, connectAudio, tenantSchema, ct);
+        return resolved ?? DefaultConnectPrompt;
     }
 
     private static int ParseInt(string? s) => int.TryParse(s, out var n) ? n : 0;
