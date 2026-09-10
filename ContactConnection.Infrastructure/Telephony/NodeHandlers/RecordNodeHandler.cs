@@ -112,7 +112,10 @@ public class RecordNodeHandler : ITelephonyNodeHandler
             if (beep)
             {
                 var session = await _sessionStore.GetAsync(ctx.ChannelUuid, ct);
-                agentUuid = session?.Vars.GetValueOrDefault("_agent_uuid");
+                // _bridged_peer_uuid is stamped by EslBackgroundService on CHANNEL_BRIDGE and
+                // survives the whisper/tf_end teardown that clears _agent_uuid.
+                agentUuid = session?.Vars.GetValueOrDefault("_bridged_peer_uuid")
+                         ?? session?.Vars.GetValueOrDefault("_agent_uuid");
             }
 
             var options = new RecordingStartOptions

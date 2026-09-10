@@ -57,8 +57,10 @@ public sealed class CallRecordingController : ICallRecordingController
             if (options.Stereo)
                 await e.SetChannelVarAsync(command.ChannelUuid, "RECORD_STEREO", "true", ct);
 
-            await e.RecordAsync(command.ChannelUuid, RecordingEventAction.Start, path, options.LimitSeconds, ct);
-
+            // Start the beep BEFORE uuid_record. FreeSWITCH media bugs run in add-order on a read
+            // frame: the displace bug must be added first (mixes the tone into the frame) so the
+            // record bug added after it captures the tone. Reversed, the caller hears the beep but
+            // the recorder never sees it.
             if (options.Beep)
             {
                 var legs = new List<string> { command.ChannelUuid };
@@ -67,6 +69,8 @@ public sealed class CallRecordingController : ICallRecordingController
                     await e.DisplaceAsync(leg, "start", _beepTone, ct);
                 _beepLegs[command.ChannelUuid] = legs;
             }
+
+            await e.RecordAsync(command.ChannelUuid, RecordingEventAction.Start, path, options.LimitSeconds, ct);
 
             var evt = RecordingEvent.Start(UtcNow(), command.Source, command.NodeId, path);
             await PersistAsync(command, evt, ct);

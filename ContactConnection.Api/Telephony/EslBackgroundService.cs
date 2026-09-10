@@ -1311,11 +1311,20 @@ public sealed class EslBackgroundService : BackgroundService
         var bridgeSession = await _sessionStore.GetAsync(uuid, ct);
         if (bridgeSession is null) return;
 
-        // If this caller has a beep-enabled recording that started pre-bridge (or on the
-        // simple-bridge path, where the agent leg wasn't known), displace the beep onto the
-        // just-bridged agent leg too. No-op otherwise.
         if (!string.IsNullOrEmpty(other))
         {
+            // Stable record of the bridged peer (agent) leg — _agent_uuid is cleared by the
+            // whisper/tf_end teardown before the tf_on_agent_answer branch runs, so a
+            // post-bridge tf_record can't rely on it. RecordNodeHandler reads this for the
+            // notification-beep's agent leg.
+            if (bridgeSession.Vars.GetValueOrDefault("_bridged_peer_uuid") != other)
+            {
+                bridgeSession.Vars["_bridged_peer_uuid"] = other;
+                await _sessionStore.SaveAsync(bridgeSession, ct);
+            }
+
+            // If a beep-enabled recording already started before this bridge (pre-bridge or
+            // simple-bridge tf_record), displace the beep onto the peer now. No-op otherwise.
             using var beepScope = _scopeFactory.CreateScope();
             await beepScope.ServiceProvider.GetRequiredService<ICallRecordingController>()
                 .EnsureBeepOnPeerAsync(uuid, other, esl, ct);
