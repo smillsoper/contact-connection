@@ -140,6 +140,7 @@
 | 128 | 2026-09-09 | 10:21 AM PDT | 10:54 AM PDT | 33 min | ~13597 min |
 | 129 | 2026-09-09 | 10:56 AM PDT | 11:21 AM PDT | 25 min | ~13622 min |
 | 130 | 2026-09-09 | 11:23 AM PDT | 12:25 PM PDT | 62 min | ~13684 min |
+| 131 | 2026-09-10 | 10:29 AM PDT | 11:17 AM PDT | 48 min | ~13732 min |
 
 ---
 
@@ -6563,6 +6564,85 @@ Commits `bdbd2fd` (first pass) and `ddd080d` (beep rework after live test).
 2. **Queue-callback #4** — re-queue + resume the node's `failed` branch (with a retry bound).
 3. Diagnose the `__platform:` OGG greeting with FS logs.
 4. Then: `tf_secure_collect`; agent connect tone; "Playing greeting" indicator.
+
+### Carry-overs (unchanged)
+
+RMD filing; `.cc → .io` migration tail; `contactconnection.io` SPF/DKIM/DMARC; `cc_timesync`
+crash-loop; `CommitmentEvents` JSONB `ValueComparer`; `ServiceLevelThresholdSeconds` widget;
+Dashboards endpoint authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 131
+
+**Date:** 2026-09-10
+**Start:** 10:29 AM PDT
+**End:** 11:17 AM PDT
+**Duration:** 48 minutes
+**Total Duration:** ~13732 minutes
+
+### Focus
+
+Get the recording notification beep actually working — it was heard by both parties last session
+(S130 `uuid_broadcast … both` timer) but never landed on the recording. Plus: helped locate call
+recordings, and killed the FreeSWITCH SCHED_FIFO log spam.
+
+### Recording notification beep — DONE + fully live-verified
+
+Rearchitected from the S130 `uuid_broadcast` timer (heard, not recorded — `uuid_broadcast`
+injects on the playback side, downstream of `uuid_record`'s media-bug tap) to
+**`uuid_displace … mux`** on both legs. Three live-test rounds:
+
+- **Round 1** — beep caller-only, not recorded. `uuid_displace mux` is one-directional per leg.
+- **Round 2** (`649c16c`) — added `RecordingStartOptions.AgentChannelUuid` + `EnsureBeepOnPeerAsync`
+  + `CHANNEL_BRIDGE` hook. Still caller-only + not recorded. Log showed `beepLegs=1` (agent uuid
+  came back null) and the displace was issued *after* `uuid_record`.
+- **Round 3** (`660de69`) — two fixes: (1) `EslBackgroundService` stamps a stable
+  `_bridged_peer_uuid` on `CHANNEL_BRIDGE` (the whisper/`tf_end` teardown clears `_agent_uuid`
+  before the `tf_on_agent_answer` branch runs, so `RecordNodeHandler` couldn't get it);
+  `RecordNodeHandler` reads that for the beep's agent leg → `beepLegs=2`. (2) Displace **before**
+  `uuid_record` — FreeSWITCH media bugs run in add-order, so the displace bug (a
+  READ/WRITE_REPLACE mixer) must precede the record bug (a STREAM tee) for the tone to be
+  captured. **Result: both parties heard it; ffmpeg analysis of the 64s recording — pure ~1400Hz
+  bursts at ~14.3/28.5/42.8/57.0s (14s cadence), 1400Hz-only level == full-band level at those
+  instants.** All three requirements met.
+
+Mechanics: `CallRecordingController` displaces `tone_stream://%(250,14000,1400);loops=-1` (config
+`Recording:BeepTone`) in mux mode on `command.ChannelUuid` + the agent leg, tracked per caller in
+`_beepLegs`, stopped on every leg on stop/forget/finalize. `EnsureBeepOnPeerAsync` + the bridge
+hook cover the pre-bridge / simple-bridge `tf_record` ordering. `ICallRecordingController.DisplaceAsync`
+re-added; `RecordingBeepService` / `BeepingChannels()` / `BroadcastToBothLegsAsync` deleted.
+5 controller tests (was 4). See [[project_recording_notification_beep]].
+
+**Key diagnosis note:** `docker compose logs freeswitch` only shows SCHED_FIFO spam. The real FS
+log is `/var/log/freeswitch/freeswitch.log` inside the container; `fsctl loglevel 7` for
+`uuid_record` / `uuid_displace` API-command visibility (not dialplan `EXECUTE` lines).
+
+### Also
+
+- **Recording access help** — recordings are the `freeswitch/recordings/{callRecordId}.wav` bind
+  mount (host path `C:\...\ContactConnection\freeswitch\recordings\`), stereo, one per call. The
+  `GET /api/v1/call-records/{id}/recording` endpoint serves only the *merged* output (needs the
+  Worker's `RecordingMergeService`) and is http-only + auth'd + tenant-scoped, so not
+  browser-friendly. Raw WAV is the immediate path.
+- **`docker-compose.yml`** (`0e94933`) — freeswitch service gets `cap_add: SYS_NICE` +
+  `ulimits: rtprio: 99` to stop the `Failed to set SCHED_FIFO scheduler` / `Could not set nice
+  level` spam and let FS media threads run at real-time priority. Additive scheduling permission
+  only; user recreated the container.
+
+### State
+
+- `dotnet build` + `dotnet test` (616 pass — Domain 147, App 20, Infra 365, Api 84) + `tsc
+  --noEmit` clean. No new migrations. Commits `649c16c`, `660de69`, `0e94933` (pushed).
+
+### Next session — pick up here
+
+1. **Queue-callback #4** — re-queue on bridge failure AND resume the `tf_queue_callback` node's
+   `failed` branch (tenant's queue MOH), with a retry bound. ([[project_queue_callback]])
+2. Diagnose the `__platform:` OGG greeting-not-audible bug — now that FS-log access is sorted,
+   grep `/var/log/freeswitch/freeswitch.log` for the `playback(...ogg)` line + result.
+3. `tf_secure_collect` guided-DTMF node.
+4. Agent connect tone + "Playing greeting" softphone indicator. ([[project_agent_connect_tone]])
 
 ### Carry-overs (unchanged)
 
