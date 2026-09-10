@@ -172,6 +172,9 @@ public sealed class QueueCallbackDeliveryService(
         // Re-key the placeholder session onto the live callback channel and shed the placeholder
         // markers — from here it is an ordinary in-flight call session.
         var connectAudio = placeholder.Vars.GetValueOrDefault("_queue_callback_connect_audio") ?? "";
+        // Kept (not stripped): needed if the bridge to the reserved agent then fails — the caller
+        // is re-queued and the flow resumes on this node so the tenant's queue-MOH wiring runs.
+        var failedNode = placeholder.Vars.GetValueOrDefault("_queue_callback_failed_node") ?? "";
         placeholder.ChannelUuid = newChannelUuid;
         foreach (var k in new[]
         {
@@ -217,7 +220,7 @@ public sealed class QueueCallbackDeliveryService(
         // scope (this method's scope dies when the CHANNEL_PARK handler returns).
         _ = Task.Run(() => BridgeToReservedAgentAsync(
             record.Id, record.CampaignId, tenantId, tenantSchema, tenantSubdomain, agentId,
-            newChannelUuid, mediaArg, autoAnswer));
+            newChannelUuid, mediaArg, failedNode, autoAnswer));
 
         return true;
     }
@@ -230,12 +233,16 @@ public sealed class QueueCallbackDeliveryService(
     /// connection rather than the shared read-loop socket.
     ///
     /// On bridge failure the caller is still on the line, so — up to <see cref="MaxBridgeRetries"/>
-    /// times — they're put back in the queue (with MOH) rather than dropped; only after that is it
-    /// a callback abandon.
+    /// times — they're put back in the queue AND the telephony flow is resumed on the
+    /// tf_queue_callback node's <c>failed</c> branch (<paramref name="failedNode"/>), so the tenant's
+    /// queue-MOH / alternate-destination wiring gives the caller real audio and a real path. The
+    /// agent that just failed is excluded from the re-delivery so a broken softphone isn't picked
+    /// again. Only after the bound is exhausted (or no <c>failed</c> branch is wired) is it a
+    /// callback abandon.
     /// </summary>
     private async Task BridgeToReservedAgentAsync(
         Guid recordId, Guid campaignId, Guid tenantId, string tenantSchema, string tenantSubdomain,
-        Guid agentId, string channelUuid, string connectMediaArg, bool autoAnswer)
+        Guid agentId, string channelUuid, string connectMediaArg, string failedNode, bool autoAnswer)
     {
         try
         {
@@ -274,35 +281,51 @@ public sealed class QueueCallbackDeliveryService(
             var session  = await sessionStore.GetAsync(channelUuid, CancellationToken.None);
             var fails    = ParseInt(session?.Vars.GetValueOrDefault("_qcb_bridge_fails")) + 1;
 
-            if (session is not null && fails <= MaxBridgeRetries)
+            if (session is not null && fails <= MaxBridgeRetries && !string.IsNullOrEmpty(failedNode))
             {
-                // Caller is still connected — put them back in queue instead of abandoning.
+                // Caller is still connected. Re-queue them AND resume the flow on the
+                // tf_queue_callback node's `failed` branch so the tenant's queue-MOH / alternate
+                // path runs — real audio, not dead air. Exclude the agent that just failed so
+                // QueuePollingService's re-delivery doesn't immediately pick the same broken
+                // softphone; QueuePollingService bounds the total re-delivery misses after this.
                 logger.LogWarning(
-                    "QueueCallback: bridge to reserved agent {AgentId} failed for {RecordId} ({Error}) — re-queuing caller (attempt {Fails}/{Max})",
-                    agentId, recordId, result.ErrorDetail, fails, MaxBridgeRetries);
+                    "QueueCallback: bridge to reserved agent {AgentId} failed for {RecordId} ({Error}) — re-queuing + resuming `failed` branch {Node} (attempt {Fails}/{Max})",
+                    agentId, recordId, result.ErrorDetail, failedNode, fails, MaxBridgeRetries);
 
                 session.Vars["_queued"]           = "true";
                 session.Vars["_in_queue_at"]      = DateTimeOffset.UtcNow.ToString("O");
                 session.Vars["_qcb_bridge_fails"] = fails.ToString();
+                AppendExcludedAgent(session, agentId);
                 session.Vars.Remove("_eligible_agents");   // QueuePollingService re-ranks
                 session.Vars.Remove("_assigned_agent_id");
                 session.Vars.Remove("_pending_agent_id");
                 session.Vars.Remove("_pending_interaction_id");
+                session.Vars.Remove("_agent_uuid");
                 await sessionStore.SaveAsync(session, CancellationToken.None);
 
-                try { await esl.BroadcastAsync(channelUuid, "local_stream://moh", CancellationToken.None); }
-                catch (Exception ex) { logger.LogDebug(ex, "QueueCallback {Uuid}: re-queue MOH broadcast failed (non-fatal)", channelUuid); }
+                try
+                {
+                    await scope.ServiceProvider.GetRequiredService<ITelephonyFlowEngine>()
+                        .ResumeFromNodeAsync(channelUuid, failedNode, esl, CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex,
+                        "QueueCallback {Uuid}: resume of `failed` branch {Node} threw (non-fatal — caller still re-queued)",
+                        channelUuid, failedNode);
+                }
 
                 await recorder.RecordAsync(
                     tenantId, tenantSchema, recordId, CallHistoryState.InQueue, campaignId,
-                    agentId: null, detail: $"Re-queued after callback bridge failure #{fails}",
+                    agentId: null, detail: $"Re-queued after callback bridge failure #{fails} (agent {agentId} excluded)",
                     ct: CancellationToken.None);
                 return;
             }
 
             logger.LogWarning(
-                "QueueCallback: bridge to reserved agent {AgentId} failed for {RecordId} ({Error}) — retries exhausted, hanging up caller + callback abandon",
-                agentId, recordId, result.ErrorDetail);
+                "QueueCallback: bridge to reserved agent {AgentId} failed for {RecordId} ({Error}) — {Reason}, hanging up caller + callback abandon",
+                agentId, recordId, result.ErrorDetail,
+                string.IsNullOrEmpty(failedNode) ? "no `failed` branch wired" : "retry bound exhausted");
 
             await esl.HangupChannelAsync(channelUuid, CancellationToken.None);
             await recorder.RecordAsync(
@@ -417,4 +440,19 @@ public sealed class QueueCallbackDeliveryService(
     }
 
     private static int ParseInt(string? s) => int.TryParse(s, out var n) ? n : 0;
+
+    /// <summary>
+    /// Add an agent id to the session's <c>_qcb_excluded_agents</c> CSV — QueuePollingService unions
+    /// this into the eligible-agent ranker's exclusion set for a re-queued queue-callback caller, so
+    /// the softphone that just failed the bridge isn't handed the call again on the next tick.
+    /// </summary>
+    private static void AppendExcludedAgent(TelephonyCallSession session, Guid agentId)
+    {
+        var current = session.Vars.GetValueOrDefault("_qcb_excluded_agents") ?? "";
+        var set = current
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        set.Add(agentId.ToString());
+        session.Vars["_qcb_excluded_agents"] = string.Join(',', set);
+    }
 }

@@ -108,4 +108,32 @@ public class QueuePollingServiceArbitrationTests
     [Fact]
     public void IsDeliverable_SubDialogFlagCleared_True() =>
         Assert.True(QueuePollingService.IsDeliverable(Sess(("_queued", "true"), ("_ivr_in_progress", ""))));
+
+    // ── ParseExcludedAgents: a re-queued queue-callback caller skips the softphone(s) that
+    //    already failed the post-connect agent bridge (queue-callback rough edge #4) ──
+
+    [Fact]
+    public void ParseExcludedAgents_NoVar_ReturnsEmpty() =>
+        Assert.Empty(QueuePollingService.ParseExcludedAgents(Sess(("_queued", "true"))));
+
+    [Fact]
+    public void ParseExcludedAgents_EmptyVar_ReturnsEmpty() =>
+        Assert.Empty(QueuePollingService.ParseExcludedAgents(Sess(("_qcb_excluded_agents", ""))));
+
+    [Fact]
+    public void ParseExcludedAgents_CsvOfGuids_Parsed()
+    {
+        var a = Guid.NewGuid();
+        var b = Guid.NewGuid();
+        var parsed = QueuePollingService.ParseExcludedAgents(Sess(("_qcb_excluded_agents", $"{a}, {b}")));
+        Assert.Equal(new HashSet<Guid> { a, b }, parsed);
+    }
+
+    [Fact]
+    public void ParseExcludedAgents_SkipsMalformedEntries()
+    {
+        var a = Guid.NewGuid();
+        var parsed = QueuePollingService.ParseExcludedAgents(Sess(("_qcb_excluded_agents", $"{a},not-a-guid,")));
+        Assert.Equal(new HashSet<Guid> { a }, parsed);
+    }
 }

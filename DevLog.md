@@ -141,6 +141,7 @@
 | 129 | 2026-09-09 | 10:56 AM PDT | 11:21 AM PDT | 25 min | ~13622 min |
 | 130 | 2026-09-09 | 11:23 AM PDT | 12:25 PM PDT | 62 min | ~13684 min |
 | 131 | 2026-09-10 | 10:29 AM PDT | 11:17 AM PDT | 48 min | ~13732 min |
+| 132 | 2026-09-10 | 11:20 AM PDT | 11:52 AM PDT | 32 min | ~13764 min |
 
 ---
 
@@ -6643,6 +6644,100 @@ log is `/var/log/freeswitch/freeswitch.log` inside the container; `fsctl logleve
    grep `/var/log/freeswitch/freeswitch.log` for the `playback(...ogg)` line + result.
 3. `tf_secure_collect` guided-DTMF node.
 4. Agent connect tone + "Playing greeting" softphone indicator. ([[project_agent_connect_tone]])
+
+### Carry-overs (unchanged)
+
+RMD filing; `.cc → .io` migration tail; `contactconnection.io` SPF/DKIM/DMARC; `cc_timesync`
+crash-loop; `CommitmentEvents` JSONB `ValueComparer`; `ServiceLevelThresholdSeconds` widget;
+Dashboards endpoint authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 132
+
+**Date:** 2026-09-10
+**Start:** 11:20 AM PDT
+**End:** 11:52 AM PDT
+**Duration:** 32 minutes
+**Total Duration:** ~13764 minutes
+
+### Focus
+
+Queue-callback rough edge **#4** — the S130 attempt (re-queue with ad-hoc `local_stream://moh`)
+didn't work: `QueuePollingService` re-delivered to the same dead agent every tick bypassing the
+counter, and the MOH produced no audio. Redesign per the user's plan: on a post-connect agent
+bridge failure, **re-queue AND resume the flow on the `tf_queue_callback` node's `failed` branch**
+(whatever the tenant wired — queue MOH loop / alternate destination), with a real retry bound.
+Built + live-verified.
+
+### Built
+
+- **`QueueCallbackNodeHandler`** — stashes the node's `failed` transition target as
+  `_queue_callback_failed_node` (ctx + session) on the `queued` success path.
+- **`QueueCallbackDeliveryService.ConnectAnsweredLegAsync`** — captures `_queue_callback_failed_node`
+  before the placeholder-marker strip (kept, not stripped) and passes it to
+  `BridgeToReservedAgentAsync`.
+- **`BridgeToReservedAgentAsync`** — on bridge failure, if a `failed` branch is wired and
+  `_qcb_bridge_fails ≤ MaxBridgeRetries` (config `FreeSWITCH:QueueCallback:MaxBridgeRetries`,
+  default 2):
+  - release the failed agent;
+  - append it to a per-call `_qcb_excluded_agents` CSV;
+  - re-queue (`_queued=true`, fresh `_in_queue_at`, `_qcb_bridge_fails++`), clear the
+    pending-agent vars (`_assigned_agent_id` / `_pending_agent_id` / `_pending_interaction_id` /
+    `_agent_uuid` / `_eligible_agents`);
+  - `ITelephonyFlowEngine.ResumeFromNodeAsync(channelUuid, failedNode)` — runs the tenant's
+    `failed` path on the live caller channel (real audio);
+  - history row `in_queue — "Re-queued after callback bridge failure #N (agent … excluded)"`;
+  - the old `local_stream://moh` broadcast is gone.
+  - No `failed` branch wired, or bound exhausted → hang up + `CallbackAbandon` (unchanged).
+- **`QueuePollingService`**:
+  - `TryAutoAnswerDeliverAsync` / `NotifyEligibleAgentsAsync` union `_qcb_excluded_agents`
+    (new static `ParseExcludedAgents`) into `EligibleAgentRanker.GetRankedEligibleAgentsAsync`'s
+    `excludeAgentIds` → the just-failed softphone is never re-offered the call.
+  - New `NoteRequeuedCallbackMissAsync` — when a re-queued queue-callback call (carries
+    `_qcb_bridge_fails`) has a delivery **attempted and fail** on a tick, increments the counter;
+    once it passes `MaxBridgeRetries` the caller is evicted via `EvictTimedOutCallAsync` with a
+    descriptive `reasonDetail`. A tick with *no eligible agent at all* is a legitimate wait and
+    is **not** counted.
+  - `EvictTimedOutCallAsync` gained an optional `reasonDetail`; a re-queued queue-callback caller
+    that times out / is force-evicted is a normal `QueueTimeout` abandon — **not** a callback
+    abandon. Per the user: a callback abandon is specifically "caller did not answer the callback
+    attempt"; once they answered and are back in a normal queue, an abandon there (hangup or
+    timeout) is an in-queue / queue-timeout abandon. (An earlier pass added a `_was_queue_callback`
+    marker that mapped these to `CallbackAbandon` — reverted this session on that feedback. The
+    CHANNEL_HANGUP path was never touched, so a caller hangup while re-queued was always a plain
+    `in_queue` abandon.)
+
+### Live verification (docker up, API on :5135, real Telnyx trunk + cell + agent ext 1000)
+
+Test flow: inbound DID → IVR digit 1 → `tf_queue_callback` (`queued` → Play → Hang Up;
+`failed` → `tf_play_2` looping MOH). Campaign `AutoAnswerBestAgent`.
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Bridge fails post-connect (softphone unregistered) → caller not dropped | ✅ |
+| 2 | `QueueCallback: bridge to reserved agent … failed … — re-queuing + resuming ``failed`` branch tf_play_2 (attempt 1/2)` | ✅ |
+| 3 | `ResumeFromNodeAsync [caller-uuid]: resuming at node tf_play_2` → `PlayNodeHandler … broadcasting …danza-espanola….wav loop=True` — caller hears MOH + periodic hold announcement, not dead air | ✅ |
+| 4 | Redis session re-keyed: `_queued=true`, fresh `_in_queue_at`, `_qcb_bridge_fails=1`, `_qcb_excluded_agents=<agent>`, `_queue_callback*` markers cleared | ✅ |
+| 5 | State history: `in_queue — "Re-queued after callback bridge failure #1 (agent … excluded)"` | ✅ |
+| 6 | Excluded agent re-registers + goes Available → **not** re-offered the waiting call | ✅ |
+| 7 | Second agent goes Available → `auto-answer delivered call … to agent <other>` → `resuming at node tf_end_2` → bridged | ✅ |
+
+Not staged live (logic in place, no easy path): `NoteRequeuedCallbackMissAsync` hard bound →
+eviction after N failed re-deliveries; queue-timeout-while-re-queued.
+
+### State
+
+- `dotnet build` + `dotnet test` (620 pass — Domain 147, App 20, Infra 365, Api 88; +4 new
+  `ParseExcludedAgents` cases, assertions added to `QueueCallbackNodeHandlerTests`). No web
+  changes, no migrations.
+
+### Next session — pick up here
+
+1. Diagnose the `__platform:` OGG greeting-not-audible bug — grep
+   `/var/log/freeswitch/freeswitch.log` for the `playback(...ogg)` line + result during a live call.
+2. `tf_secure_collect` guided-DTMF node.
+3. Agent connect tone + "Playing greeting" softphone indicator. ([[project_agent_connect_tone]])
 
 ### Carry-overs (unchanged)
 

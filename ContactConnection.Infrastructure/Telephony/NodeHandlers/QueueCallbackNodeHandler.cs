@@ -62,6 +62,14 @@ public class QueueCallbackNodeHandler : ITelephonyNodeHandler
         var maxAttempts  = Math.Max(1, node["maxAttempts"]?.GetValue<int>() ?? 3);
         var connectAudio = node["connectAudioFileId"]?.GetValue<string>() ?? "";
 
+        // The `failed` transition target. Reused if the callback connects but the bridge to the
+        // reserved agent then fails (QueueCallbackDeliveryService re-queues the caller and resumes
+        // the flow here) — so the tenant's queue-MOH / alternate-destination wiring gives the
+        // caller real audio instead of dead air. Blank when the branch isn't wired.
+        var failedNode = transitions?["failed"]?.GetValue<string>()
+                         ?? transitions?["default"]?.GetValue<string>()
+                         ?? "";
+
         // Mark the session as a queue-callback placeholder. _queued / _in_queue_at are left
         // untouched so the placeholder keeps its position and its acceleration clock. _left_for_
         // callback reuses the CHANNEL_HANGUP guard so the caller's hangup is not logged as an
@@ -71,6 +79,7 @@ public class QueueCallbackNodeHandler : ITelephonyNodeHandler
         ctx.Vars["_queue_callback_max_attempts"] = maxAttempts.ToString();
         ctx.Vars["_queue_callback_attempts"]     = "0";
         ctx.Vars["_queue_callback_connect_audio"] = connectAudio;
+        ctx.Vars["_queue_callback_failed_node"]  = failedNode;
         ctx.Vars["_left_for_callback"]           = "true";
 
         // The engine's var-sync copies ctx.Vars into the session, but a queue-callback node runs
@@ -85,6 +94,7 @@ public class QueueCallbackNodeHandler : ITelephonyNodeHandler
             session.Vars["_queue_callback_max_attempts"]  = maxAttempts.ToString();
             session.Vars["_queue_callback_attempts"]      = "0";
             session.Vars["_queue_callback_connect_audio"] = connectAudio;
+            session.Vars["_queue_callback_failed_node"]   = failedNode;
             session.Vars["_left_for_callback"]            = "true";
             await _sessionStore.SaveAsync(session, ct);
         }

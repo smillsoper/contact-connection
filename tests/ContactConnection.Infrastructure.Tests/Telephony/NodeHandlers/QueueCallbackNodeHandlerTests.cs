@@ -77,6 +77,10 @@ public class QueueCallbackNodeHandlerTests
         Assert.Equal("0", ctx.Vars["_queue_callback_attempts"]);
         Assert.Equal("true", ctx.Vars["_left_for_callback"]);
 
+        // The `failed` branch target is stashed so a post-connect agent-bridge failure can
+        // re-queue the caller and resume the flow there (tenant's queue-MOH wiring).
+        Assert.Equal("n_back", ctx.Vars["_queue_callback_failed_node"]);
+
         // Position preserved — _queued and _in_queue_at untouched.
         Assert.Equal("true", ctx.Vars["_queued"]);
         Assert.Equal(inQueueAt, ctx.Vars["_in_queue_at"]);
@@ -125,6 +129,7 @@ public class QueueCallbackNodeHandlerTests
 
         Assert.Equal("true", session.Vars["_queue_callback"]);
         Assert.Equal("+15551110000", session.Vars["_queue_callback_number"]);
+        Assert.Equal("n_back", session.Vars["_queue_callback_failed_node"]);
         Assert.Equal("true", session.Vars["_queued"]);
         _sessionStore.Verify(s => s.SaveAsync(session, It.IsAny<CancellationToken>()), Times.Once);
     }

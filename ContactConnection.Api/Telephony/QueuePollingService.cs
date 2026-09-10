@@ -187,7 +187,9 @@ public sealed class QueuePollingService : BackgroundService
         var autoAnswerQueue = OrderByArbitrationPriority(autoAnswerCandidates, now);
 
         foreach (var (session, _, _) in autoAnswerQueue)
-            await TryAutoAnswerDeliverAsync(session, tenantId, tenantSchema, db, ranker, deliveryService, claimedThisTick, ct);
+            await TryAutoAnswerDeliverAsync(
+                session, tenantId, tenantSchema, db, ranker, deliveryService, claimedThisTick,
+                callStateRecorder, telephonyFlowEngine, config, ct);
 
         // ── RingAll / RingTopNByProficiency — click-based, unchanged mechanics ──────────────
         foreach (var session in activeSessions)
@@ -199,29 +201,36 @@ public sealed class QueuePollingService : BackgroundService
         }
     }
 
-    /// <summary>A queued call that's waited past campaign.QueueTimeoutSeconds — dequeues it,
-    /// records the abandon, and either resumes the flow at the "on_timeout" node
+    /// <summary>A queued call that's waited past campaign.QueueTimeoutSeconds (or a re-queued
+    /// queue-callback caller whose re-delivery bound is exhausted, via
+    /// <see cref="NoteRequeuedCallbackMissAsync"/> passing <paramref name="reasonDetail"/>) —
+    /// dequeues it, records the abandon, and either resumes the flow at the "on_timeout" node
     /// RouteToQueueNodeHandler stashed (if one was wired) or hangs up directly, mirroring
     /// TelEndNodeHandler's own "no transition defined" fallback so the caller is never left
-    /// silently parked.</summary>
+    /// silently parked. A re-queued queue-callback caller that reaches this point is a normal
+    /// in-queue abandon — the callback attempt itself was answered; a callback abandon is
+    /// specifically "caller did not answer the callback".</summary>
     private async Task EvictTimedOutCallAsync(
         TelephonyCallSession session, Guid tenantId, string tenantSchema,
         ICallStateHistoryRecorder callStateRecorder, ITelephonyFlowEngine telephonyFlowEngine,
-        IConfiguration config, CancellationToken ct)
+        IConfiguration config, CancellationToken ct, string? reasonDetail = null)
     {
         session.Vars.Remove("_queued");
         await _sessionStore.SaveAsync(session, ct);
 
-        // A queue-callback placeholder that waited out the timeout is a callback abandon, not a
-        // queue-timeout abandon — and there is no live channel to resume a flow node on.
-        var isQueueCallback = session.Vars.GetValueOrDefault("_queue_callback") == "true";
+        // A virtual-hold placeholder (caller hung up, only the session remains) has no live channel
+        // to resume a flow node on or to hang up — and its timeout is a callback abandon. A
+        // re-queued queue-callback caller (caller still on the line) does have a channel and falls
+        // through to the normal hangup / on_timeout resume as an ordinary queue-timeout abandon.
+        var isPlaceholder = session.Vars.GetValueOrDefault("_queue_callback") == "true";
 
         await callStateRecorder.RecordAsync(
             tenantId, tenantSchema, session.CallRecordId, CallHistoryState.Abandoned, session.CampaignId,
-            agentId: null, detail: isQueueCallback ? "Queue callback timed out in queue" : "Queue timeout",
-            abandonType: isQueueCallback ? CallAbandonType.CallbackAbandon : CallAbandonType.QueueTimeout, ct: ct);
+            agentId: null,
+            detail: reasonDetail ?? (isPlaceholder ? "Queue callback timed out in queue" : "Queue timeout"),
+            abandonType: isPlaceholder ? CallAbandonType.CallbackAbandon : CallAbandonType.QueueTimeout, ct: ct);
 
-        if (isQueueCallback)
+        if (isPlaceholder)
         {
             await _sessionStore.DeleteAsync(session.ChannelUuid, ct);
             _logger.LogInformation(
@@ -292,11 +301,18 @@ public sealed class QueuePollingService : BackgroundService
     private async Task TryAutoAnswerDeliverAsync(
         TelephonyCallSession session, Guid tenantId, string tenantSchema, TenantDbContext db,
         EligibleAgentRanker ranker, QueuedCallDeliveryService deliveryService,
-        HashSet<Guid> claimedThisTick, CancellationToken ct)
+        HashSet<Guid> claimedThisTick, ICallStateHistoryRecorder callStateRecorder,
+        ITelephonyFlowEngine telephonyFlowEngine, IConfiguration config, CancellationToken ct)
     {
-        var ranked = await ranker.GetRankedEligibleAgentsAsync(
-            db, session.TenantId, session.CampaignId, excludeAgentIds: claimedThisTick, ct: ct);
+        // A re-queued queue-callback caller (agent bridge failed after the callback connected)
+        // carries a per-call exclusion list — the softphone(s) that already failed the bridge.
+        var exclude = new HashSet<Guid>(claimedThisTick);
+        exclude.UnionWith(ParseExcludedAgents(session));
 
+        var ranked = await ranker.GetRankedEligibleAgentsAsync(
+            db, session.TenantId, session.CampaignId, excludeAgentIds: exclude, ct: ct);
+
+        var attemptedDelivery = false;
         foreach (var candidate in ranked.Take(MaxAutoAnswerAttempts))
         {
             var claimKey = AgentClaimKey(tenantId, candidate.AgentId);
@@ -308,6 +324,7 @@ public sealed class QueuePollingService : BackgroundService
                     candidate.AgentId);
                 continue;
             }
+            attemptedDelivery = true;
 
             // Arm the client's auto-answer flag BEFORE originating — the whisper/bridge INVITE
             // that DeliverAsync triggers can otherwise reach the browser before a push sent only
@@ -337,8 +354,47 @@ public sealed class QueuePollingService : BackgroundService
             await _hub.Clients.Group($"agent:{candidate.AgentId}").ReceiveAutoConnectFailed(session.CallRecordId.ToString());
         }
 
-        // No candidate succeeded (or none were eligible) — the call stays queued and this same
-        // arbitration runs again next tick.
+        // No candidate succeeded. For an ordinary queued call the call just stays queued and this
+        // arbitration runs again next tick. For a re-queued queue-callback caller, count the miss
+        // toward the bridge-retry bound so a wholly-broken agent pool doesn't trap the caller until
+        // QueueTimeoutSeconds — but only when a delivery was actually attempted (a tick with no
+        // eligible agent at all is a legitimate wait, not a failure).
+        if (attemptedDelivery && session.Vars.ContainsKey("_qcb_bridge_fails"))
+            await NoteRequeuedCallbackMissAsync(
+                session, tenantId, tenantSchema, callStateRecorder, telephonyFlowEngine, config, ct);
+    }
+
+    /// <summary>
+    /// A re-queued queue-callback caller (post-connect agent bridge failed →
+    /// QueueCallbackDeliveryService re-queued them and resumed the flow's <c>failed</c> branch)
+    /// whose re-delivery is still failing. Increments <c>_qcb_bridge_fails</c>; once it passes
+    /// <c>FreeSWITCH:QueueCallback:MaxBridgeRetries</c> (default 2) the caller is evicted and the
+    /// call recorded as a callback abandon rather than left ringing forever.
+    /// </summary>
+    private async Task NoteRequeuedCallbackMissAsync(
+        TelephonyCallSession session, Guid tenantId, string tenantSchema,
+        ICallStateHistoryRecorder callStateRecorder, ITelephonyFlowEngine telephonyFlowEngine,
+        IConfiguration config, CancellationToken ct)
+    {
+        var misses = (int.TryParse(session.Vars.GetValueOrDefault("_qcb_bridge_fails"), out var m) ? m : 0) + 1;
+        session.Vars["_qcb_bridge_fails"] = misses.ToString();
+        await _sessionStore.SaveAsync(session, ct);
+
+        var max = int.TryParse(config["FreeSWITCH:QueueCallback:MaxBridgeRetries"], out var n) && n >= 0 ? n : 2;
+        if (misses <= max)
+        {
+            _logger.LogWarning(
+                "QueuePoller: re-queued queue-callback {Uuid} — re-delivery still failing ({Misses}/{Max})",
+                session.ChannelUuid, misses, max);
+            return;
+        }
+
+        _logger.LogWarning(
+            "QueuePoller: re-queued queue-callback {Uuid} — re-delivery bound exhausted ({Misses}/{Max}), abandoning",
+            session.ChannelUuid, misses, max);
+        await EvictTimedOutCallAsync(
+            session, tenantId, tenantSchema, callStateRecorder, telephonyFlowEngine, config, ct,
+            reasonDetail: $"Queue callback re-delivery failed {misses} time(s) after agent bridge failure");
     }
 
     private async Task NotifyEligibleAgentsAsync(
@@ -349,8 +405,11 @@ public sealed class QueuePollingService : BackgroundService
             "QueuePoller: processing queued session {Uuid} — campaign={CampaignId} tenant={TenantId} schema={Schema}",
             session.ChannelUuid, session.CampaignId, session.TenantId, session.TenantSchemaName);
 
+        var exclude = new HashSet<Guid>(claimedThisTick);
+        exclude.UnionWith(ParseExcludedAgents(session));   // re-queued queue-callback: skip the failed softphone(s)
+
         var ranked = await ranker.GetRankedEligibleAgentsAsync(
-            db, session.TenantId, session.CampaignId, excludeAgentIds: claimedThisTick, ct: ct);
+            db, session.TenantId, session.CampaignId, excludeAgentIds: exclude, ct: ct);
 
         // RingTopNByProficiency truncates to the top N here too, so a re-poll (an agent newly
         // going Available mid-queue) still only offers the call to the same restricted set the
@@ -417,6 +476,19 @@ public sealed class QueuePollingService : BackgroundService
 
     /// <summary>A queue-callback placeholder whose last dial attempt failed carries
     /// _queue_callback_retry_after — a short cool-off before it's re-dialed.</summary>
+    /// <summary>The per-call agent exclusion list a re-queued queue-callback caller carries in
+    /// <c>_qcb_excluded_agents</c> (CSV of guids) — softphones that already failed the post-connect
+    /// bridge. Unioned into the eligible-agent ranker's exclusion set so they aren't re-picked.</summary>
+    internal static HashSet<Guid> ParseExcludedAgents(TelephonyCallSession s)
+    {
+        var set = new HashSet<Guid>();
+        var raw = s.Vars.GetValueOrDefault("_qcb_excluded_agents");
+        if (string.IsNullOrEmpty(raw)) return set;
+        foreach (var part in raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            if (Guid.TryParse(part, out var g)) set.Add(g);
+        return set;
+    }
+
     private static bool RetryCoolingOff(TelephonyCallSession s, DateTimeOffset now) =>
         s.Vars.TryGetValue("_queue_callback_retry_after", out var iso)
         && DateTimeOffset.TryParse(iso, out var after)
