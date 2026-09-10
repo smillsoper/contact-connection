@@ -20,6 +20,14 @@ public interface IEslCommander
     Task<string?> GetChannelVarAsync(string uuid, string name, CancellationToken ct = default);
     /// <summary>uuid_broadcast to play media on one leg of a parked/bridged channel.</summary>
     Task BroadcastAsync(string uuid, string mediaArg, CancellationToken ct = default);
+
+    /// <summary>
+    /// uuid_displace &lt;uuid&gt; [start|stop] &lt;mediaArg&gt; — mixes a media stream into a channel's audio
+    /// (<c>mux</c>) so it is both heard on that leg AND captured by uuid_record. Used for the
+    /// recording-notification beep (a looping <c>tone_stream://</c>), started on each leg of the
+    /// call; <c>stop</c> takes the identical <paramref name="mediaArg"/>.
+    /// </summary>
+    Task DisplaceAsync(string uuid, string action, string mediaArg, CancellationToken ct = default);
     /// <summary>uuid_bridge to connect two already-established parked channels.</summary>
     Task BridgeChannelsAsync(string uuid1, string uuid2, CancellationToken ct = default);
     /// <summary>Originate a call to an agent extension with auto-answer and park the channel. Returns (uuid, null) on success, (null, errorDetail) on failure.</summary>

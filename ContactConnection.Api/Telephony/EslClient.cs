@@ -212,10 +212,18 @@ public sealed class EslClient(ILogger<EslClient>? logger = null) : IOwnedEslComm
     public Task BroadcastAsync(string uuid, string mediaArg, CancellationToken ct = default) =>
         SendApiAsync($"uuid_broadcast {uuid} {mediaArg} aleg", ct);
 
-    /// <summary>uuid_broadcast onto BOTH legs of a bridged call, overlaying the live conversation
-    /// (used for the periodic recording-notification beep so caller and agent both hear it).</summary>
-    public Task BroadcastToBothLegsAsync(string uuid, string mediaArg, CancellationToken ct = default) =>
-        SendApiAsync($"uuid_broadcast {uuid} {mediaArg} both", ct);
+    /// <summary>
+    /// uuid_displace &lt;uuid&gt; [start|stop] &lt;file&gt; [&lt;limit&gt;] [mux] — <c>start</c> mixes the media
+    /// into the channel's audio (<c>mux</c>, no time limit) so it's both heard AND captured by
+    /// uuid_record; <c>stop</c> takes the same file string. Used for the recording-notification beep
+    /// (a looping tone_stream), displaced on each leg of the call.
+    /// </summary>
+    public Task DisplaceAsync(string uuid, string action, string mediaArg, CancellationToken ct = default) =>
+        SendApiAsync(
+            action == "start"
+                ? $"uuid_displace {uuid} start {mediaArg} 0 mux"
+                : $"uuid_displace {uuid} stop {mediaArg}",
+            ct);
 
     public Task BridgeChannelsAsync(string uuid1, string uuid2, CancellationToken ct = default) =>
         SendApiAsync($"uuid_bridge {uuid1} {uuid2}", ct);

@@ -21,12 +21,14 @@ public sealed class CallRecordingController : ICallRecordingController
 
     private readonly string _recordingsBase;
     private readonly int _defaultMaxMaskSeconds;
+    private readonly string _beepTone;
 
     // channelUuid -> the CTS that cancels its pending forced-unmask
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _watchdogs = new();
-    // channelUuid of live recordings that want the periodic notification beep — RecordingBeepService
-    // reads this each tick and plays the tone on both legs of those calls.
-    private readonly ConcurrentDictionary<string, byte> _beeping = new();
+    // recording (caller) channelUuid -> the legs the notification-beep tone was displaced onto,
+    // so StopAsync can stop it on each. A looping tone_stream in mux mode: periodic beep, heard
+    // on the leg AND captured by uuid_record.
+    private readonly ConcurrentDictionary<string, List<string>> _beepLegs = new();
 
     public CallRecordingController(
         IEslCommanderFactory eslFactory,
@@ -41,6 +43,10 @@ public sealed class CallRecordingController : ICallRecordingController
         _recordingsBase = (config["FreeSWITCH:RecordingsContainerPath"] ?? "/var/lib/freeswitch/recordings").TrimEnd('/');
         _defaultMaxMaskSeconds =
             int.TryParse(config["Recording:MaxMaskSeconds"], out var v) && v > 0 ? v : 180;
+        // Looping teletone: <on>ms tone, <off>ms silence, forever. ~250ms of 1400Hz every ~14s.
+        _beepTone = config["Recording:BeepTone"] is { Length: > 0 } bt
+            ? bt
+            : "tone_stream://%(250,14000,1400);loops=-1";
     }
 
     public Task<RecordingActionOutcome> StartAsync(
@@ -54,13 +60,20 @@ public sealed class CallRecordingController : ICallRecordingController
             await e.RecordAsync(command.ChannelUuid, RecordingEventAction.Start, path, options.LimitSeconds, ct);
 
             if (options.Beep)
-                _beeping[command.ChannelUuid] = 0;   // RecordingBeepService plays the tone on its tick
+            {
+                var legs = new List<string> { command.ChannelUuid };
+                if (!string.IsNullOrEmpty(options.AgentChannelUuid)) legs.Add(options.AgentChannelUuid);
+                foreach (var leg in legs)
+                    await e.DisplaceAsync(leg, "start", _beepTone, ct);
+                _beepLegs[command.ChannelUuid] = legs;
+            }
 
             var evt = RecordingEvent.Start(UtcNow(), command.Source, command.NodeId, path);
             await PersistAsync(command, evt, ct);
             _logger.LogInformation(
-                "Recording started [{Uuid}] call={CallRecordId} stereo={Stereo} beep={Beep} path={Path} source={Source}",
-                command.ChannelUuid, command.CallRecordId, options.Stereo, options.Beep, path, command.Source);
+                "Recording started [{Uuid}] call={CallRecordId} stereo={Stereo} beep={Beep} beepLegs={BeepLegs} path={Path} source={Source}",
+                command.ChannelUuid, command.CallRecordId, options.Stereo, options.Beep,
+                options.Beep ? _beepLegs.GetValueOrDefault(command.ChannelUuid)?.Count ?? 0 : 0, path, command.Source);
             return RecordingActionOutcome.Success(evt);
         });
 
@@ -68,10 +81,10 @@ public sealed class CallRecordingController : ICallRecordingController
         RecordingCommand command, IEslCommander? esl = null, CancellationToken ct = default)
     {
         DisarmWatchdog(command.ChannelUuid);
-        _beeping.TryRemove(command.ChannelUuid, out _);
         return RunAsync(esl, async e =>
         {
             await e.RecordAsync(command.ChannelUuid, RecordingEventAction.Stop, PathFor(command), 0, ct);
+            await StopBeepAsync(command.ChannelUuid, e, ct);
             var evt = RecordingEvent.Stop(UtcNow(), command.Source, command.NodeId, command.Reason);
             await PersistAsync(command, evt, ct);
             _logger.LogInformation("Recording stopped [{Uuid}] call={CallRecordId} source={Source}",
@@ -117,18 +130,33 @@ public sealed class CallRecordingController : ICallRecordingController
     public void ForgetChannel(string channelUuid)
     {
         DisarmWatchdog(channelUuid);
-        _beeping.TryRemove(channelUuid, out _);
+        _beepLegs.TryRemove(channelUuid, out _);   // channel gone — its displaces die with it
     }
 
-    // Skip the beep during a masked segment (an active watchdog == a live mask) so the tone
-    // doesn't land in the middle of sensitive-data DTMF entry.
-    public IReadOnlyCollection<string> BeepingChannels() =>
-        _beeping.Keys.Where(u => !_watchdogs.ContainsKey(u)).ToArray();
+    public async Task EnsureBeepOnPeerAsync(
+        string callerUuid, string peerUuid, IEslCommander esl, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(peerUuid) || !_beepLegs.TryGetValue(callerUuid, out var legs)) return;
+        lock (legs)
+        {
+            if (legs.Contains(peerUuid)) return;
+            legs.Add(peerUuid);
+        }
+        try
+        {
+            await esl.DisplaceAsync(peerUuid, "start", _beepTone, ct);
+            _logger.LogInformation("Recording beep [{Caller}]: started on bridged peer leg {Peer}", callerUuid, peerUuid);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Recording beep start on bridged peer {Peer} failed (non-fatal)", peerUuid);
+        }
+    }
 
     public async Task FinalizeOnDisconnectAsync(RecordingCommand command, CancellationToken ct = default)
     {
         DisarmWatchdog(command.ChannelUuid);
-        _beeping.TryRemove(command.ChannelUuid, out _);
+        _beepLegs.TryRemove(command.ChannelUuid, out _);   // channel gone — its displaces die with it
         var evt = RecordingEvent.Stop(
             UtcNow(), RecordingEventSource.Disconnect, command.NodeId, command.Reason ?? "call_disconnected");
         await PersistAsync(command, evt, ct);
@@ -139,6 +167,18 @@ public sealed class CallRecordingController : ICallRecordingController
     // ── internals ───────────────────────────────────────────────────────────
 
     private string PathFor(RecordingCommand c) => $"{_recordingsBase}/{c.CallRecordId}.wav";
+
+    private async Task StopBeepAsync(string callerUuid, IEslCommander e, CancellationToken ct)
+    {
+        if (!_beepLegs.TryRemove(callerUuid, out var legs)) return;
+        string[] snapshot;
+        lock (legs) snapshot = [.. legs];
+        foreach (var leg in snapshot)
+        {
+            try { await e.DisplaceAsync(leg, "stop", _beepTone, ct); }
+            catch (Exception ex) { _logger.LogDebug(ex, "Recording beep stop on leg {Leg} failed (non-fatal)", leg); }
+        }
+    }
 
     private static DateTimeOffset UtcNow() => DateTimeOffset.UtcNow;
 

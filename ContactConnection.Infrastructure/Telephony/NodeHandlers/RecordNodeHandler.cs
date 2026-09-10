@@ -104,11 +104,23 @@ public class RecordNodeHandler : ITelephonyNodeHandler
             if (ConsentModel.RequiresAnnouncement(campaign?.ConsentModel ?? ConsentModel.OneParty))
                 await PlayConsentAnnouncementAsync(node, ctx, ct);
 
+            var beep = campaign?.RecordingBeepEnabled ?? false;
+            // For a post-bridge tf_record (tf_on_agent_answer branch) the agent leg is known — the
+            // beep needs displacing onto it too so the agent hears it and it's on the agent
+            // channel of the stereo recording. A pre-bridge start leaves this null.
+            string? agentUuid = null;
+            if (beep)
+            {
+                var session = await _sessionStore.GetAsync(ctx.ChannelUuid, ct);
+                agentUuid = session?.Vars.GetValueOrDefault("_agent_uuid");
+            }
+
             var options = new RecordingStartOptions
             {
-                Stereo       = campaign?.RecordStereo ?? true,
-                LimitSeconds = node["recordLimitSeconds"]?.GetValue<int>() ?? 0,
-                Beep         = campaign?.RecordingBeepEnabled ?? false,
+                Stereo           = campaign?.RecordStereo ?? true,
+                LimitSeconds     = node["recordLimitSeconds"]?.GetValue<int>() ?? 0,
+                Beep             = beep,
+                AgentChannelUuid = agentUuid,
             };
 
             var outcome = await _recording.StartAsync(command, options, ctx.Esl, ct);

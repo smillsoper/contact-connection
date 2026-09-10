@@ -113,48 +113,64 @@ public class CallRecordingControllerTests
         h.Factory.Verify(f => f.CreateAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // ── notification beep (BeepingChannels feeds RecordingBeepService) ─────
+    // ── notification beep (looping tone_stream displaced onto each leg) ────
+
+    private const string BeepTone = "tone_stream://%(250,14000,1400);loops=-1";
+    private const string AgentUuid = "agent-chan-9";
 
     [Fact]
-    public async Task StartAsync_Beep_MarksChannelBeeping()
+    public async Task StartAsync_Beep_DisplacesToneOnCallerLeg()
     {
         var h = new Harness();
         await h.Controller.StartAsync(Cmd(), new RecordingStartOptions { Beep = true }, h.Esl.Object);
-        Assert.Contains(Uuid, h.Controller.BeepingChannels());
+        h.Esl.Verify(e => e.DisplaceAsync(Uuid, "start", BeepTone, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task StartAsync_NoBeep_NotBeeping()
+    public async Task StartAsync_Beep_WithAgentLeg_DisplacesBothLegs()
+    {
+        var h = new Harness();
+        await h.Controller.StartAsync(
+            Cmd(), new RecordingStartOptions { Beep = true, AgentChannelUuid = AgentUuid }, h.Esl.Object);
+        h.Esl.Verify(e => e.DisplaceAsync(Uuid, "start", BeepTone, It.IsAny<CancellationToken>()), Times.Once);
+        h.Esl.Verify(e => e.DisplaceAsync(AgentUuid, "start", BeepTone, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task StartAsync_NoBeep_NoDisplace()
     {
         var h = new Harness();
         await h.Controller.StartAsync(Cmd(), new RecordingStartOptions { Beep = false }, h.Esl.Object);
-        Assert.DoesNotContain(Uuid, h.Controller.BeepingChannels());
+        h.Esl.Verify(e => e.DisplaceAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task StopAsync_RemovesChannelFromBeeping()
+    public async Task StopAsync_AfterBeep_StopsDisplaceOnEveryLeg()
     {
         var h = new Harness();
-        await h.Controller.StartAsync(Cmd(), new RecordingStartOptions { Beep = true }, h.Esl.Object);
+        await h.Controller.StartAsync(
+            Cmd(), new RecordingStartOptions { Beep = true, AgentChannelUuid = AgentUuid }, h.Esl.Object);
         await h.Controller.StopAsync(Cmd(), h.Esl.Object);
-        Assert.DoesNotContain(Uuid, h.Controller.BeepingChannels());
+        h.Esl.Verify(e => e.DisplaceAsync(Uuid, "stop", BeepTone, It.IsAny<CancellationToken>()), Times.Once);
+        h.Esl.Verify(e => e.DisplaceAsync(AgentUuid, "stop", BeepTone, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task MaskedChannel_ExcludedFromBeeping_ThenRestoredOnUnmask()
+    public async Task EnsureBeepOnPeer_AddsLeg_WhenBeeping_NoOp_WhenNot()
     {
         var h = new Harness();
+
+        await h.Controller.EnsureBeepOnPeerAsync(Uuid, AgentUuid, h.Esl.Object);   // not recording yet
+        h.Esl.Verify(e => e.DisplaceAsync(AgentUuid, "start", BeepTone, It.IsAny<CancellationToken>()), Times.Never);
+
         await h.Controller.StartAsync(Cmd(), new RecordingStartOptions { Beep = true }, h.Esl.Object);
+        await h.Controller.EnsureBeepOnPeerAsync(Uuid, AgentUuid, h.Esl.Object);
+        await h.Controller.EnsureBeepOnPeerAsync(Uuid, AgentUuid, h.Esl.Object);   // idempotent
 
-        await h.Controller.MaskAsync(new RecordingMaskCommand
-        {
-            ChannelUuid = Uuid, CallRecordId = CallRecordId, TenantSchemaName = Schema,
-            Source = RecordingEventSource.CustomEvent,
-        }, h.Esl.Object);
-        Assert.DoesNotContain(Uuid, h.Controller.BeepingChannels());
+        h.Esl.Verify(e => e.DisplaceAsync(AgentUuid, "start", BeepTone, It.IsAny<CancellationToken>()), Times.Once);
 
-        await h.Controller.UnmaskAsync(Cmd(), h.Esl.Object);
-        Assert.Contains(Uuid, h.Controller.BeepingChannels());
+        await h.Controller.StopAsync(Cmd(), h.Esl.Object);
+        h.Esl.Verify(e => e.DisplaceAsync(AgentUuid, "stop", BeepTone, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // ── mask / unmask / stop ───────────────────────────────────────────────

@@ -1311,6 +1311,16 @@ public sealed class EslBackgroundService : BackgroundService
         var bridgeSession = await _sessionStore.GetAsync(uuid, ct);
         if (bridgeSession is null) return;
 
+        // If this caller has a beep-enabled recording that started pre-bridge (or on the
+        // simple-bridge path, where the agent leg wasn't known), displace the beep onto the
+        // just-bridged agent leg too. No-op otherwise.
+        if (!string.IsNullOrEmpty(other))
+        {
+            using var beepScope = _scopeFactory.CreateScope();
+            await beepScope.ServiceProvider.GetRequiredService<ICallRecordingController>()
+                .EnsureBeepOnPeerAsync(uuid, other, esl, ct);
+        }
+
         // tf_transfer external_number connected — the outbound leg is now bridged to the caller, so
         // the transfer is no longer "in progress". Clearing this lets that outbound leg's eventual
         // CHANNEL_HANGUP complete the call normally instead of being read as a bridge failure.

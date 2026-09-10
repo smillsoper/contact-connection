@@ -39,11 +39,13 @@ public interface ICallRecordingController
     void ForgetChannel(string channelUuid);
 
     /// <summary>
-    /// Channel UUIDs of live recordings whose campaign has the notification beep enabled and that
-    /// are not currently in a masked segment. <c>RecordingBeepService</c> plays the periodic tone
-    /// on both legs of each of these every tick.
+    /// When a bridge forms (CHANNEL_BRIDGE), if <paramref name="callerUuid"/> has a beep-enabled
+    /// recording that isn't yet displaced onto <paramref name="peerUuid"/> (the just-bridged agent
+    /// leg), start the notification beep on that leg too. No-op when the caller isn't recording
+    /// with a beep, or the peer already has it. Covers the pre-bridge / simple-bridge
+    /// <c>tf_record</c> case where the agent leg wasn't known at start.
     /// </summary>
-    IReadOnlyCollection<string> BeepingChannels();
+    Task EnsureBeepOnPeerAsync(string callerUuid, string peerUuid, IEslCommander esl, CancellationToken ct = default);
 
     /// <summary>
     /// Closes the recording audit trail on hangup: forgets the channel and appends a
@@ -87,6 +89,13 @@ public record RecordingStartOptions
     /// <c>RecordingBeepEnabled</c>. Stopped when the recording stops / on disconnect.
     /// </summary>
     public bool Beep { get; init; }
+
+    /// <summary>
+    /// The agent leg's channel UUID when the call is already bridged at <c>start</c> time (a
+    /// post-bridge <c>tf_record</c>). The beep is displaced onto this leg too so the agent hears
+    /// it and it lands on the agent channel of the stereo recording. Null for a pre-bridge start.
+    /// </summary>
+    public string? AgentChannelUuid { get; init; }
 }
 
 /// <summary>A <see cref="RecordingCommand"/> plus the mask-specific fields.</summary>
