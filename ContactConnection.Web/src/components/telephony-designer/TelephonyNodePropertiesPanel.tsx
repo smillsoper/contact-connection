@@ -373,6 +373,10 @@ export default function TelephonyNodePropertiesPanel({
         <IvrMenuNodeEditor data={data} onChange={(patch) => onChange(node.id, patch)} />
       )}
 
+      {type === 'tf_secure_collect' && (
+        <SecureCollectNodeEditor data={data} onChange={(patch) => onChange(node.id, patch)} />
+      )}
+
       {type === 'tf_voicemail' && (
         <VoicemailNodeEditor data={data} onChange={(patch) => onChange(node.id, patch)} />
       )}
@@ -1425,6 +1429,136 @@ function IvrMenuNodeEditor({
           <span className="font-mono text-gray-400"> no_match</span> handle.
         </p>
       </div>
+    </div>
+  )
+}
+
+type SecureField = NonNullable<TelNodeData['secureFields']>[number]
+
+const SECURE_VALIDATIONS: { value: NonNullable<SecureField['validation']>; label: string }[] = [
+  { value: 'none', label: 'None (any digits of the given length)' },
+  { value: 'luhn', label: 'Luhn / mod-10 (card number)' },
+  { value: 'expiry_mmyy', label: 'Expiry MMYY (valid month, not past)' },
+  { value: 'cvv', label: 'CVV (3–4 digits)' },
+]
+
+function SecureCollectNodeEditor({
+  data,
+  onChange,
+}: {
+  data: TelNodeData
+  onChange: (patch: Partial<TelNodeData>) => void
+}) {
+  const inputCls = 'w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-rose-500'
+  const labelCls = 'block text-xs text-gray-400 mb-1'
+  const fields = (data.secureFields as SecureField[] | undefined) ?? []
+
+  const setFields = (next: SecureField[]) => onChange({ secureFields: next })
+  const updateField = (i: number, patch: Partial<SecureField>) =>
+    setFields(fields.map((f, idx) => (idx === i ? { ...f, ...patch } : f)))
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-[11px] text-rose-300/90 leading-snug bg-rose-950/30 border border-rose-900/50 rounded p-2">
+        PCI: while this node runs the call recording is masked with silence and, if the caller is
+        with an agent, the agent is put on hold. Captured digits are encrypted into the call
+        record and offered as <span className="font-mono">{'{{secure.<key>}}'}</span> for an
+        immediate tokenization step — they are never written to the call trace.
+      </p>
+
+      <div>
+        <label className={labelCls}>Fields — collected in order, one prompt each</label>
+        <div className="flex flex-col gap-2">
+          {fields.map((f, i) => (
+            <div key={i} className="border border-gray-700 rounded p-2 flex flex-col gap-2 bg-gray-800/40">
+              <div className="flex items-center gap-1.5">
+                <input
+                  className={`${inputCls} font-mono`}
+                  placeholder="key (e.g. pan)"
+                  value={f.key}
+                  onChange={(e) => updateField(i, { key: e.target.value.replace(/[^a-z0-9_]/gi, '_').toLowerCase() })}
+                />
+                <button
+                  type="button"
+                  onClick={() => setFields(fields.filter((_, idx) => idx !== i))}
+                  className="text-gray-500 hover:text-red-400 text-sm px-1"
+                >×</button>
+              </div>
+              <AudioPicker
+                value={f.promptAudioFileId ?? ''}
+                onChange={(v) => updateField(i, { promptAudioFileId: v })}
+                accent="purple"
+                label="Prompt audio"
+                blankLabel="— Select audio (required) —"
+              />
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className={labelCls}>Min digits</label>
+                  <input type="number" min={1} max={32} className={inputCls} value={f.minDigits ?? 1}
+                    onChange={(e) => updateField(i, { minDigits: parseInt(e.target.value) || 1 })} />
+                </div>
+                <div>
+                  <label className={labelCls}>Max digits</label>
+                  <input type="number" min={1} max={32} className={inputCls} value={f.maxDigits ?? 1}
+                    onChange={(e) => updateField(i, { maxDigits: parseInt(e.target.value) || 1 })} />
+                </div>
+                <div>
+                  <label className={labelCls}>Terminator</label>
+                  <input className={`${inputCls} font-mono`} placeholder="none"
+                    value={f.terminator ?? ''}
+                    onChange={(e) => updateField(i, { terminator: e.target.value })} />
+                </div>
+              </div>
+              <div>
+                <label className={labelCls}>Validation</label>
+                <select className={inputCls} value={f.validation ?? 'none'}
+                  onChange={(e) => updateField(i, { validation: e.target.value as SecureField['validation'] })}>
+                  {SECURE_VALIDATIONS.map((v) => <option key={v.value} value={v.value}>{v.label}</option>)}
+                </select>
+              </div>
+            </div>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={() => setFields([...fields, { key: `field_${fields.length + 1}`, minDigits: 1, maxDigits: 16, terminator: '#', validation: 'none' }])}
+          className="mt-2 text-xs text-rose-400 hover:text-rose-300"
+        >+ Add field</button>
+      </div>
+
+      <div>
+        <AudioPicker
+          value={(data.invalidAudioFileId as string) ?? ''}
+          onChange={(v) => onChange({ invalidAudioFileId: v })}
+          accent="purple"
+          label="Invalid-entry re-prompt audio (optional)"
+          blankLabel="— None —"
+        />
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        <div>
+          <label className={labelCls}>Max tries / field</label>
+          <input type="number" min={1} max={10} className={inputCls} value={(data.maxTries as number) ?? 3}
+            onChange={(e) => onChange({ maxTries: parseInt(e.target.value) || 1 })} />
+        </div>
+        <div>
+          <label className={labelCls}>First-digit timeout (ms)</label>
+          <input type="number" min={1000} step={500} className={inputCls} value={(data.timeoutMs as number) ?? 12000}
+            onChange={(e) => onChange({ timeoutMs: parseInt(e.target.value) || 12000 })} />
+        </div>
+        <div>
+          <label className={labelCls}>Inter-digit timeout (ms)</label>
+          <input type="number" min={1000} step={250} className={inputCls} value={(data.interDigitTimeoutMs as number) ?? 5000}
+            onChange={(e) => onChange({ interDigitTimeoutMs: parseInt(e.target.value) || 5000 })} />
+        </div>
+      </div>
+
+      <p className="text-[10px] text-gray-500 leading-snug">
+        Handles: <span className="font-mono text-emerald-400">collected</span> (all fields captured
+        + encrypted), <span className="font-mono text-red-400">failed</span> (bad config, failed
+        validation, or retries exhausted), <span className="font-mono text-amber-400">timeout</span> (no entry).
+      </p>
     </div>
   )
 }

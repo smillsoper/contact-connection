@@ -43,6 +43,7 @@ import OnCallDisconnectedNode from '../components/telephony-designer/nodes/OnCal
 import OnCustomEventNode from '../components/telephony-designer/nodes/OnCustomEventNode'
 import DtmfNode from '../components/telephony-designer/nodes/DtmfNode'
 import IvrMenuNode from '../components/telephony-designer/nodes/IvrMenuNode'
+import SecureCollectNode from '../components/telephony-designer/nodes/SecureCollectNode'
 import RecordNode from '../components/telephony-designer/nodes/RecordNode'
 import VoicemailNode from '../components/telephony-designer/nodes/VoicemailNode'
 import ScheduledCallbackNode from '../components/telephony-designer/nodes/ScheduledCallbackNode'
@@ -96,6 +97,7 @@ const nodeTypes = {
   tf_script_pop: ScriptPopNode,
   tf_dtmf: DtmfNode,
   tf_ivr_menu: IvrMenuNode,
+  tf_secure_collect: SecureCollectNode,
   tf_record: RecordNode,
   tf_voicemail: VoicemailNode,
   tf_scheduled_callback: ScheduledCallbackNode,

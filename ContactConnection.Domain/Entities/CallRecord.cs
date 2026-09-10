@@ -313,6 +313,35 @@ public class CallRecord
     }
 
     /// <summary>
+    /// Stores the time-bounded, AES-256-encrypted sensitive-data blob (PCI — captured card
+    /// number / CVV / SSN, etc., see ARCHITECTURE.md §24). The caller does the encryption and,
+    /// when merging into an existing blob, the decrypt/merge/re-encrypt — this method only
+    /// records the ciphertext and stamps the store time, and clears any prior wipe marker
+    /// (fresh data supersedes an earlier wipe).
+    /// </summary>
+    public void StoreSensitiveData(string encryptedJson)
+    {
+        SensitiveData         = encryptedJson;
+        SensitiveDataStoredAt = DateTimeOffset.UtcNow;
+        SensitiveDataWipedAt  = null;
+        SensitiveWipeReason   = null;
+        UpdatedAt             = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>
+    /// Wipes the sensitive-data blob (scheduled retention job, or an explicit discard). The
+    /// ciphertext is dropped; the wipe is stamped and reasoned for the PCI audit trail.
+    /// Idempotent — a second wipe just refreshes the timestamp/reason.
+    /// </summary>
+    public void WipeSensitiveData(string reason)
+    {
+        SensitiveData        = null;
+        SensitiveDataWipedAt = DateTimeOffset.UtcNow;
+        SensitiveWipeReason  = reason;
+        UpdatedAt            = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>
     /// Appends one recording-lifecycle transition (start/stop/mask/unmask) and refreshes
     /// the denormalised recording_* scalar columns from the full event list. Events may
     /// arrive slightly out of order (independent ESL callbacks) — aggregates are always

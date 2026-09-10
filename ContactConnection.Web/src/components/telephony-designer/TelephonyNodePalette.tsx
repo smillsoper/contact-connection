@@ -14,6 +14,7 @@ const INBOUND_NODES: TelephonyNodeType[] = [
   'tf_play',
   'tf_dtmf',
   'tf_ivr_menu',
+  'tf_secure_collect',
   'tf_record',
   'tf_voicemail',
   'tf_scheduled_callback',

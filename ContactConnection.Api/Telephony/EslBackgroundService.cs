@@ -90,7 +90,7 @@ public sealed class EslBackgroundService : BackgroundService
             "CHANNEL_PARK CHANNEL_ANSWER CHANNEL_HANGUP CHANNEL_HANGUP_COMPLETE CHANNEL_BRIDGE CHANNEL_UNBRIDGE " +
             "CHANNEL_HOLD CHANNEL_UNHOLD PLAYBACK_STOP " +
             "CUSTOM contactconnection::ivr_done contactconnection::vm_done contactconnection::xfer_failed " +
-            "contactconnection::tts_done " +
+            "contactconnection::tts_done contactconnection::secure_collect_done " +
             "sofia::register sofia::unregister sofia::expire", ct);
 
         _logger.LogInformation("ESL connected to FreeSWITCH at {Host}:{Port}", host, port);
@@ -186,6 +186,19 @@ public sealed class EslBackgroundService : BackgroundService
             || ivrSession?.Vars.GetValueOrDefault("_vm_in_progress") == "true")
         {
             _logger.LogInformation("CHANNEL_PARK {Uuid}: returned from voicemail recording — not a new call", channelUuid);
+            return;
+        }
+
+        // tf_secure_collect: the secure_collect extension re-parks after each field's
+        // play_and_get_digits; contactconnection::secure_collect_done drives the next field / the
+        // finish. The park_with_moh re-park is the held agent leg mid-capture — also not a new call
+        // (EslBackgroundService re-bridges it once the capture completes).
+        if (destination == "secure_collect" || destination == "park_with_moh"
+            || rawDestination == "secure_collect" || rawDestination == "park_with_moh"
+            || transferSource.Contains("secure_collect") || transferSource.Contains("park_with_moh")
+            || ivrSession?.Vars.GetValueOrDefault("_sc_in_progress") == "true")
+        {
+            _logger.LogInformation("CHANNEL_PARK {Uuid}: returned from secure DTMF capture — not a new call", channelUuid);
             return;
         }
 
@@ -565,6 +578,199 @@ public sealed class EslBackgroundService : BackgroundService
         await scope.ServiceProvider
             .GetRequiredService<ITelephonyFlowEngine>()
             .ResumeFromNodeAsync(session.ChannelUuid, target, esl, ct);
+    }
+
+    /// <summary>
+    /// One field of a tf_secure_collect capture just finished in the secure_collect extension.
+    /// Validate it; on success accumulate the digits in the Redis-only <c>sc:{uuid}</c> blob and
+    /// either arm the next field or finalise. Finalising = AES-encrypt every captured field into
+    /// <c>call_records.sensitive_data</c>, expose <c>{{secure.&lt;key&gt;}}</c> flow vars, unmask the
+    /// recording, re-bridge a held agent leg, then resume the flow (collected / failed / timeout).
+    /// The plaintext digits are NEVER logged (length only) and never written to session vars other
+    /// than the redacted <c>secure.</c> namespace.
+    /// </summary>
+    private async Task HandleSecureCollectDoneAsync(
+        Dictionary<string, string> vars, EslClient esl, CancellationToken ct)
+    {
+        var uuid = vars.GetValueOrDefault("Unique-ID");
+        if (string.IsNullOrEmpty(uuid)) return;
+
+        var session = await ResolveSessionAsync(uuid, vars, ct);
+        if (session is null || session.Vars.GetValueOrDefault("_sc_in_progress") != "true") return;
+
+        var fieldKey = vars.GetValueOrDefault("cc_sc_field") ?? "";
+        var digits   = vars.GetValueOrDefault("cc_sc_digits");
+        if (string.IsNullOrEmpty(digits)) digits = vars.GetValueOrDefault("variable_cc_sc_result");
+
+        JsonArray specs;
+        try { specs = JsonNode.Parse(session.Vars.GetValueOrDefault("_sc_fields_json", "[]"))!.AsArray(); }
+        catch { specs = new JsonArray(); }
+
+        var idx = int.TryParse(session.Vars.GetValueOrDefault("_sc_field_index"), out var i) ? i : 0;
+        var spec = idx >= 0 && idx < specs.Count ? specs[idx]!.AsObject() : null;
+        var validation = spec?["val"]?.GetValue<string>() ?? SecureCollectValidation.None;
+
+        var blobKey = $"sc:{session.ChannelUuid}";
+        string outcome;
+        string? nextNode;
+
+        if (string.IsNullOrEmpty(digits))
+        {
+            outcome  = "timeout";
+            nextNode = session.Vars.GetValueOrDefault("_sc_next_timeout");
+            _logger.LogWarning("secure_collect_done {Uuid}: field '{Field}' timed out / no entry", uuid, fieldKey);
+        }
+        else if (!SecureCollect.Validate(validation, digits))
+        {
+            outcome  = "failed";
+            nextNode = session.Vars.GetValueOrDefault("_sc_next_failed");
+            _logger.LogWarning(
+                "secure_collect_done {Uuid}: field '{Field}' failed {Validation} validation ({Len} digits)",
+                uuid, fieldKey, validation, digits.Length);
+        }
+        else
+        {
+            // Accumulate in the Redis-only blob (never session.Vars) and advance.
+            var collected = ReadScBlob(await _sessionStore.GetKeyAsync(blobKey, ct));
+            collected[fieldKey] = digits;
+            await _sessionStore.SetKeyAsync(blobKey, JsonSerializer.Serialize(collected), TimeSpan.FromMinutes(10), ct);
+
+            var nextIdx = idx + 1;
+            if (nextIdx < specs.Count)
+            {
+                session.Vars["_sc_field_index"] = nextIdx.ToString();
+                await _sessionStore.SaveAsync(session, ct);
+
+                var maxTries   = int.TryParse(session.Vars.GetValueOrDefault("_sc_max_tries"), out var mt) ? mt : 3;
+                var timeoutMs  = int.TryParse(session.Vars.GetValueOrDefault("_sc_timeout_ms"), out var to) ? to : 12000;
+                var interDigit = int.TryParse(session.Vars.GetValueOrDefault("_sc_interdigit_ms"), out var id) ? id : 5000;
+                var invalidArg = session.Vars.GetValueOrDefault("_sc_invalid_arg", "silence_stream://250");
+
+                await SecureCollect.ApplyFieldVarsAsync(
+                    esl, session.ChannelUuid, specs[nextIdx]!.AsObject(),
+                    maxTries, timeoutMs, interDigit, invalidArg, ct);
+                await esl.TransferAsync(session.ChannelUuid, "secure_collect", "XML", "default", ct);
+
+                _logger.LogInformation(
+                    "secure_collect_done {Uuid}: field '{Field}' captured ({Len} digits) → next field '{Next}' ({Idx}/{Total})",
+                    uuid, fieldKey, digits.Length, specs[nextIdx]!["k"]?.GetValue<string>(), nextIdx + 1, specs.Count);
+                return;
+            }
+
+            // Last field — finalise.
+            outcome  = "collected";
+            nextNode = session.Vars.GetValueOrDefault("_sc_next_collected");
+
+            var finalBlob = ReadScBlob(await _sessionStore.GetKeyAsync(blobKey, ct));
+            var stored = await PersistSensitiveDataAsync(session, finalBlob, ct);
+            if (!stored)
+            {
+                outcome  = "failed";
+                nextNode = session.Vars.GetValueOrDefault("_sc_next_failed");
+            }
+            else
+            {
+                // Expose {{secure.<key>}} for an immediate tokenization api_call. Redacted from
+                // the call-trace snapshot by prefix (CallTraceSnapshot.RedactTelephonyVars).
+                foreach (var (k, v) in finalBlob)
+                    session.Vars["secure." + k] = v;
+                _logger.LogInformation(
+                    "secure_collect_done {Uuid}: all {Count} field(s) captured + encrypted to sensitive_data",
+                    uuid, finalBlob.Count);
+            }
+            await _sessionStore.DeleteKeyAsync(blobKey, ct);
+        }
+
+        // ── Common exit: clean up state, unmask, re-bridge, resume ───────────────
+        var maskedRecording = session.Vars.GetValueOrDefault("_sc_recording_masked") == "true";
+        var rebridge        = session.Vars.GetValueOrDefault("_sc_rebridge") == "true";
+        var peerUuid        = session.Vars.GetValueOrDefault("_sc_peer_uuid");
+        var nodeId          = session.Vars.GetValueOrDefault("_sc_node_id");
+
+        foreach (var k in new[]
+        {
+            "_sc_in_progress", "_sc_node_id", "_sc_fields_json", "_sc_field_index", "_sc_max_tries",
+            "_sc_timeout_ms", "_sc_interdigit_ms", "_sc_invalid_arg", "_sc_recording_masked",
+            "_sc_rebridge", "_sc_peer_uuid", "_sc_next_collected", "_sc_next_failed", "_sc_next_timeout",
+        })
+            session.Vars.Remove(k);
+        await _sessionStore.SaveAsync(session, ct);
+
+        using var scope = _scopeFactory.CreateScope();
+
+        if (maskedRecording)
+        {
+            var recording = scope.ServiceProvider.GetRequiredService<ICallRecordingController>();
+            await recording.UnmaskAsync(new RecordingCommand
+            {
+                ChannelUuid      = session.ChannelUuid,
+                CallRecordId     = session.CallRecordId,
+                TenantSchemaName = session.TenantSchemaName,
+                Source           = RecordingEventSource.SecureCollect,
+                NodeId           = nodeId,
+                Reason           = "secure_collect",
+            }, esl, ct);
+        }
+
+        if (rebridge && !string.IsNullOrEmpty(peerUuid))
+        {
+            _logger.LogInformation("secure_collect_done {Uuid}: re-bridging held agent leg {Peer}", uuid, peerUuid);
+            await esl.BridgeChannelsAsync(session.ChannelUuid, peerUuid, ct);
+        }
+
+        _logger.LogInformation("secure_collect_done {Uuid}: {Outcome} → node {Next}", uuid, outcome, nextNode ?? "(dead-end)");
+        if (string.IsNullOrEmpty(nextNode)) return;
+
+        await scope.ServiceProvider
+            .GetRequiredService<ITelephonyFlowEngine>()
+            .ResumeFromNodeAsync(session.ChannelUuid, nextNode, esl, ct);
+    }
+
+    private static Dictionary<string, string> ReadScBlob(string? json)
+    {
+        if (string.IsNullOrEmpty(json)) return new();
+        try { return JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? new(); }
+        catch { return new(); }
+    }
+
+    /// <summary>Merges the captured fields into any existing sensitive_data blob and re-encrypts.
+    /// Returns false (→ the node's `failed` path) if the protector isn't usable or the record is gone.</summary>
+    private async Task<bool> PersistSensitiveDataAsync(
+        TelephonyCallSession session, Dictionary<string, string> captured, CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var protector = scope.ServiceProvider.GetRequiredService<ISensitiveDataProtector>();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
+
+        if (!protector.IsConfigured)
+        {
+            _logger.LogError("secure_collect: SensitiveData:MasterKey not configured — cannot persist capture for record {RecordId}", session.CallRecordId);
+            return false;
+        }
+
+        try
+        {
+            await using var db = dbFactory.Create(session.TenantSchemaName);
+            var record = await db.CallRecords.FirstOrDefaultAsync(r => r.Id == session.CallRecordId, ct);
+            if (record is null) return false;
+
+            var merged = new Dictionary<string, string>();
+            if (!string.IsNullOrEmpty(record.SensitiveData))
+            {
+                try { merged = JsonSerializer.Deserialize<Dictionary<string, string>>(protector.Unprotect(record.SensitiveData)) ?? new(); }
+                catch (Exception ex) { _logger.LogWarning(ex, "secure_collect: existing sensitive_data for {RecordId} could not be read — overwriting", record.Id); }
+            }
+            foreach (var (k, v) in captured) merged[k] = v;
+
+            record.StoreSensitiveData(protector.Protect(JsonSerializer.Serialize(merged)));
+            await db.SaveChangesAsync(ct);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "secure_collect: failed to encrypt/persist sensitive_data for record {RecordId}", session.CallRecordId);
+            return false;
+        }
     }
 
     /// <summary>
@@ -1666,6 +1872,9 @@ public sealed class EslBackgroundService : BackgroundService
                 break;
             case "contactconnection::tts_done":
                 await HandleTtsDoneAsync(vars, esl, ct);
+                break;
+            case "contactconnection::secure_collect_done":
+                await HandleSecureCollectDoneAsync(vars, esl, ct);
                 break;
             case "contactconnection::xfer_failed":
                 await HandleXferFailedAsync(vars, esl, ct);

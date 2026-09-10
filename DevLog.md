@@ -143,6 +143,7 @@
 | 131 | 2026-09-10 | 10:29 AM PDT | 11:17 AM PDT | 48 min | ~13732 min |
 | 132 | 2026-09-10 | 11:20 AM PDT | 11:52 AM PDT | 32 min | ~13764 min |
 | 133 | 2026-09-10 | 11:59 AM PDT | 12:18 PM PDT | 19 min | ~13783 min |
+| 134 | 2026-09-10 | 12:20 PM PDT | 12:57 PM PDT | 37 min | ~13820 min |
 
 ---
 
@@ -6735,10 +6736,105 @@ eviction after N failed re-deliveries; queue-timeout-while-re-queued.
 
 ### Next session — pick up here
 
-1. Diagnose the `__platform:` OGG greeting-not-audible bug — grep
-   `/var/log/freeswitch/freeswitch.log` for the `playback(...ogg)` line + result during a live call.
-2. `tf_secure_collect` guided-DTMF node.
-3. Agent connect tone + "Playing greeting" softphone indicator. ([[project_agent_connect_tone]])
+1. `tf_secure_collect` guided-DTMF node.
+2. Agent connect tone + "Playing greeting" softphone indicator. ([[project_agent_connect_tone]])
+3. A bigger Group D piece (Chat / HubService / Integrations / Reporting) or Group B telephony
+   (Telnyx Verified Numbers / ANI passthrough / DNC registry).
+
+### Carry-overs (unchanged)
+
+RMD filing; `.cc → .io` migration tail; `contactconnection.io` SPF/DKIM/DMARC; `cc_timesync`
+crash-loop; `CommitmentEvents` JSONB `ValueComparer`; `ServiceLevelThresholdSeconds` widget;
+Dashboards endpoint authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 134
+
+**Date:** 2026-09-10
+**Start:** 12:20 PM PDT
+**End:** 12:57 PM PDT
+**Duration:** 37 minutes
+**Total Duration:** ~13820 minutes
+
+### Focus
+
+Build the **tf_secure_collect** telephony node — PCI-safe guided DTMF capture (card number /
+expiry / CVV / SSN / …). First thing to actually use the `call_records.sensitive_data` §24
+lifecycle. Full build across all layers; live verification deferred to next session.
+
+### Design (locked with the user via AskUserQuestion)
+
+- **Bridge handling — "Both":** pre-agent (caller alone, like tf_ivr_menu) AND mid-call (caller ↔
+  agent — agent leg parked on hold music for the capture, re-bridged after).
+- **Fields — configurable list:** `{ key, promptAudioFileId, minDigits, maxDigits, terminator,
+  validation: none|luhn|expiry_mmyy|cvv }`.
+- **Storage — encrypted AND flow vars:** AES-256-GCM into `sensitive_data` (+ `SensitiveDataStoredAt`)
+  **and** exposed as `{{secure.<key>}}` for an immediate tokenization api_call.
+- **Recording — auto-mask + collected/failed/timeout:** `MaskAsync(silence)` for the whole
+  capture, `UnmaskAsync` on every exit.
+
+### Built
+
+- **Domain:** `CallRecord.StoreSensitiveData(cipher)` / `WipeSensitiveData(reason)` (columns
+  already existed, nothing wrote them before); `RecordingEventSource.SecureCollect`.
+- **Application:** `ISensitiveDataProtector` — `IsConfigured` / `Protect` / `Unprotect`.
+- **Infrastructure:**
+  - `Security/AesGcmSensitiveDataProtector` — key from `SensitiveData:MasterKey` (base64 32 bytes,
+    Key Vault / user-secrets); inert with a clear log when unset; token = `[ver][nonce][tag][ct]`
+    base64. DI singleton.
+  - `Telephony/SecureCollect.cs` — `ParseFields` / `LengthRegexp` / `Validate` (Luhn, MMYY-not-past,
+    3–4-digit CVV) / `LuhnValid` / `ExpiryValid` + `ApplyFieldVarsAsync` (public static, shared
+    with the Api layer for re-arming each field).
+  - `Telephony/NodeHandlers/SecureCollectNodeHandler` — parses fields, guards (no fields / no
+    master key → `failed`), detects a bridge via `_bridged_peer_uuid` → `uuid_transfer` agent to
+    `park_with_moh`, masks a live recording, stashes `_sc_*` state (fields spec, index, transitions,
+    rebridge/peer, masked flag) on ctx + session, arms field 0's `cc_sc_*` vars, `uuid_transfer`s
+    the caller into `secure_collect`. Registered in `ServiceCollectionExtensions`.
+- **API — `EslBackgroundService`:**
+  - Subscribes `contactconnection::secure_collect_done`; CHANNEL_PARK guard ignores
+    `secure_collect` / `park_with_moh` re-parks.
+  - `HandleSecureCollectDoneAsync` — per field: empty → `timeout`; fails `Validate` → `failed`;
+    else accumulate in a **Redis-only** `sc:{uuid}` blob (never session vars) and either arm the
+    next field (`ApplyFieldVarsAsync` + re-transfer) or **finalise**: merge + AES-encrypt every
+    field into `sensitive_data` (`PersistSensitiveDataAsync`), set `{{secure.<key>}}` session vars,
+    delete the blob. Common exit: clear `_sc_*`, `UnmaskAsync`, `uuid_bridge` the held agent leg
+    back, resume the flow on the outcome's node. Plaintext never logged (key + digit count only).
+- **Dialplan** (`freeswitch/conf/dialplan/default.xml`): `secure-collect` (one field per
+  transfer, mirrors `ivr_collect`) + `park-with-moh` (looping `local_stream://moh` + park for the
+  held agent leg). Needs `fs_cli -x reloadxml` — bind mount, no FS restart.
+- **PCI hygiene:** `CallTraceSnapshot.BuildTelephonySnapshot` now redacts vars whose key starts
+  with `secure.` or `_sc_` to `[REDACTED]`.
+- **Web designer:** `tf_secure_collect` in `TelephonyNodeType` + `TELEPHONY_NODE_META` (rose
+  `#be123c`, multi handles `collected`/`failed`/`timeout`) + `defaultTelNodeData` (PAN+expiry+CVV) +
+  `SecureCollectNode.tsx` + `SecureCollectNodeEditor` (per-field key / AudioPicker / min-max /
+  terminator / validation dropdown, plus max-tries / timeouts / invalid-audio) + palette
+  (`INBOUND_NODES`) + `TelephonyDesignerPage` nodeTypes.
+- **Config:** dev `SensitiveData:MasterKey` set in `ContactConnection.Api` user-secrets; CLAUDE.md
+  Key Vault table += `SensitiveData--MasterKey`.
+
+### State
+
+- `dotnet build` + `dotnet test` (**668 pass — Domain 150, App 20, Infra 401, Api 97; +39**:
+  `SecureCollectTests`, `AesGcmSensitiveDataProtectorTests`, `SecureCollectNodeHandlerTests`,
+  `CallTraceSnapshotRedactionTests`, `SensitiveDataLifecycleTests`) + `tsc -b` all clean. No
+  migration (columns pre-existed). Not yet committed at time of writing.
+- **NOT live-verified** — no real card-entry call; the mid-bridge hold/re-bridge and the
+  multi-field `secure_collect` loop are untested against real FreeSWITCH. See
+  [[project_tf_secure_collect]] for the verify checklist.
+
+### New list items (from the user, S134 — not started)
+
+- **tf_delay** node — wait N ms/seconds (node property) → next.
+- **tf_repeat** node — internal counter, take the `repeat` exit N times then `finished`; downstream
+  nodes loop back to its entry. Together with tf_delay → a "fast-track: ring the available agent a
+  few times before dropping to queue MOH" pattern.
+
+### Next session — pick up here
+
+1. **Live-verify tf_secure_collect** — `fs_cli reloadxml`, build a card-capture flow, real call.
+2. tf_delay + tf_repeat nodes.
+3. Agent connect tone + "Playing greeting" indicator.
 
 ### Carry-overs (unchanged)
 

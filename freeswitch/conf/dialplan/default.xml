@@ -50,6 +50,35 @@
       </condition>
     </extension>
 
+    <!-- PCI guided-DTMF capture for the tf_secure_collect node. SecureCollectNodeHandler /
+         EslBackgroundService set cc_sc_* channel vars then `uuid_transfer <uuid> secure_collect
+         XML default` into here, once per field. Same play_and_get_digits mechanics as ivr_collect;
+         we emit contactconnection::secure_collect_done with the field key + collected digits and
+         re-park (ignored by the CHANNEL_PARK handler via _sc_in_progress). The recording is masked
+         by the handler for the whole capture, so the DTMF never lands on the file. -->
+    <extension name="secure-collect">
+      <condition field="destination_number" expression="^secure_collect$">
+        <action application="answer"/>
+        <action application="play_and_get_digits"
+                data="${cc_sc_min} ${cc_sc_max} ${cc_sc_tries} ${cc_sc_timeout} ${cc_sc_term} ${cc_sc_prompt} ${cc_sc_invalid} cc_sc_result ${cc_sc_regex} ${cc_sc_digit_timeout}"/>
+        <action application="event"
+                data="Event-Name=CUSTOM,Event-Subclass=contactconnection::secure_collect_done,cc_sc_field=${cc_sc_field},cc_sc_digits=${cc_sc_result}"/>
+        <action application="park"/>
+      </condition>
+    </extension>
+
+    <!-- Holds a bridged agent leg on music while the caller does a tf_secure_collect capture.
+         SecureCollectNodeHandler `uuid_transfer`s the agent leg here; the looping local_stream://moh
+         playback blocks until EslBackgroundService `uuid_bridge`s the two legs back together after
+         the capture (the bridge interrupts the playback). -->
+    <extension name="park-with-moh">
+      <condition field="destination_number" expression="^park_with_moh$">
+        <action application="answer"/>
+        <action application="playback" data="local_stream://moh"/>
+        <action application="park"/>
+      </condition>
+    </extension>
+
     <!-- Voicemail capture for the tf_voicemail node. EslBackgroundService sets cc_vm_* channel
          vars then `uuid_transfer <uuid> vm_record XML default` into here. playback plays the
          greeting + beep; record does the message capture (built-in max length + silence

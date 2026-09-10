@@ -89,9 +89,11 @@ public static class RecordingEventSource
     public const string Watchdog = "watchdog";
     /// <summary>Forced stop / unmask during call-disconnect cleanup.</summary>
     public const string Disconnect = "disconnect";
+    /// <summary>Automatic mask around a tf_secure_collect guided-DTMF capture (PCI).</summary>
+    public const string SecureCollect = "secure_collect";
 
     public static bool IsValid(string value) =>
-        value is FlowNode or CustomEvent or FieldFocus or Manual or AutoHold or Watchdog or Disconnect;
+        value is FlowNode or CustomEvent or FieldFocus or Manual or AutoHold or Watchdog or Disconnect or SecureCollect;
 }
 
 public static class MaskFillKind

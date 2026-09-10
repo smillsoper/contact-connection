@@ -67,10 +67,24 @@ public static class CallTraceSnapshot
         string channelUuid) =>
         JsonSerializer.Serialize(new
         {
-            vars,
+            vars = RedactTelephonyVars(vars),
             sipHeaders,
             callerNumber,
             destinationNumber,
             channelUuid,
         }, SerializeOptions);
+
+    /// <summary>
+    /// PCI: tf_secure_collect exposes captured digits as <c>secure.&lt;key&gt;</c> flow vars and
+    /// keeps its own working state under <c>_sc_</c>. Neither ever belongs in a stored call-trace
+    /// snapshot — redact both prefixes unconditionally (the plaintext is meant to reach only an
+    /// immediate tokenization api_call and the encrypted <c>sensitive_data</c> column).
+    /// </summary>
+    private static Dictionary<string, string> RedactTelephonyVars(IReadOnlyDictionary<string, string> vars) =>
+        vars.ToDictionary(
+            kv => kv.Key,
+            kv => kv.Key.StartsWith("secure.", StringComparison.OrdinalIgnoreCase)
+                  || kv.Key.StartsWith("_sc_", StringComparison.OrdinalIgnoreCase)
+                ? Redacted
+                : kv.Value);
 }

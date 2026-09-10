@@ -421,6 +421,9 @@ Set `KeyVault:VaultUri` (an App Service/Container App setting — not a secret, 
 | `ConnectionStrings--Redis` | `ConnectionStrings:Redis` | Api, Worker |
 | `Resend--ApiKey` | `Resend:ApiKey` | Api |
 | `FreeSWITCH--EslPassword` | `FreeSWITCH:EslPassword` | Api, Worker |
+| `SensitiveData--MasterKey` | `SensitiveData:MasterKey` | Api |
+
+`SensitiveData--MasterKey` = base64 of 32 random bytes (`openssl rand -base64 32`). AES-256-GCM key for the tf_secure_collect PCI blob on `call_records.sensitive_data`. Local dev: set via `dotnet user-secrets set "SensitiveData:MasterKey" "<base64>" --project ContactConnection.Api`. If unset, tf_secure_collect nodes take their `failed` path rather than capturing card data.
 
 The SignalWire PAT (used only as a Docker build arg for the FreeSWITCH image, never read by .NET config) isn't reachable via the config provider — store it in Key Vault as a plain secret named `SignalWirePAT` and pull it into the local `.env` before building:
 

@@ -20,6 +20,7 @@ export type TelephonyNodeType =
   // Signal / media actions
   | 'tf_dtmf'
   | 'tf_ivr_menu'
+  | 'tf_secure_collect'
   | 'tf_record'
   | 'tf_voicemail'
   | 'tf_scheduled_callback'
@@ -116,6 +117,17 @@ export interface TelNodeData extends Record<string, unknown> {
   terminators?: string
   /** Each maps an exact DTMF entry to a named transition (its own source handle on the canvas). */
   options?: { digit: string; transition: string; label?: string }[]
+  // tf_secure_collect — PCI guided DTMF capture. Ordered list of fields; each is one
+  // play_and_get_digits step. Digits are AES-encrypted into call_records.sensitive_data and
+  // exposed as {{secure.<key>}}. The recording is masked for the whole capture.
+  secureFields?: {
+    key: string
+    promptAudioFileId?: string
+    minDigits?: number
+    maxDigits?: number
+    terminator?: string
+    validation?: 'none' | 'luhn' | 'expiry_mmyy' | 'cvv'
+  }[]
   // tf_record
   action?: 'start' | 'stop' | 'mask' | 'unmask'
   maskFill?: 'silence' | 'tone' | 'comfort_noise'   // mask only
@@ -334,6 +346,14 @@ export const TELEPHONY_NODE_META: Record<
     description: 'Play a prompt, collect DTMF, branch per option',
     handles: 'multi',
   },
+  tf_secure_collect: {
+    label: 'Secure Collect',
+    color: '#be123c',
+    description: 'PCI guided DTMF capture (card / CVV / SSN) — masks the recording during entry',
+    // 'collected' (all fields captured + encrypted) + 'failed' (bad config / validation / retries)
+    // + 'timeout' (no entry).
+    handles: 'multi',
+  },
   tf_record: {
     label: 'Record',
     color: '#e11d48',
@@ -475,6 +495,17 @@ export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
         minDigits: 1, maxDigits: 1, maxTries: 3,
         timeoutMs: 5000, interDigitTimeoutMs: 3000, terminators: '',
         options: [{ digit: '1', transition: 'option_1' }],
+      }
+    case 'tf_secure_collect':
+      return {
+        label: 'Secure Collect',
+        secureFields: [
+          { key: 'pan', minDigits: 13, maxDigits: 19, terminator: '#', validation: 'luhn' },
+          { key: 'expiry', minDigits: 4, maxDigits: 4, terminator: 'none', validation: 'expiry_mmyy' },
+          { key: 'cvv', minDigits: 3, maxDigits: 4, terminator: 'none', validation: 'cvv' },
+        ],
+        invalidAudioFileId: '',
+        maxTries: 3, timeoutMs: 12000, interDigitTimeoutMs: 5000,
       }
     case 'tf_record':
       return { label: 'Record', action: 'start', maskFill: 'silence', recordLimitSeconds: 0 }

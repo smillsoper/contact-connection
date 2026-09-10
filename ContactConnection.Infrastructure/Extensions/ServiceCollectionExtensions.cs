@@ -139,6 +139,10 @@ public static class ServiceCollectionExtensions
         // connection pools persist for the process lifetime. See API_HARDENING_CHECKLIST.md Tier 3.
         services.AddSingleton<IMtlsHttpClientProvider, MtlsHttpClientProvider>();
 
+        // PCI sensitive-data encryption (tf_secure_collect → call_records.sensitive_data).
+        // Master key from SensitiveData:MasterKey (Key Vault / user-secrets); inert if unset.
+        services.AddSingleton<ISensitiveDataProtector, Security.AesGcmSensitiveDataProtector>();
+
         // Version history — one IVersionHistoryService implementation per scope (tenant/portal
         // persist to different DbContexts), resolved via keyed DI at each call site.
         services.AddKeyedScoped<IVersionHistoryService, TenantVersionHistoryService>("tenant");
@@ -209,6 +213,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ITelephonyNodeHandler, Telephony.NodeHandlers.ScheduledCallbackNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, QueueCallbackNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, TransferNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, SecureCollectNodeHandler>();
 
         // Call session store (singleton — Redis operations are inherently stateless)
         services.AddSingleton<ITelephonyCallSessionStore, RedisCallSessionStore>();
