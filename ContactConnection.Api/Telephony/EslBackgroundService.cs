@@ -1516,6 +1516,25 @@ public sealed class EslBackgroundService : BackgroundService
         var audioSource = session.Vars.GetValueOrDefault("_play_audio_source", "file");
         var currentState = session.Vars.GetValueOrDefault("_play_state", "main");
 
+        // ── RTP-prime / lead-in silence guard ──────────────────────────────────
+        // tf_answer primes the RTP path with a short silence_stream, and a tf_play node can carry
+        // its own leadInSilenceMs burst. That silence broadcast finishes (or is interrupted by the
+        // real media broadcast) and fires its own PLAYBACK_STOP — after the tf_play node has
+        // already set _play_media_arg. Without this check that stop is misread as "the prompt
+        // finished" and the flow resumes early; when the prompt's next node does a uuid_transfer
+        // (tf_ivr_menu, tf_voicemail) the real prompt is cut off before it is ever audible (S133 —
+        // greeting silently dropped once an IVR menu was wired after it). A silence_stream stop is
+        // never a tf_play main-media completion worth advancing on, unless the node's own media
+        // genuinely is that silence stream.
+        var stoppedFilePath = vars.GetValueOrDefault("Playback-File-Path", "");
+        if (IsRtpPrimeSilenceStop(currentState, stoppedFilePath, mediaArg))
+        {
+            _logger.LogDebug(
+                "PlaybackStop [{Uuid}]: stopped file '{Stopped}' is an RTP-prime / lead-in silence, not the main media '{Media}' — ignoring",
+                uuid, stoppedFilePath, mediaArg);
+            return;
+        }
+
         // ── Duration check ───────────────────────────────────────────────────────
         if (int.TryParse(session.Vars.GetValueOrDefault("_play_duration_seconds", "0"), out var durationSecs)
             && durationSecs > 0
@@ -1885,6 +1904,21 @@ public sealed class EslBackgroundService : BackgroundService
         try { return JsonSerializer.Deserialize<List<string>>(json) ?? []; }
         catch { return []; }
     }
+
+    /// <summary>
+    /// True when a PLAYBACK_STOP should be ignored rather than treated as the tf_play main media
+    /// finishing: the stopped file is an RTP-prime / lead-in <c>silence_stream://</c> burst
+    /// (tf_answer's post-answer prime, or a tf_play node's own <c>leadInSilenceMs</c>) being
+    /// interrupted by the real media broadcast, and it isn't itself the node's configured media.
+    /// Advancing on it resumes the flow early; when the next node does a <c>uuid_transfer</c>
+    /// (tf_ivr_menu, tf_voicemail) the real prompt is then cut off before it is ever audible
+    /// (Session 133 — the queue greeting silently vanished once an IVR menu was wired after it).
+    /// Internal for EslBackgroundServicePlaybackStopTests (InternalsVisibleTo covers Api.Tests).
+    /// </summary>
+    internal static bool IsRtpPrimeSilenceStop(string playState, string stoppedFilePath, string mainMediaArg) =>
+        playState != "announcement"
+        && stoppedFilePath.StartsWith("silence_stream://", StringComparison.OrdinalIgnoreCase)
+        && !PlayFilePathsMatch(mainMediaArg, stoppedFilePath);
 
     /// <summary>Whether a stored play arg and a PLAYBACK_STOP Playback-File-Path refer to the same
     /// file. FreeSWITCH may report the path with or without leading modifiers (e.g. "@@" offset) or

@@ -142,6 +142,7 @@
 | 130 | 2026-09-09 | 11:23 AM PDT | 12:25 PM PDT | 62 min | ~13684 min |
 | 131 | 2026-09-10 | 10:29 AM PDT | 11:17 AM PDT | 48 min | ~13732 min |
 | 132 | 2026-09-10 | 11:20 AM PDT | 11:52 AM PDT | 32 min | ~13764 min |
+| 133 | 2026-09-10 | 11:59 AM PDT | 12:18 PM PDT | 19 min | ~13783 min |
 
 ---
 
@@ -6738,6 +6739,85 @@ eviction after N failed re-deliveries; queue-timeout-while-re-queued.
    `/var/log/freeswitch/freeswitch.log` for the `playback(...ogg)` line + result during a live call.
 2. `tf_secure_collect` guided-DTMF node.
 3. Agent connect tone + "Playing greeting" softphone indicator. ([[project_agent_connect_tone]])
+
+### Carry-overs (unchanged)
+
+RMD filing; `.cc → .io` migration tail; `contactconnection.io` SPF/DKIM/DMARC; `cc_timesync`
+crash-loop; `CommitmentEvents` JSONB `ValueComparer`; `ServiceLevelThresholdSeconds` widget;
+Dashboards endpoint authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 133
+
+**Date:** 2026-09-10
+**Start:** 11:59 AM PDT
+**End:** 12:18 PM PDT
+**Duration:** 19 minutes
+**Total Duration:** ~13783 minutes
+
+### Focus
+
+The S130-flagged bug: a `tf_play` queue-greeting node (`__platform:will/hold_all_agents_busy`,
+"all agents busy") played **nothing** on live calls once an IVR menu node was wired between it and
+the MOH node. User's steer: it played fine before the IVR menu was dropped in, so not the audio
+file — look at what inserting the IVR menu changed. Root-caused with FreeSWITCH logs, fixed,
+live-verified.
+
+### Root cause — PLAYBACK_STOP misattribution, not an OGG/codec issue
+
+`tf_answer` fires `playback(silence_stream://300,0)` to prime the RTP path. That 300 ms silence's
+PLAYBACK_STOP lands **after** the flow segment has auto-advanced through `tf_route_to_queue` to
+`tf_play_1`, which has already stored `_play_media_arg` = the greeting OGG and
+`_play_next_end_of_stream/default` = the IVR menu node. `EslBackgroundService.HandlePlaybackStopAsync`'s
+main branch did **no `Playback-File-Path` check** (unlike the periodic-announcement branch, which
+matches via `PlayFilePathsMatch`), so it treated the silence stop as "greeting finished" →
+`FireEndTransitionAsync` → resumed at `tf_ivr_menu` → `uuid_transfer` to `ivr_collect` ~600 ms
+after answer. The greeting's own `uuid_broadcast` then landed at `[depth=1]` *after* the transfer
+and was immediately overrun by `play_and_get_digits`. FS log proof (buggy run): answer 22.380 →
+`Transfer to ivr_collect` 22.980 → `[depth=1] playback(hold_all_agents_busy.ogg)` after.
+
+It "worked before the IVR menu" only because the premature resume then went to a **looping MOH
+`tf_play`** — a competing `uuid_broadcast`, not a transfer — and the greeting broadcast (issued
+microseconds later by the still-running `PlayNodeHandler`) won that race, played fully, then its
+stop hit `_play_loop=true` and MOH resumed.
+
+### Fix
+
+`EslBackgroundService` — new `internal static IsRtpPrimeSilenceStop(playState, stoppedFilePath,
+mainMediaArg)`: ignore a PLAYBACK_STOP whose `Playback-File-Path` is a `silence_stream://` burst
+(tf_answer's RTP prime, or a `tf_play` node's own `leadInSilenceMs`) that isn't the node's own
+configured media. Called at the top of `HandlePlaybackStopAsync`'s main path (skipped in the
+announcement branch, which does its own matching). Deliberately narrow — only `silence_stream://`,
+not a general file match — so it can't hang a real file playback or a flite-TTS resolved temp
+path that legitimately won't string-match. `_play_media_arg` is still set before the lead-in
+broadcast in `PlayNodeHandler` — no change needed there, the guard covers it.
+
+**Diagnosis notes for next time:** raise FS logging with
+`fs_cli -H 127.0.0.1 -P 8021 -p <event_socket.conf password> -x "fsctl loglevel 7"`; the real log
+is `/var/log/freeswitch/freeswitch.log` inside `cc_freeswitch`; prefix git-bash `docker exec`
+with `MSYS_NO_PATHCONV=1` so `/var/...` isn't rewritten to a Windows path. PLAYBACK_STOP is an
+ESL event (seen by the API), not a console log line — correlate the API log's `PlaybackStop
+[uuid]: transition=… → node …` timing against the FS `playback(...)` / `Transfer` lines.
+
+### Live verification (real Telnyx trunk + cell, campaign flow route_to_queue → greeting → IVR menu → MOH)
+
+- Buggy run: greeting inaudible, `Transfer to ivr_collect` 600 ms after answer.
+- After fix: `playback(hold_all_agents_busy.ogg)` at answer, `Transfer to ivr_collect` **9.2 s
+  later** (full greeting), then `callback_offer.ogg` menu prompt; digit `2` → `ivr_done → tf_play_2`
+  → `danza-espanola.wav` MOH loop. User confirmed by ear on a second call: greeting → menu → MOH.
+
+### State
+
+- `dotnet build` + `dotnet test` (629 pass — Domain 147, App 20, Infra 365, Api 97; +9 new
+  `EslBackgroundServicePlaybackStopTests`). No web changes, no migrations.
+
+### Next session — pick up here
+
+1. `tf_secure_collect` guided-DTMF node.
+2. Agent connect tone + "Playing greeting" softphone indicator. ([[project_agent_connect_tone]])
+3. A bigger Group D piece (Chat / HubService / Integrations / Reporting) or Group B telephony
+   (Telnyx Verified Numbers / ANI passthrough / DNC registry).
 
 ### Carry-overs (unchanged)
 
