@@ -50,6 +50,13 @@ services:
       args:
         SIGNALWIRE_PAT: ${SIGNALWIRE_PAT}
     container_name: cc_freeswitch
+    # Let FreeSWITCH set SCHED_FIFO / raise thread priority for its media threads — without this
+    # it logs "Failed to set SCHED_FIFO scheduler" + "Could not set nice level" on a loop and
+    # runs at normal priority. CAP_SYS_NICE grants the permission; rtprio lifts RLIMIT_RTPRIO.
+    cap_add:
+      - SYS_NICE
+    ulimits:
+      rtprio: 99
     depends_on:
       - timesync
     ports:
