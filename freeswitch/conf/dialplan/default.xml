@@ -137,6 +137,27 @@
       </condition>
     </extension>
 
+    <!-- Bridges the parked caller leg to an agent's registered WebRTC endpoint — used by
+         QueuedCallDeliveryService's "simple-bridge" path (EslClient.BridgeToAgentAsync) for both
+         normal queue delivery and a direct tf_transfer agentExtension destination. Unlike
+         xfer-bridge (an external-number transfer, which SHOULD hang up once that bridge ends),
+         this caller must be able to survive its agent leg being pulled out of the bridge mid-call
+         — e.g. tf_secure_collect uuid_transfer-ing the agent leg to park_with_moh for a card
+         capture — and still be reachable afterward for a re-bridge or a fresh uuid_transfer.
+         hangup_after_bridge=false + an explicit park() keeps this leg alive and back under ESL
+         control when the bridge ends for ANY reason (agent hangup, agent pulled out, bridge
+         failure), instead of the caller channel silently dying with the bridge.
+         Bug found + fixed S135: without this, the very first tf_secure_collect mid-bridge call
+         hung up the caller the instant the agent leg was parked (FreeSWITCH's default end-of-
+         inline-bridge-execution behavior is to hang up when there's no next action). -->
+    <extension name="agent-bridge">
+      <condition field="destination_number" expression="^agent_bridge$">
+        <action application="set" data="hangup_after_bridge=false"/>
+        <action application="bridge" data="${cc_agent_bridge_dest}"/>
+        <action application="park"/>
+      </condition>
+    </extension>
+
     <!-- DID inbound (dev/test): 10+ digit numbers routed through telephony call flow engine.
          Park WITHOUT answer so ESL can reject pre-answer (busy/unavailable/declined).
          In production, inbound DIDs arrive on the external profile (port 5080) and are

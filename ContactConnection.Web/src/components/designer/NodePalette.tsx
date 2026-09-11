@@ -13,6 +13,7 @@ const NODE_TYPES: ContactConnectionNodeType[] = [
   'scheduled_callback',
   'branch',
   'set_variable',
+  'trigger_telephony_event',
   'api_call',
   'end',
 ]

@@ -126,7 +126,11 @@ public sealed class EslClient(ILogger<EslClient>? logger = null) : IOwnedEslComm
 
     // Transfer the parked inbound channel to the agent's registered WebRTC endpoint.
     // Resolves the agent's actual SIP contact via sofia_contact (registration lookup),
-    // then bridges using uuid_transfer inline so the parked channel connects to the agent.
+    // then bridges via the dialplan's agent-bridge extension (NOT a bare uuid_transfer inline
+    // bridge — that leaves nothing for the channel to fall through to once the bridge ends, so
+    // FreeSWITCH hangs it up even when the agent leg was merely pulled out mid-call, e.g. by
+    // tf_secure_collect parking it for a card capture; agent-bridge's hangup_after_bridge=false +
+    // explicit park() keeps this leg alive and under ESL control instead — bug found + fixed S135).
     public async Task BridgeToAgentAsync(string uuid, string extension, string domain, string callerNumber, CancellationToken ct = default)
     {
         // Set effective caller ID before bridging so the SIP INVITE to the agent shows the original ANI
@@ -145,7 +149,8 @@ public sealed class EslClient(ILogger<EslClient>? logger = null) : IOwnedEslComm
             throw new InvalidOperationException(
                 $"Agent {extension}@{domain} is not reachable in FreeSWITCH. sofia_contact returned: {contact}");
 
-        await SendApiAsync($"uuid_transfer {uuid} 'bridge:{contact}' inline", ct);
+        await SetChannelVarAsync(uuid, "cc_agent_bridge_dest", contact!, ct);
+        await TransferAsync(uuid, "agent_bridge", "XML", "default", ct);
     }
 
     /// <summary>True when sofia_contact returned a usable contact URI (not empty, "-ERR", or "error/…").</summary>

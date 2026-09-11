@@ -10,6 +10,7 @@ export type ContactConnectionNodeType =
   | 'scheduled_callback'
   | 'branch'
   | 'set_variable'
+  | 'trigger_telephony_event'
   | 'api_call'
   | 'end'
 
@@ -65,6 +66,8 @@ export interface NodeData extends Record<string, unknown> {
   condition?: string
   // set_variable
   assignments?: { variable: string; value: string }[]
+  // trigger_telephony_event
+  eventName?: string
   // api_call
   apiEndpointId?: string
   apiDefinitionScope?: 'tenant' | 'portal'
@@ -108,6 +111,7 @@ export interface ContactConnectionNodeDef {
   targetFlowName?: string
   condition?: string
   assignments?: { variable: string; value: string }[]
+  eventName?: string
   apiEndpointId?: string
   apiDefinitionScope?: 'tenant' | 'portal'
   apiDefinitionName?: string
@@ -196,6 +200,12 @@ export const NODE_META: Record<
     description: 'Assign a value to a flow variable',
     handles: 'single',
   },
+  trigger_telephony_event: {
+    label: 'Trigger Telephony Event',
+    color: '#be123c',
+    description: 'Fire a custom event on the bridged call (e.g. start a card capture)',
+    handles: 'single',
+  },
   api_call: {
     label: 'API Call',
     color: '#6366f1',
@@ -240,6 +250,8 @@ export function defaultNodeData(type: ContactConnectionNodeType): NodeData {
       return { label: 'New Branch', condition: '' }
     case 'set_variable':
       return { label: 'Set Variable', assignments: [{ variable: '', value: '' }] }
+    case 'trigger_telephony_event':
+      return { label: 'Trigger Telephony Event', eventName: '' }
     case 'api_call':
       return { label: 'New API Call', apiEndpointId: '', apiDefinitionScope: 'tenant', apiDefinitionName: '', apiEndpointName: '', outputVariable: '', timeoutSeconds: 30 }
     case 'end':

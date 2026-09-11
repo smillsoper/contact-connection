@@ -44,6 +44,26 @@ public class AnswerNodeHandlerTests
         Assert.Equal("next", result.NextNodeId);
     }
 
+    /// <summary>
+    /// Every leg is bridged/re-bridged via the ESL uuid_bridge API (not the dialplan bridge() app),
+    /// whose default teardown hangs BOTH legs up the instant either one leaves the bridge. Without
+    /// park_after_bridge=true, pulling one leg out mid-bridge (e.g. tf_secure_collect parking the
+    /// agent leg for a mid-call capture) kills the other leg too — reproduced live on a real bridged
+    /// call (S135): the caller leg was already gone ("No such channel") by the time
+    /// SecureCollectNodeHandler tried to uuid_transfer it into the capture extension.
+    /// </summary>
+    [Fact]
+    public async Task Always_SetsParkAfterBridge_SoAPeerLeavingTheBridgeDoesNotHangUpThisLeg()
+    {
+        var esl = new Mock<IEslCommander>();
+        var ctx = NewContext(esl);
+        var node = new JsonObject { ["transitions"] = new JsonObject { ["default"] = "next" } };
+
+        await new AnswerNodeHandler().ExecuteAsync(node, ctx);
+
+        esl.Verify(e => e.SetChannelVarAsync("chan-1", "park_after_bridge", "true", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     [Fact]
     public async Task LeadInZero_SkipsSilenceBroadcast_AndDoesNotMarkPrimed()
     {

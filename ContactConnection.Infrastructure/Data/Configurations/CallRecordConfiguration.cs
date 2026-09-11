@@ -122,10 +122,12 @@ public class CallRecordConfiguration : IEntityTypeConfiguration<CallRecord>
             .HasColumnType("jsonb")
             .HasDefaultValueSql("'[]'::jsonb");
 
-        // Sensitive data (PCI — encrypted at rest)
+        // Sensitive data (PCI — encrypted at rest). Opaque AES-256-GCM ciphertext (base64 text,
+        // not itself valid JSON) — must be a text column, not jsonb, or Npgsql rejects the write
+        // with "22P02: invalid input syntax for type json".
         builder.Property(r => r.SensitiveData)
             .HasColumnName("sensitive_data")
-            .HasColumnType("jsonb");
+            .HasColumnType("text");
         builder.Property(r => r.SensitiveDataStoredAt).HasColumnName("sensitive_data_stored_at");
         builder.Property(r => r.SensitiveDataWipedAt).HasColumnName("sensitive_data_wiped_at");
         builder.Property(r => r.SensitiveWipeReason)

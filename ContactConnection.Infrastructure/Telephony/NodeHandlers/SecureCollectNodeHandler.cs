@@ -128,6 +128,15 @@ public class SecureCollectNodeHandler : ITelephonyNodeHandler
                     "SecureCollectNodeHandler [{Uuid}]: could not park agent leg {Peer} — continuing, agent may hear the prompts",
                     ctx.ChannelUuid, peerUuid);
             }
+
+            // The caller leg's own bridge() app (agent-bridge dialplan extension) only learns its
+            // peer left and hands control to park() asynchronously — it does not happen the instant
+            // the agent leg's uuid_transfer command returns. Live-verified S135: transferring the
+            // caller into secure_collect ~20ms after pulling the agent raced the caller's own
+            // bridge→park transition and killed the call (CS_ROUTING/NORMAL_CLEARING, no error
+            // returned from the transfer command — it looked like it worked and then died anyway).
+            // A short buffer here lets that transition land first.
+            await Task.Delay(400, ct);
         }
 
         // ── Mask a live recording for the whole capture ──────────────────────────

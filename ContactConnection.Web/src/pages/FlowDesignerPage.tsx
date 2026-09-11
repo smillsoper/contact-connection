@@ -30,6 +30,7 @@ import ExecuteFlowNode from '../components/designer/nodes/ExecuteFlowNode'
 import TransitionToFlowNode from '../components/designer/nodes/TransitionToFlowNode'
 import BranchNode from '../components/designer/nodes/BranchNode'
 import SetVariableNode from '../components/designer/nodes/SetVariableNode'
+import TriggerTelephonyEventNode from '../components/designer/nodes/TriggerTelephonyEventNode'
 import ApiCallNode from '../components/designer/nodes/ApiCallNode'
 import ScheduledCallbackNode from '../components/designer/nodes/ScheduledCallbackNode'
 import EndNode from '../components/designer/nodes/EndNode'
@@ -49,6 +50,7 @@ const nodeTypes = {
   transition_to_flow: TransitionToFlowNode,
   branch: BranchNode,
   set_variable: SetVariableNode,
+  trigger_telephony_event: TriggerTelephonyEventNode,
   api_call: ApiCallNode,
   scheduled_callback: ScheduledCallbackNode,
   end: EndNode,
@@ -606,6 +608,7 @@ function DesignerCanvas({
                 transition_to_flow: '#7e22ce',
                 branch: '#f59e0b',
                 set_variable: '#8b5cf6',
+                trigger_telephony_event: '#be123c',
                 api_call: '#6366f1',
                 scheduled_callback: '#0891b2',
                 end: '#ef4444',

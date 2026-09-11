@@ -69,7 +69,7 @@ public class CallRecord
     public string? TelephonyEvents { get; private set; }      // JSONB — telephony layer owns this
 
     // Sensitive data lifecycle — PCI. See ARCHITECTURE.md §24
-    public string? SensitiveData { get; private set; }        // AES-256 encrypted JSONB
+    public string? SensitiveData { get; private set; }        // AES-256-GCM ciphertext (base64 text), of a serialized JSON dict
     public DateTimeOffset? SensitiveDataStoredAt { get; private set; }
     public DateTimeOffset? SensitiveDataWipedAt { get; private set; }
     public string? SensitiveWipeReason { get; private set; }

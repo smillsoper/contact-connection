@@ -220,6 +220,23 @@ public sealed class EslBackgroundService : BackgroundService
             return;
         }
 
+        // agent-bridge (EslClient.BridgeToAgentAsync — queue delivery / direct tf_transfer agent
+        // destination): hangup_after_bridge=false + an explicit park() keeps the caller alive and
+        // re-parks it when the bridge ends for ANY reason, including tf_secure_collect pulling the
+        // agent leg out mid-call for a card capture. Without this guard that re-park falls through
+        // to "new inbound call" below and spins up a SECOND, conflicting call-handling path on the
+        // exact same channel/session — racing the real in-progress flow and killing the call.
+        // Live-verified S135: every mid-bridge tf_secure_collect attempt failed until this guard was
+        // added — no error was ever visible in the winning path, just an unexplained hangup shortly
+        // after the agent leg was parked.
+        if (destination == "agent_bridge"
+            || rawDestination == "agent_bridge"
+            || transferSource.Contains("agent_bridge"))
+        {
+            _logger.LogInformation("CHANNEL_PARK {Uuid}: returned from agent bridge ending — not a new call", channelUuid);
+            return;
+        }
+
         // Same idea for tf_transfer's external_number destination: the xfer_bridge extension only
         // re-parks the caller when the bridge FAILED to connect (a successful bridge goes straight
         // to CHANNEL_BRIDGE and never comes back here). So a re-park with _xfer_in_progress still

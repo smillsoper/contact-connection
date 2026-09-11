@@ -144,6 +144,7 @@
 | 132 | 2026-09-10 | 11:20 AM PDT | 11:52 AM PDT | 32 min | ~13764 min |
 | 133 | 2026-09-10 | 11:59 AM PDT | 12:18 PM PDT | 19 min | ~13783 min |
 | 134 | 2026-09-10 | 12:20 PM PDT | 12:57 PM PDT | 37 min | ~13820 min |
+| 135 | 2026-09-11 | 9:31 AM PDT | 10:54 AM PDT | 83 min | ~13903 min |
 
 ---
 
@@ -6920,3 +6921,158 @@ ESL event (seen by the API), not a console log line — correlate the API log's 
 RMD filing; `.cc → .io` migration tail; `contactconnection.io` SPF/DKIM/DMARC; `cc_timesync`
 crash-loop; `CommitmentEvents` JSONB `ValueComparer`; `ServiceLevelThresholdSeconds` widget;
 Dashboards endpoint authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.
+
+---
+
+## Session 135
+
+**Date:** 2026-09-11
+**Start:** 9:31 AM PDT
+**End:** 10:54 AM PDT
+**Duration:** 83 minutes
+**Total Duration:** ~13903 minutes
+
+### Focus
+
+Live-verify `tf_secure_collect` (queued from Session 134). Pre-agent case fully verified end to
+end, including a real production-blocking bug fix. Mid-bridge case: found and fixed three more real
+bugs, built a genuinely new platform capability along the way (`trigger_telephony_event` CRM node),
+but did not get the mid-bridge capture itself working live — a fourth, deeper FreeSWITCH-level
+issue remains open.
+
+### Bug #1 — sensitive_data column type (FIXED, live-verified)
+
+`CallRecordConfiguration` mapped `SensitiveData` (a `string` CLR property holding opaque AES-256-GCM
+ciphertext, base64 text) to a `jsonb` column. Postgres rejects a bare base64 string as invalid JSON
+(`22P02: invalid input syntax for type json`) — every real capture would have failed to persist.
+Never caught in Session 134 because no real card-entry call had been driven yet.
+
+Fix: column changed to `text` (`CallRecordConfiguration`, migration `FixSensitiveDataColumnType`,
+applied to both `tenant_test_tenant` and `tenant_test_contact_center`). Live-verified: real call,
+PAN `4111111111111111` / expiry `1230` / CVV `123` entered on a live Telnyx call, encrypted,
+persisted, decrypted back byte-for-byte via a temporary dev-only debug endpoint (added, verified,
+then deleted before commit — Development-environment-gated the whole time). `SensitiveDataStoredAt`
+set correctly. Call trace events show no plaintext.
+
+Also found: dialing rapid-repeated digits (e.g. many 1s back to back) can drop keypresses on a real
+handset/trunk — a dialing-pace artifact, not a platform bug. Beep prompts (`tone_stream`, one pitch
+per field) were added to the ad-hoc test flow so digit entry has an audible cue; production prompt
+design is still open.
+
+### New feature — trigger_telephony_event CRM node (BUILT, live-verified as a trigger)
+
+The mid-bridge case needs an agent to kick off `tf_secure_collect` while already bridged to a
+caller — and there was no way for a CRM (script) flow to reach into the telephony side at all.
+`ITelephonyFlowEngine.FireEventAsync` + `tf_on_custom_event` already existed on the telephony side,
+but nothing on the CRM side could call it.
+
+- `TriggerTelephonyEventNodeHandler` (`ContactConnection.Infrastructure/FlowEngine/NodeHandlers/`) —
+  new CRM node type `trigger_telephony_event`. Node config `{ "eventName": "..." }`. Finds the live
+  `TelephonyCallSession` by matching `ctx.CallRecordId` (CRM session and its telephony call always
+  share one), then fires `custom:{eventName}` on that channel. Fire-and-continue — advances to
+  `default` immediately regardless of outcome; never blocks waiting for the telephony side.
+- Registered in `ServiceCollectionExtensions`. 5 new unit tests
+  (`TriggerTelephonyEventNodeHandlerTests`) — missing eventName, no live session, live session
+  found + fires correctly, FireEventAsync throws (still advances), ignores sessions for other call
+  records.
+- Web designer: `trigger_telephony_event` added to `ContactConnectionNodeType` + `NodeData` +
+  `NODE_META` (rose `#be123c`, matches secure_collect) + `defaultNodeData`; new
+  `TriggerTelephonyEventNode.tsx` canvas node; registered in `FlowDesignerPage.tsx` (nodeTypes map +
+  MiniMap color) and `NodePalette.tsx`; properties-panel case in `NodePropertiesPanel.tsx` (single
+  Event Name field + explanatory note). `tsc -b` clean.
+- Live-verified as a trigger: real call, agent script popped, agent clicked Continue,
+  `TriggerTelephonyEventNodeHandler` fired `capture_card` on the live channel, `handled=True` every
+  time. The CRM-to-telephony bridge-event mechanism itself works correctly in all 6 live attempts.
+
+### Bug #2 — agent-bridge dialplan had no survival path (FIXED, partially verified)
+
+Direct-to-agent delivery (`EslClient.BridgeToAgentAsync`, used by both normal queue delivery and a
+direct `tf_transfer` agent destination) bridged the caller via a bare
+`uuid_transfer <uuid> 'bridge:<contact>' inline` — a single-action inline execution with nothing to
+fall through to. The very first live mid-bridge attempt: the instant `tf_secure_collect` pulled the
+agent leg out to `park_with_moh`, the caller leg died too (`-ERR No such channel!` on the follow-up
+`uuid_transfer ... secure_collect`). Nothing before tonight ever needed to pull one leg out of a
+live two-party bridge and expect the other to survive.
+
+Fix: new `agent-bridge` dialplan extension (`freeswitch/conf/dialplan/default.xml`, mirrors the
+existing `xfer-bridge` pattern but with opposite intent): `set hangup_after_bridge=false` then
+`bridge(${cc_agent_bridge_dest})` then an explicit `park()`. `BridgeToAgentAsync` now sets
+`cc_agent_bridge_dest` and `uuid_transfer`s into `agent_bridge` XML instead of the bare inline
+bridge. Dialplan reloaded live (`reloadxml`, bind-mounted, no FS restart needed).
+
+Also added (turned out unnecessary given Bug #2/#3's real fixes, but harmless defense-in-depth):
+`AnswerNodeHandler` now sets `park_after_bridge=true` on every answered channel. New regression
+test `AnswerNodeHandlerTests.Always_SetsParkAfterBridge_...`.
+
+### Bug #3 — CHANNEL_PARK guard gap for the new agent-bridge re-park (FIXED, partially verified)
+
+`EslBackgroundService.HandleChannelParkAsync` has explicit guards for every known "this re-park
+isn't a new call" scenario (`ivr_collect`, `vm_record`, `secure_collect`/`park_with_moh`,
+`tts_play`, `xfer_bridge`) — but the caller falling through the new `agent-bridge` extension's
+fallback `park()` matched none of them, fell through to "treat as a fresh inbound call", and spun up
+a second, conflicting call-handling path on the same live channel — racing the real
+`tf_secure_collect` flow already in progress. This, not a SIP/carrier issue, was the real cause of
+attempts 1-5 failing in various inconsistent-looking ways (a false lead chased for a while: initially
+looked like a timing race between pulling the agent and transferring the caller, so a 400ms
+`Task.Delay` was added to `SecureCollectNodeHandler` before the caller transfer — harmless but not
+the real fix).
+
+Fix: added an `agent_bridge` guard clause to `HandleChannelParkAsync`, matching the same pattern as
+the other five. Verified: attempt 6 showed the agent leg's `park_with_moh` re-park correctly guarded
+("returned from secure DTMF capture — not a new call") — but the caller leg's own `agent_bridge`
+re-park never logged reaching either guard OR the fallthrough at all in that attempt, and the caller
+still died. So Bug #3 is a real, confirmed-necessary fix, but evidently not the whole story either.
+
+### Bug #4 — OPEN: caller leg still drops unbridging a live external SIP trunk
+
+After Bugs #2 and #3 were both fixed, one attempt (with `sofia global siptrace on` plus
+`fsctl loglevel 7`) showed the caller's own `bridge()` app never logging a subsequent `EXECUTE
+park()` at all, yet FreeSWITCH still reported `Hangup ... [CS_PARK] [NORMAL_CLEARING]` — internal
+core-level bridge-teardown parked the channel by state without the dialplan's own `park()` action
+ever visibly executing. A `send ... BYE` to Telnyx was captured in the SIP trace with
+`Reason: NORMAL_CLEARING`, confirming we (not Telnyx) tore the call down — but its embedded
+timestamp was 4 seconds off from the surrounding log lines, which is suspicious enough (given the
+pre-existing `cc_timesync` crash-loop carry-over) not to over-trust for sequencing. Both legs
+negotiated opus per the CHANNEL_BRIDGE diagnostic log — transcoding/re-INVITE complexity when
+un-bridging a live opus call with a real external trunk is a plausible mechanism, but unconfirmed.
+Six total live call attempts tonight; the mid-bridge capture itself never completed successfully.
+
+Not fixed tonight. User's call: stop live-iterating and hand this off with full evidence rather than
+keep guessing. `project_tf_secure_collect.md` carries the next-session diagnosis plan (top
+candidate: skip the two-party-bridge-then-pull-a-leg pattern entirely — route the mid-bridge case
+through a FreeSWITCH conference instead, so the "hold" is just muting a conference member rather
+than tearing down and reconstructing a two-party bridge).
+
+### State
+
+- `dotnet build` + `dotnet test`: 674 passing (Domain 150, Application 20, Api 97, Infrastructure
+  407; +6 net new this session — 5 `TriggerTelephonyEventNodeHandlerTests` + 1
+  `AnswerNodeHandlerTests` regression test). `tsc -b` clean.
+- Migration `FixSensitiveDataColumnType` applied to both dev tenant schemas.
+- FreeSWITCH dialplan: `agent-bridge` extension added to `freeswitch/conf/dialplan/default.xml`
+  (bind-mounted, reloaded live — no image rebuild needed). `sofia global siptrace` and `fsctl
+  loglevel` restored to normal (off / info) before ending the session.
+- Left in place for next session (all in `tenant_test_tenant`, dev-only): test flow
+  `a1b2c3d4-1135-4000-9000-000000000001` (pre-agent secure_collect, verified working), CRM flow
+  `...0002` plus telephony flow `...0003` (mid-bridge test pair, still failing at Bug #4), and DID
+  `+15415293670` ("2nd Telnyx Test DID") pointed at `...0003` via `phone_numbers.telephony_flow_id`.
+- Also newly noted, not yet fixed: `park_with_moh`'s `local_stream://moh` source doesn't exist in
+  this FreeSWITCH build (`Unknown source moh, trying default` then `Unknown source default` — agent
+  hears silence instead of hold music during a mid-bridge capture). Confirms the open question
+  flagged in Session 134's memory. Low priority relative to Bug #4.
+
+### Next session — pick up here
+
+1. Root-cause Bug #4 (mid-bridge caller drop) — try the conference-based hold redesign first;
+   otherwise get FreeSWITCH community/source-level input on `hangup_after_bridge=false` plus
+   `uuid_transfer`-ing one leg of a live external-trunk opus bridge.
+2. Fix `park_with_moh`'s missing MOH source once Bug #4 is resolved (or as part of the redesign).
+3. `tf_delay` + `tf_repeat` nodes (still queued from Session 134).
+4. Agent connect tone + "Playing greeting" softphone indicator (queued from Session 133/134).
+
+### Carry-overs (unchanged)
+
+RMD filing; `.cc → .io` migration tail; `contactconnection.io` SPF/DKIM/DMARC; `cc_timesync`
+crash-loop (now a live suspect for Bug #4's timestamp anomaly, not just a background nuisance);
+`CommitmentEvents` JSONB `ValueComparer`; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint
+authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.

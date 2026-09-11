@@ -178,6 +178,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<INodeHandler, ApiCallNodeHandler>();
         services.AddScoped<INodeHandler, EndNodeHandler>();
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.ScheduledCallbackNodeHandler>();
+        services.AddScoped<INodeHandler, TriggerTelephonyEventNodeHandler>();
 
         // Flow engine (scoped — uses scoped repositories and tenant context)
         services.AddScoped<IFlowEngine, FlowEngine.FlowEngine>();

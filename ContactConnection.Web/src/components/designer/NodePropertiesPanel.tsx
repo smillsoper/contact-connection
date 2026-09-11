@@ -898,6 +898,20 @@ export default function NodePropertiesPanel({
         )
       }
 
+      case 'trigger_telephony_event':
+        return (
+          <>
+            {field('eventName', 'Event Name', input('eventName', 'capture_card'))}
+            <p className="text-[10px] text-gray-500 leading-snug">
+              Fires <span className="font-mono text-rose-400">custom:&#123;eventName&#125;</span> on
+              the telephony flow bridged to this call — must match a{' '}
+              <span className="font-mono text-rose-400">tf_on_custom_event</span> node's Event Name in
+              the telephony designer. Fire-and-continue: this node advances to the next node right
+              away and does not wait for the telephony side to finish.
+            </p>
+          </>
+        )
+
       case 'api_call': {
         const selectedEndpointId = (data.apiEndpointId as string) ?? ''
         const tenantApis = generalApis.filter((a) => a.scope === 'tenant')
