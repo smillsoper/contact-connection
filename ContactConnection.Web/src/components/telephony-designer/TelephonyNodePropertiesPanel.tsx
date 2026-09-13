@@ -377,6 +377,48 @@ export default function TelephonyNodePropertiesPanel({
         <SecureCollectNodeEditor data={data} onChange={(patch) => onChange(node.id, patch)} />
       )}
 
+      {type === 'tf_delay' && (
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Duration (ms)</label>
+          <input
+            className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-lime-500"
+            placeholder="e.g. 2000 or {{flow.wait_ms}}"
+            value={(data.delayDurationMs as string) ?? ''}
+            onChange={(e) => set('delayDurationMs', e.target.value)}
+          />
+          <p className="text-xs text-gray-500 mt-1 leading-snug">
+            A literal number of milliseconds, or any <span className="font-mono text-lime-400">{'{{variable}}'}</span> that
+            resolves to one. Pairs well with <span className="font-mono">tf_repeat</span> for a "wait between attempts" loop.
+          </p>
+        </div>
+      )}
+
+      {type === 'tf_repeat' && (
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Repeat count</label>
+          <input
+            type="number"
+            min={1}
+            className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-yellow-600"
+            value={(data.repeatCount as number) ?? 1}
+            onChange={(e) => set('repeatCount', Math.max(1, Number(e.target.value) || 1))}
+          />
+          <p className="text-xs text-gray-500 mt-1 leading-snug">
+            Every time flow reaches this node's entry — from upstream the first time, and from the
+            loop body's own wire every time after — its counter increments.{' '}
+            <span className="font-mono text-yellow-500">repeat</span> fires for every hit up to
+            and including this number; the next hit after that exits{' '}
+            <span className="font-mono text-emerald-400">finished</span> instead. With a count
+            of {(data.repeatCount as number) ?? 1}, the <span className="font-mono text-yellow-500">repeat</span> branch
+            fires exactly {(data.repeatCount as number) ?? 1} time(s) before finishing.
+          </p>
+          <p className="text-xs text-gray-500 mt-2 leading-snug">
+            Wire whatever nodes you want onto <span className="font-mono text-yellow-500">repeat</span>, then connect
+            their tail back to this same node.
+          </p>
+        </div>
+      )}
+
       {type === 'tf_voicemail' && (
         <VoicemailNodeEditor data={data} onChange={(patch) => onChange(node.id, patch)} />
       )}

@@ -21,6 +21,8 @@ export type TelephonyNodeType =
   | 'tf_dtmf'
   | 'tf_ivr_menu'
   | 'tf_secure_collect'
+  | 'tf_delay'
+  | 'tf_repeat'
   | 'tf_record'
   | 'tf_voicemail'
   | 'tf_scheduled_callback'
@@ -128,6 +130,14 @@ export interface TelNodeData extends Record<string, unknown> {
     terminator?: string
     validation?: 'none' | 'luhn' | 'expiry_mmyy' | 'cvv'
   }[]
+  // tf_delay — pauses the flow for a duration before continuing. Literal ms as text, or a
+  // {{variable}} template resolved the same way tf_set_caller_id/tf_set_sip_header values are.
+  // (Named delayDurationMs, not durationMs, to avoid colliding with tf_dtmf's numeric field above.)
+  delayDurationMs?: string
+  // tf_repeat — bounded loop primitive. One entry (fed by both the upstream wire and the
+  // tenant's own loop-back wire), two exits: 'repeat' (fires repeatCount - 1 times) and
+  // 'finished' (fires once the counter reaches repeatCount).
+  repeatCount?: number
   // tf_record
   action?: 'start' | 'stop' | 'mask' | 'unmask'
   maskFill?: 'silence' | 'tone' | 'comfort_noise'   // mask only
@@ -354,6 +364,19 @@ export const TELEPHONY_NODE_META: Record<
     // + 'timeout' (no entry).
     handles: 'multi',
   },
+  tf_delay: {
+    label: 'Delay',
+    color: '#65a30d',
+    description: 'Pause the flow for a duration before continuing',
+    handles: 'single',
+  },
+  tf_repeat: {
+    label: 'Repeat',
+    color: '#a16207',
+    description: 'Loop back to this node up to N times, then fall through',
+    // 'repeat' (loop body) + 'finished' (count reached).
+    handles: 'multi',
+  },
   tf_record: {
     label: 'Record',
     color: '#e11d48',
@@ -507,6 +530,10 @@ export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
         invalidAudioFileId: '',
         maxTries: 3, timeoutMs: 12000, interDigitTimeoutMs: 5000,
       }
+    case 'tf_delay':
+      return { label: 'Delay', delayDurationMs: '2000' }
+    case 'tf_repeat':
+      return { label: 'Repeat', repeatCount: 3 }
     case 'tf_record':
       return { label: 'Record', action: 'start', maskFill: 'silence', recordLimitSeconds: 0 }
     case 'tf_voicemail':

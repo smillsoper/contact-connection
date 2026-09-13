@@ -75,9 +75,17 @@ export const BUILTIN_AUDIO_GROUPS: { group: string; options: { value: string; la
   {
     group: 'Ring Tones',
     options: [
-      { value: 'tone_stream://%(2000,4000,440,480);loops=-1', label: 'US Ring Back (440+480 Hz)' },
-      { value: 'tone_stream://%(400,200,400,450);%(400,2000,400,450);loops=-1', label: 'UK Ring Back (400+450 Hz)' },
-      { value: 'tone_stream://%(1000,4000,425);loops=-1', label: 'EU Ring Back (425 Hz)' },
+      { value: 'tone_stream://%(2000,4000,440,480);loops=-1', label: 'US Ring Back (440+480 Hz, continuous)' },
+      { value: 'tone_stream://%(400,200,400,450);%(400,2000,400,450);loops=-1', label: 'UK Ring Back (400+450 Hz, continuous)' },
+      { value: 'tone_stream://%(1000,4000,425);loops=-1', label: 'EU Ring Back (425 Hz, continuous)' },
+      // Real one-shot file (not a tone_stream generator) — same 440+480Hz frequencies as the US
+      // preset above, rendered to a 2s file with ffmpeg rather than FreeSWITCH's own generator.
+      // The "continuous" presets never emit PLAYBACK_STOP (loops=-1 means FreeSWITCH regenerates
+      // the tone forever), so a Play node using one never reaches its end-of-stream transition —
+      // fine for a background/hold context, but it silently stalls any flow (e.g. a tf_repeat/
+      // tf_delay ring-retry loop) that expects the node to actually finish. Use this instead
+      // whenever the tone needs to play once and hand off. Added S138.
+      { value: '__builtin:/usr/share/freeswitch/sounds/contactconnection/_system/ring_tones/us_ring_back.ogg', label: 'US Ring Back — Single Ring (one-shot, completes)' },
     ],
   },
   {
@@ -89,10 +97,14 @@ export const BUILTIN_AUDIO_GROUPS: { group: string; options: { value: string; la
   {
     group: 'Music (Built-In)',
     options: [
-      { value: '__builtin:/usr/share/freeswitch/sounds/music/8000/danza-espanola-op-37-h-142-xii-arabesca.wav', label: 'Classical — Danza Española (Arabesca)' },
-      { value: '__builtin:/usr/share/freeswitch/sounds/music/8000/partita-no-3-in-e-major-bwv-1006-1-preludio.wav', label: 'Classical — Bach Partita No. 3 (Preludio)' },
-      { value: '__builtin:/usr/share/freeswitch/sounds/music/8000/ponce-preludio-in-e-major.wav', label: 'Classical — Ponce Preludio in E Major' },
-      { value: '__builtin:/usr/share/freeswitch/sounds/music/8000/suite-espanola-op-47-leyenda.wav', label: 'Classical — Suite Española (Leyenda)' },
+      // Repointed from .../music/8000/... to .../music/48000/... (S137 audio-quality audit) — the
+      // 8kHz path forced narrowband quality on every leg, including the internal WebRTC agent leg
+      // (opus, wideband up to 48kHz); FreeSWITCH resamples down for any leg that IS narrowband, so
+      // there's no reason to source these below the container's own best-quality copies.
+      { value: '__builtin:/usr/share/freeswitch/sounds/music/48000/danza-espanola-op-37-h-142-xii-arabesca.wav', label: 'Classical — Danza Española (Arabesca)' },
+      { value: '__builtin:/usr/share/freeswitch/sounds/music/48000/partita-no-3-in-e-major-bwv-1006-1-preludio.wav', label: 'Classical — Bach Partita No. 3 (Preludio)' },
+      { value: '__builtin:/usr/share/freeswitch/sounds/music/48000/ponce-preludio-in-e-major.wav', label: 'Classical — Ponce Preludio in E Major' },
+      { value: '__builtin:/usr/share/freeswitch/sounds/music/48000/suite-espanola-op-47-leyenda.wav', label: 'Classical — Suite Española (Leyenda)' },
     ],
   },
 ]

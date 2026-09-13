@@ -147,6 +147,7 @@
 | 135 | 2026-09-11 | 9:31 AM PDT | 10:54 AM PDT | 83 min | ~13903 min |
 | 136 | 2026-09-13 | 10:12 AM PDT | 10:49 AM PDT | 37 min | ~13940 min |
 | 137 | 2026-09-13 | 10:54 AM PDT | 11:15 AM PDT | 21 min | ~13961 min |
+| 138 | 2026-09-13 | 11:18 AM PDT | 12:36 PM PDT | 78 min | ~14039 min |
 
 ---
 
@@ -7282,6 +7283,152 @@ valid duration. Library size 6.5MB (was ~8kHz-sized before, now ~3x — still tr
 5. Opportunistic: if the user upgrades the ElevenLabs account to Pro tier, revisit
    `ElevenLabsTtsStreamProvider`'s 24000 ceiling — 22050/44100 would become available and could
    be re-enabled for a further (modest, speech-content-limited) quality gain.
+
+### Carry-overs (unchanged)
+
+RMD filing; .cc → .io migration tail; contactconnection.io SPF/DKIM/DMARC; cc_timesync
+crash-loop; CommitmentEvents JSONB ValueComparer; ServiceLevelThresholdSeconds widget;
+Dashboards endpoint authz; broader FlowEngine test coverage; retire the .cc softphone route.
+
+## Session 138
+
+**Date:** 2026-09-13
+**Start:** 11:18 AM PDT
+**End:** 12:36 PM PDT
+**Duration:** 78 minutes
+**Total Duration:** ~14039 minutes
+
+### Focus
+
+Built tf_delay + tf_repeat (queued since Session 134) — two general-purpose telephony flow
+primitives the user specifically wanted for building richer call flows (a bounded "ring/retry N
+times" loop being the motivating example, not a fixed built-in feature). Also audited and fixed
+tf_check_agent_availability at the user's request, since they wanted to use it in the same test
+flow and it had never been exercised. All three fully live-verified end to end, including a real
+semantics bug in tf_repeat found and fixed live mid-session. Also fixed a real, unrelated bug
+uncovered along the way: every built-in ring-back/busy tone preset loops forever internally,
+silently stalling any flow that expects the Play node to actually complete.
+
+### tf_delay — BUILT, LIVE-VERIFIED
+
+General-purpose pause primitive: `delayDurationMs` (literal ms or a `{{variable}}` template,
+resolved via the same `TelSetVariableNodeHandler.Resolve` every other telephony node uses) then
+a single `default` transition. Deliberately does NOT `await Task.Delay()` on the shared ESL
+event-processing thread — that would stall every other call's event handling platform-wide (the
+exact class of bug S128's playback-signal removal fixed for streaming TTS). Instead follows the
+same deferred-continuation pattern as `tf_ivr_menu`/`tf_voicemail`/`tf_play`/`tf_secure_collect`:
+new `delay_wait` dialplan extension (`freeswitch/conf/dialplan/default.xml`) plays a *finite*
+`silence_stream://<ms>` (blocks only that channel's own FreeSWITCH-side thread, keeps real
+silence RTP flowing per `suppress-cng`), emits `contactconnection::delay_done`, re-parks; new
+`EslBackgroundService.HandleDelayDoneAsync` resumes the flow. New `CHANNEL_PARK` guard for
+`delay_wait` (same pattern as the other deferred-continuation nodes). Sanity clamp (300,000ms /
+5 min) against a misconfigured or runaway `{{variable}}`. `_delay_in_progress` is persisted to
+the session *before* the park transfer, not batched at the end — the exact ordering fix S136
+needed for `tf_secure_collect`'s own suspend, applied proactively here from the start. 7 new
+unit tests (`DelayNodeHandlerTests`). Live-verified: fired multiple times across two live test
+calls, waited 3000ms each time, resumed cleanly via `delay_done` every time.
+
+### tf_repeat — BUILT, LIVE-VERIFIED, semantics bug found + fixed live
+
+Bounded loop primitive, design locked with the user up front (S138): single entry (same physical
+handle serves both the initial upstream wire and the tenant's own loop-back wire), two source
+transitions — `repeat` and `finished`. Counter keyed by the node's own id (`_repeat_{nodeId}
+_count`) so multiple `tf_repeat` nodes in one flow don't collide; pure `ctx.Vars` bookkeeping, no
+telephony I/O, no suspend — relies on `TelephonyFlowEngine`'s normal end-of-step var sync (unlike
+`tf_delay`, which has to write directly to the session because it suspends before that sync ever
+runs). The engine's existing `MaxIterations` (50 per synchronous segment) is the backstop against
+a misconfigured all-synchronous loop; no additional cap added.
+
+**Bug found live, S138 same session:** first live test (repeatCount=3) showed `repeat` firing
+only twice before `finished` — a real off-by-one. Original logic incremented then checked
+`count >= repeatCount`, so the loop body ran `repeatCount - 1` times. **User caught the UX
+problem directly**: a tenant setting "repeat count: 3" would reasonably expect the body to run 3
+times, not 2. Fixed to `count > repeatCount` — `repeat` now fires for every hit through
+`repeatCount` inclusive, `finished` on the first hit past it. Re-verified live: repeat fired
+exactly 3 times, `finished` on the 4th hit, matching the corrected contract exactly. 7 unit tests
+(`RepeatNodeHandlerTests`, rewritten for the corrected semantics — one added, one split). Web
+copy (node summary + properties-panel help text) updated to describe the count precisely, since
+this exact ambiguity is what caused the bug.
+
+### tf_check_agent_availability — AUDITED, FIXED, LIVE-VERIFIED (both branches)
+
+User asked for this specifically before their test, since it was still an unfinished "Phase 1"
+stub (flagged in its own code comment: "Phase 2 will add presence-based filtering... " never
+built) — it only checked whether an `AgentCampaignAssignment`/`GroupCampaignAssignment` row
+existed for the campaign, never live agent presence at all, so it could report "available" with
+every assigned agent offline. Rewired to delegate to `EligibleAgentRanker` — the exact
+ranked-eligible-agent query `RouteToQueueNodeHandler`/`QueuePollingService` already use for real
+delivery decisions — instead of a third independent reimplementation. Also fixes the same
+`GroupCampaignAssignment.IsActive` gap `EligibleAgentRanker`'s own doc comment records fixing for
+the queue-delivery path (a deactivated group assignment previously still counted here). 4 new
+unit tests (`CheckAgentAvailabilityNodeHandlerTests`).
+
+Canvas bug also found and fixed: the node shared `tf_check_block_list`'s `blocked`(red)/
+`not_blocked`(green) handle scheme (`TelNodeShell.tsx`'s `isDualCheck` grouped both node types
+together) — backwards for an availability check. Split it out; `tf_check_agent_availability` now
+gets its own dedicated `available`(green)/`unavailable`(red) handles (a pre-existing but
+previously-unreachable fallback branch in the same component), with clean `Available`/`Not
+Available` edge labels added to `HANDLE_DISPLAY_LABELS`.
+
+Live-verified twice: once correctly taking `unavailable` (0 agents online, matching the queue
+poller's own "notifying 0 immediately-available agents" line, correctly routed to the queue-hold
+Play/IVR path), once correctly taking `available` (1 agent online, routed into the new
+`tf_repeat` loop).
+
+### Built-in Ring Tone (one-shot) — real bug found + fixed, not a tf_repeat/tf_delay issue
+
+User's first live retry-loop test looked like it was "repeating endlessly and never reaching
+finished" — traced to a real, unrelated bug: every built-in ring-back/busy-signal preset
+(`ContactConnection.Web/src/api/audioFiles.ts`) has `loops=-1` baked into its `tone_stream://`
+media string, so FreeSWITCH regenerates the tone forever and never emits `PLAYBACK_STOP` — a
+`Play` node using one never reaches its end-of-stream transition at all. Fine for a background/
+hold context; silently stalls any flow (like this ring-retry loop) that expects the node to
+actually finish. Confirmed `tf_repeat`/`tf_delay` themselves had each fired exactly once and were
+simply never revisited — not a loop bug. Also checked: the Play node's "Duration" override does
+NOT help here — it only opportunistically checks elapsed time *when* a `PLAYBACK_STOP` happens to
+fire, and one never does for a `loops=-1` stream, so it's not an active timer.
+
+Fixed by adding a real one-shot audio file rather than trying to force a fix onto the generator
+string: synthesized the same 440+480Hz US ring-back tone directly with `ffmpeg` (`sine` filters +
+`amix`, no FreeSWITCH involved) as a genuine 2-second, 44.1kHz mono OGG file — new
+`freeswitch/sounds/_system/ring_tones/us_ring_back.ogg` (bind-mounted, live immediately, no
+restart). Added to the "Ring Tones" picker group as `US Ring Back — Single Ring (one-shot,
+completes)`, alongside the existing (now clearly relabeled "continuous") generator presets.
+Live-verified: swapped into the test flow's `Play` node, correctly fired `PLAYBACK_STOP` →
+`end_of_stream` → resumed into `tf_delay` every pass.
+
+While in that file, also fixed a third instance of S137's audio-quality-audit pattern that
+session had missed: the "Music (Built-In)" group's `__builtin:` file paths still pointed at
+`.../music/8000/...` (narrowband) instead of `.../music/48000/...` (the container's own
+best-quality copies, same fix already applied to `local_stream`'s MOH source and everywhere
+else audited in S137).
+
+### State
+
+- `dotnet build` + `dotnet test`: 692 passing (150 Domain, 20 Application, 97 Api, 425
+  Infrastructure — +18 net this session: 7 tf_delay, 7 tf_repeat, 4 CheckAgentAvailability).
+  `tsc -b` + `vite build` clean.
+- FreeSWITCH dialplan: new `delay-wait` extension added; reloaded live via `reloadxml`. New sound
+  asset `freeswitch/sounds/_system/ring_tones/us_ring_back.ogg`, bind-mounted, no reload needed.
+- Test flow left in place (`tenant_test_tenant`, "Test Campaign 1 - Inbound Call Flow"): Route to
+  Queue → Check Agent Availability → (available) Repeat(3) → Play(one-shot ring) → Delay(3000ms)
+  → loop back to Repeat, (finished/unavailable) → Play(queue greeting) → IVR Menu → hold loop /
+  callback offer. Reusable for future regression checks on any of these three node types.
+
+### Next session — pick up here
+
+1. Worker retention job to `WipeSensitiveData` after N minutes/hours (queued from Session 134).
+2. Agent connect tone + "Playing greeting" softphone indicator (queued from Session 133/134).
+3. Confirm the S136 `park_with_moh` MOH fix by ear on a real mid-bridge `tf_secure_collect` call
+   (mechanism-verified only so far).
+4. Defensive cleanup noted but not fixed this session: none of the `_*_in_progress` session flags
+   (`_ivr_in_progress`/`_vm_in_progress`/`_tts_in_progress`/`_sc_in_progress`/`_delay_in_progress`)
+   get cleared on a successful `CHANNEL_BRIDGE` — if the background queue poller bridges a call
+   away mid-`Play`/mid-`Delay` (a real, now-confirmed-live scenario in S138's ring-loop test),
+   the flag can be left stale. Dormant for flows that don't touch the channel again after
+   bridging (today's test flow included), but worth a proper fix before any flow pairs one of
+   these nodes with something that re-parks the channel post-bridge (e.g. `tf_secure_collect`
+   mid-bridge capture after a `tf_repeat`/`tf_delay` ring loop).
 
 ### Carry-overs (unchanged)
 

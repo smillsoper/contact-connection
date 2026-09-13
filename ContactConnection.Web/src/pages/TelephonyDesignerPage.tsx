@@ -44,6 +44,8 @@ import OnCustomEventNode from '../components/telephony-designer/nodes/OnCustomEv
 import DtmfNode from '../components/telephony-designer/nodes/DtmfNode'
 import IvrMenuNode from '../components/telephony-designer/nodes/IvrMenuNode'
 import SecureCollectNode from '../components/telephony-designer/nodes/SecureCollectNode'
+import DelayNode from '../components/telephony-designer/nodes/DelayNode'
+import RepeatNode from '../components/telephony-designer/nodes/RepeatNode'
 import RecordNode from '../components/telephony-designer/nodes/RecordNode'
 import VoicemailNode from '../components/telephony-designer/nodes/VoicemailNode'
 import ScheduledCallbackNode from '../components/telephony-designer/nodes/ScheduledCallbackNode'
@@ -67,6 +69,8 @@ const HANDLE_DISPLAY_LABELS: Record<string, string> = {
   end_of_stream: 'End Of Play Stream',
   duration_reached: 'Duration Reached',
   tts_finished: 'TTS Finished',
+  available: 'Available',
+  unavailable: 'Not Available',
 }
 
 // Node types with a fixed (non-user-editable) exit-option list — wired via a single physical
@@ -98,6 +102,8 @@ const nodeTypes = {
   tf_dtmf: DtmfNode,
   tf_ivr_menu: IvrMenuNode,
   tf_secure_collect: SecureCollectNode,
+  tf_delay: DelayNode,
+  tf_repeat: RepeatNode,
   tf_record: RecordNode,
   tf_voicemail: VoicemailNode,
   tf_scheduled_callback: ScheduledCallbackNode,

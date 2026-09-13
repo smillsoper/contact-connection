@@ -17,7 +17,11 @@ export default function TelNodeShell({ type, label, isEntry, selected, children,
   const hasDual      = meta.handles === 'dual'
   const isEventNode  = meta.handles === 'source-only'
 
-  const isDualCheck      = type === 'tf_check_block_list' || type === 'tf_check_agent_availability'
+  // tf_check_agent_availability deliberately does NOT share tf_check_block_list's
+  // blocked(red)/not_blocked(green) scheme — it gets its own available(green)/unavailable(red)
+  // pair below (fixed S138; it previously rode along with the block-list node's labels/colors,
+  // which read backwards for an availability check).
+  const isDualCheck      = type === 'tf_check_block_list'
   const isGenericBranch  = type === 'tf_branch'
 
   return (

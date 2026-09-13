@@ -119,6 +119,24 @@
       </condition>
     </extension>
 
+    <!-- Timed pause for the tf_delay node. DelayNodeHandler sets cc_delay_ms then
+         `uuid_transfer <uuid> delay_wait XML default` into here. A *finite* silence_stream
+         playback blocks only this channel's own FreeSWITCH-side dialplan thread for exactly that
+         duration — never the .NET ESL event loop — and keeps real silence RTP flowing the whole
+         time (no CNG, per the platform's suppress-cng setting), so there's no dead air or
+         jitter-buffer starvation on the far end. We then emit contactconnection::delay_done and
+         re-park; the re-park is ignored by the CHANNEL_PARK handler via _delay_in_progress, same
+         pattern as ivr_collect / vm_record / tts_play / secure_collect. -->
+    <extension name="delay-wait">
+      <condition field="destination_number" expression="^delay_wait$">
+        <action application="answer"/>
+        <action application="playback" data="silence_stream://${cc_delay_ms}"/>
+        <action application="event"
+                data="Event-Name=CUSTOM,Event-Subclass=contactconnection::delay_done"/>
+        <action application="park"/>
+      </condition>
+    </extension>
+
     <!-- Blind transfer target for the tf_transfer node's external_number destination.
          TransferNodeHandler sets cc_xfer_dest (a sofia/gateway/… or sofia/external/sip:… dial
          string) + cc_xfer_announce, then `uuid_transfer <uuid> xfer_bridge XML default`.

@@ -90,7 +90,7 @@ public sealed class EslBackgroundService : BackgroundService
             "CHANNEL_PARK CHANNEL_ANSWER CHANNEL_HANGUP CHANNEL_HANGUP_COMPLETE CHANNEL_BRIDGE CHANNEL_UNBRIDGE " +
             "CHANNEL_HOLD CHANNEL_UNHOLD PLAYBACK_STOP " +
             "CUSTOM contactconnection::ivr_done contactconnection::vm_done contactconnection::xfer_failed " +
-            "contactconnection::tts_done contactconnection::secure_collect_done " +
+            "contactconnection::tts_done contactconnection::secure_collect_done contactconnection::delay_done " +
             "sofia::register sofia::unregister sofia::expire", ct);
 
         _logger.LogInformation("ESL connected to FreeSWITCH at {Host}:{Port}", host, port);
@@ -199,6 +199,18 @@ public sealed class EslBackgroundService : BackgroundService
             || ivrSession?.Vars.GetValueOrDefault("_sc_in_progress") == "true")
         {
             _logger.LogInformation("CHANNEL_PARK {Uuid}: returned from secure DTMF capture — not a new call", channelUuid);
+            return;
+        }
+
+        // tf_delay: the delay_wait extension re-parks once its finite silence_stream finishes;
+        // contactconnection::delay_done drives the resume. Same "not a new call" pattern as
+        // every other deferred-continuation node above.
+        if (destination == "delay_wait"
+            || rawDestination == "delay_wait"
+            || transferSource.Contains("delay_wait")
+            || ivrSession?.Vars.GetValueOrDefault("_delay_in_progress") == "true")
+        {
+            _logger.LogInformation("CHANNEL_PARK {Uuid}: returned from a timed delay — not a new call", channelUuid);
             return;
         }
 
@@ -584,6 +596,34 @@ public sealed class EslBackgroundService : BackgroundService
         await scope.ServiceProvider
             .GetRequiredService<ITelephonyFlowEngine>()
             .ResumeFromNodeAsync(session.ChannelUuid, target, esl, ct);
+    }
+
+    /// <summary>
+    /// The delay_wait extension's finite silence_stream finished for a tf_delay node. Resume at
+    /// the node's "default" transition — mirrors HandleIvrDoneAsync's shape exactly, just with no
+    /// digits/result to interpret.
+    /// </summary>
+    private async Task HandleDelayDoneAsync(
+        Dictionary<string, string> vars, EslClient esl, CancellationToken ct)
+    {
+        var uuid = vars.GetValueOrDefault("Unique-ID");
+        if (string.IsNullOrEmpty(uuid)) return;
+
+        var session = await ResolveSessionAsync(uuid, vars, ct);
+        if (session is null || session.Vars.GetValueOrDefault("_delay_in_progress") != "true") return;
+
+        var nextNode = session.Vars.GetValueOrDefault("_delay_next_node_id");
+        session.Vars.Remove("_delay_in_progress");
+        session.Vars.Remove("_delay_next_node_id");
+        await _sessionStore.SaveAsync(session, ct);
+
+        _logger.LogInformation("delay_done {Uuid}: resuming at node {Next}", uuid, nextNode ?? "(dead-end)");
+        if (string.IsNullOrEmpty(nextNode)) return;
+
+        using var scope = _scopeFactory.CreateScope();
+        await scope.ServiceProvider
+            .GetRequiredService<ITelephonyFlowEngine>()
+            .ResumeFromNodeAsync(session.ChannelUuid, nextNode, esl, ct);
     }
 
     /// <summary>
@@ -1895,6 +1935,9 @@ public sealed class EslBackgroundService : BackgroundService
                 break;
             case "contactconnection::secure_collect_done":
                 await HandleSecureCollectDoneAsync(vars, esl, ct);
+                break;
+            case "contactconnection::delay_done":
+                await HandleDelayDoneAsync(vars, esl, ct);
                 break;
             case "contactconnection::xfer_failed":
                 await HandleXferFailedAsync(vars, esl, ct);
