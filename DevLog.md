@@ -148,6 +148,7 @@
 | 136 | 2026-09-13 | 10:12 AM PDT | 10:49 AM PDT | 37 min | ~13940 min |
 | 137 | 2026-09-13 | 10:54 AM PDT | 11:15 AM PDT | 21 min | ~13961 min |
 | 138 | 2026-09-13 | 11:18 AM PDT | 12:36 PM PDT | 78 min | ~14039 min |
+| 139 | 2026-09-13 | 12:40 PM PDT | 12:45 PM PDT | 5 min | ~14044 min |
 
 ---
 
@@ -7429,6 +7430,52 @@ else audited in S137).
    bridging (today's test flow included), but worth a proper fix before any flow pairs one of
    these nodes with something that re-parks the channel post-bridge (e.g. `tf_secure_collect`
    mid-bridge capture after a `tf_repeat`/`tf_delay` ring loop).
+
+### Carry-overs (unchanged)
+
+RMD filing; .cc → .io migration tail; contactconnection.io SPF/DKIM/DMARC; cc_timesync
+crash-loop; CommitmentEvents JSONB ValueComparer; ServiceLevelThresholdSeconds widget;
+Dashboards endpoint authz; broader FlowEngine test coverage; retire the .cc softphone route.
+
+## Session 139
+
+**Date:** 2026-09-13
+**Start:** 12:40 PM PDT
+**End:** 12:45 PM PDT
+**Duration:** 5 minutes
+**Total Duration:** ~14044 minutes
+
+### Focus
+
+Quick, scoped ear-check requested by the user: confirm the S136 `park_with_moh` MOH fix (was
+mechanism-verified only via a synthetic test channel, never heard on a real call) by re-running
+the S135/S136 mid-bridge `tf_secure_collect` test flow one more time.
+
+### park_with_moh MOH fix — CONFIRMED BY EAR
+
+Test fixtures from S135/S136 still intact and active (`tenant_test_tenant`, DID `+15415293670` →
+telephony flow `a1b2c3d4-1135-4000-9000-000000000003`, CRM flow `...0002`) — no code changes
+needed, this was purely a live-verification session. Real Telnyx call: caller answered →
+transferred to agent → CRM script popped → `trigger_telephony_event` fired `capture_card` →
+`tf_secure_collect` parked the agent on `park_with_moh` — **user confirmed hearing real hold
+music, "clear and clean," not silence.** All 3 fields (PAN/expiry/CVV) captured and encrypted,
+agent re-bridged, normal conversation resumed, clean hangup. Full mid-bridge `tf_secure_collect`
+flow re-verified end to end in the same call.
+
+This closes the last open item from S136's `park_with_moh` fix (was flagged as "mechanism-
+verified only, not yet heard live" in both DevLog and memory).
+
+### State
+
+No code changes this session. `tests`/`tsc -b` unaffected (still 692 passing / clean per S138).
+
+### Next session — pick up here
+
+1. Worker retention job to `WipeSensitiveData` after N minutes/hours (queued from Session 134).
+2. Agent connect tone + "Playing greeting" softphone indicator (queued from Session 133/134).
+3. Defensive cleanup: `_*_in_progress` session flags not cleared on `CHANNEL_BRIDGE` (queued from
+   Session 138 — dormant today, but a real gap once a flow pairs `tf_repeat`/`tf_delay` with a
+   later re-park like `tf_secure_collect` mid-bridge).
 
 ### Carry-overs (unchanged)
 
