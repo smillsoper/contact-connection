@@ -117,10 +117,10 @@ public sealed class TtsFileSynthesizer : ITtsFileSynthesizer
             }
         }
 
-        var request = new TtsStreamRequest(text, voiceId, credentials, PreferredSampleRateHz: 8000, providerSettings);
+        var request = new TtsStreamRequest(text, voiceId, credentials, PreferredSampleRateHz: 48000, providerSettings);
 
         using var pcm = new MemoryStream();
-        int sampleRateHz = 8000;
+        int sampleRateHz = 48000;
         var gotAudio = false;
         try
         {

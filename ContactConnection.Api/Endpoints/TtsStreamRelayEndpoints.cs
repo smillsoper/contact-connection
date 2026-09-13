@@ -27,10 +27,14 @@ public static class TtsStreamRelayEndpoints
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 
-    // ffmpeg output: fixed 22.05 kHz mono CBR MP3. `-write_xing 0` drops the VBR/LAME header
-    // (which would force the muxer to buffer the whole file to count frames) so ffmpeg emits a
-    // pure frame stream mpg123 can sync on immediately. FreeSWITCH resamples to the call codec.
-    private const string FfmpegOutArgs = "-ar 22050 -ac 1 -c:a libmp3lame -b:a 32k -write_xing 0 -flush_packets 1 -f mp3 pipe:1";
+    // ffmpeg output: fixed 44.1 kHz mono CBR MP3 at 64kbps — clean for voice, still tiny for
+    // prompt-length audio. Was 22.05kHz/32kbps on the assumption every leg ends up on narrowband
+    // G.711 PSTN; the internal WebRTC agent leg negotiates opus (wideband up to 48kHz, confirmed
+    // live S135/S136) and FreeSWITCH resamples down for any leg that IS narrowband, so there's no
+    // benefit to capping here and a real audible cost on every leg that isn't. Fixed S137.
+    // `-write_xing 0` drops the VBR/LAME header (which would force the muxer to buffer the whole
+    // file to count frames) so ffmpeg emits a pure frame stream mpg123 can sync on immediately.
+    private const string FfmpegOutArgs = "-ar 44100 -ac 1 -c:a libmp3lame -b:a 64k -write_xing 0 -flush_packets 1 -f mp3 pipe:1";
 
     public static IEndpointRouteBuilder MapTtsStreamRelayEndpoints(this IEndpointRouteBuilder app)
     {

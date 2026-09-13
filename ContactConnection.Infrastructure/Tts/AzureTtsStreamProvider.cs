@@ -78,11 +78,16 @@ public class AzureTtsStreamProvider : ITtsStreamProvider
         await speakTask; // rethrow if SpeakTextAsync itself faulted after the channel closed
     }
 
+    // Azure's raw PCM ceiling is 48kHz (Raw48Khz16BitMonoPcm) — matches opus, the codec the
+    // internal WebRTC agent leg negotiates. Was capped at 24kHz platform-wide on the assumption
+    // every leg ends up on narrowband G.711 PSTN; FreeSWITCH resamples down for any leg that
+    // does, so there's no reason not to request the best Azure offers. Fixed S137.
     private static (SpeechSynthesisOutputFormat Format, int SampleRateHz) ResolveOutputFormat(int preferredSampleRateHz) =>
         preferredSampleRateHz switch
         {
             <= 8000  => (SpeechSynthesisOutputFormat.Raw8Khz16BitMonoPcm, 8000),
             <= 16000 => (SpeechSynthesisOutputFormat.Raw16Khz16BitMonoPcm, 16000),
-            _        => (SpeechSynthesisOutputFormat.Raw24Khz16BitMonoPcm, 24000),
+            <= 24000 => (SpeechSynthesisOutputFormat.Raw24Khz16BitMonoPcm, 24000),
+            _        => (SpeechSynthesisOutputFormat.Raw48Khz16BitMonoPcm, 48000),
         };
 }

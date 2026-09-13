@@ -169,14 +169,19 @@ public class ElevenLabsTtsStreamProvider : ITtsStreamProvider
     private static Task SendAsync(ClientWebSocket socket, string json, CancellationToken ct) =>
         socket.SendAsync(Encoding.UTF8.GetBytes(json), WebSocketMessageType.Text, true, ct);
 
-    // ElevenLabs' PCM options are 16000/22050/24000/44100 — no 8000, unlike Azure. Nearest-
-    // rate-up mapping; mod_audio_stream resamples to the channel's actual codec regardless.
+    // ElevenLabs' PCM options are 16000/22050/24000/44100 — but 22050 and 44100 are gated to
+    // Pro-tier-and-above accounts (confirmed live, S137: "Output format 'pcm_44100' is only
+    // available on the Pro tier and above", output_format_not_allowed). Requesting a gated
+    // format from this live streaming path (tf_play/tf_whisper) would fail the call outright,
+    // not just log a warning, so the ceiling here is capped at 24000 — the highest format
+    // confirmed to work regardless of tier. 24kHz is still excellent for voice (its Nyquist
+    // frequency is well above the practical content of human speech); the audible gap to
+    // 44.1kHz matters far more for music than speech. mod_audio_stream resamples to the
+    // channel's actual codec regardless of what we request here.
     private static (string OutputFormat, int SampleRateHz) ResolveOutputFormat(int preferredSampleRateHz) =>
         preferredSampleRateHz switch
         {
             <= 16000 => ("pcm_16000", 16000),
-            <= 22050 => ("pcm_22050", 22050),
-            <= 24000 => ("pcm_24000", 24000),
-            _        => ("pcm_44100", 44100),
+            _        => ("pcm_24000", 24000),
         };
 }

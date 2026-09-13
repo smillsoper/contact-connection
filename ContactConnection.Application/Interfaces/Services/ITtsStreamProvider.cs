@@ -45,10 +45,13 @@ public interface ITtsStreamProvider
     ///
     /// TtsStreamRequest.PreferredSampleRateHz is a hint, not a contract — vendors don't all
     /// support the same rate set (e.g. ElevenLabs' PCM options are 16000/22050/24000/44100,
-    /// no 8000), so each implementation picks its nearest supported native rate and reports
-    /// the ACTUAL rate on every yielded chunk. mod_audio_stream resamples on the FreeSWITCH
-    /// side to match the channel's real codec regardless, so precision here just avoids an
-    /// unnecessary resample in application code — never lie about the rate you produced.
+    /// no 8000), so each implementation picks its nearest supported native rate at or above the
+    /// hint and reports the ACTUAL rate on every yielded chunk. mod_audio_stream resamples on
+    /// the FreeSWITCH side to match the channel's real codec regardless, so this hint should
+    /// always ask for the best a vendor offers (see the 48000 default below) — there is no
+    /// quality cost to requesting high even when a leg ends up narrowband, only to requesting
+    /// low when a leg (e.g. the internal WebRTC agent leg, which negotiates opus) could have
+    /// carried more. Never lie about the rate you actually produced.
     /// </summary>
     IAsyncEnumerable<TtsAudioChunk> SynthesizeAsync(TtsStreamRequest request, CancellationToken ct = default);
 }
@@ -64,10 +67,14 @@ public readonly record struct TtsAudioChunk(ReadOnlyMemory<byte> Data, int Sampl
 /// need different numbers/shapes of credential fields (ElevenLabs: one API key; Azure: key +
 /// region; AWS-style: access key + secret + region), so both are free-form dictionaries rather
 /// than fixed fields — each provider implementation reads the keys it expects and documents them.
+///
+/// PreferredSampleRateHz defaults to 48000 (matches opus' ceiling, the codec the internal WebRTC
+/// agent leg negotiates) rather than 8000 — was 8000 platform-wide on the assumption every leg
+/// ends up on narrowband G.711 PSTN, which undersells audio on every leg that isn't. Fixed S137.
 /// </summary>
 public sealed record TtsStreamRequest(
     string Text,
     string VoiceId,
     IReadOnlyDictionary<string, string> Credentials,
-    int PreferredSampleRateHz = 8000,
+    int PreferredSampleRateHz = 48000,
     IReadOnlyDictionary<string, string>? ProviderSettings = null);

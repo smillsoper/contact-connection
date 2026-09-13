@@ -17,7 +17,7 @@ public static class AudioFilesEndpoints
     {
         var group = app.MapGroup("/api/v1/audio-files").RequireAuthorization();
 
-        // POST /api/v1/audio-files — multipart upload; transcodes to OGG Vorbis 8 kHz mono via ffmpeg
+        // POST /api/v1/audio-files — multipart upload; transcodes to OGG Vorbis 44.1 kHz mono via ffmpeg
         group.MapPost("/", async (
             HttpContext http,
             IWebHostEnvironment env,
@@ -314,10 +314,15 @@ public static class AudioFilesEndpoints
         Path.Combine(ResolveSoundsHostPath(config, env), schemaName);
 
     /// <summary>
-    /// Transcodes to OGG Vorbis 8 kHz mono — the format FreeSWITCH mod_sndfile handles natively —
-    /// shared by both the raw-upload endpoint and the TTS-synthesis endpoints below. Returns the
-    /// resulting file's size in bytes; throws (with the source file already cleaned up by the
-    /// caller's finally block) on any ffmpeg failure.
+    /// Transcodes to OGG Vorbis 44.1 kHz mono — the format FreeSWITCH mod_sndfile handles
+    /// natively — shared by both the raw-upload endpoint and the TTS-synthesis endpoints below.
+    /// Previously forced to 8 kHz on the assumption every leg ends up on narrowband G.711 PSTN;
+    /// that's not true of the internal WebRTC agent leg (negotiates opus, wideband up to 48kHz,
+    /// confirmed live S135/S136) and FreeSWITCH downsamples transparently for any leg that DOES
+    /// end up narrowband — so there's no benefit to capping quality here and a real audible cost
+    /// on every leg that isn't narrowband. Fixed S137. Returns the resulting file's size in
+    /// bytes; throws (with the source file already cleaned up by the caller's finally block) on
+    /// any ffmpeg failure.
     /// </summary>
     private static async Task<long> TranscodeToOggAsync(
         IConfiguration config, string sourcePath, string oggPath, CancellationToken ct)
@@ -325,7 +330,7 @@ public static class AudioFilesEndpoints
         var ffmpegExe = config["FreeSWITCH:FfmpegPath"] ?? "ffmpeg";
         var psi = new ProcessStartInfo(ffmpegExe)
         {
-            Arguments        = $"-y -i \"{sourcePath}\" -vn -ar 8000 -ac 1 -c:a libvorbis -q:a 3 \"{oggPath}\"",
+            Arguments        = $"-y -i \"{sourcePath}\" -vn -ar 44100 -ac 1 -c:a libvorbis -q:a 5 \"{oggPath}\"",
             UseShellExecute  = false,
             CreateNoWindow   = true,
             RedirectStandardOutput = true,

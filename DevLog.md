@@ -146,6 +146,7 @@
 | 134 | 2026-09-10 | 12:20 PM PDT | 12:57 PM PDT | 37 min | ~13820 min |
 | 135 | 2026-09-11 | 9:31 AM PDT | 10:54 AM PDT | 83 min | ~13903 min |
 | 136 | 2026-09-13 | 10:12 AM PDT | 10:49 AM PDT | 37 min | ~13940 min |
+| 137 | 2026-09-13 | 10:54 AM PDT | 11:15 AM PDT | 21 min | ~13961 min |
 
 ---
 
@@ -7189,6 +7190,98 @@ call that exercises tf_secure_collect's mid-bridge hold.
    tf_secure_collect's PCI data-lifecycle follow-up — not built).
 4. Opportunistic: confirm the park_with_moh MOH fix by ear on the next real mid-bridge
    tf_secure_collect call (mechanism-verified only, not yet heard live).
+
+### Carry-overs (unchanged)
+
+RMD filing; .cc → .io migration tail; contactconnection.io SPF/DKIM/DMARC; cc_timesync
+crash-loop; CommitmentEvents JSONB ValueComparer; ServiceLevelThresholdSeconds widget;
+Dashboards endpoint authz; broader FlowEngine test coverage; retire the .cc softphone route.
+
+## Session 137
+
+**Date:** 2026-09-13
+**Start:** 10:54 AM PDT
+**End:** 11:15 AM PDT
+**Duration:** 21 minutes
+**Total Duration:** ~13961 minutes
+
+### Focus
+
+User-requested audit: audio quality across the whole platform — is codec negotiation actually
+best-quality-first, and is every transcoding step we control targeting good quality rather than
+settling for old-phone-system narrowband. Found and fixed four real instances of an outdated
+"every leg ends up on 8kHz G.711 PSTN" assumption baked into audio we fully control, and
+regenerated the platform TTS phrase library under the fixed pipeline.
+
+### SIP codec negotiation — audited, already correct, no change needed
+
+Both `internal.xml` (agent WebRTC) and `external.xml` (Telnyx trunk) offer
+`OPUS,G722,G711U,G711A` — best-quality-first — via `global_codec_prefs` /
+`outbound_codec_prefs` in `vars.xml`. Confirmed live in S135/S136 testing: `rtpCodec=opus`
+negotiated on both legs of a real call. Noted for the record: a real inbound PSTN caller's
+actual voice is band-limited by their own carrier long before reaching Telnyx, so codec choice
+on our end can't recover content that was never captured — it only matters for legs where high
+quality is actually achievable (the agent's leg, and any audio we generate/store ourselves).
+
+### Four narrowband-by-default spots found and fixed
+
+All four shared the same root cause and the same fix rationale: FreeSWITCH resamples down
+transparently for any leg that DOES end up narrowband, so there is no quality benefit to
+capping these at 8kHz/22kHz and a real, avoidable, audible cost on every leg that isn't
+(especially the internal WebRTC agent leg, which negotiates opus).
+
+1. **`AudioFilesEndpoints.cs`** — tenant-uploaded prompt transcode was `-ar 8000 -q:a 3`;
+   now `-ar 44100 -q:a 5`. A tenant uploading a professionally-recorded prompt no longer gets
+   it permanently crushed to telephone quality on ingest.
+2. **`ITtsStreamProvider.cs` / `TtsStreamingService.cs` / `TtsFileSynthesizer.cs`** —
+   `PreferredSampleRateHz` was hardcoded to 8000 at every call site (interface default and both
+   concrete callers), so both live streaming TTS (`tf_play`/`tf_whisper`/`tf_transfer`
+   announcements) and saved TTS clips always requested the lowest quality a vendor would give.
+   Default raised to 48000 (opus' ceiling) platform-wide; each provider still clamps to its own
+   real ceiling.
+3. **`AzureTtsStreamProvider.cs`** — `ResolveOutputFormat` topped out at `Raw24Khz16BitMonoPcm`;
+   Azure's Speech SDK actually goes up to `Raw48Khz16BitMonoPcm` (confirmed against the
+   installed SDK's own XML docs), added as the new top branch.
+4. **`TtsStreamRelayEndpoints.cs`** — the ffmpeg MP3 relay (`tf_play`'s `shout://` delivery
+   path) was fixed at `-ar 22050 -b:a 32k`; now `-ar 44100 -b:a 64k` — clean for voice, still
+   tiny for prompt-length audio.
+
+### Platform TTS phrase library — regenerated at real-tier-safe quality (150/150 clips)
+
+`scripts/generate-platform-phrases.mjs` explicitly downsampled every clip to 8kHz
+(`aresample=8000`) after synthesizing at ElevenLabs' PCM floor — the most permanent instance of
+the narrowband assumption, since these 150 files (25 phrases × 6 voices) ship committed to the
+repo and back every tenant's default IVR/hold/queue prompts. First fix attempt requested
+ElevenLabs' true ceiling (`pcm_44100`) directly and failed immediately on every clip:
+`"Output format 'pcm_44100' is only available on the Pro tier and above"`
+(`output_format_not_allowed`) — this account is below Pro tier. Probed down and confirmed
+`pcm_24000` works; **`ElevenLabsTtsStreamProvider.ResolveOutputFormat`'s ceiling was capped at
+24000 accordingly (not left at 44100)** — the live streaming path (`tf_play`/`tf_whisper`) would
+otherwise hard-fail a real call the same way the script did, not just log a warning. 24kHz is
+still excellent for voice; the gap to 44.1kHz matters far more for music than speech.
+Regenerated all 150 clips with `ELEVENLABS_API_KEY` supplied by the user for this run only (not
+stored); `created=150 skipped=0 failed=0`. Spot-verified via `ffprobe`: 24000 Hz mono Vorbis,
+valid duration. Library size 6.5MB (was ~8kHz-sized before, now ~3x — still trivial).
+
+### State
+
+- `dotnet build` + `dotnet test`: 674 passing, unchanged (all changes are config/transcode
+  parameters and a script, no logic under test changed).
+- 150 platform phrase `.ogg` files regenerated at 24kHz mono (was 8kHz); `freeswitch/sounds/
+  _platform/` now 6.5MB.
+- No FreeSWITCH container/dialplan changes this session — nothing to `reloadxml` or restart;
+  the regenerated `.ogg` files are picked up on next playback (bind-mounted, no caching).
+
+### Next session — pick up here
+
+1. `tf_delay` + `tf_repeat` nodes (queued from Session 134, carried through S135/S136).
+2. Agent connect tone + "Playing greeting" softphone indicator (queued from Session 133/134).
+3. Worker retention job to `WipeSensitiveData` after N minutes/hours (queued from Session 134).
+4. Confirm the S136 `park_with_moh` MOH fix by ear on a real mid-bridge `tf_secure_collect`
+   call (mechanism-verified only so far, not yet heard live).
+5. Opportunistic: if the user upgrades the ElevenLabs account to Pro tier, revisit
+   `ElevenLabsTtsStreamProvider`'s 24000 ceiling — 22050/44100 would become available and could
+   be re-enabled for a further (modest, speech-content-limited) quality gain.
 
 ### Carry-overs (unchanged)
 

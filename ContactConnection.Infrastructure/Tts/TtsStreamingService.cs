@@ -111,7 +111,7 @@ public sealed class TtsStreamingService : ITtsStreamingService
             provider.ProviderKey,
             voiceId,
             text.Replace("\n", " "),
-            PreferredSampleRateHz: 8000,
+            PreferredSampleRateHz: 48000,
             providerSettings);
 
         var token = Guid.NewGuid().ToString("N");

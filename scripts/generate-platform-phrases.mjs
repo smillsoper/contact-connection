@@ -7,7 +7,13 @@
  * every phrase in every voice, synthesizes the phrase text (English phrases in the `en` voices,
  * Spanish in the `es` voices) via ElevenLabs' documented streaming WebSocket protocol — the same
  * protocol ContactConnection.Infrastructure/Tts/ElevenLabsTtsStreamProvider.cs speaks — then
- * transcodes the PCM to OGG Vorbis 8 kHz mono and writes it to:
+ * transcodes the PCM to OGG Vorbis 24 kHz mono — was downsampled to 8 kHz on the assumption
+ * every leg ends up on narrowband G.711 PSTN; the internal WebRTC agent leg negotiates opus,
+ * wideband up to 48kHz, and FreeSWITCH resamples down for any leg that IS narrowband, so
+ * there's no reason to cap this permanently-baked library at telephone quality (fixed S137).
+ * 24kHz, not ElevenLabs' true 44.1kHz ceiling, because 22050/44100 are gated to Pro-tier-and-
+ * above accounts (confirmed live, S137: "output_format_not_allowed") — 24000 is the highest
+ * format confirmed to work regardless of tier, and still excellent for voice. Writes to:
  *
  *     freeswitch/sounds/_platform/{voiceKey}/{phraseKey}.ogg
  *
@@ -45,7 +51,7 @@ const CATALOG_PATH = join(REPO_ROOT, 'ContactConnection.Web', 'src', 'data', 'pl
 const OUT_ROOT = join(REPO_ROOT, 'freeswitch', 'sounds', '_platform');
 const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg';
 const MODEL_ID = 'eleven_flash_v2_5';
-const PCM_RATE = 16000; // ElevenLabs has no pcm_8000; nearest-up, then ffmpeg downsamples to 8k
+const PCM_RATE = 24000; // highest ElevenLabs PCM format that works regardless of account tier — see file header
 const VOICE_SETTINGS = { stability: 0.5, similarity_boost: 0.75, style: 0.0, use_speaker_boost: true, speed: 1.0 };
 const INTER_REQUEST_DELAY_MS = 350;
 const LEAD_IN_SILENCE_MS = Number(process.env.LEAD_IN_MS ?? 400); // prepended to every clip; anti first-syllable-clip
@@ -150,9 +156,14 @@ function wavFromPcm(pcm, sampleRate) {
 
 function transcodeToOgg(wavPath, oggPath) {
   return new Promise((res, rej) => {
-    const filters = ['aresample=8000'];
+    // No aresample filter — keep the source at ElevenLabs' native PCM_RATE (44.1kHz) instead of
+    // forcing it down. See the file header for why.
+    const filters = [];
     if (LEAD_IN_SILENCE_MS > 0) filters.push(`adelay=${LEAD_IN_SILENCE_MS}:all=1`);
-    const p = spawn(FFMPEG, ['-y', '-i', wavPath, '-vn', '-af', filters.join(','), '-ac', '1', '-c:a', 'libvorbis', '-q:a', '3', oggPath], { stdio: ['ignore', 'ignore', 'pipe'] });
+    const ffmpegArgs = ['-y', '-i', wavPath, '-vn'];
+    if (filters.length) ffmpegArgs.push('-af', filters.join(','));
+    ffmpegArgs.push('-ac', '1', '-c:a', 'libvorbis', '-q:a', '5', oggPath);
+    const p = spawn(FFMPEG, ffmpegArgs, { stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = '';
     p.stderr.on('data', (d) => { stderr += d; });
     p.on('error', (e) => rej(new Error(`ffmpeg could not start (${FFMPEG}): ${e.message}`)));
