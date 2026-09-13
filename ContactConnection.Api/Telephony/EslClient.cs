@@ -124,33 +124,27 @@ public sealed class EslClient(ILogger<EslClient>? logger = null) : IOwnedEslComm
     public Task HangupChannelAsync(string uuid, CancellationToken ct = default) =>
         SendApiAsync($"uuid_kill {uuid} NORMAL_CLEARING", ct);
 
-    // Transfer the parked inbound channel to the agent's registered WebRTC endpoint.
-    // Resolves the agent's actual SIP contact via sofia_contact (registration lookup),
-    // then bridges via the dialplan's agent-bridge extension (NOT a bare uuid_transfer inline
-    // bridge — that leaves nothing for the channel to fall through to once the bridge ends, so
-    // FreeSWITCH hangs it up even when the agent leg was merely pulled out mid-call, e.g. by
-    // tf_secure_collect parking it for a card capture; agent-bridge's hangup_after_bridge=false +
-    // explicit park() keeps this leg alive and under ESL control instead — bug found + fixed S135).
+    // Bridge the parked inbound channel to the agent's registered WebRTC endpoint.
+    //
+    // Originates a separate, independently-parked agent leg (OriginateAndParkAsync) and then
+    // media-bridges the two via uuid_bridge — the SAME mechanism the whisper/agent_selected path
+    // (QueuedCallDeliveryService → TelEndNodeHandler.BridgeChannelsAsync) and tf_secure_collect's
+    // own re-bridge-after-capture step already use successfully. Deliberately NOT a dialplan
+    // bridge() app (the old "agent-bridge" extension, removed S136): that approach put both legs
+    // inside one shared, blocking app execution on the caller's channel — pulling the agent leg
+    // out mid-call via uuid_transfer (e.g. tf_secure_collect parking it for a card capture) killed
+    // the caller leg too, even with hangup_after_bridge=false + an explicit park() fallback (Bug
+    // #4, chased across 3 fix attempts in S135, never fully resolved). uuid_bridge never puts
+    // either leg inside a shared blocking app — the caller stays a plain parked/ESL-controlled
+    // channel throughout, so pulling the agent leg away just ends the media bridge and leaves the
+    // caller right where it was, reachable for a re-bridge or a fresh uuid_transfer.
     public async Task BridgeToAgentAsync(string uuid, string extension, string domain, string callerNumber, CancellationToken ct = default)
     {
-        // Set effective caller ID before bridging so the SIP INVITE to the agent shows the original ANI
-        await SetChannelVarAsync(uuid, "effective_caller_id_number", callerNumber, ct);
-        await SetChannelVarAsync(uuid, "effective_caller_id_name", callerNumber, ct);
+        var (agentUuid, error) = await OriginateAndParkAsync(extension, domain, callerNumber, ct);
+        if (agentUuid is null)
+            throw new InvalidOperationException($"Agent {extension}@{domain} is not reachable in FreeSWITCH. {error}");
 
-        // Resolve the agent's registered WebRTC contact URI — this is the sofia profile +
-        // full SIP contact with fs_path for WebSocket routing, e.g.:
-        // sofia/internal/sip:abc@host.invalid;transport=ws;fs_path=sip:abc@172.x.x.x:port;transport=ws
-        var contact = await ResolveAgentContactAsync(extension, domain, ct);
-        // sofia_contact returns "error/user_not_registered" (not "-ERR", not empty) when the
-        // agent has no live registration — forwarding that verbatim to bridge: yields a bogus
-        // "error/" endpoint and FreeSWITCH drops the caller with CHAN_NOT_IMPLEMENTED. Treat any
-        // "error/…" contact, empty, or "-ERR" as "not reachable" so callers can fall back.
-        if (!IsResolvedContact(contact))
-            throw new InvalidOperationException(
-                $"Agent {extension}@{domain} is not reachable in FreeSWITCH. sofia_contact returned: {contact}");
-
-        await SetChannelVarAsync(uuid, "cc_agent_bridge_dest", contact!, ct);
-        await TransferAsync(uuid, "agent_bridge", "XML", "default", ct);
+        await BridgeChannelsAsync(uuid, agentUuid!, ct);
     }
 
     /// <summary>True when sofia_contact returned a usable contact URI (not empty, "-ERR", or "error/…").</summary>

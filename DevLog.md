@@ -145,6 +145,7 @@
 | 133 | 2026-09-10 | 11:59 AM PDT | 12:18 PM PDT | 19 min | ~13783 min |
 | 134 | 2026-09-10 | 12:20 PM PDT | 12:57 PM PDT | 37 min | ~13820 min |
 | 135 | 2026-09-11 | 9:31 AM PDT | 10:54 AM PDT | 83 min | ~13903 min |
+| 136 | 2026-09-13 | 10:12 AM PDT | 10:49 AM PDT | 37 min | ~13940 min |
 
 ---
 
@@ -7076,3 +7077,121 @@ RMD filing; `.cc → .io` migration tail; `contactconnection.io` SPF/DKIM/DMARC;
 crash-loop (now a live suspect for Bug #4's timestamp anomaly, not just a background nuisance);
 `CommitmentEvents` JSONB `ValueComparer`; `ServiceLevelThresholdSeconds` widget; Dashboards endpoint
 authz; broader `FlowEngine` test coverage; retire the `.cc` softphone route.
+
+## Session 136
+
+**Date:** 2026-09-13
+**Start:** 10:12 AM PDT
+**End:** 10:49 AM PDT
+**Duration:** 37 minutes
+**Total Duration:** ~13940 minutes
+
+### Focus
+
+Root-cause and fix Bug #4 from Session 135 (tf_secure_collect mid-bridge caller drop) — queued as
+the #1 next-session item. Fixed, live-verified end to end on a real Telnyx call. Also fixed and
+verified the park_with_moh MOH-silence bug queued from the same session, and upgraded it to
+wideband while there.
+
+### Bug #4 — mid-bridge caller drop — ROOT-CAUSED, FIXED, LIVE-VERIFIED
+
+Two independent causes, both real, both fixed:
+
+**Cause 1 — dialplan bridge() app vs. uuid_bridge.** EslClient.BridgeToAgentAsync (the
+"simple-bridge" queue-delivery path, and a direct tf_transfer → agent-extension destination)
+connected caller and agent via the dialplan's bridge() app, which puts both legs inside one
+shared, blocking app execution — pulling the agent leg out mid-call via uuid_transfer (exactly
+what tf_secure_collect does to park the agent for a capture) risked the caller going down with
+it, even with hangup_after_bridge=false + an explicit park() fallback (S135's Bugs #2/#3). The
+codebase already had a bridging mechanism proven not to have this problem: the "whisper" path
+(OriginateAndParkAsync + TelEndNodeHandler.BridgeChannelsAsync) and tf_secure_collect's own
+post-capture re-bridge step both connect two independently-parked legs via the ESL uuid_bridge
+command — neither leg is ever inside a shared blocking app, so pulling one away just ends the
+media bridge, not the channel. BridgeToAgentAsync rewritten to originate the agent leg
+separately and uuid_bridge the two, same as those paths. Removed the now-dead "agent-bridge"
+dialplan extension (freeswitch/conf/dialplan/default.xml) and its CHANNEL_PARK guard
+(EslBackgroundService) — no dialplan extension is needed for this connection anymore.
+
+**Cause 2 — the more direct one, found by tracing a live failure with the Cause-1 fix already in
+place.** EslBackgroundService.HandleChannelUnbridgeAsync unconditionally hung up the caller on
+ANY bridge teardown, agent-pulled-mid-call included — this fires regardless of which bridging
+mechanism connected the legs, so it would have killed the caller the instant the agent leg was
+parked either way. Added a guard so it skips the auto-hangup while the session's _sc_in_progress
+flag is set.
+
+**First live retest still failed** — traced via the newly-armed monitor in real time: the
+CHANNEL_UNBRIDGE guard from Cause 2 never fired because SecureCollectNodeHandler didn't persist
+_sc_in_progress=true to the session until a big batched save near the END of the method — well
+after the agent-park transfer that triggers the unbridge. The event arrived and was read from
+Redis before the flag was written: a pure ordering race, confirmed exactly in the log ("parking
+agent on hold" → CHANNEL_UNBRIDGE ... hanging up → CHANNEL_HANGUP ... completed, all within the
+same event burst). Fixed by saving _sc_in_progress=true to the session immediately before the
+park transfer instead of after.
+
+**Second live retest: fully successful, end to end**, real Telnyx call, DID +15415293670, same
+S135 test fixtures (CRM flow ...0002 / telephony flow ...0003, agent ext 1002). Caller answered →
+transferred to agent → agent answered → CRM script popped → trigger_telephony_event fired
+capture_card → tf_secure_collect parked the agent (caller survived, confirmed no CHANNEL_HANGUP)
+→ all 3 fields (PAN/expiry/CVV) captured and encrypted to sensitive_data → agent re-bridged →
+caller and agent could hear each other again → CRM script logged normally → clean
+NORMAL_CLEARING hangup. User-confirmed live: "the caller was indeed re-bridged to the agent when
+the secure capture completed and the caller and agent were able to hear each other... All
+perfect."
+
+Process note: this session's API/Worker were never running (cold boot, no leftover dotnet watch)
+— started dotnet watch run --project ContactConnection.Api in the background and armed a Monitor
+filtered on the relevant log lines (readiness, CHANNEL_PARK/BRIDGE/UNBRIDGE,
+SecureCollectNodeHandler, secure_collect_done, ESL command failures) so each step of the live
+test call surfaced as it happened, same workflow as S135's live debugging.
+
+### park_with_moh MOH silence — ROOT-CAUSED, FIXED, VERIFIED (synthetic)
+
+Flagged but not fixed in S135 ("Unknown source moh, trying default"... agent hears silence).
+freeswitch/conf/autoload_configs/local_stream.conf.xml pointed the moh local-stream source at
+/usr/share/freeswitch/sounds/music/default — that path doesn't exist in this FreeSWITCH image
+(confirmed via docker exec); only rate-specific folders do (8000/16000/32000/48000, each with the
+same 4 tracks). mod_local_stream found no files at startup and never registered moh as a valid
+source at all, which is why every playback(local_stream://moh) failed.
+
+While fixing, user asked why hold music should be forced to 8kHz narrowband when calls here
+negotiate opus (wideband up to 48kHz, confirmed in this session's live test — rtpCodec=opus both
+legs). Agreed: no reason to cap quality — FreeSWITCH downsamples transparently for any leg that
+does end up on a narrowband codec, so there's no downside to sourcing high and real downside
+(audibly worse hold music on every wideband leg) to sourcing low. Repointed at music/48000 +
+rate="48000" instead of music/default + rate="8000".
+
+Fixed via reload mod_local_stream (a plain reloadxml reloads the XML registry but not an
+already-loaded module's own re-parse of its config — module reload was needed to re-register the
+stream source). Verified with a synthetic test channel (originate null &playback(local_stream://
+moh)) — clean playback, no "Unknown source" error, confirming the source is live. Not yet
+verified by ear on a real call (the fix landed after this session's live call had already ended)
+— low priority to re-verify given the mechanism is proven; do so opportunistically on the next
+call that exercises tf_secure_collect's mid-bridge hold.
+
+### State
+
+- dotnet build + dotnet test: 674 passing, unchanged from S135 (no test-relevant behavior
+  changed — the fixes are in ESL/dialplan plumbing and a session-var write-ordering fix).
+- FreeSWITCH dialplan (freeswitch/conf/dialplan/default.xml): "agent-bridge" extension removed
+  (replaced by EslClient.BridgeToAgentAsync's uuid_bridge approach); reloaded live via reloadxml.
+- freeswitch/conf/autoload_configs/local_stream.conf.xml: moh source repointed to music/48000 @
+  48kHz; mod_local_stream reloaded live via reload mod_local_stream.
+- S135's mid-bridge test fixtures (test-tenant, CRM flow ...0002, telephony flow ...0003, DID
+  +15415293670 override) left in place, now confirmed working — reusable for future
+  tf_secure_collect regression checks. +15415293670's routing override should be reverted (or
+  repointed) when it's needed for other telephony testing.
+
+### Next session — pick up here
+
+1. tf_delay + tf_repeat nodes (queued from Session 134, carried through S135).
+2. Agent connect tone + "Playing greeting" softphone indicator (queued from Session 133/134).
+3. Worker retention job to WipeSensitiveData after N minutes/hours (queued from Session 134,
+   tf_secure_collect's PCI data-lifecycle follow-up — not built).
+4. Opportunistic: confirm the park_with_moh MOH fix by ear on the next real mid-bridge
+   tf_secure_collect call (mechanism-verified only, not yet heard live).
+
+### Carry-overs (unchanged)
+
+RMD filing; .cc → .io migration tail; contactconnection.io SPF/DKIM/DMARC; cc_timesync
+crash-loop; CommitmentEvents JSONB ValueComparer; ServiceLevelThresholdSeconds widget;
+Dashboards endpoint authz; broader FlowEngine test coverage; retire the .cc softphone route.

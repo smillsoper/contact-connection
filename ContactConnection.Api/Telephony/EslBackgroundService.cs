@@ -220,22 +220,11 @@ public sealed class EslBackgroundService : BackgroundService
             return;
         }
 
-        // agent-bridge (EslClient.BridgeToAgentAsync — queue delivery / direct tf_transfer agent
-        // destination): hangup_after_bridge=false + an explicit park() keeps the caller alive and
-        // re-parks it when the bridge ends for ANY reason, including tf_secure_collect pulling the
-        // agent leg out mid-call for a card capture. Without this guard that re-park falls through
-        // to "new inbound call" below and spins up a SECOND, conflicting call-handling path on the
-        // exact same channel/session — racing the real in-progress flow and killing the call.
-        // Live-verified S135: every mid-bridge tf_secure_collect attempt failed until this guard was
-        // added — no error was ever visible in the winning path, just an unexplained hangup shortly
-        // after the agent leg was parked.
-        if (destination == "agent_bridge"
-            || rawDestination == "agent_bridge"
-            || transferSource.Contains("agent_bridge"))
-        {
-            _logger.LogInformation("CHANNEL_PARK {Uuid}: returned from agent bridge ending — not a new call", channelUuid);
-            return;
-        }
+        // REMOVED S136: the "agent_bridge" guard (for the old dialplan bridge()-app path,
+        // EslClient.BridgeToAgentAsync). That path is gone — BridgeToAgentAsync now originates the
+        // agent leg separately and uuid_bridges the two (see EslClient.BridgeToAgentAsync), so the
+        // caller channel is never transferred into a dialplan extension for this and never re-parks
+        // here at all. No guard needed.
 
         // Same idea for tf_transfer's external_number destination: the xfer_bridge extension only
         // re-parks the caller when the bridge FAILED to connect (a successful bridge goes straight
@@ -1691,13 +1680,27 @@ public sealed class EslBackgroundService : BackgroundService
         // Resolve via the session's own key OR its bridge partner's — this event can fire with
         // either leg's uuid, and the session is only ever keyed under the caller/parked leg's.
         var session = await ResolveSessionAsync(uuid, vars, ct);
-        if (session is not null)
+        if (session is null) return;
+
+        // A controlled mid-call leg pull (tf_secure_collect uuid_transfer-ing the agent leg to
+        // park_with_moh for a card capture) tears down this same bridge on purpose — the caller is
+        // meant to stay parked and reachable for the eventual re-bridge, not hung up. Found S136:
+        // this handler fires on ANY bridge teardown, agent-pulled-mid-call included, and — before
+        // this guard — unconditionally hung up the caller right here. Very likely THE cause (or at
+        // least a second, independent cause) of Bug #4: every mid-bridge secure_collect attempt in
+        // S135 died right around the moment the agent leg was parked, which is exactly this event.
+        if (session.Vars.GetValueOrDefault("_sc_in_progress") == "true")
         {
             _logger.LogInformation(
-                "CHANNEL_UNBRIDGE {Uuid}: caller channel still active (sessionKeyUuid={SessionKeyUuid}) — hanging up",
+                "CHANNEL_UNBRIDGE {Uuid}: bridge torn down for a controlled secure-collect hold — leaving caller {SessionKeyUuid} parked",
                 uuid, session.ChannelUuid);
-            await esl.HangupChannelAsync(session.ChannelUuid, ct);
+            return;
         }
+
+        _logger.LogInformation(
+            "CHANNEL_UNBRIDGE {Uuid}: caller channel still active (sessionKeyUuid={SessionKeyUuid}) — hanging up",
+            uuid, session.ChannelUuid);
+        await esl.HangupChannelAsync(session.ChannelUuid, ct);
     }
 
     /// <summary>

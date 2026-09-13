@@ -1,5 +1,13 @@
+<!-- "moh" source for `local_stream://moh` (tf_secure_collect's park_with_moh hold, S136).
+     path was "/usr/share/freeswitch/sounds/music/default" — that folder doesn't exist in this
+     image, only rate-specific ones do (8000/16000/32000/48000), so mod_local_stream never found
+     any files and never registered "moh" as a valid source at all ("Unknown source moh" → the
+     agent heard silence, not music, S135/S136). Fixed to point at 48000: calls here negotiate
+     opus (wideband up to 48kHz), so there's no reason to source hold music at 8kHz narrowband —
+     FreeSWITCH downsamples transparently for any leg that ends up on a narrowband codec, but
+     starting low would cap quality for every leg, opus included, with no benefit. -->
 <configuration name="local_stream.conf" description="Local stream (hold music)">
-  <directory name="moh" path="/usr/share/freeswitch/sounds/music/default" shuffle="true" channels="1" rate="8000" interval="20" timer-name="soft">
+  <directory name="moh" path="/usr/share/freeswitch/sounds/music/48000" shuffle="true" channels="1" rate="48000" interval="20" timer-name="soft">
     <param name="volume" value="0.5"/>
   </directory>
 </configuration>

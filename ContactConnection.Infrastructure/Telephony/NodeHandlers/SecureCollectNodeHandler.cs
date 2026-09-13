@@ -118,6 +118,22 @@ public class SecureCollectNodeHandler : ITelephonyNodeHandler
         var bridged = !string.IsNullOrEmpty(peerUuid);
         if (bridged)
         {
+            // Mark the capture in-progress on the SESSION (not just ctx.Vars, which isn't saved
+            // until much further down) before pulling the agent leg. Parking the agent tears down
+            // the caller↔agent uuid_bridge within milliseconds — EslBackgroundService.
+            // HandleChannelUnbridgeAsync fires on that teardown and only skips its normal "bridge
+            // ended, hang up the caller" cleanup when it reads _sc_in_progress=true from Redis.
+            // Setting it only in the big batched save near the end of this method (as everything
+            // else here does) loses that race. Confirmed live, S136: the guard existed but never
+            // fired because CHANNEL_UNBRIDGE reached Redis before this method did — the caller was
+            // hung up between the log line below and the transfer call even returning.
+            var earlySession = await _sessionStore.GetAsync(ctx.ChannelUuid, ct);
+            if (earlySession is not null)
+            {
+                earlySession.Vars["_sc_in_progress"] = "true";
+                await _sessionStore.SaveAsync(earlySession, ct);
+            }
+
             _logger.LogInformation(
                 "SecureCollectNodeHandler [{Uuid}]: bridged to agent leg {Peer} — parking agent on hold for capture",
                 ctx.ChannelUuid, peerUuid);
@@ -129,13 +145,9 @@ public class SecureCollectNodeHandler : ITelephonyNodeHandler
                     ctx.ChannelUuid, peerUuid);
             }
 
-            // The caller leg's own bridge() app (agent-bridge dialplan extension) only learns its
-            // peer left and hands control to park() asynchronously — it does not happen the instant
-            // the agent leg's uuid_transfer command returns. Live-verified S135: transferring the
-            // caller into secure_collect ~20ms after pulling the agent raced the caller's own
-            // bridge→park transition and killed the call (CS_ROUTING/NORMAL_CLEARING, no error
-            // returned from the transfer command — it looked like it worked and then died anyway).
-            // A short buffer here lets that transition land first.
+            // A short buffer for the caller's own bridge→park transition to land before the
+            // follow-up uuid_transfer into secure_collect. Left in place from S135; harmless either
+            // way, not load-bearing for Bug #4 (that was the _sc_in_progress race above).
             await Task.Delay(400, ct);
         }
 
