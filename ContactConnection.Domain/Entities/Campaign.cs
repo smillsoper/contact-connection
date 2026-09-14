@@ -76,6 +76,13 @@ public class Campaign
     // Retention window for finished recordings; drives the purge job (job itself is separate).
     public int RecordingRetentionDays { get; private set; } = 90;
 
+    // Retention window for the PCI SensitiveData blob (captured card/CVV/SSN — see
+    // ARCHITECTURE.md §24), drives the Worker's SensitiveDataRetentionService safety-net wipe.
+    // Null = fall back to the platform default (SensitiveData:Retention:TtlMinutes). Campaigns
+    // whose sensitive data must survive for a daily/weekly secure export (FTPS, PGP, encrypted
+    // zip, etc.) before the safety net wipes it need a longer window here than the default.
+    public int? SensitiveDataRetentionMinutes { get; private set; }
+
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
@@ -178,6 +185,18 @@ public class Campaign
         AutoMaskOnHold         = autoMaskOnHold;
         RecordingRetentionDays = Math.Clamp(recordingRetentionDays, 1, 3650);
         UpdatedAt              = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>
+    /// Sets this campaign's PCI SensitiveData retention window (minutes). Null clears the
+    /// override and falls back to the platform default. A non-null value is clamped to
+    /// [1, 43200] (30 days) — generous enough for a daily or weekly secure-export job with
+    /// buffer, but still a bounded ceiling rather than an accidental "forever".
+    /// </summary>
+    public void SetSensitiveDataRetentionMinutes(int? minutes)
+    {
+        SensitiveDataRetentionMinutes = minutes is { } m ? Math.Clamp(m, 1, 43200) : null;
+        UpdatedAt = DateTimeOffset.UtcNow;
     }
 
     public void AssignFlow(Guid flowId)         { FlowId = flowId;         UpdatedAt = DateTimeOffset.UtcNow; }

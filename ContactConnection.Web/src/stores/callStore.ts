@@ -34,11 +34,17 @@ interface CallState {
   // tf_secure_collect progress — null when no capture is active on this call
   secureCollect: SecureCollectState | null
 
+  // "Playing greeting…" indicator (project_agent_connect_tone) — true while a connect prompt is
+  // playing to the CALLER during the receiveAutoConnecting window, so the agent knows to hold off
+  // rather than speak before the caller has actually been greeted. Pushed via receivePlayingGreeting.
+  playingGreeting: boolean
+
   setQueued: (callerNumber: string, callerName: string, callRecordId: string, destinationNumber?: string, campaignId?: string) => void
   // RingStrategy.AutoAnswerBestAgent — server picked this agent, no click required. Pushed via
   // receiveAutoConnecting before the whisper/bridge INVITE arrives, so SoftphonePanel can arm
   // auto-answer proactively (see its useEffect on callStatus === 'auto-connecting').
   setAutoConnecting: (callerNumber: string, callerName: string, callRecordId: string, destinationNumber?: string, campaignId?: string) => void
+  setPlayingGreeting: (playing: boolean) => void
   setRinging: (callerNumber: string, callerName: string) => void
   setDialing: (dialedNumber: string) => void
   setOnCall: () => void
@@ -77,12 +83,15 @@ export const useCallStore = create<CallState>((set) => ({
   transferTarget: null,
   transferTargetLabel: null,
   secureCollect: null,
+  playingGreeting: false,
 
   setQueued: (callerNumber, callerName, callRecordId, destinationNumber, campaignId) =>
-    set({ callStatus: 'queued', callerNumber, callerName, destinationNumber: destinationNumber ?? null, callRecordId, isMuted: false, callStartedAt: null, campaignId: campaignId || null, secureCollect: null, ...TRANSFER_RESET }),
+    set({ callStatus: 'queued', callerNumber, callerName, destinationNumber: destinationNumber ?? null, callRecordId, isMuted: false, callStartedAt: null, campaignId: campaignId || null, secureCollect: null, playingGreeting: false, ...TRANSFER_RESET }),
 
   setAutoConnecting: (callerNumber, callerName, callRecordId, destinationNumber, campaignId) =>
-    set({ callStatus: 'auto-connecting', callerNumber, callerName, destinationNumber: destinationNumber ?? null, callRecordId, isMuted: false, callStartedAt: null, campaignId: campaignId || null, secureCollect: null, ...TRANSFER_RESET }),
+    set({ callStatus: 'auto-connecting', callerNumber, callerName, destinationNumber: destinationNumber ?? null, callRecordId, isMuted: false, callStartedAt: null, campaignId: campaignId || null, secureCollect: null, playingGreeting: false, ...TRANSFER_RESET }),
+
+  setPlayingGreeting: (playing) => set({ playingGreeting: playing }),
 
   // When transitioning from 'queued' → 'ringing' (agent answered via bridge), preserve the
   // screen-pop callRecordId so we don't lose the DID-routed call record association.
@@ -96,14 +105,15 @@ export const useCallStore = create<CallState>((set) => ({
       callRecordId: state.callStatus === 'queued' ? state.callRecordId : null,
       campaignId: null,
       secureCollect: null,
+      playingGreeting: false,
       ...TRANSFER_RESET,
     })),
 
   setDialing: (dialedNumber) =>
-    set({ callStatus: 'dialing', callerNumber: dialedNumber, callerName: null, isMuted: false, callStartedAt: null, callRecordId: null, campaignId: null, secureCollect: null, ...TRANSFER_RESET }),
+    set({ callStatus: 'dialing', callerNumber: dialedNumber, callerName: null, isMuted: false, callStartedAt: null, callRecordId: null, campaignId: null, secureCollect: null, playingGreeting: false, ...TRANSFER_RESET }),
 
   setOnCall: () =>
-    set({ callStatus: 'on-call', callStartedAt: Date.now(), secureCollect: null }),
+    set({ callStatus: 'on-call', callStartedAt: Date.now(), secureCollect: null, playingGreeting: false }),
 
   setMuted:  (muted) => set({ isMuted: muted }),
   setOnHold: (held)  => set({ isOnHold: held }),
@@ -140,5 +150,5 @@ export const useCallStore = create<CallState>((set) => ({
   clearSecureCollect: () => set({ secureCollect: null }),
 
   reset: () =>
-    set({ callStatus: 'idle', callerNumber: null, callerName: null, destinationNumber: null, isMuted: false, callStartedAt: null, callRecordId: null, campaignId: null, secureCollect: null, ...TRANSFER_RESET }),
+    set({ callStatus: 'idle', callerNumber: null, callerName: null, destinationNumber: null, isMuted: false, callStartedAt: null, callRecordId: null, campaignId: null, secureCollect: null, playingGreeting: false, ...TRANSFER_RESET }),
 }))

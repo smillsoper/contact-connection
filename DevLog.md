@@ -150,6 +150,8 @@
 | 138 | 2026-09-13 | 11:18 AM PDT | 12:36 PM PDT | 78 min | ~14039 min |
 | 139 | 2026-09-13 | 12:40 PM PDT | 12:45 PM PDT | 5 min | ~14044 min |
 | 140 | 2026-09-14 | 8:29 AM PDT | 9:03 AM PDT | 34 min | ~14078 min |
+| 141 | 2026-09-14 | 9:04 AM PDT | 10:31 AM PDT | 87 min | ~14165 min |
+| 142 | 2026-09-14 | 10:35 AM PDT | 11:21 AM PDT | 46 min | ~14211 min |
 
 ---
 
@@ -7569,6 +7571,270 @@ something else).
 3. Defensive cleanup: `_*_in_progress` session flags not cleared on `CHANNEL_BRIDGE` (queued from
    Session 138 — dormant today, but a real gap once a flow pairs `tf_repeat`/`tf_delay` with a
    later re-park like `tf_secure_collect` mid-bridge).
+
+### Carry-overs (unchanged)
+
+RMD filing; .cc → .io migration tail; contactconnection.io SPF/DKIM/DMARC; cc_timesync
+crash-loop; CommitmentEvents JSONB ValueComparer; ServiceLevelThresholdSeconds widget;
+Dashboards endpoint authz; broader FlowEngine test coverage; retire the .cc softphone route.
+
+## Session 141
+
+**Date:** 2026-09-14
+**Start:** 9:04 AM PDT
+**End:** 10:31 AM PDT
+**Duration:** 87 minutes
+**Total Duration:** ~14165 minutes
+
+### Focus
+
+New gap the user thought of: no way for a caller to opt into a callback (or any other action)
+mid-hold-loop without a blocking IVR prompt stealing the flow. Designed, built, and live-verified
+an async "hot-digit" listener mode on `tf_ivr_menu`.
+
+### Design (agreed with the user before building)
+
+- Extend `tf_ivr_menu` with an `alwaysListen` flag rather than a new node type — same digit-map
+  config either way, just a different execution mode (arm-and-continue vs. blocking capture).
+- Single-digit options only for v1 — no multi-digit sequence buffering against arbitrary
+  interleaved audio state.
+- Three auto-clear triggers (user's spec): entering another capture node, bridging to an
+  agent/transfer, or an explicit new "Clear DTMF Listener" node — user's framing that this bounds
+  the interrupt risk (only tenant-chosen hold-loop nodes can ever be in flight while armed) meant
+  a lightweight known-var sweep was enough, not a general interrupt/epoch mechanism.
+- Validated the core mechanism empirically before designing further: raw FreeSWITCH `DTMF` ESL
+  events fire at the channel-core level independent of whatever app owns the channel (confirmed
+  live — a press during `tf_answer`'s RTP-prime silence stream, no capture app running at all,
+  still produced the event). `bind_digit_action` (the FreeSWITCH-native alternative) isn't loaded
+  in this trimmed build, consistent with the earlier `uuid_execute`/`uuid_hangup` gaps.
+
+### What was built
+
+**Backend** — `IvrMenuNodeHandler`: `alwaysListen=true` arms `_hot_digit_options`/
+`_hot_digit_node_id` and returns immediately via `default`, no channel I/O. New
+`ClearHotDigitListenerNodeHandler` (`tf_clear_hot_digit`). `TelephonyFlowEngine`: centralized
+auto-clear on entering any synchronous capture node (`tf_secure_collect`, sync `tf_ivr_menu`) —
+implemented once in node dispatch, not per-handler. `EslBackgroundService`: `DTMF` added to the
+event subscription mask (never used before); new `HandleDtmfAsync` matches a press against the
+armed map, sweeps the known hold-loop continuation var families (`_play_*`/`_tts_*`/`_delay_*`/
+`_announce_*`) so a late completion event can't land after the redirect and clobber it, `uuid_break`s,
+and jumps via the same `ResumeFromNodeAsync` every other async continuation already uses; also
+clears the listener on `CHANNEL_BRIDGE`. 14 new unit tests.
+
+**Designer** — `tf_ivr_menu` properties panel gets an "Always listen (no timeout)" checkbox with
+an explanatory label (user's explicit request — checkbox drives an explicit `alwaysListen` flag
+under the hood, not an implicit `timeoutMs===0` sentinel); checked mode swaps the whole editor for
+a single-digit hot-key list and hides every sync-only field. Canvas node swaps its `no_match`
+handle for `default` + shows a "🎧 always listening" badge. New "Clear DTMF Listener" node in the
+inbound palette.
+
+### Real bug found + fixed during live testing
+
+`TelephonyDesignerPage.tsx`'s `normHandle()` collapsed any handle literally named `"default"` to
+"no handle at all" — correct for the common single-handle-node case, but the new async
+`tf_ivr_menu` (like the pre-existing `tf_route_to_queue` default+on_timeout pair) has `"default"`
+as one of *several* real, positioned handles on the same node. On reload, React Flow couldn't
+resolve the nulled-out handle and mis-attached that edge onto the digit-option handle instead —
+live-caught by the user: wired the hot-digit's `default` to a Play node, saved, reloaded, and both
+edges appeared sourced from the digit handle with `default` showing unconnected. Root-caused from
+a screenshot without needing a repro session. Fixed by scoping the collapse to single-handle/
+fixed-option nodes only; multi-handle nodes keep their literal handle id on reload. Confirmed the
+underlying save path (`toTelDef`) was never wrong — this was purely a reload/render bug, so no
+data repair was needed. Also retroactively fixes the identical latent bug in
+`tf_route_to_queue`'s own default+on_timeout combo.
+
+### State
+
+`dotnet test`: **705/705 passing** (150 Domain, 20 Application, 438 Infrastructure — +14 net this
+session, 97 Api). `tsc -b` + `vite build` clean.
+
+### Live verification
+
+Real Telnyx call against the user's own master test flow (`Test Campaign 1 - Inbound Call Flow`,
+already live-wired — no scratch fixture needed this session): Check Agent Availability →
+unavailable → IVR Menu (`alwaysListen`, digit `1` → Queue Callback) armed → Play Queue Greeting →
+looping Play (MOH + periodic announcements, including a queue-callback announcement) → caller
+waited for the actual callback announcement before pressing 1, exactly as a real caller would.
+Log confirmed: `DTMF ... hot-digit '1' matched ... → redirecting to tf_queue_callback` →
+`ResumeFromNodeAsync` → Queue Callback booked → delivery originated → agent bridged → caller
+bridged → clean hangup, agent → ACW, queue-callback placeholder held position. No errors anywhere
+in the trace. **User-confirmed live**, first pass hit the pre-fix reload bug (see above); second
+pass after the fix worked without a hitch.
+
+### Next session — pick up here
+
+1. Worker retention job to `WipeSensitiveData` after N minutes/hours (queued from Session 134).
+2. Agent connect tone + "Playing greeting" softphone indicator (queued from Session 133/134).
+3. Defensive cleanup: `_*_in_progress` session flags not cleared on `CHANNEL_BRIDGE` (queued from
+   Session 138).
+
+### Carry-overs (unchanged)
+
+RMD filing; .cc → .io migration tail; contactconnection.io SPF/DKIM/DMARC; cc_timesync
+crash-loop; CommitmentEvents JSONB ValueComparer; ServiceLevelThresholdSeconds widget;
+Dashboards endpoint authz; broader FlowEngine test coverage; retire the .cc softphone route.
+
+## Session 142
+
+**Date:** 2026-09-14
+**Start:** 10:35 AM PDT
+**End:** 11:21 AM PDT
+**Duration:** 46 minutes
+**Total Duration:** ~14211 minutes
+
+### Focus
+
+Worked top-to-bottom through Session 141's "pick up here" queue: the Worker sensitive-data
+retention job, the agent connect tone, the "Playing greeting…" softphone indicator, and the
+dormant `_*_in_progress` CHANNEL_BRIDGE cleanup bug. Then, from a user question after the live
+verification pass, made the sensitive-data retention window per-campaign configurable (item 5).
+
+### 1. Worker retention job for `WipeSensitiveData` (queued since Session 134)
+
+New `SensitiveDataRetentionService : BackgroundService` in `ContactConnection.Worker`, same shape
+as `RecordingRetentionService` — per-tenant, batched, oldest-`SensitiveDataStoredAt`-first,
+single-instance assumption. Since nothing in the platform currently reads/exports the PCI
+`SensitiveData` blob (no payment-gateway or export-worker consumer exists yet — see ARCHITECTURE.md
+§24's future "Export worker" confirmed-export wipe path), this is a pure time-bounded safety net:
+anything older than the resolved TTL gets wiped on a schedule (`PollMinutes`, default 15)
+regardless of whether anything ever consumed it. TTL started this session as a single global
+`SensitiveData:Retention:TtlMinutes` (default 60) — **later made per-campaign, see item 5 below**,
+with this global value as the fallback default. New
+`ICallRecordRepository.FindWithSensitiveDataOldestFirstAsync` + `CallRecordRepository`
+implementation; config block added to `ContactConnection.Worker/appsettings.json`; registered in
+`Program.cs`. 7 new tests (4 repository-query tests mirroring the existing
+`CallRecordRepositoryRetentionTests` pattern).
+
+**Live-verified for real, not just against test data:** booted the Worker against the running dev
+stack and it found and wiped 4 genuine stale `SensitiveData` blobs left over from earlier
+tf_secure_collect test sessions (Sessions 135/136/139/140) — confirmed directly in Postgres
+(`tenant_test_tenant.call_records`): all 4 show `sensitive_data IS NULL`,
+`sensitive_data_wiped_at` stamped, `sensitive_wipe_reason = 'retention_expired'`.
+
+### 2. Agent connect tone (queued since Session 130/133/134)
+
+A short beep in the AGENT's ear right before every call bridges to them — predictive-dialer "zip
+tone" convention, so the agent knows exactly when their audio goes live to the caller. User chose a
+**global config toggle** over a per-campaign one (Recommended option — matches most other one-shot
+audio behaviors already in the codebase; per-campaign would have needed a new Campaign column +
+migration + admin UI for a short beep). New `Telephony:AgentConnectTone:{Enabled,ToneStream,
+SettleMs}` config (`ContactConnection.Api/appsettings.json`), default on, `tone_stream://%(200,0,800)`,
+250ms settle.
+
+Traced every real agent-delivery bridge point down to exactly two: `EslClient.BridgeToAgentAsync`
+(the simple-bridge delivery path in `QueuedCallDeliveryService`, and `RouteToQueueNodeHandler`'s
+direct-extension route — both funnel through this one method) and `TelEndNodeHandler`'s own
+`uuid_bridge` call (the whisper/agent_selected path, which queue-callback delivery also funnels
+through via `QueuedCallDeliveryService.DeliverAsync`). Added the tone step to both — broadcast on
+the agent leg only, non-fatal on failure (a broadcast error never blocks the actual bridge), await
+a short settle before bridging. `EslClient` gained an optional `IConfiguration?` constructor
+parameter (null-safe — older un-updated construction sites keep their previous no-tone behavior);
+wired at the three sites that matter (`EslBackgroundService`, `QueuedCallDeliveryService`,
+`EslCommanderFactory`). `TelEndNodeHandler` gained a first-ever constructor (previously
+parameterless) since it needed its own `IConfiguration`. 6 new `TelEndNodeHandlerTests` (first
+tests this handler has ever had) covering order-of-operations (break → tone → bridge), disabled
+toggle, custom tone string, broadcast-throws-but-still-bridges, and the pre-existing
+unanswered/unqueued-hangup and answered-no-bridge branches.
+
+**Live-verified by ear** — user confirmed hearing the connect beep every time a caller was bridged,
+across the real test call session described below.
+
+### 3. "Playing greeting…" softphone indicator (queued since Session 130)
+
+Companion to #2 from the same memory item. Scoped to where it's actually meaningful in the current
+codebase: the `RingStrategy.AutoAnswerBestAgent` queue-callback path, where `ReceiveAutoConnecting`
+already arms the agent's softphone to auto-answer *before* the connect prompt has played to the
+caller — a manual pick-up agent isn't engaged with the call yet at that point, so nothing is pushed
+there. New `IFlowHubClient.ReceivePlayingGreeting(callRecordId, playing)`; pushed `true` right
+before `QueueCallbackDeliveryService.BridgeToReservedAgentAsync` broadcasts the connect prompt and
+`false` right after the settle delay, only when `autoAnswer` is true. Frontend: `callStore.ts` gained
+a `playingGreeting` boolean (cleared alongside `secureCollect` in every existing reset path —
+`setQueued`/`setAutoConnecting`/`setRinging`/`setDialing`/`setOnCall`/`reset`); `FlowPanel.tsx`
+subscribes to `receivePlayingGreeting`, scoped to the call currently on screen; `SoftphonePanel.tsx`
+swaps the existing "Connecting you…" label for "Playing greeting… hold off" during that window
+(same auto-connecting visual state, just a different label — no new UI state machine needed).
+
+**Live-verified**: the real test session's queue-callback delivery hit `autoAnswer=True` for real
+(`QueueCallback ... bridging to reserved agent ... (autoAnswer=True...)` in the API log), exercising
+the exact branch that pushes this event.
+
+### 4. Real bug found + fixed: `_*_in_progress` vars not cleared on CHANNEL_BRIDGE (queued since Session 138)
+
+Traced to a concrete, previously-undiscovered gap. Session 141's own `HandleDtmfAsync` (the
+hot-digit redirect) carries a comment claiming "...a real bridge clears it too
+(HandleChannelBridgeAsync)" for the `_play_*`/`_tts_*`/`_delay_*`/`_announce_*` hold-loop var
+families — but `HandleChannelBridgeAsync` only ever called `ClearPlayVars`, which strips `_play_*`
+only. `_tts_in_progress` (tf_play's streaming-vendor-TTS sibling state, set in `PlayNodeHandler`)
+and `_announce_in_progress` (a tf_transfer announcement, set in `TransferNodeHandler`) could survive
+a real bridge event uncleared — the exact "dormant but real" bug Session 138 flagged without
+locating it. Fixed by extracting `HandleDtmfAsync`'s inline sweep into a shared
+`internal static ClearHoldLoopVars(TelephonyCallSession)`, used by both `HandleDtmfAsync` (no
+behavior change there) and `HandleChannelBridgeAsync` (the actual fix — broadened from the
+`_play_*`-only guard/clear to all four families). Deliberately still leaves `_sc_*`/`_vm_*`/
+`_ivr_*` alone — those are synchronous capture nodes, not hold loops, and can't legitimately
+coexist with a real bridge. 4 new `EslBackgroundServiceHoldLoopVarsTests` against the pure sweep
+logic (`internal`, `InternalsVisibleTo` already covered `Api.Tests` from the existing
+`IsRtpPrimeSilenceStop` tests) — full four-family clear, `_sc_*`/`_vm_*`/`_ivr_*` left untouched,
+empty-vars no-op, no-matching-keys no-op.
+
+**Live-verified**: the same test session armed a hot-digit listener, matched a DTMF press, redirected
+to `tf_queue_callback`, and the subsequent real bridges after that all completed cleanly with no
+errors in the log.
+
+### 5. Per-campaign PCI retention override (user follow-up, after the live-verification pass)
+
+User asked whether item 1's retention TTL was configurable per campaign — it wasn't, and correctly
+pointed out it needed to be: some campaigns run a daily/weekly secure export (FTPS, PGP, encrypted
+zip, etc.) and the global safety-net default could wipe captured data before that export ever runs.
+Added `Campaign.SensitiveDataRetentionMinutes` (nullable int, clamped [1, 43200] = 30 days when
+set; `null` falls back to the platform default) via a new `SetSensitiveDataRetentionMinutes`
+method, same separation-of-concerns pattern as `ConfigureRecording`. Migration
+`AddSensitiveDataRetentionToCampaigns` applied to `tenant_test_tenant`.
+`SensitiveDataRetentionService.WipeTenantAsync` now resolves TTL per-campaign — one batched
+`db.Campaigns` lookup for the ids referenced by the current sweep batch (identical shape to
+`RecordingRetentionService.PurgeTenantAsync`'s own per-campaign `RecordingRetentionDays`
+resolution), falling back to the global default for campaigns with no override or no resolvable
+campaign. New `PUT /api/v1/campaigns/{id}/sensitive-data-retention` endpoint
+(`UpdateCampaignSensitiveDataRetentionRequest`), `SensitiveDataRetentionMinutes` added to both
+campaign response DTOs. Frontend: `updateCampaignSensitiveDataRetention` API client function, new
+"PCI Captured-Data Retention" panel on `CampaignDetailPage.tsx` (override toggle + minutes input,
+sits right below Call Recording settings) — same toggle-then-reveal UX as the recording form's
+`Toggle` component. 6 new `Campaign` domain tests (default-null, clamp theory, null-clears-override
+round-trip) in `CallRecordingTests.cs`, alongside the existing `RecordingRetentionDays` clamp
+tests. Confirmed separately that captured data already persists correctly with the call record —
+`CallRecord.SensitiveData` is a real Postgres column stamped by `StoreSensitiveData` during
+capture, not transient Redis/session state, so no change was needed there; `CampaignId` is
+resolved on the record very early (DID routing, before any flow node runs), so the per-campaign
+lookup applies correctly to real captures. Building the actual export process itself (§24's
+"Export worker" — FTPS/WinZip/PGP transmission) is still separate, not-yet-started future work;
+this item only makes sure the safety net won't outrun whatever export cadence a campaign needs.
+
+### State
+
+`dotnet test`: **725/725 passing** (156 Domain, 20 Application, 448 Infrastructure, 101 Api — +20
+net this session). `dotnet build` and `npm run build`/`tsc -b` both clean, 0 new warnings.
+
+### Live verification session
+
+Ran the real dev stack (`docker compose` services + `dotnet run --project ContactConnection.Api`)
+against real Telnyx calls and a real softphone. Log evidence: 3 separate whisper-path deliveries
+each showing the tone step execute cleanly before `CHANNEL_BRIDGE`; a queue-callback delivery
+hitting `autoAnswer=True` (the `ReceivePlayingGreeting` branch); a hot-digit arm → DTMF match →
+redirect to `tf_queue_callback` → clean subsequent real bridges. No exceptions anywhere in the log;
+the one `warn` present (`CHANNEL_PARK DID ...: flow did not queue`) is a pre-existing, unrelated
+case. **User separately confirmed hearing the connect beep by ear every time a caller was bridged**,
+across the whole session. Item 5 (per-campaign retention override) was built after this live pass
+and has not itself been live-verified yet — only unit-tested and build-verified.
+
+### Next session — pick up here
+
+All four items from Session 141's queue are closed and live-verified. Item 5 (per-campaign PCI
+retention override) is built and unit-tested but not yet live-verified — worth a real
+`tf_secure_collect` capture on a campaign with an override set, confirming the Worker actually
+honors it over the platform default. Otherwise nothing new queued — pull from the standing
+carry-over list below, or ask the user for direction. Also worth flagging to the user again next
+session: the §24 "Export worker" (secure FTPS/PGP/WinZip transmission) that item 5's retention
+override exists to accommodate is still not built.
 
 ### Carry-overs (unchanged)
 

@@ -81,7 +81,7 @@ public sealed class EslBackgroundService : BackgroundService
         var port = int.Parse(_config["FreeSWITCH:EslPort"] ?? "8021");
         var pass = _config["FreeSWITCH:EslPassword"] ?? "ClueCon";
 
-        await using var esl = new EslClient(_eslClientLogger);
+        await using var esl = new EslClient(_eslClientLogger, _config);
         await esl.ConnectAsync(host, port, pass, ct);
         // Streaming TTS plays as one continuous shout:// MP3 foreground in the tts_play dialplan
         // extension (mod_shout never fires PLAYBACK_STOP on a finite stream, so a uuid_broadcast
@@ -1752,13 +1752,22 @@ public sealed class EslBackgroundService : BackgroundService
                 metServiceLevel: metServiceLevel, ct: ct);
         }
 
-        // Stop any active play loop — the call is now bridged. Clear ALL _play_* (not just the two
-        // loop keys) so a periodic-announcement PLAYBACK_STOP that lands right after the bridge
-        // can't re-broadcast MOH onto the live agent call, and PlayAnnouncementService (which gates
-        // on _play_loop) stops considering this session.
-        if (bridgeSession.Vars.ContainsKey("_play_media_arg"))
+        // Stop any active hold-style loop — the call is now bridged. Sweeps the same _play_*/
+        // _tts_*/_delay_*/_announce_* var families HandleDtmfAsync's hot-digit redirect already
+        // sweeps (see ClearHoldLoopVars) so a late completion event from whichever one was still
+        // in flight (periodic-announcement PLAYBACK_STOP, tts_done, delay_done) can't land after
+        // the bridge and re-broadcast MOH / resume a stale node onto the live agent call, and
+        // PlayAnnouncementService (which gates on _play_loop) stops considering this session.
+        // Previously only _play_* was cleared here — the HandleDtmfAsync comment claiming a real
+        // bridge already did this full sweep was aspirational, not actual, until this fix
+        // (Session 138's "dormant but real" follow-up).
+        if (bridgeSession.Vars.Keys.Any(k =>
+                k.StartsWith("_play_", StringComparison.Ordinal)
+                || k.StartsWith("_tts_", StringComparison.Ordinal)
+                || k.StartsWith("_delay_", StringComparison.Ordinal)
+                || k.StartsWith("_announce_", StringComparison.Ordinal)))
         {
-            ClearPlayVars(bridgeSession);
+            ClearHoldLoopVars(bridgeSession);
             // Immediately cut the audio; without this FreeSWITCH finishes the current
             // file before the bridge audio starts coming through.
             await esl.BreakChannelAsync(uuid, ct);
@@ -1913,13 +1922,7 @@ public sealed class EslBackgroundService : BackgroundService
         // ever coexist with an armed listener — every synchronous capture node clears the listener
         // on entry (TelephonyFlowEngine), and a real bridge clears it too (HandleChannelBridgeAsync)
         // — so this is a known, bounded sweep, not a general-purpose interrupt mechanism.
-        var staleKeys = session.Vars.Keys
-            .Where(k => k.StartsWith("_play_", StringComparison.Ordinal)
-                     || k.StartsWith("_tts_", StringComparison.Ordinal)
-                     || k.StartsWith("_delay_", StringComparison.Ordinal)
-                     || k.StartsWith("_announce_", StringComparison.Ordinal))
-            .ToList();
-        foreach (var k in staleKeys) session.Vars.Remove(k);
+        ClearHoldLoopVars(session);
 
         session.Vars.Remove("_hot_digit_options");
         session.Vars.Remove("_hot_digit_node_id");
@@ -2405,6 +2408,29 @@ public sealed class EslBackgroundService : BackgroundService
             .ToList();
         foreach (var k in keysToRemove)
             session.Vars.Remove(k);
+    }
+
+    /// <summary>
+    /// Sweeps every var of the "hold-style loop" node families — tf_play (_play_*, plus its
+    /// streaming-TTS sibling _tts_*), tf_delay (_delay_*), and a tf_transfer announcement
+    /// (_announce_*) — whichever happens to be in flight. Broader than <see cref="ClearPlayVars"/>
+    /// (which only owns tf_play's own normal-completion path): used where something ELSE is
+    /// superseding whatever hold loop was running — a hot-digit redirect (HandleDtmfAsync) or a
+    /// real bridge (HandleChannelBridgeAsync) — so a late completion event from the superseded
+    /// loop can't land afterward and clobber the node/call it no longer belongs to. Deliberately
+    /// does not touch _sc_*/_vm_*/_ivr_* — those are synchronous capture nodes, not hold loops,
+    /// and can't legitimately coexist with either trigger (see call sites for the reasoning).
+    /// Internal for EslBackgroundServiceHoldLoopVarsTests (InternalsVisibleTo covers Api.Tests).
+    /// </summary>
+    internal static void ClearHoldLoopVars(TelephonyCallSession session)
+    {
+        var staleKeys = session.Vars.Keys
+            .Where(k => k.StartsWith("_play_", StringComparison.Ordinal)
+                     || k.StartsWith("_tts_", StringComparison.Ordinal)
+                     || k.StartsWith("_delay_", StringComparison.Ordinal)
+                     || k.StartsWith("_announce_", StringComparison.Ordinal))
+            .ToList();
+        foreach (var k in staleKeys) session.Vars.Remove(k);
     }
 
     private async Task HandleHangupByTenantScanAsync(string channelUuid, string cause, CancellationToken ct)

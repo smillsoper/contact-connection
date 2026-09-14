@@ -1,6 +1,7 @@
 using System.Net.Sockets;
 using System.Text;
 using ContactConnection.Application.Interfaces.Services;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace ContactConnection.Api.Telephony;
@@ -10,7 +11,7 @@ namespace ContactConnection.Api.Telephony;
 /// Handles auth handshake, event subscription, and line-by-line event reading.
 /// Also implements IEslCommander so it can be injected into telephony node handlers.
 /// </summary>
-public sealed class EslClient(ILogger<EslClient>? logger = null) : IOwnedEslCommander
+public sealed class EslClient(ILogger<EslClient>? logger = null, IConfiguration? config = null) : IOwnedEslCommander
 {
     private TcpClient? _tcp;
     private StreamReader? _reader;
@@ -144,7 +145,37 @@ public sealed class EslClient(ILogger<EslClient>? logger = null) : IOwnedEslComm
         if (agentUuid is null)
             throw new InvalidOperationException($"Agent {extension}@{domain} is not reachable in FreeSWITCH. {error}");
 
+        await PlayAgentConnectToneAsync(agentUuid!, ct);
         await BridgeChannelsAsync(uuid, agentUuid!, ct);
+    }
+
+    /// <summary>
+    /// A short beep in the AGENT's ear right before the caller is bridged in (predictive-dialer
+    /// "zip tone" convention) — see project memory project_agent_connect_tone. Global on/off via
+    /// <c>Telephony:AgentConnectTone:*</c> config (not per-tenant/campaign). Broadcast on the
+    /// agent leg only, never the caller's; a broadcast failure is logged and swallowed — it must
+    /// never block the actual bridge. No-op when this instance has no <see cref="IConfiguration"/>
+    /// (older call sites not yet wired to it keep their previous no-tone behavior) — same config
+    /// keys and defaults as TelEndNodeHandler's identical step for the whisper/agent_selected path,
+    /// which bridges via uuid_bridge directly and so can't share this method.
+    /// </summary>
+    private async Task PlayAgentConnectToneAsync(string agentUuid, CancellationToken ct)
+    {
+        if (config is null) return;
+        if (bool.TryParse(config["Telephony:AgentConnectTone:Enabled"], out var enabled) && !enabled)
+            return;
+
+        var mediaArg = config["Telephony:AgentConnectTone:ToneStream"];
+        if (string.IsNullOrWhiteSpace(mediaArg)) mediaArg = "tone_stream://%(200,0,800)";
+        var settleMs = int.TryParse(config["Telephony:AgentConnectTone:SettleMs"], out var ms) && ms >= 0 ? ms : 250;
+
+        try { await BroadcastAsync(agentUuid, mediaArg, ct); }
+        catch (Exception ex)
+        {
+            logger?.LogDebug(ex, "Agent connect tone broadcast failed for {AgentUuid} (non-fatal)", agentUuid);
+        }
+        if (settleMs > 0)
+            await Task.Delay(settleMs, ct);
     }
 
     /// <summary>True when sofia_contact returned a usable contact URI (not empty, "-ERR", or "error/…").</summary>

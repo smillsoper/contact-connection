@@ -101,7 +101,7 @@ public class QueuedCallDeliveryService(
         var port = int.Parse(config["FreeSWITCH:EslPort"] ?? "8021");
         var pass = config["FreeSWITCH:EslPassword"] ?? "ClueCon";
 
-        await using var esl = new EslClient(eslLogger);
+        await using var esl = new EslClient(eslLogger, config);
         await esl.ConnectAsync(host, port, pass, ct);
 
         // Check whether the telephony flow has an agent_selected event branch

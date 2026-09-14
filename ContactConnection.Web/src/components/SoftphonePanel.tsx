@@ -125,7 +125,7 @@ export default function SoftphonePanel() {
     callStatus, callerNumber, destinationNumber, isMuted, isOnHold,
     callStartedAt, campaignId, callRecordId,
     transferState, transferTarget, transferTargetLabel,
-    secureCollect,
+    secureCollect, playingGreeting,
     setRinging, setDialing, setOnCall, setMuted, setOnHold,
     setCallRecordId, setCampaignId,
     setTransferDialing, setTransferConnected, setTransferConference, resetTransfer, reset,
@@ -759,7 +759,9 @@ export default function SoftphonePanel() {
             </div>
           </div>
           <div className="text-center">
-            <p className="text-xs text-indigo-400 font-medium mb-1">Connecting you…</p>
+            <p className="text-xs text-indigo-400 font-medium mb-1">
+              {playingGreeting ? 'Playing greeting… hold off' : 'Connecting you…'}
+            </p>
             <p className="text-white font-semibold text-sm truncate">{callerNumber ?? 'Unknown'}</p>
             {destinationNumber && <p className="text-gray-400 text-xs font-mono truncate">→ {destinationNumber}</p>}
           </div>

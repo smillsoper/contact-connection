@@ -94,6 +94,38 @@ public class CallRecordingTests
     public void RecordingMode_AllowsPreBridge(string mode, bool expected)
         => Assert.Equal(expected, RecordingMode.AllowsPreBridge(mode));
 
+    // ── Campaign PCI sensitive-data retention override ───────────────────────
+
+    [Fact]
+    public void Campaign_Create_HasNullSensitiveDataRetentionOverride()
+    {
+        var c = NewCampaign();
+        Assert.Null(c.SensitiveDataRetentionMinutes);
+    }
+
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(-5, 1)]
+    [InlineData(1500, 1500)]
+    [InlineData(100000, 43200)]
+    public void SetSensitiveDataRetentionMinutes_NonNull_IsClamped(int input, int expected)
+    {
+        var c = NewCampaign();
+        c.SetSensitiveDataRetentionMinutes(input);
+        Assert.Equal(expected, c.SensitiveDataRetentionMinutes);
+    }
+
+    [Fact]
+    public void SetSensitiveDataRetentionMinutes_Null_ClearsOverride_FallsBackToPlatformDefault()
+    {
+        var c = NewCampaign();
+        c.SetSensitiveDataRetentionMinutes(1500);
+        Assert.Equal(1500, c.SensitiveDataRetentionMinutes);
+
+        c.SetSensitiveDataRetentionMinutes(null);
+        Assert.Null(c.SensitiveDataRetentionMinutes);
+    }
+
     [Theory]
     [InlineData(ConsentModel.OneParty, false)]
     [InlineData(ConsentModel.TwoPartyAnnounce, true)]

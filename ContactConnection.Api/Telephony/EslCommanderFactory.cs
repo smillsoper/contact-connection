@@ -17,7 +17,7 @@ public sealed class EslCommanderFactory(IConfiguration config, ILogger<EslClient
         var port = int.Parse(config["FreeSWITCH:EslPort"] ?? "8021");
         var pass = config["FreeSWITCH:EslPassword"] ?? "ClueCon";
 
-        var client = new EslClient(eslLogger);
+        var client = new EslClient(eslLogger, config);
         await client.ConnectAsync(host, port, pass, ct);
         return client;
     }

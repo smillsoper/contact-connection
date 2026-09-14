@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import AdminShell from '../../components/admin/AdminShell'
 import SearchableSelect from '../../components/SearchableSelect'
 import {
-  getCampaign, updateCampaign, updateCampaignRecording, setCampaignFlow, removeCampaignFlow,
+  getCampaign, updateCampaign, updateCampaignRecording, updateCampaignSensitiveDataRetention, setCampaignFlow, removeCampaignFlow,
   setCampaignInboundFlow, removeCampaignInboundFlow,
   setCampaignOutboundFlow, removeCampaignOutboundFlow,
   activateCampaign, pauseCampaign, deactivateCampaign,
@@ -556,6 +556,95 @@ function RecordingSettingsForm({ campaign, onSaved }: RecordingSettingsFormProps
           className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg px-5 py-2 text-sm font-medium transition-colors"
         >
           {saving ? 'Saving…' : 'Save recording policy'}
+        </button>
+        {saved && <span className="text-emerald-400 text-sm">Saved</span>}
+        {saveError && <span className="text-red-400 text-sm">{saveError}</span>}
+      </div>
+    </div>
+  )
+}
+
+// ── PCI sensitive-data retention override ───────────────────────────────────
+
+interface SensitiveDataRetentionFormProps {
+  campaign: CampaignDetail
+  onSaved: (updated: CampaignDetail) => void
+}
+
+const SENSITIVE_DATA_RETENTION_MAX_MINUTES = 43200 // 30 days — matches the backend clamp
+
+function SensitiveDataRetentionForm({ campaign, onSaved }: SensitiveDataRetentionFormProps) {
+  const [useOverride, setUseOverride] = useState(campaign.sensitiveDataRetentionMinutes != null)
+  const [minutes, setMinutes] = useState(campaign.sensitiveDataRetentionMinutes ?? 1440)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+
+  const inputCls = 'w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500'
+  const labelCls = 'block text-xs text-gray-400 mb-1'
+
+  async function handleSave() {
+    setSaving(true); setSaveError(null); setSaved(false)
+    try {
+      const updated = await updateCampaignSensitiveDataRetention(campaign.id, useOverride ? minutes : null)
+      onSaved({ ...campaign, ...updated })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+      <h2 className="text-white text-sm font-semibold mb-1">PCI Captured-Data Retention</h2>
+      <p className="text-xs text-gray-500 mb-5">
+        How long a captured card/CVV/SSN blob (from a <span className="font-mono">tf_secure_collect</span> node)
+        survives before the platform's safety-net job wipes it. If this campaign runs a daily or weekly secure
+        export (FTPS, PGP, encrypted zip, etc.), set a window long enough for that job to run before the wipe —
+        otherwise the platform default applies.
+      </p>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="flex items-start gap-3">
+          <button
+            type="button"
+            onClick={() => setUseOverride(!useOverride)}
+            className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer items-center rounded-full transition-colors mt-0.5 ${useOverride ? 'bg-indigo-600' : 'bg-gray-700'}`}
+          >
+            <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${useOverride ? 'translate-x-5' : 'translate-x-1'}`} />
+          </button>
+          <div>
+            <span className="text-sm text-gray-300 font-medium">Override platform default</span>
+            <p className="text-xs text-gray-500 mt-0.5 leading-snug">
+              Off = use the platform-wide default retention window for every campaign.
+            </p>
+          </div>
+        </div>
+
+        <div>
+          <label className={labelCls}>Retention (minutes)</label>
+          <input
+            type="number" min={1} max={SENSITIVE_DATA_RETENTION_MAX_MINUTES} value={minutes}
+            disabled={!useOverride}
+            onChange={(e) => setMinutes(Number(e.target.value))}
+            className={`${inputCls} disabled:opacity-50`}
+          />
+          <p className="text-xs text-gray-500 mt-1 leading-snug">
+            E.g. 1440 = 1 day, 10080 = 1 week. Clamped to 1–{SENSITIVE_DATA_RETENTION_MAX_MINUTES} minutes (30 days).
+          </p>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3 mt-6 pt-4 border-t border-gray-800">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg px-5 py-2 text-sm font-medium transition-colors"
+        >
+          {saving ? 'Saving…' : 'Save retention override'}
         </button>
         {saved && <span className="text-emerald-400 text-sm">Saved</span>}
         {saveError && <span className="text-red-400 text-sm">{saveError}</span>}
@@ -1165,6 +1254,10 @@ export default function CampaignDetailPage() {
             onSaved={(updated) => setCampaign(updated)}
           />
           <RecordingSettingsForm
+            campaign={campaign}
+            onSaved={(updated) => setCampaign(updated)}
+          />
+          <SensitiveDataRetentionForm
             campaign={campaign}
             onSaved={(updated) => setCampaign(updated)}
           />

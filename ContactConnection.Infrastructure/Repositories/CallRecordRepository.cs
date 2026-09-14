@@ -38,4 +38,13 @@ public class CallRecordRepository : ICallRecordRepository
             .Select(r => r.Id)
             .Take(limit)
             .ToListAsync(ct);
+
+    public async Task<IReadOnlyList<Guid>> FindWithSensitiveDataOldestFirstAsync(
+        int limit, CancellationToken ct = default) =>
+        await Db.CallRecords
+            .Where(r => r.SensitiveData != null)
+            .OrderBy(r => r.SensitiveDataStoredAt ?? r.CreatedAt)
+            .Select(r => r.Id)
+            .Take(limit)
+            .ToListAsync(ct);
 }

@@ -15,6 +15,7 @@ public static class CampaignsEndpoints
         group.MapGet("{id:guid}",                     GetById);
         group.MapPut("{id:guid}",                     Update);
         group.MapPut("{id:guid}/recording",           UpdateRecording);
+        group.MapPut("{id:guid}/sensitive-data-retention", UpdateSensitiveDataRetention);
         group.MapPut("{id:guid}/flow",                SetFlow);
         group.MapDelete("{id:guid}/flow",             RemoveFlow);
         group.MapPut("{id:guid}/inbound-flow",        SetInboundFlow);
@@ -130,6 +131,25 @@ public static class CampaignsEndpoints
             recordingBeepEnabled:   req.RecordingBeepEnabled,
             autoMaskOnHold:         req.AutoMaskOnHold,
             recordingRetentionDays: req.RecordingRetentionDays);
+
+        await repo.SaveChangesAsync(ct);
+        return Results.Ok(ToSummaryResponse(campaign));
+    }
+
+    // ── PUT /api/v1/campaigns/{id}/sensitive-data-retention ─────────────────
+    // Separate from UpdateRecording — this bounds the PCI SensitiveData blob (tf_secure_collect
+    // captures), not call recording. Null clears the override back to the platform default; see
+    // Campaign.SetSensitiveDataRetentionMinutes.
+
+    private static async Task<IResult> UpdateSensitiveDataRetention(
+        Guid id, UpdateCampaignSensitiveDataRetentionRequest req,
+        ICampaignRepository repo, TenantContext tenantContext, CancellationToken ct)
+    {
+        if (!tenantContext.HasTenant) return Results.Unauthorized();
+        var campaign = await repo.GetByIdAsync(id, ct);
+        if (campaign is null) return Results.NotFound();
+
+        campaign.SetSensitiveDataRetentionMinutes(req.SensitiveDataRetentionMinutes);
 
         await repo.SaveChangesAsync(ct);
         return Results.Ok(ToSummaryResponse(campaign));
@@ -384,6 +404,7 @@ public static class CampaignsEndpoints
         c.RingStrategy, c.RingTopN,
         c.RecordingMode, c.ConsentModel, c.RecordingRequired, c.RecordStereo,
         c.RecordingBeepEnabled, c.AutoMaskOnHold, c.RecordingRetentionDays,
+        c.SensitiveDataRetentionMinutes,
         Client = c.Client is null ? null : new { c.Client.Id, c.Client.Name },
         c.CreatedAt, c.UpdatedAt
     };
@@ -397,6 +418,7 @@ public static class CampaignsEndpoints
         c.RingStrategy, c.RingTopN,
         c.RecordingMode, c.ConsentModel, c.RecordingRequired, c.RecordStereo,
         c.RecordingBeepEnabled, c.AutoMaskOnHold, c.RecordingRetentionDays,
+        c.SensitiveDataRetentionMinutes,
         Client = c.Client is null ? null : new { c.Client.Id, c.Client.Name },
         PhoneNumbers     = c.PhoneNumbers.Select(p => new { p.Id, p.Number, p.Label, p.IsActive, p.FlowId, p.TelephonyFlowId }),
         AgentAssignments = c.AgentAssignments.Where(a => a.IsActive).Select(ToAssignmentResponse),
@@ -438,6 +460,7 @@ public record UpdateCampaignRecordingRequest(
     bool RecordingBeepEnabled = false,
     bool AutoMaskOnHold = false,
     int RecordingRetentionDays = 90);
+public record UpdateCampaignSensitiveDataRetentionRequest(int? SensitiveDataRetentionMinutes = null);
 public record SetCampaignFlowRequest(Guid FlowId);
 public record AssignAgentRequest(Guid AgentId, int Proficiency = 50);
 public record BulkAssignAgentsRequest(List<BulkAgentEntry> Agents);

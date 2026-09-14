@@ -16,4 +16,11 @@ public interface ICallRecordRepository
     /// record's campaign-specific <c>RecordingRetentionDays</c> in memory before deleting.
     /// </summary>
     Task<IReadOnlyList<Guid>> FindRetainedRecordingIdsOldestFirstAsync(int limit, CancellationToken ct = default);
+
+    /// <summary>
+    /// Ids of call records still holding a PCI <c>SensitiveData</c> blob, oldest
+    /// <c>SensitiveDataStoredAt</c> first — the Worker's sensitive-data retention sweep pulls a
+    /// batch and wipes anything past the configured TTL.
+    /// </summary>
+    Task<IReadOnlyList<Guid>> FindWithSensitiveDataOldestFirstAsync(int limit, CancellationToken ct = default);
 }

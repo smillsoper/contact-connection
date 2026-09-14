@@ -313,6 +313,14 @@ export default function FlowPanel() {
       }
     })
 
+    // "Playing greeting…" indicator (project_agent_connect_tone) — a connect prompt is playing
+    // to the caller during the auto-connecting window. Only relevant if it's for the call
+    // currently on screen.
+    connection.on('receivePlayingGreeting', (callRecordId: string, playing: boolean) => {
+      const current = useCallStore.getState()
+      if (current.callRecordId === callRecordId) current.setPlayingGreeting(playing)
+    })
+
     // Script pop delivered after whisper bridge (agent_selected → tf_whisper → tf_end → CHANNEL_BRIDGE → agent_answer)
     connection.on('receiveScriptPop', (sessionJson: string) => {
       try {

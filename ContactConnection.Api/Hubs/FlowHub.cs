@@ -75,6 +75,17 @@ public interface IFlowHubClient
     /// since no actual call is coming for that callRecordId after all.</summary>
     Task ReceiveAutoConnectFailed(string callRecordId);
 
+    /// <summary>
+    /// A greeting/connect prompt is playing to the CALLER on <paramref name="callRecordId"/> —
+    /// project_agent_connect_tone's "Playing greeting…" indicator. Only meaningful during the
+    /// ReceiveAutoConnecting window (RingStrategy.AutoAnswerBestAgent), where the agent's softphone
+    /// is already armed to auto-answer before the caller has actually been greeted — for a manual
+    /// pick-up the agent isn't engaged with this call yet when the prompt plays, so nothing is
+    /// pushed. <paramref name="playing"/> true when the prompt starts, false when it's done —
+    /// see QueueCallbackDeliveryService.BridgeToReservedAgentAsync, the only current caller.
+    /// </summary>
+    Task ReceivePlayingGreeting(string callRecordId, bool playing);
+
     /// <summary>Script pop delivered after whisper bridge — pushes CRM flow session JSON to the agent.</summary>
     Task ReceiveScriptPop(string sessionJson);
 

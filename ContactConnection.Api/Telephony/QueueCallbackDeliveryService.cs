@@ -250,10 +250,19 @@ public sealed class QueueCallbackDeliveryService(
             await esl.ConnectAsync(EslHost, EslPort, EslPass, CancellationToken.None);
 
             // Connect prompt to the caller, then let it play out before delivery bridges.
+            // "Playing greeting…" softphone indicator (project_agent_connect_tone) — only
+            // meaningful when the agent's softphone was already armed via ReceiveAutoConnecting
+            // (autoAnswer); a manual pick-up agent isn't engaged with this call yet at this point.
+            if (autoAnswer)
+                await hub.Clients.Group($"agent:{agentId}").ReceivePlayingGreeting(recordId.ToString(), true);
+
             try { await esl.BroadcastAsync(channelUuid, connectMediaArg, CancellationToken.None); }
             catch (Exception ex) { logger.LogDebug(ex, "QueueCallback {Uuid}: connect prompt broadcast failed (non-fatal)", channelUuid); }
             if (ConnectPromptSettleMs > 0)
                 await Task.Delay(ConnectPromptSettleMs, CancellationToken.None);
+
+            if (autoAnswer)
+                await hub.Clients.Group($"agent:{agentId}").ReceivePlayingGreeting(recordId.ToString(), false);
 
             using var scope = scopeFactory.CreateScope();
             var delivery = scope.ServiceProvider.GetRequiredService<QueuedCallDeliveryService>();
