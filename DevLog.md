@@ -149,6 +149,7 @@
 | 137 | 2026-09-13 | 10:54 AM PDT | 11:15 AM PDT | 21 min | ~13961 min |
 | 138 | 2026-09-13 | 11:18 AM PDT | 12:36 PM PDT | 78 min | ~14039 min |
 | 139 | 2026-09-13 | 12:40 PM PDT | 12:45 PM PDT | 5 min | ~14044 min |
+| 140 | 2026-09-14 | 8:29 AM PDT | 9:03 AM PDT | 34 min | ~14078 min |
 
 ---
 
@@ -7468,6 +7469,98 @@ verified only, not yet heard live" in both DevLog and memory).
 ### State
 
 No code changes this session. `tests`/`tsc -b` unaffected (still 692 passing / clean per S138).
+
+### Next session — pick up here
+
+1. Worker retention job to `WipeSensitiveData` after N minutes/hours (queued from Session 134).
+2. Agent connect tone + "Playing greeting" softphone indicator (queued from Session 133/134).
+3. Defensive cleanup: `_*_in_progress` session flags not cleared on `CHANNEL_BRIDGE` (queued from
+   Session 138 — dormant today, but a real gap once a flow pairs `tf_repeat`/`tf_delay` with a
+   later re-park like `tf_secure_collect` mid-bridge).
+
+### Carry-overs (unchanged)
+
+RMD filing; .cc → .io migration tail; contactconnection.io SPF/DKIM/DMARC; cc_timesync
+crash-loop; CommitmentEvents JSONB ValueComparer; ServiceLevelThresholdSeconds widget;
+Dashboards endpoint authz; broader FlowEngine test coverage; retire the .cc softphone route.
+
+## Session 140
+
+**Date:** 2026-09-14
+**Start:** 8:29 AM PDT
+**End:** 9:03 AM PDT
+**Duration:** 34 minutes
+**Total Duration:** ~14078 minutes
+
+### Focus
+
+User-requested gap in `tf_secure_collect` (queued at the end of S139): the parked agent got no
+progress feedback during a mid-bridge capture, and a caller hangup mid-capture wasn't handled at
+all. Built both, live-verified end to end on real Telnyx calls.
+
+### What was found
+
+Confirmed the caller-hangup gap was a real, previously-unknown bug, not just missing UX. On a
+caller hangup mid-capture, `HandleChannelHangupCoreAsync`'s existing "safety net" only hangs up
+the *other* leg when the hangup event's uuid differs from the session-keyed uuid — never true for
+the caller's own hangup, since the caller IS the session-keyed uuid. The parked agent leg
+(`park_with_moh`) was left running hold music indefinitely, with the agent's state silently
+flipped to ACW/Unavailable underneath them and no way back. A mirror gap existed if the *agent's*
+parked leg hung up first: `ResolveSessionAsync`'s `Other-Leg-Unique-ID`/`Bridge-B-Unique-ID`
+fallback finds nothing for a parked-not-bridged channel, so the caller would've been resolved via
+`HandleHangupByTenantScanAsync`'s generic fallback and left stranded in secure_collect.
+
+### What was built
+
+**Backend** — `ISecureCollectNotifier` (Application) + `SecureCollectNotifier` (Api) /
+`NoOpSecureCollectNotifier` (Worker), the same Clean Architecture SignalR-abstraction pattern as
+`IFlowNotifier`. Two new `IFlowHubClient` pushes, `ReceiveSecureCollectProgress` /
+`ReceiveSecureCollectEnded` (never carry digits — field key only). `SecureCollectNodeHandler`
+pushes a "started" progress event for field 0 when bridged, and now stores a `sc_peer:{agentUuid}`
+reverse Redis key at park time (10-min TTL) so a hangup on the *agent's* parked leg can still
+resolve back to the caller's session — mirrors the existing `whisper:{uuid}` reverse-key pattern.
+`EslBackgroundService.HandleSecureCollectDoneAsync` pushes progress on each field advance and an
+ended event on every terminal outcome (collected/failed/timeout). `HandleChannelHangupCoreAsync`
+gets a new `_sc_in_progress` branch handling both directions: caller hangup (explicitly hangs up
+the parked peer leg — the actual fix) and agent-leg hangup (resolved via the reverse key; the
+existing safety net already covers hanging up the caller once session resolves non-null). Either
+direction discards the partial capture (Redis blob deleted, nothing persisted/charged for an
+incomplete field set — user's explicit call) and lifts any recording mask. 4 new unit tests on the
+node-handler side; the hangup-handler fix itself follows this codebase's established pattern of
+live-call verification rather than unit tests (`EslBackgroundService`'s private event handlers
+have no existing test harness beyond pure static helpers — see `EslBackgroundServicePlaybackStopTests.cs`).
+
+**Frontend** — `callStore.ts` gets a `secureCollect` sub-state (`fieldKey`/`fieldIndex`/
+`fieldCount`/`endedOutcome`) + 3 new actions. `FlowPanel.tsx` wires the two new SignalR events.
+`SoftphonePanel.tsx`: while capturing, swaps Mute/Hold/Transfer for a "Capturing secure info…
+Field 2 of 3" indicator (per user's explicit choice — those controls would otherwise operate on
+the parked leg, not the caller); Hang Up stays available throughout. On end, shows a brief
+color-coded result banner (collected/failed/timeout/caller_hung_up) for 4s then returns to normal
+controls.
+
+### State
+
+`dotnet test`: **696/696 passing** (150 Domain, 20 Application, 429 Infrastructure — +4 net this
+session, 97 Api). `tsc -b` + `vite build` clean.
+
+### Live verification
+
+Real Telnyx calls against the S135/136 test fixtures (`tenant_test_tenant`, DID `+15415293670`,
+telephony flow `a1b2c3d4-…0003`, CRM flow `a1b2c3d4-…0002`) — found the campaign's
+`inbound_flow_id` had been left pointed at S138's ring/delay test flow, repointed it back before
+testing (both flows were still intact/active, just not currently wired to the DID — **left
+repointed at the secure-collect flow for next session**, note this if reusing the campaign for
+something else).
+
+- **Happy path**: full 3-field capture (pan → expiry → cvv), progress pushes tracked correctly
+  through the softphone for every field, clean re-bridge, "Secure capture complete" banner —
+  user-confirmed.
+- **Caller hangup mid-capture**: hung up right after field 1. Log confirmed the new branch fired
+  (`secure_collect in progress (caller hung up) — discarding partial capture, cleaning up parked
+  leg`), partial capture discarded (no encrypt attempt), normal call-completion path ran
+  correctly. **User-confirmed live**: agent's softphone dropped cleanly instead of hanging on hold
+  music, agent state went ACW → Available as expected, "Caller disconnected during capture" banner
+  shown. This closes the gap flagged at the end of S139.
 
 ### Next session — pick up here
 

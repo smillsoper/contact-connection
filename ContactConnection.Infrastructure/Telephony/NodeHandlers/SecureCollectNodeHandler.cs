@@ -41,6 +41,7 @@ public class SecureCollectNodeHandler : ITelephonyNodeHandler
     private readonly ICallRecordingController _recording;
     private readonly ISensitiveDataProtector _protector;
     private readonly IEslCommanderFactory _eslFactory;
+    private readonly ISecureCollectNotifier _notifier;
     private readonly IConfiguration _config;
     private readonly ILogger<SecureCollectNodeHandler> _logger;
 
@@ -50,6 +51,7 @@ public class SecureCollectNodeHandler : ITelephonyNodeHandler
         ICallRecordingController recording,
         ISensitiveDataProtector protector,
         IEslCommanderFactory eslFactory,
+        ISecureCollectNotifier notifier,
         IConfiguration config,
         ILogger<SecureCollectNodeHandler> logger)
     {
@@ -58,6 +60,7 @@ public class SecureCollectNodeHandler : ITelephonyNodeHandler
         _recording    = recording;
         _protector    = protector;
         _eslFactory   = eslFactory;
+        _notifier     = notifier;
         _config       = config;
         _logger       = logger;
     }
@@ -149,6 +152,13 @@ public class SecureCollectNodeHandler : ITelephonyNodeHandler
             // follow-up uuid_transfer into secure_collect. Left in place from S135; harmless either
             // way, not load-bearing for Bug #4 (that was the _sc_in_progress race above).
             await Task.Delay(400, ct);
+
+            // Reverse mapping so a hangup on the PARKED AGENT LEG (not the caller) can still find
+            // this call's session — it's keyed under the caller's uuid, and while parked (not
+            // bridged) there's no Other-Leg-Unique-ID/Bridge-B-Unique-ID on that event to resolve
+            // it the normal way. Same pattern as the whisper:{uuid} reverse key. Cleared by
+            // whichever side finishes the capture first (EslBackgroundService).
+            await _sessionStore.SetKeyAsync($"sc_peer:{peerUuid}", ctx.ChannelUuid, TimeSpan.FromMinutes(10), ct);
         }
 
         // ── Mask a live recording for the whole capture ──────────────────────────
@@ -209,6 +219,24 @@ public class SecureCollectNodeHandler : ITelephonyNodeHandler
         await SecureCollect.ApplyFieldVarsAsync(
             esl, ctx.ChannelUuid, specs[0], maxTries, timeoutMs, interDigitMs, invalidArg, ct);
         await esl.TransferAsync(ctx.ChannelUuid, "secure_collect", "XML", "default", ct);
+
+        // Let the parked agent know a capture just started (never digits — field key only) so
+        // their softphone can swap "on call" for a "capturing…" indicator instead of leaving them
+        // guessing why the caller went quiet. Pre-agent captures have no one to notify.
+        if (bridged && Guid.TryParse(ctx.Vars.GetValueOrDefault("_assigned_agent_id"), out var startAgentId))
+        {
+            try
+            {
+                await _notifier.NotifyProgressAsync(
+                    startAgentId, ctx.CallRecordId, (string)specs[0]["k"]!, fieldIndex: 0, fieldCount: specs.Count, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "SecureCollectNodeHandler [{Uuid}]: progress push failed — capture continues regardless",
+                    ctx.ChannelUuid);
+            }
+        }
 
         _logger.LogInformation(
             "SecureCollectNodeHandler [{Uuid}]: capture started — {Count} field(s), first='{Key}' masked={Masked} bridged={Bridged}",

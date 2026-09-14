@@ -44,6 +44,17 @@ internal sealed class NoOpCallTraceNotifier : ICallTraceNotifier
         Task.CompletedTask;
 }
 
+internal sealed class NoOpSecureCollectNotifier : ISecureCollectNotifier
+{
+    public Task NotifyProgressAsync(
+        Guid agentId, Guid callRecordId, string fieldKey, int fieldIndex, int fieldCount,
+        CancellationToken ct = default) =>
+        Task.CompletedTask;
+
+    public Task NotifyEndedAsync(Guid agentId, Guid callRecordId, string outcome, CancellationToken ct = default) =>
+        Task.CompletedTask;
+}
+
 /// <summary>
 /// Throws if actually invoked — unlike the notifiers above, a silent no-op here would hide a
 /// real bug (a caller expecting a working ESL connection back). Nothing on the Worker's own

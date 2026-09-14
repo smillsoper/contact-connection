@@ -41,6 +41,18 @@ function formatElapsed(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
+// "card_number" → "Card Number" — fields have no separate display label in the designer, just a key.
+function humanizeFieldKey(key: string): string {
+  return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) || 'field'
+}
+
+const SECURE_COLLECT_ENDED_META: Record<string, { text: string; className: string }> = {
+  collected:       { text: 'Secure capture complete',            className: 'bg-green-950 border-green-800 text-green-400' },
+  failed:          { text: 'Capture failed — validation error',  className: 'bg-red-950 border-red-800 text-red-400' },
+  timeout:         { text: 'Capture timed out — no entry',       className: 'bg-amber-950 border-amber-700 text-amber-400' },
+  caller_hung_up:  { text: 'Caller disconnected during capture', className: 'bg-red-950 border-red-800 text-red-400' },
+}
+
 // ── Icons (inline so no icon library needed) ──────────────────────────────
 
 const PhoneIcon = ({ className }: { className?: string }) => (
@@ -113,9 +125,11 @@ export default function SoftphonePanel() {
     callStatus, callerNumber, destinationNumber, isMuted, isOnHold,
     callStartedAt, campaignId, callRecordId,
     transferState, transferTarget, transferTargetLabel,
+    secureCollect,
     setRinging, setDialing, setOnCall, setMuted, setOnHold,
     setCallRecordId, setCampaignId,
     setTransferDialing, setTransferConnected, setTransferConference, resetTransfer, reset,
+    clearSecureCollect,
   } = useCallStore()
   const addFlowSession = useFlowSessionsStore((s) => s.addSession)
 
@@ -155,6 +169,16 @@ export default function SoftphonePanel() {
   useEffect(() => {
     if (callStatus === 'queued') { setPickingUp(false); setPickUpError(null) }
   }, [callRecordId])
+
+  // tf_secure_collect finished (collected/failed/timeout/caller_hung_up) — show the result briefly,
+  // then hand control back to the normal on-call view. A caller_hung_up outcome is usually
+  // overtaken by the call itself ending (JsSIP 'ended' → reset(), which also clears this) before
+  // the timer fires; harmless either way.
+  useEffect(() => {
+    if (!secureCollect?.endedOutcome) return
+    const id = setTimeout(clearSecureCollect, 4000)
+    return () => clearTimeout(id)
+  }, [secureCollect?.endedOutcome, clearSecureCollect])
 
   // RingStrategy.AutoAnswerBestAgent — the server picked this agent with no click, so the ref
   // that normally gets set inside handlePickUp (below) must be armed here instead, the moment
@@ -824,8 +848,44 @@ export default function SoftphonePanel() {
             {destinationNumber && <p className="text-gray-400 text-xs font-mono truncate">→ {destinationNumber}</p>}
           </div>
 
+          {/* ── tf_secure_collect in progress: caller is being guided through a PCI DTMF
+               capture and this leg is actually parked on hold music, not really "on call" with
+               the caller — Hold/Transfer would operate on the wrong leg, so they're hidden below
+               until this clears. Hang Up stays available (already cleans up correctly server-side
+               either way it fires). ── */}
+          {secureCollect && !secureCollect.endedOutcome && (
+            <div className="bg-indigo-950 border border-indigo-700 rounded-lg px-3 py-2 text-center">
+              <div className="flex items-center justify-center gap-2 mb-1">
+                <span className="w-3 h-3 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin shrink-0" />
+                <p className="text-indigo-400 text-xs font-medium">Capturing secure info…</p>
+              </div>
+              <p className="text-white text-sm font-semibold">{humanizeFieldKey(secureCollect.fieldKey)}</p>
+              {secureCollect.fieldCount > 0 && (
+                <p className="text-gray-500 text-xs mt-0.5">Field {secureCollect.fieldIndex + 1} of {secureCollect.fieldCount}</p>
+              )}
+            </div>
+          )}
+
+          {/* Brief result after a capture ends — collected/failed/timeout/caller_hung_up */}
+          {secureCollect?.endedOutcome && (
+            <div className={`border rounded-lg px-3 py-2 text-center text-xs font-medium ${SECURE_COLLECT_ENDED_META[secureCollect.endedOutcome].className}`}>
+              {SECURE_COLLECT_ENDED_META[secureCollect.endedOutcome].text}
+            </div>
+          )}
+
           {/* ── No transfer in progress: normal controls + transfer list ── */}
-          {transferState === 'idle' && (
+          {transferState === 'idle' && secureCollect && !secureCollect.endedOutcome ? (
+            // Capture in progress — only Hang Up is meaningful (this leg is on hold music).
+            <div className="flex justify-center">
+              <button
+                onClick={handleHangUp}
+                className="w-11 h-11 rounded-full bg-red-600 hover:bg-red-500 flex items-center justify-center transition-colors"
+                title="Hang up"
+              >
+                <PhoneIcon className="w-5 h-5 text-white rotate-135" />
+              </button>
+            </div>
+          ) : transferState === 'idle' && (
             <>
               <div className="flex gap-2 justify-center">
                 {/* Mute */}

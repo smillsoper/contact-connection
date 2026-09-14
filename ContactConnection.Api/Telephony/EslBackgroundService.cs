@@ -697,6 +697,20 @@ public sealed class EslBackgroundService : BackgroundService
                     maxTries, timeoutMs, interDigit, invalidArg, ct);
                 await esl.TransferAsync(session.ChannelUuid, "secure_collect", "XML", "default", ct);
 
+                if (session.Vars.GetValueOrDefault("_sc_rebridge") == "true"
+                    && Guid.TryParse(session.Vars.GetValueOrDefault("_assigned_agent_id"), out var progressAgentId))
+                {
+                    try
+                    {
+                        await _hub.Clients.Group($"agent:{progressAgentId}").ReceiveSecureCollectProgress(
+                            session.CallRecordId.ToString(), specs[nextIdx]!["k"]?.GetValue<string>() ?? "", nextIdx, specs.Count);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "secure_collect_done {Uuid}: progress push failed — capture continues regardless", uuid);
+                    }
+                }
+
                 _logger.LogInformation(
                     "secure_collect_done {Uuid}: field '{Field}' captured ({Len} digits) → next field '{Next}' ({Idx}/{Total})",
                     uuid, fieldKey, digits.Length, specs[nextIdx]!["k"]?.GetValue<string>(), nextIdx + 1, specs.Count);
@@ -741,6 +755,22 @@ public sealed class EslBackgroundService : BackgroundService
         })
             session.Vars.Remove(k);
         await _sessionStore.SaveAsync(session, ct);
+
+        if (rebridge && !string.IsNullOrEmpty(peerUuid))
+            await _sessionStore.DeleteKeyAsync($"sc_peer:{peerUuid}", ct);
+
+        if (rebridge && Guid.TryParse(session.Vars.GetValueOrDefault("_assigned_agent_id"), out var endedAgentId))
+        {
+            try
+            {
+                await _hub.Clients.Group($"agent:{endedAgentId}")
+                    .ReceiveSecureCollectEnded(session.CallRecordId.ToString(), outcome);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "secure_collect_done {Uuid}: ended push failed — resume continues regardless", uuid);
+            }
+        }
 
         using var scope = _scopeFactory.CreateScope();
 
@@ -1261,6 +1291,18 @@ public sealed class EslBackgroundService : BackgroundService
         // for all session-store/CallRecord lookups below once a session is found.
         var session = await ResolveSessionAsync(channelUuid, vars, ct);
 
+        // A secure_collect capture parks the agent leg solo (not bridged) — ResolveSessionAsync's
+        // Other-Leg-Unique-ID/Bridge-B-Unique-ID fallback finds nothing for it, so if THIS hangup
+        // is that parked leg (not the caller), fall back to the sc_peer:{uuid} reverse key set at
+        // park time (SecureCollectNodeHandler) to find the caller's session anyway — otherwise the
+        // caller is left stranded in secure_collect indefinitely with no agent left to return to.
+        if (session is null)
+        {
+            var scCallerUuid = await _sessionStore.GetKeyAsync($"sc_peer:{channelUuid}", ct);
+            if (!string.IsNullOrEmpty(scCallerUuid))
+                session = await _sessionStore.GetAsync(scCallerUuid, ct);
+        }
+
         // A fired callback leg that hung up with no session — HandleChannelParkAsync never ran
         // for it, so the callee never answered (no answer / busy / gateway reject). Resolve the
         // Callback row: retry if attempts remain, else abandon. A callback that DID connect has a
@@ -1361,6 +1403,79 @@ public sealed class EslBackgroundService : BackgroundService
                 try { await HandleVmDoneAsync(salvageVars, esl, CancellationToken.None, fromHangup: true, knownSession: salvageSession); }
                 catch (Exception ex) { _logger.LogError(ex, "Voicemail salvage on hangup failed for {Uuid}", salvageUuid); }
             });
+        }
+
+        // tf_secure_collect: the caller (or, less commonly, the parked agent leg) hung up mid-
+        // capture. Before this fix neither side was cleaned up here — the caller's own
+        // CHANNEL_HANGUP fell straight into the normal completion path below, which only hangs up
+        // "the other leg" when this event's uuid differs from the session-keyed uuid — never true
+        // for the caller's own hangup, since the caller IS the session-keyed uuid — so the agent's
+        // parked park_with_moh leg was left playing hold music forever. Handles both directions:
+        //   • caller hangs up (this event's uuid == session.ChannelUuid) — explicitly hang up the
+        //     parked peer leg here (the safety net below only fires for the opposite direction).
+        //   • agent's parked leg hangs up (session resolved via the sc_peer:{uuid} reverse key
+        //     above) — the existing safety net below already hangs up the caller once session is
+        //     non-null, since channelUuid != sessionUuid in that case.
+        // Either way the partial capture is discarded (never persist/charge an incomplete field
+        // set) and any recording mask is lifted; caller-hangup additionally tells the agent why
+        // their call just went quiet instead of leaving them to find out from a bare ACW flip.
+        if (session?.Vars.GetValueOrDefault("_sc_in_progress") == "true")
+        {
+            var scPeerUuid   = session.Vars.GetValueOrDefault("_sc_peer_uuid");
+            var scMasked     = session.Vars.GetValueOrDefault("_sc_recording_masked") == "true";
+            var scNodeId     = session.Vars.GetValueOrDefault("_sc_node_id");
+            var callerHangup = string.Equals(channelUuid, session.ChannelUuid, StringComparison.Ordinal);
+
+            _logger.LogWarning(
+                "CHANNEL_HANGUP {Uuid} cause={Cause}: secure_collect in progress ({Side} hung up) — " +
+                "discarding partial capture, cleaning up parked leg",
+                channelUuid, cause, callerHangup ? "caller" : "agent");
+
+            await _sessionStore.DeleteKeyAsync($"sc:{session.ChannelUuid}", ct);
+            if (!string.IsNullOrEmpty(scPeerUuid))
+                await _sessionStore.DeleteKeyAsync($"sc_peer:{scPeerUuid}", ct);
+
+            if (scMasked)
+            {
+                using var scScope = _scopeFactory.CreateScope();
+                var recording = scScope.ServiceProvider.GetRequiredService<ICallRecordingController>();
+                await recording.UnmaskAsync(new RecordingCommand
+                {
+                    ChannelUuid      = session.ChannelUuid,
+                    CallRecordId     = session.CallRecordId,
+                    TenantSchemaName = session.TenantSchemaName,
+                    Source           = RecordingEventSource.SecureCollect,
+                    NodeId           = scNodeId,
+                    Reason           = "secure_collect_hangup",
+                }, esl, ct);
+            }
+
+            if (callerHangup)
+            {
+                if (!string.IsNullOrEmpty(scPeerUuid))
+                {
+                    try { await esl.HangupChannelAsync(scPeerUuid, ct); }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex,
+                            "CHANNEL_HANGUP {Uuid}: hangup of parked secure-collect peer {Peer} failed (likely already gone)",
+                            channelUuid, scPeerUuid);
+                    }
+                }
+
+                if (Guid.TryParse(session.Vars.GetValueOrDefault("_assigned_agent_id"), out var hungupAgentId))
+                {
+                    try
+                    {
+                        await _hub.Clients.Group($"agent:{hungupAgentId}")
+                            .ReceiveSecureCollectEnded(session.CallRecordId.ToString(), "caller_hung_up");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "CHANNEL_HANGUP {Uuid}: secure-collect ended push failed", channelUuid);
+                    }
+                }
+            }
         }
 
         if (session is not null)

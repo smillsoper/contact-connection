@@ -332,6 +332,20 @@ export default function FlowPanel() {
       setAgentStateCode(code, expiresAt)
     })
 
+    // tf_secure_collect: a capture field started/advanced on the caller's parked leg (agent is on
+    // park_with_moh) — never carries digits. Only relevant if it's for the call currently on screen.
+    connection.on('receiveSecureCollectProgress', (callRecordId: string, fieldKey: string, fieldIndex: number, fieldCount: number) => {
+      const current = useCallStore.getState()
+      if (current.callRecordId === callRecordId) current.setSecureCollectProgress(fieldKey, fieldIndex, fieldCount)
+    })
+
+    // tf_secure_collect: the capture finished — "collected" | "failed" | "timeout" | "caller_hung_up".
+    connection.on('receiveSecureCollectEnded', (callRecordId: string, outcome: string) => {
+      const current = useCallStore.getState()
+      if (current.callRecordId === callRecordId)
+        current.setSecureCollectEnded(outcome as 'collected' | 'failed' | 'timeout' | 'caller_hung_up')
+    })
+
     connection.start()
       .then(() => console.log('[SignalR] FlowHub connected'))
       .catch((err) => console.error('[SignalR] FlowHub connection failed:', err))

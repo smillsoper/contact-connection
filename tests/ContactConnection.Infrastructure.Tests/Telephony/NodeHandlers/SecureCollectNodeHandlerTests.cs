@@ -31,6 +31,7 @@ public class SecureCollectNodeHandlerTests
         public Mock<ICallRecordingController> Recording { get; } = new();
         public Mock<ISensitiveDataProtector> Protector { get; } = new();
         public Mock<ITelephonyCallSessionStore> SessionStore { get; } = new();
+        public Mock<ISecureCollectNotifier> Notifier { get; } = new();
         public TenantDbContext Db { get; }
         public SecureCollectNodeHandler Handler { get; }
 
@@ -55,7 +56,7 @@ public class SecureCollectNodeHandlerTests
 
             Handler = new SecureCollectNodeHandler(
                 dbFactory.Object, SessionStore.Object, Recording.Object, Protector.Object,
-                eslFactory.Object, Config, NullLogger<SecureCollectNodeHandler>.Instance);
+                eslFactory.Object, Notifier.Object, Config, NullLogger<SecureCollectNodeHandler>.Instance);
         }
     }
 
@@ -151,6 +152,54 @@ public class SecureCollectNodeHandlerTests
         Assert.Equal("true", ctx.Vars["_sc_rebridge"]);
         Assert.Equal("agent-leg-uuid", ctx.Vars["_sc_peer_uuid"]);
         h.Esl.Verify(e => e.TransferAsync("agent-leg-uuid", "park_with_moh", "XML", "default", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Bridged_StoresReversePeerMapping_ForAgentLegHangupLookup()
+    {
+        var h = new Harness();
+        var ctx = Ctx(h.Esl.Object, ("_bridged_peer_uuid", "agent-leg-uuid"));
+
+        await h.Handler.ExecuteAsync(Node(), ctx);
+
+        h.SessionStore.Verify(s => s.SetKeyAsync("sc_peer:agent-leg-uuid", Uuid, It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Bridged_WithAssignedAgent_PushesStartProgress_NeverDigits()
+    {
+        var h = new Harness();
+        var agentId = Guid.NewGuid();
+        var ctx = Ctx(h.Esl.Object, ("_bridged_peer_uuid", "agent-leg-uuid"), ("_assigned_agent_id", agentId.ToString()));
+
+        await h.Handler.ExecuteAsync(Node(), ctx);
+
+        h.Notifier.Verify(n => n.NotifyProgressAsync(
+            agentId, ctx.CallRecordId, "pan", 0, 2, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Bridged_NoAssignedAgent_DoesNotPushProgress()
+    {
+        var h = new Harness();
+        var ctx = Ctx(h.Esl.Object, ("_bridged_peer_uuid", "agent-leg-uuid"));
+
+        await h.Handler.ExecuteAsync(Node(), ctx);
+
+        h.Notifier.Verify(n => n.NotifyProgressAsync(
+            It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task PreAgent_DoesNotPushProgress_NoAgentToNotify()
+    {
+        var h = new Harness();
+        var ctx = Ctx(h.Esl.Object);
+
+        await h.Handler.ExecuteAsync(Node(), ctx);
+
+        h.Notifier.Verify(n => n.NotifyProgressAsync(
+            It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

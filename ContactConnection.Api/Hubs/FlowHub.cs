@@ -100,4 +100,13 @@ public interface IFlowHubClient
     /// (attempted / expired / abandoned / connected / cancelled / rescheduled). campaignId may be
     /// empty ("00000000-…") when the change isn't campaign-scoped.</summary>
     Task ReceiveScheduledCallbackChanged(string campaignId, string change);
+
+    /// <summary>tf_secure_collect: a capture field started or advanced on the caller's parked leg
+    /// (agent is on park_with_moh). fieldKey identifies which field (e.g. "card_number") — never
+    /// carries digits. fieldIndex is 0-based.</summary>
+    Task ReceiveSecureCollectProgress(string callRecordId, string fieldKey, int fieldIndex, int fieldCount);
+
+    /// <summary>tf_secure_collect: the capture finished — outcome is "collected" | "failed" |
+    /// "timeout" | "caller_hung_up".</summary>
+    Task ReceiveSecureCollectEnded(string callRecordId, string outcome);
 }
