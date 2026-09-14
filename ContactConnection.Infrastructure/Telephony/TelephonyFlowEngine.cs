@@ -446,6 +446,20 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
             // parsed copy — session.FlowDefinitionJson keeps the original string.
             nodeObj["nodeId"] = currentNodeId;
 
+            // A hot-digit listener (tf_ivr_menu, alwaysListen=true) is only meant to stay armed
+            // across "hold"-style nodes (Play/Repeat/Delay/park) — never race a synchronous DTMF
+            // capture that's actively running its own play_and_get_digits on the same channel.
+            // Cleared centrally here (not per-handler) so every synchronous capture node type,
+            // present and future, gets this for free.
+            if (IsSyncDtmfCaptureNode(nodeType, nodeObj) && ctx.Vars.ContainsKey("_hot_digit_options"))
+            {
+                _logger.LogInformation(
+                    "TelephonyFlowEngine [{Uuid}]: entering synchronous capture node {NodeId} ({NodeType}) — clearing armed hot-digit listener",
+                    ctx.ChannelUuid, currentNodeId, nodeType);
+                ctx.RemoveSessionVar("_hot_digit_options");
+                ctx.RemoveSessionVar("_hot_digit_node_id");
+            }
+
             _logger.LogInformation(
                 "TelephonyFlowEngine [{Uuid}]: → {NodeId} ({NodeType})",
                 ctx.ChannelUuid, currentNodeId, nodeType);
@@ -497,6 +511,16 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
             "TelephonyFlowEngine [{Uuid}]: segment complete — {StepCount} step(s), reason={Reason}",
             ctx.ChannelUuid, trace.Steps.Count, terminationReason);
     }
+
+    /// <summary>tf_secure_collect always runs a blocking capture; tf_ivr_menu only does when it's
+    /// NOT the async hot-digit-listener variant (alwaysListen=true arms a background listener and
+    /// returns immediately — it doesn't compete with itself).</summary>
+    private static bool IsSyncDtmfCaptureNode(string nodeType, JsonObject nodeObj) => nodeType switch
+    {
+        "tf_secure_collect" => true,
+        "tf_ivr_menu"        => nodeObj["alwaysListen"]?.GetValue<bool>() != true,
+        _                    => false,
+    };
 
     private Task RecordStepAsync(
         TelephonyFlowContext ctx, Guid flowId, string nodeId, string nodeType,

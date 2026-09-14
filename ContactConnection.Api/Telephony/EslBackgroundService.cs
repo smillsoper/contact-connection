@@ -88,7 +88,7 @@ public sealed class EslBackgroundService : BackgroundService
         // would hang) — the extension emits contactconnection::tts_done when the playback returns.
         await esl.SubscribeAsync(
             "CHANNEL_PARK CHANNEL_ANSWER CHANNEL_HANGUP CHANNEL_HANGUP_COMPLETE CHANNEL_BRIDGE CHANNEL_UNBRIDGE " +
-            "CHANNEL_HOLD CHANNEL_UNHOLD PLAYBACK_STOP " +
+            "CHANNEL_HOLD CHANNEL_UNHOLD PLAYBACK_STOP DTMF " +
             "CUSTOM contactconnection::ivr_done contactconnection::vm_done contactconnection::xfer_failed " +
             "contactconnection::tts_done contactconnection::secure_collect_done contactconnection::delay_done " +
             "sofia::register sofia::unregister sofia::expire", ct);
@@ -130,6 +130,9 @@ public sealed class EslBackgroundService : BackgroundService
                     break;
                 case "CHANNEL_UNBRIDGE":
                     await HandleChannelUnbridgeAsync(vars, esl, ct);
+                    break;
+                case "DTMF":
+                    await HandleDtmfAsync(vars, esl, ct);
                     break;
                 case "CHANNEL_HOLD":
                     await HandleChannelHoldAsync(vars, esl, mask: true, ct);
@@ -1707,6 +1710,16 @@ public sealed class EslBackgroundService : BackgroundService
             await _sessionStore.SaveAsync(bridgeSession, ct);
         }
 
+        // A hot-digit listener (tf_ivr_menu, alwaysListen=true) is only meant to live across
+        // hold-style waiting — once the caller is actually bridged to someone (agent, transfer
+        // target), it's superseded. tf_secure_collect's own internal re-bridge already cleared
+        // this at node entry (TelephonyFlowEngine), so this is safe to clear unconditionally here.
+        if (bridgeSession.Vars.Remove("_hot_digit_options"))
+        {
+            bridgeSession.Vars.Remove("_hot_digit_node_id");
+            await _sessionStore.SaveAsync(bridgeSession, ct);
+        }
+
         // Call is now bridged to an agent — record the "active" transition
         {
             using var recorderScope = _scopeFactory.CreateScope();
@@ -1856,6 +1869,72 @@ public sealed class EslBackgroundService : BackgroundService
             "CHANNEL_UNBRIDGE {Uuid}: caller channel still active (sessionKeyUuid={SessionKeyUuid}) — hanging up",
             uuid, session.ChannelUuid);
         await esl.HangupChannelAsync(session.ChannelUuid, ct);
+    }
+
+    /// <summary>
+    /// Raw DTMF event — fires at the FreeSWITCH channel-core level regardless of what's currently
+    /// running (playback, park, a repeat/delay hold loop), independent of any play_and_get_digits
+    /// app (live-verified S141: a press during tf_answer's RTP-prime silence stream, no capture
+    /// app running at all, still produced this event). The only consumer today is the tf_ivr_menu
+    /// hot-digit listener — everything else captures digits synchronously via ivr_collect/
+    /// secure_collect and their own CUSTOM *_done events. A press that doesn't match an armed
+    /// listener (or when nothing is armed) is ignored outright — no logging spam, no invalid-entry
+    /// handling; "ignore invalid entirely" is the whole point of this feature.
+    /// </summary>
+    private async Task HandleDtmfAsync(Dictionary<string, string> vars, EslClient esl, CancellationToken ct)
+    {
+        var uuid = vars.GetValueOrDefault("Unique-ID");
+        if (string.IsNullOrEmpty(uuid)) return;
+
+        var digit = vars.GetValueOrDefault("DTMF-Digit");
+        if (string.IsNullOrEmpty(digit)) return;
+
+        var session = await ResolveSessionAsync(uuid, vars, ct);
+        if (session is null) return;
+
+        Dictionary<string, string> optionMap;
+        try
+        {
+            optionMap = JsonSerializer.Deserialize<Dictionary<string, string>>(
+                session.Vars.GetValueOrDefault("_hot_digit_options", "{}")) ?? new();
+        }
+        catch (JsonException) { return; }
+
+        if (!optionMap.TryGetValue(digit, out var targetNodeId) || string.IsNullOrEmpty(targetNodeId))
+            return; // nothing armed, or this digit isn't one of the configured hot keys
+
+        _logger.LogInformation(
+            "DTMF {Uuid}: hot-digit '{Digit}' matched (armed by {NodeId}) → redirecting to {Target}",
+            uuid, digit, session.Vars.GetValueOrDefault("_hot_digit_node_id"), targetNodeId);
+
+        // Neutralize whatever hold-style loop is currently in flight so its own late completion
+        // event (PLAYBACK_STOP / delay_done / a periodic announcement's replay) can't land after
+        // the redirect and clobber the node we're jumping to. Only these "hold" node types can
+        // ever coexist with an armed listener — every synchronous capture node clears the listener
+        // on entry (TelephonyFlowEngine), and a real bridge clears it too (HandleChannelBridgeAsync)
+        // — so this is a known, bounded sweep, not a general-purpose interrupt mechanism.
+        var staleKeys = session.Vars.Keys
+            .Where(k => k.StartsWith("_play_", StringComparison.Ordinal)
+                     || k.StartsWith("_tts_", StringComparison.Ordinal)
+                     || k.StartsWith("_delay_", StringComparison.Ordinal)
+                     || k.StartsWith("_announce_", StringComparison.Ordinal))
+            .ToList();
+        foreach (var k in staleKeys) session.Vars.Remove(k);
+
+        session.Vars.Remove("_hot_digit_options");
+        session.Vars.Remove("_hot_digit_node_id");
+        await _sessionStore.SaveAsync(session, ct);
+
+        try { await esl.BreakChannelAsync(session.ChannelUuid, ct); }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "DTMF {Uuid}: uuid_break before hot-digit redirect failed — continuing anyway", uuid);
+        }
+
+        using var scope = _scopeFactory.CreateScope();
+        await scope.ServiceProvider
+            .GetRequiredService<ITelephonyFlowEngine>()
+            .ResumeFromNodeAsync(session.ChannelUuid, targetNodeId, esl, ct);
     }
 
     /// <summary>

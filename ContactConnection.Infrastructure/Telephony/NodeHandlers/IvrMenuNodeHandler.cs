@@ -26,6 +26,16 @@ namespace ContactConnection.Infrastructure.Telephony.NodeHandlers;
 ///   _ivr_in_progress = "true"   (also tells the CHANNEL_PARK handler the re-park isn't a new call)
 ///   _ivr_options     = JSON { "&lt;digits&gt;": "&lt;targetNodeId&gt;", … }
 ///   _ivr_no_match    = target node id for empty / unmatched input (may be empty)
+///
+/// <c>alwaysListen: true</c> — hot-digit mode (S141, motivated by "press 1 at any time while
+/// waiting to opt into a callback"). Doesn't touch play_and_get_digits/ivr_collect at all: arms a
+/// single-digit → node map in session state and returns via "default" immediately, so the flow
+/// keeps going into whatever hold loop comes next. EslBackgroundService's raw DTMF event handler
+/// (not ivr_done — no capture app is running) matches a press against the armed map from any
+/// channel state and redirects. Only <c>options</c> (single-digit keys only) matter in this mode;
+/// timeout/tries/prompt/no_match don't apply to an open-ended listener. Superseded by entering any
+/// synchronous capture node (TelephonyFlowEngine, centrally) or bridging to an agent
+/// (EslBackgroundService), or explicitly by the "Clear DTMF Listener" node (tf_clear_hot_digit).
 /// </summary>
 public class IvrMenuNodeHandler : ITelephonyNodeHandler
 {
@@ -47,6 +57,9 @@ public class IvrMenuNodeHandler : ITelephonyNodeHandler
         JsonObject node, TelephonyFlowContext ctx, CancellationToken ct = default)
     {
         var transitions = node["transitions"]?.AsObject();
+
+        if (node["alwaysListen"]?.GetValue<bool>() == true)
+            return ArmHotDigitListener(node, ctx, transitions);
 
         if (ctx.Esl is null)
         {
@@ -127,6 +140,52 @@ public class IvrMenuNodeHandler : ITelephonyNodeHandler
 
         // Terminal — EslBackgroundService resumes from the contactconnection::ivr_done event.
         return new TelephonyNodeResult(null, "collecting");
+    }
+
+    /// <summary>Arms a background single-digit listener and returns immediately via "default" —
+    /// doesn't touch the channel at all (no prompt, no transfer). Single-digit options only:
+    /// unlike the synchronous capture above, this has no inter-digit timer to buffer a sequence
+    /// against arbitrary interleaved audio state, so a multi-character "digit" is rejected here
+    /// rather than silently truncated or hung waiting for more input that will never come.</summary>
+    private TelephonyNodeResult ArmHotDigitListener(JsonObject node, TelephonyFlowContext ctx, JsonObject? transitions)
+    {
+        var nodeId = node["nodeId"]?.GetValue<string>() ?? "tf_ivr_menu";
+        var optionMap = new Dictionary<string, string>();
+
+        if (node["options"] is JsonArray opts)
+        {
+            foreach (var o in opts)
+            {
+                var digit = o?["digit"]?.GetValue<string>()?.Trim();
+                var transitionKey = o?["transition"]?.GetValue<string>();
+                if (string.IsNullOrEmpty(digit) || string.IsNullOrEmpty(transitionKey)) continue;
+                if (digit.Length != 1)
+                {
+                    _logger.LogWarning(
+                        "IvrMenuNodeHandler [{Uuid}]: hot-digit option '{Digit}' is not a single character — skipped",
+                        ctx.ChannelUuid, digit);
+                    continue;
+                }
+                var target = transitions?[transitionKey]?.GetValue<string>();
+                if (!string.IsNullOrEmpty(target))
+                    optionMap[digit] = target;
+            }
+        }
+
+        if (optionMap.Count == 0)
+            _logger.LogWarning(
+                "IvrMenuNodeHandler [{Uuid}]: hot-digit listener armed with no usable options — every press will be ignored",
+                ctx.ChannelUuid);
+
+        ctx.Vars["_hot_digit_options"] = JsonSerializer.Serialize(optionMap);
+        ctx.Vars["_hot_digit_node_id"] = nodeId;
+
+        _logger.LogInformation(
+            "IvrMenuNodeHandler [{Uuid}]: hot-digit listener armed — digits=[{Digits}]",
+            ctx.ChannelUuid, string.Join(",", optionMap.Keys));
+
+        var next = transitions?["default"]?.GetValue<string>();
+        return new TelephonyNodeResult(next, "armed");
     }
 
     private static TelephonyNodeResult Follow(JsonObject? transitions, string preferredKey)

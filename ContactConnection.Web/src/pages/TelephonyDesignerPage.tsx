@@ -43,6 +43,7 @@ import OnCallDisconnectedNode from '../components/telephony-designer/nodes/OnCal
 import OnCustomEventNode from '../components/telephony-designer/nodes/OnCustomEventNode'
 import DtmfNode from '../components/telephony-designer/nodes/DtmfNode'
 import IvrMenuNode from '../components/telephony-designer/nodes/IvrMenuNode'
+import ClearHotDigitListenerNode from '../components/telephony-designer/nodes/ClearHotDigitListenerNode'
 import SecureCollectNode from '../components/telephony-designer/nodes/SecureCollectNode'
 import DelayNode from '../components/telephony-designer/nodes/DelayNode'
 import RepeatNode from '../components/telephony-designer/nodes/RepeatNode'
@@ -101,6 +102,7 @@ const nodeTypes = {
   tf_script_pop: ScriptPopNode,
   tf_dtmf: DtmfNode,
   tf_ivr_menu: IvrMenuNode,
+  tf_clear_hot_digit: ClearHotDigitListenerNode,
   tf_secure_collect: SecureCollectNode,
   tf_delay: DelayNode,
   tf_repeat: RepeatNode,
@@ -159,8 +161,18 @@ function toTelDef(
   }
 }
 
-function normHandle(h: string | null | undefined): string | null {
-  return !h || h === 'default' ? null : h
+// For a node with a single physical source handle (or none), "default" is the implicit/only
+// handle — collapsed to null so React Flow matches it against that one unlabeled handle and no
+// redundant "default" label shows on the wire. For 'multi'-handle nodes, "default" can instead be
+// ONE OF SEVERAL real, explicitly-id'd handles (tf_route_to_queue's default+on_timeout;
+// tf_ivr_menu's per-digit options + default in async/hot-digit mode) — collapsing it to null
+// there is wrong: React Flow has no unlabeled handle to fall back to on a multi-handle node, so
+// the edge ends up mis-attached to whichever handle happens to resolve first (found live, S141 —
+// an async tf_ivr_menu's "default" edge reattached itself onto the digit-option handle on reload).
+// Keep the literal id for those so it matches its own real handle.
+function normHandle(h: string | null | undefined, collapseDefault: boolean): string | null {
+  if (!h) return null
+  return h === 'default' && collapseDefault ? null : h
 }
 
 function fromTelDef(def: TelephonyFlowDefinition): {
@@ -190,13 +202,16 @@ function fromTelDef(def: TelephonyFlowDefinition): {
     // Fixed-exit-option nodes (e.g. tf_general_api_call) render one physical "default" handle —
     // the option name travels as edge data, not as a distinct handle id.
     const isFixedOptionNode = FIXED_EXIT_OPTIONS[nodeDef.type] !== undefined
+    // 'multi'-handle nodes can have "default" as one of several REAL positioned handles
+    // (tf_route_to_queue, async tf_ivr_menu) — don't collapse it to null for those (see normHandle).
+    const collapseDefault = isFixedOptionNode || TELEPHONY_NODE_META[nodeDef.type]?.handles !== 'multi'
     for (const [handle, target] of Object.entries(nodeDef.transitions)) {
       const edgeId = `e-${id}-${target}-${handle}`
       const edgeDef = def._waypoints?.[edgeId]
-      const normalizedHandle = normHandle(handle)
+      const normalizedHandle = normHandle(handle, collapseDefault)
       const visualHandle = isFixedOptionNode ? null : normalizedHandle
       const seen = edges.filter(
-        (e) => e.source === id && normHandle(e.sourceHandle) === normalizedHandle && e.target === target
+        (e) => e.source === id && normHandle(e.sourceHandle, collapseDefault) === normalizedHandle && e.target === target
       )
       if (seen.length > 0) continue
       edges.push({

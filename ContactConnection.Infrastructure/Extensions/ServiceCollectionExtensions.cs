@@ -217,6 +217,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ITelephonyNodeHandler, SecureCollectNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, DelayNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, RepeatNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, ClearHotDigitListenerNodeHandler>();
 
         // Call session store (singleton — Redis operations are inherently stateless)
         services.AddSingleton<ITelephonyCallSessionStore, RedisCallSessionStore>();

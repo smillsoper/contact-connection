@@ -129,4 +129,75 @@ public class IvrMenuNodeHandlerTests
         Assert.Contains("\"1\":\"node_sales\"", ctx.Vars["_ivr_options"]);
         Assert.DoesNotContain("\"2\"", ctx.Vars["_ivr_options"]);
     }
+
+    // ── alwaysListen (hot-digit / async) mode — S141 ──────────────────────────────
+
+    private static JsonObject HotDigitNode() => new()
+    {
+        ["type"] = "tf_ivr_menu",
+        ["nodeId"] = "tf_ivr_menu_hot",
+        ["alwaysListen"] = true,
+        ["options"] = new JsonArray
+        {
+            new JsonObject { ["digit"] = "1", ["transition"] = "callback" },
+        },
+        ["transitions"] = new JsonObject
+        {
+            ["default"] = "node_hold_loop",
+            ["callback"] = "node_callback_offer",
+        },
+    };
+
+    [Fact]
+    public async Task AlwaysListen_ArmsListener_ReturnsDefaultImmediately_NoEslCalls()
+    {
+        var esl = NewEsl();
+        var ctx = Ctx(esl.Object);
+
+        var result = await NewHandler().ExecuteAsync(HotDigitNode(), ctx);
+
+        Assert.Equal("node_hold_loop", result.NextNodeId);
+        Assert.Equal("armed", result.TransitionTaken);
+        Assert.Equal("tf_ivr_menu_hot", ctx.Vars["_hot_digit_node_id"]);
+        Assert.Contains("\"1\":\"node_callback_offer\"", ctx.Vars["_hot_digit_options"]);
+
+        esl.Verify(e => e.TransferAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        esl.Verify(e => e.SetChannelVarAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AlwaysListen_NoEslNeeded_WorksEvenWithoutOne()
+    {
+        // Async mode never touches the channel at all — unlike sync mode, a missing ESL
+        // connection shouldn't push it to no_match (there's no capture to fail).
+        var ctx = Ctx(esl: null);
+        var result = await NewHandler().ExecuteAsync(HotDigitNode(), ctx);
+        Assert.Equal("node_hold_loop", result.NextNodeId);
+    }
+
+    [Fact]
+    public async Task AlwaysListen_MultiDigitOption_IsSkipped_SingleDigitOnly()
+    {
+        var node = HotDigitNode();
+        ((JsonArray)node["options"]!).Add(new JsonObject { ["digit"] = "12", ["transition"] = "callback" });
+        var ctx = Ctx(NewEsl().Object);
+
+        await NewHandler().ExecuteAsync(node, ctx);
+
+        Assert.Contains("\"1\":\"node_callback_offer\"", ctx.Vars["_hot_digit_options"]);
+        Assert.DoesNotContain("\"12\"", ctx.Vars["_hot_digit_options"]);
+    }
+
+    [Fact]
+    public async Task AlwaysListen_NoOptionsWired_ArmsEmptyMap_StillReturnsDefault()
+    {
+        var node = HotDigitNode();
+        node["options"] = new JsonArray();
+        var ctx = Ctx(NewEsl().Object);
+
+        var result = await NewHandler().ExecuteAsync(node, ctx);
+
+        Assert.Equal("node_hold_loop", result.NextNodeId);
+        Assert.Equal("{}", ctx.Vars["_hot_digit_options"]);
+    }
 }

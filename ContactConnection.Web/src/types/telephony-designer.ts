@@ -20,6 +20,7 @@ export type TelephonyNodeType =
   // Signal / media actions
   | 'tf_dtmf'
   | 'tf_ivr_menu'
+  | 'tf_clear_hot_digit'
   | 'tf_secure_collect'
   | 'tf_delay'
   | 'tf_repeat'
@@ -119,6 +120,13 @@ export interface TelNodeData extends Record<string, unknown> {
   terminators?: string
   /** Each maps an exact DTMF entry to a named transition (its own source handle on the canvas). */
   options?: { digit: string; transition: string; label?: string }[]
+  // tf_ivr_menu — hot-digit / async mode (S141). When true: arms a single-digit-only background
+  // listener from `options` above and returns via "default" immediately, instead of running the
+  // usual blocking play_and_get_digits capture. Every other tf_ivr_menu field above (prompt,
+  // min/max/tries/timeout/terminators, no_match) is unused in this mode. Cleared automatically on
+  // entering any synchronous capture node or a real agent/transfer bridge, or explicitly via the
+  // "Clear DTMF Listener" node (tf_clear_hot_digit).
+  alwaysListen?: boolean
   // tf_secure_collect — PCI guided DTMF capture. Ordered list of fields; each is one
   // play_and_get_digits step. Digits are AES-encrypted into call_records.sensitive_data and
   // exposed as {{secure.<key>}}. The recording is masked for the whole capture.
@@ -353,8 +361,14 @@ export const TELEPHONY_NODE_META: Record<
   tf_ivr_menu: {
     label: 'IVR Menu',
     color: '#0d9488',
-    description: 'Play a prompt, collect DTMF, branch per option',
+    description: 'Play a prompt, collect DTMF, branch per option — or, in hot-digit mode, silently listen in the background',
     handles: 'multi',
+  },
+  tf_clear_hot_digit: {
+    label: 'Clear DTMF Listener',
+    color: '#4b5563',
+    description: 'Explicitly disarm an active hot-digit listener (IVR Menu in "always listen" mode)',
+    handles: 'single',
   },
   tf_secure_collect: {
     label: 'Secure Collect',
@@ -518,7 +532,10 @@ export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
         minDigits: 1, maxDigits: 1, maxTries: 3,
         timeoutMs: 5000, interDigitTimeoutMs: 3000, terminators: '',
         options: [{ digit: '1', transition: 'option_1' }],
+        alwaysListen: false,
       }
+    case 'tf_clear_hot_digit':
+      return { label: 'Clear DTMF Listener' }
     case 'tf_secure_collect':
       return {
         label: 'Secure Collect',

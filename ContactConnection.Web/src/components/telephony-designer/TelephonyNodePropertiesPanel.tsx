@@ -1375,13 +1375,81 @@ function IvrMenuNodeEditor({
   const labelCls = 'block text-xs text-gray-400 mb-1'
   const options = (data.options as { digit: string; transition: string }[] | undefined) ?? []
   const maxDigits = (data.maxDigits as number) ?? 1
+  const alwaysListen = !!(data.alwaysListen as boolean)
 
   const setOptions = (next: { digit: string; transition: string }[]) => onChange({ options: next })
   const updateOption = (i: number, patch: Partial<{ digit: string; transition: string }>) =>
     setOptions(options.map((o, idx) => (idx === i ? { ...o, ...patch } : o)))
 
+  const asyncToggle = (
+    <label className="flex items-start gap-2 bg-indigo-950/40 border border-indigo-800 rounded px-2.5 py-2 cursor-pointer">
+      <input
+        type="checkbox"
+        className="mt-0.5"
+        checked={alwaysListen}
+        onChange={(e) => onChange({ alwaysListen: e.target.checked })}
+      />
+      <span>
+        <span className="block text-xs font-medium text-indigo-300">Always listen (no timeout)</span>
+        <span className="block text-[10px] text-gray-400 leading-snug mt-0.5">
+          Arms a silent background digit listener and continues the flow immediately — doesn't play
+          a prompt or block anything. Good for "press 1 at any time to request a callback" while
+          hold music/announcements keep playing. Cleared automatically when the flow enters another
+          DTMF capture or bridges to an agent, or explicitly via a "Clear DTMF Listener" node.
+        </span>
+      </span>
+    </label>
+  )
+
+  if (alwaysListen)
+    return (
+      <div className="flex flex-col gap-3">
+        {asyncToggle}
+        <div>
+          <label className={labelCls}>Hot digits — single keypress → transition name (its own handle)</label>
+          <div className="flex flex-col gap-1.5">
+            {options.map((o, i) => (
+              <div key={i} className="flex items-center gap-1.5">
+                <input
+                  className={`${inputCls} font-mono w-16 text-center`}
+                  placeholder="1"
+                  maxLength={1}
+                  value={o.digit}
+                  onChange={(e) => updateOption(i, { digit: e.target.value.replace(/[^0-9*#]/g, '').slice(0, 1) })}
+                />
+                <span className="text-gray-600 text-xs">→</span>
+                <input
+                  className={`${inputCls} font-mono`}
+                  placeholder="callback_offer"
+                  value={o.transition}
+                  onChange={(e) => updateOption(i, { transition: e.target.value.replace(/[^a-z0-9_]/gi, '_').toLowerCase() })}
+                />
+                <button
+                  type="button"
+                  onClick={() => setOptions(options.filter((_, idx) => idx !== i))}
+                  className="text-gray-500 hover:text-red-400 text-sm px-1"
+                >×</button>
+              </div>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => setOptions([...options, { digit: '', transition: `hot_digit_${options.length + 1}` }])}
+            className="mt-2 text-xs text-teal-400 hover:text-teal-300"
+          >+ Add hot digit</button>
+          <p className="text-[10px] text-gray-500 mt-1.5 leading-snug">
+            One keypress each — no multi-digit sequences in this mode. An unconfigured digit is
+            ignored entirely (no invalid-entry handling, no retry count). Wire the
+            <span className="font-mono text-gray-400"> default</span> handle to whatever the flow
+            should do right after arming (e.g. the hold-music loop).
+          </p>
+        </div>
+      </div>
+    )
+
   return (
     <div className="flex flex-col gap-3">
+      {asyncToggle}
       <div>
         <AudioPicker
           value={(data.promptAudioFileId as string) ?? ''}
