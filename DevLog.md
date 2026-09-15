@@ -153,6 +153,7 @@
 | 141 | 2026-09-14 | 9:04 AM PDT | 10:31 AM PDT | 87 min | ~14165 min |
 | 142 | 2026-09-14 | 10:35 AM PDT | 11:21 AM PDT | 46 min | ~14211 min |
 | 143 | 2026-09-15 | 9:46 AM PDT | 11:41 AM PDT | 115 min | ~14326 min |
+| 144 | 2026-09-15 | 11:49 AM PDT | 12:25 PM PDT | 36 min | ~14362 min |
 
 ---
 
@@ -8004,3 +8005,94 @@ retire the .cc softphone route.
 **Closed this session:** contactconnection.io SPF/DKIM/DMARC (item 2); cc_timesync crash-loop
 (item 3); CommitmentEvents JSONB ValueComparer (item 4); ServiceLevelThresholdSeconds widget
 (item 6).
+
+---
+
+## Session 144
+
+**Date:** 2026-09-15
+**Start:** 11:49 AM PDT
+**End:** 12:25 PM PDT
+**Duration:** 36 minutes
+**Total Duration:** ~14362 minutes
+
+### Focus
+
+Opened with a carry-over audit (found several previously-flagged items were already stale/closed
+and corrected the project's own memory to match), then closed the two real items still open:
+`isVerified` wiring on the address node, and re-confirming the address-validation jump-back fix
+still holds in current code.
+
+### 1. Carry-over audit — corrected stale memory, no code changes
+
+Cross-checked five items the user believed were already handled against `DevLog.md` and current
+code: Agent Connect Tone + "Playing greeting" indicator (confirmed done + live-verified S142),
+`WipeSensitiveData` retention job (confirmed done + live-verified S142), API Hardening Checklist
+(confirmed fully closed since Session 90), and the softphone re-registration blip (confirmed fixed
+S106 / live-verified S107 — this one was actually already correct in memory; an earlier mis-read on
+my part had listed it as open). One item did **not** check out: `AddressNodeHandler.cs` still had
+`isVerified` hardcoded `false` in the live code despite the surrounding address-validation/ZIP/
+autocomplete vendor APIs being fully built — flagged instead of assumed closed.
+
+### 2. `isVerified` wiring on the address node
+
+Asked the user to settle the one real semantic ambiguity before writing code: when an agent
+overrides a vendor suggestion (keeps original despite a correction, picks "Original Address" among
+multiple matches, "Continue as Manually Verified" after no-match), should `isVerified` be `true`
+(agent signed off) or `false` (vendor never actually confirmed it)? User chose **false — reflects
+vendor confirmation only**, matching the convention the no-match path already used.
+
+Backend: `AddressSubmission.IsVerified` (new, `bool?`) replaces the hardcoded `false` in
+`BuildAddressObject`. Frontend: `FlowPanel.tsx`'s `exact_match` auto-continue path and both
+`AddressValidationModal.tsx` variants (`CorrectedVariant`, `MultipleMatchesVariant`) now stamp
+`isVerified` explicitly per the locked rule; `NoMatchVariant` already did.
+
+**A real regression caught by a new test before it reached the live flow:** the node's stored
+output object round-trips `isVerified` as a JSON boolean, but `MakeState()` re-deserializes that
+same stored object into `AddressSubmission` to prefill the form on jump-back — a naive `string?`
+field there throws on the boolean mismatch, and the handler's blanket `catch` silently wipes the
+*entire* prefill, not just `isVerified`. Fixed with a `FlexibleBoolConverter` (`bool?`) accepting
+either the frontend's raw string or the stored boolean. New
+`tests/ContactConnection.Infrastructure.Tests/FlowEngine/NodeHandlers/AddressNodeHandlerTests.cs`
+(9 tests) — first automated coverage this handler has ever had; covers this exact regression plus
+every isVerified branch (default-false, explicit true/false, case-insensitivity, garbage input,
+required-field validation, and the jump-back prefill itself).
+
+### 3. Address validation jump-back — re-confirmed, not re-broken
+
+Traced the existing jump-back mechanism (`NodeDisplay.tsx`'s stable
+`nodeId:JSON(prefilledAddress)` key, from the original Session 41 fix) and confirmed it's still
+intact in current code — no regression from the intervening sessions. The project's own memory on
+this (`project_address_validation_jumpback.md`) had already said RESOLVED since Session 41, but the
+memory index summary line had gone stale and still read as an open item; corrected.
+
+### State
+
+`dotnet build` (whole solution) and `dotnet test`: **744/744 passing** (159 Domain, 20 Application,
+464 Infrastructure — +9 net this session, 101 Api). `npm run build` (`tsc -b && vite build`) clean,
+0 errors. No new migrations.
+
+### Live verification session
+
+Started `dotnet watch run --project ContactConnection.Api` (user's own dev-stack services already
+running) with a log monitor armed for errors/exceptions during the test. User ran a real CRM script
+flow with address nodes wired to the real validation API: submitted an address, accepted a vendor
+correction, jumped back — form showed the corrected address; submitted again keeping the original
+address, jumped back — form showed the original address. No errors in the API log throughout
+(only the routine dev-environment HTTPS-redirect warning and the expected outbound
+`api.zip-codes.com` validation calls). User confirmed no issues.
+
+Also separately confirmed during this session (outside the address work): the S143 phantom-call
+fix's DB backstop (`HandleDidCallAsync`, previously unverified in isolation) is now live-verified
+by the user — both parts of that fix are confirmed working in practice.
+
+### Next session — pick up here
+
+Nothing explicitly queued. Remaining carry-overs: DNC Registry Integration (`doNotCall` still a
+placeholder); Telnyx Verified Numbers (not started); RMD filing; .cc → .io migration tail;
+contactconnection.io DMARC policy tightening (`p=none` → `quarantine` → `reject`, still in the
+1-2 week monitor-only window from Session 143); Dashboards endpoint authz; broader FlowEngine test
+coverage; retire the .cc softphone route.
+
+**Closed this session:** `isVerified` wiring on the address node; address-validation jump-back
+re-confirmed (no code change needed, memory corrected); S143 phantom-call DB backstop live-verified.

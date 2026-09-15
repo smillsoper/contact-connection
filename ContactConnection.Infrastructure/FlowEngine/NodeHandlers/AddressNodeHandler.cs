@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using ContactConnection.Application.Interfaces.Services;
 
@@ -37,7 +38,10 @@ namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 ///   isOutlyingUS  — true when state is PR / GU / VI / AS / MP / UM
 ///   isAKHI        — true when state is AK or HI
 ///   isForeign     — true when country is not US and not Canadian postal code
-///   isVerified    — always false (address validation API pending — wire up after API designer)
+///   isVerified    — true only when the stored address is exactly what the address-validation
+///                   vendor API returned (exact match, an accepted correction, or a selected
+///                   multiple-match candidate); false whenever the agent overrides with a value
+///                   the vendor didn't confirm, or when validation never ran
 /// </summary>
 public partial class AddressNodeHandler(IVariableResolver resolver)
     : NodeHandlerBase(resolver), INodeHandler
@@ -262,7 +266,7 @@ public partial class AddressNodeHandler(IVariableResolver resolver)
             ["isOutlyingUS"]      = isOutlying,
             ["isForeign"]         = isForeign,
             ["isAKHI"]            = isAKHI,
-            ["isVerified"]        = false,
+            ["isVerified"]        = s.IsVerified ?? false,
         };
         if (s.Latitude.HasValue)  obj["latitude"]  = s.Latitude.Value;
         if (s.Longitude.HasValue) obj["longitude"] = s.Longitude.Value;
@@ -308,8 +312,34 @@ public class AddressSubmission
     public string? Zip            { get; set; }
     public string? Zip4           { get; set; }
     public string? Country        { get; set; }
+    // The frontend sends this as a JSON string ("true"/"false", matching every other field on
+    // this Record<string,string>-shaped submission), but the node's own stored output object
+    // round-trips it as a real JSON boolean (see BuildAddressObject) — MakeState() re-deserializes
+    // that stored object into this same class to prefill the form on jump-back, so this needs to
+    // accept both shapes rather than throwing (which would silently wipe the whole prefill via the
+    // catch in MakeState()).
+    [JsonConverter(typeof(FlexibleBoolConverter))]
+    public bool? IsVerified       { get; set; }
     [System.Text.Json.Serialization.JsonNumberHandling(System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString)]
     public double? Latitude       { get; set; }
     [System.Text.Json.Serialization.JsonNumberHandling(System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString)]
     public double? Longitude      { get; set; }
+}
+
+/// <summary>Accepts a JSON boolean or a "true"/"false" string; anything else is null.</summary>
+public class FlexibleBoolConverter : JsonConverter<bool?>
+{
+    public override bool? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+        reader.TokenType switch
+        {
+            JsonTokenType.True or JsonTokenType.False => reader.GetBoolean(),
+            JsonTokenType.String => bool.TryParse(reader.GetString(), out var b) ? b : null,
+            _ => null,
+        };
+
+    public override void Write(Utf8JsonWriter writer, bool? value, JsonSerializerOptions options)
+    {
+        if (value.HasValue) writer.WriteBooleanValue(value.Value);
+        else writer.WriteNullValue();
+    }
 }

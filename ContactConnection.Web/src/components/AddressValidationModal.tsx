@@ -166,7 +166,11 @@ function CorrectedVariant({
         </button>
         <button
           type="button"
-          onClick={() => onSelectAddress(selected === 'corrected' ? correctedAddress : originalAddress)}
+          onClick={() => onSelectAddress(
+            selected === 'corrected'
+              ? { ...correctedAddress, isVerified: 'true' }
+              : { ...originalAddress, isVerified: 'false' },
+          )}
           className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-500 transition-colors"
         >
           Continue with {selected === 'corrected' ? 'Corrected' : 'Original'}
@@ -197,7 +201,9 @@ function MultipleMatchesVariant({
   ]
 
   const selectedAddress =
-    selected === 'original' ? originalAddress : (allOptions[selected as number]?.address ?? originalAddress)
+    selected === 'original'
+      ? { ...originalAddress, isVerified: 'false' }
+      : { ...(allOptions[selected as number]?.address ?? originalAddress), isVerified: 'true' }
 
   return (
     <>

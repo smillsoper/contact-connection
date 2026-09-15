@@ -100,7 +100,7 @@ function FlowSessionView({ entry, hub, onEnd }: FlowSessionViewProps) {
       try {
         const result = await flowsApi.validateAddress(entry.sessionId, address)
         if (result.outcomeKey === 'exact_match') {
-          const finalAddress = { ...address, ...(result.correctedFields ?? {}) }
+          const finalAddress = { ...address, ...(result.correctedFields ?? {}), isVerified: 'true' }
           await advance(JSON.stringify(finalAddress))
         } else {
           setValidationModal({ result, address })
