@@ -30,8 +30,19 @@ public interface ICallStateHistoryRepository
     /// </summary>
     Task<int> GetMaxSequenceAsync(
         string tenantSchemaName, Guid callRecordId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Counts calls answered on time vs late against Campaign.ServiceLevelThresholdSeconds,
+    /// among rows stamped with a non-null MetServiceLevel (see CallStateHistoryEntry) whose
+    /// EnteredAt falls at/after sinceUtc. campaignIds null = every campaign in the tenant.
+    /// Used by the Service Level dashboard widget.
+    /// </summary>
+    Task<ServiceLevelStats> GetServiceLevelStatsAsync(
+        string tenantSchemaName, List<Guid>? campaignIds, DateTimeOffset sinceUtc, CancellationToken ct = default);
 }
 
 public record CampaignStateCount(Guid CampaignId, string State, int Count);
 
 public record NonTerminalCall(Guid CallRecordId, Guid CampaignId);
+
+public record ServiceLevelStats(int Met, int Missed);

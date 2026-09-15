@@ -360,6 +360,28 @@ public sealed class EslBackgroundService : BackgroundService
 
         await using var db = dbFactory.Create(tenant.SchemaName);
 
+        // Defensive backstop against the phantom-re-park race (Session 143): AnswerNodeHandler
+        // sets park_after_bridge=true on every caller channel so a mid-call leg pull (e.g.
+        // tf_secure_collect) can re-bridge later — but that same flag re-parks the caller on ANY
+        // bridge teardown, including the final, normal end of a call, right as
+        // HandleChannelHangupCoreAsync is still mid-flight completing that same CallRecord. The
+        // park_after_bridge=false fix there closes the race at the source; this catches it here
+        // too in case the timing isn't airtight — if this exact channel already has a CallRecord
+        // that reached a terminal state, this CHANNEL_PARK is a stale re-park of an already-
+        // finished call, not a new inbound call. Kill the dead/dying channel and stop.
+        var staleRecord = await db.CallRecords
+            .Where(r => r.ContactIdExternal == channelUuid && r.OverallStatus != CallRecordStatus.Active)
+            .OrderByDescending(r => r.CreatedAt)
+            .FirstOrDefaultAsync(ct);
+        if (staleRecord is not null)
+        {
+            _logger.LogWarning(
+                "CHANNEL_PARK DID {Uuid}: stale re-park of already-{Status} CallRecord {RecordId} — killing channel, not creating a duplicate",
+                channelUuid, staleRecord.OverallStatus, staleRecord.Id);
+            await esl.HangupChannelAsync(channelUuid, ct);
+            return;
+        }
+
         // A fired scheduled-callback leg carries cc_callback_id — its connected call record is a
         // "callback" source record, and ScheduledCallbackConnectionService links it back + marks
         // the row completed once the flow has run (below). cc_target_flow_id (when set) says which
@@ -1484,6 +1506,18 @@ public sealed class EslBackgroundService : BackgroundService
         if (session is not null)
         {
             var sessionUuid = session.ChannelUuid;
+
+            // This is the generic, final call-completion path — every mid-call leg-pull scenario
+            // (_sc_in_progress, _xfer_in_progress, _vm_in_progress, queue-callback placeholder,
+            // etc.) already special-cased and returned above, so reaching here means the call is
+            // genuinely over. AnswerNodeHandler set park_after_bridge=true on this channel so a
+            // MID-call leg pull (e.g. tf_secure_collect) can re-bridge later — but that same flag
+            // means FreeSWITCH re-parks the caller on ANY bridge teardown, including this final
+            // one, which then gets misread as a brand-new inbound call (see phantom-call
+            // investigation, Session 143). Flip it off as the very first action, before the slow
+            // DB/flow-engine work below, to close the race against FreeSWITCH's own near-instant
+            // re-park as tightly as possible. Never throws on failure (SendApiAsync only logs).
+            await esl.SetChannelVarAsync(sessionUuid, "park_after_bridge", "false", ct);
 
             // Read assigned agent before deleting session
             var assignedAgentIdStr = session.Vars.GetValueOrDefault("_assigned_agent_id");

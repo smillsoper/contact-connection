@@ -38,12 +38,23 @@ export interface PendingQueueCallbackRow {
   retry_after: string | null
 }
 
+export interface ServiceLevelThresholdData {
+  met: number
+  missed: number
+  /** null when met + missed === 0 (no answered calls in the window yet). */
+  percent_in_sl: number | null
+}
+
 function buildQuery(params: WidgetFilterConfig): string {
   const parts: string[] = []
   if (params.campaignId) parts.push(`campaignId=${params.campaignId}`)
   if (params.clientId) parts.push(`clientId=${params.clientId}`)
   if (params.groupId) parts.push(`groupId=${params.groupId}`)
   if (params.loggedInOnly) parts.push('loggedInOnly=true')
+  if (params.timeWindow) {
+    parts.push(`timeWindowMode=${params.timeWindow.mode}`)
+    if (params.timeWindow.value != null) parts.push(`timeWindowValue=${params.timeWindow.value}`)
+  }
   return parts.length ? `?${parts.join('&')}` : ''
 }
 
@@ -59,4 +70,7 @@ export const dashboardWidgetsApi = {
 
   pendingQueueCallbacks: (params: WidgetFilterConfig) =>
     api.get<PendingQueueCallbackRow[]>(`/api/v1/dashboard-widgets/pending-queue-callbacks${buildQuery(params)}`),
+
+  serviceLevelThreshold: (params: WidgetFilterConfig) =>
+    api.get<ServiceLevelThresholdData>(`/api/v1/dashboard-widgets/service-level-threshold${buildQuery(params)}`),
 }

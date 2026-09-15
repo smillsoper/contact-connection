@@ -39,5 +39,12 @@ export default function WidgetIcon({ type }: { type: DashboardWidgetType }) {
           <path d="M18 4v2.2l1.4 1" stroke="#0ea5e9" strokeWidth="1.5" strokeLinecap="round" />
         </svg>
       )
+    case 'service_level_threshold':
+      return (
+        <svg viewBox="0 0 24 24" className="w-7 h-7">
+          <circle cx="12" cy="12" r="8" fill="none" stroke="#ef4444" strokeWidth="4" />
+          <path d="M12 4 A8 8 0 0 1 19.3 16.5" fill="none" stroke="#22c55e" strokeWidth="4" strokeLinecap="round" />
+        </svg>
+      )
   }
 }

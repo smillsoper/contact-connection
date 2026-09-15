@@ -150,7 +150,7 @@ public class Campaign
         Priority                             = Math.Clamp(priority, 1, 10);
         AfterCallWorkSeconds                 = Math.Max(0, afterCallWorkSeconds);
         CallerIdNumber                       = callerIdNumber?.Trim();
-        MaxQueueSize                         = Math.Max(1, maxQueueSize);
+        MaxQueueSize                         = Math.Max(0, maxQueueSize);  // 0 = unlimited (see RouteToQueueNodeHandler / TransferNodeHandler)
         QueueTimeoutSeconds                  = Math.Max(0, queueTimeoutSeconds);
         ServiceLevelThresholdSeconds         = Math.Max(0, serviceLevelThresholdSeconds);
         ShortAbandonThresholdSeconds         = Math.Max(0, shortAbandonThresholdSeconds);

@@ -104,4 +104,17 @@ public class CallStateHistoryRepository(ITenantDbContextFactory factory) : ICall
             .Select(e => (int?)e.Sequence)
             .MaxAsync(ct) ?? 0;
     }
+
+    public async Task<ServiceLevelStats> GetServiceLevelStatsAsync(
+        string tenantSchemaName, List<Guid>? campaignIds, DateTimeOffset sinceUtc, CancellationToken ct = default)
+    {
+        await using var db = factory.Create(tenantSchemaName);
+        var query = db.CallStateHistory.Where(e => e.MetServiceLevel != null && e.EnteredAt >= sinceUtc);
+        if (campaignIds is not null)
+            query = query.Where(e => campaignIds.Contains(e.CampaignId));
+
+        var met = await query.CountAsync(e => e.MetServiceLevel == true, ct);
+        var missed = await query.CountAsync(e => e.MetServiceLevel == false, ct);
+        return new ServiceLevelStats(met, missed);
+    }
 }

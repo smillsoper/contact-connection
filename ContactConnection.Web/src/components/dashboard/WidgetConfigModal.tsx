@@ -1,26 +1,35 @@
 import { useEffect, useState } from 'react'
 import SearchableSelect from '../SearchableSelect'
 import { listClients, listCampaigns, listAgentGroups } from '../../api/telephony'
-import type { WidgetFilterConfig, WidgetFilterFields } from '../../types/dashboard'
+import type { TimeWindowConfig, WidgetFilterConfig, WidgetFilterFields } from '../../types/dashboard'
 
 interface Props {
   title: string
   fields: WidgetFilterFields
   initial: WidgetFilterConfig
-  onSave: (config: WidgetFilterConfig) => void
+  initialWidgetTitle: string
+  onSave: (config: WidgetFilterConfig, widgetTitle: string | undefined) => void
   onClose: () => void
 }
 
+const DEFAULT_HOURS = 1
+const DEFAULT_MINUTES = 30
+
 // Exactly one of client/campaign/group scopes a widget at a time — picking one clears the
 // others, since the backend's agent-set resolution only honors a single filter dimension.
-export default function WidgetConfigModal({ title, fields, initial, onSave, onClose }: Props) {
+export default function WidgetConfigModal({ title, fields, initial, initialWidgetTitle, onSave, onClose }: Props) {
   const [clients, setClients] = useState<{ id: string; name: string }[]>([])
   const [campaigns, setCampaigns] = useState<{ id: string; name: string }[]>([])
   const [groups, setGroups] = useState<{ id: string; name: string }[]>([])
+  const [widgetTitle, setWidgetTitle] = useState(initialWidgetTitle)
   const [clientId, setClientId] = useState(initial.clientId ?? '')
   const [campaignId, setCampaignId] = useState(initial.campaignId ?? '')
   const [groupId, setGroupId] = useState(initial.groupId ?? '')
   const [loggedInOnly, setLoggedInOnly] = useState(initial.loggedInOnly ?? false)
+  const [timeWindowMode, setTimeWindowMode] = useState<TimeWindowConfig['mode']>(initial.timeWindow?.mode ?? 'today')
+  const [timeWindowValue, setTimeWindowValue] = useState(
+    initial.timeWindow?.value ?? (initial.timeWindow?.mode === 'minutes' ? DEFAULT_MINUTES : DEFAULT_HOURS),
+  )
 
   useEffect(() => {
     listClients().then(setClients).catch(() => {})
@@ -34,7 +43,10 @@ export default function WidgetConfigModal({ title, fields, initial, onSave, onCl
       campaignId: campaignId || undefined,
       groupId: groupId || undefined,
       loggedInOnly: loggedInOnly || undefined,
-    })
+      timeWindow: fields.timeWindow
+        ? (timeWindowMode === 'today' ? { mode: 'today' } : { mode: timeWindowMode, value: timeWindowValue })
+        : undefined,
+    }, widgetTitle.trim() || undefined)
     onClose()
   }
 
@@ -48,6 +60,17 @@ export default function WidgetConfigModal({ title, fields, initial, onSave, onCl
         <p className="text-xs text-gray-500 mb-4">Filter which data this widget shows. Pick one — the most specific wins.</p>
 
         <div className="space-y-3">
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Widget Title</label>
+            <input
+              type="text"
+              value={widgetTitle}
+              onChange={(e) => setWidgetTitle(e.target.value)}
+              placeholder="Leave blank to use the default name"
+              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-sky-500"
+            />
+            <p className="text-[11px] text-gray-500 mt-1">Handy once a filter below narrows this to one client or campaign — rename it so the tile says what it's actually showing.</p>
+          </div>
           {fields.client && (
             <div>
               <label className="block text-xs text-gray-400 mb-1">Client</label>
@@ -94,6 +117,41 @@ export default function WidgetConfigModal({ title, fields, initial, onSave, onCl
               />
               Logged in only
             </label>
+          )}
+          {fields.timeWindow && (
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Time Window</label>
+              <div className="flex items-center gap-2">
+                <select
+                  value={timeWindowMode}
+                  onChange={(e) => {
+                    const mode = e.target.value as TimeWindowConfig['mode']
+                    setTimeWindowMode(mode)
+                    if (mode === 'hours') setTimeWindowValue(DEFAULT_HOURS)
+                    else if (mode === 'minutes') setTimeWindowValue(DEFAULT_MINUTES)
+                  }}
+                  className="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-sky-500"
+                >
+                  <option value="today">Today</option>
+                  <option value="hours">Last N hours</option>
+                  <option value="minutes">Last N minutes</option>
+                </select>
+                {timeWindowMode !== 'today' && (
+                  <input
+                    type="number"
+                    min={1}
+                    value={timeWindowValue}
+                    onChange={(e) => setTimeWindowValue(Math.max(1, Number(e.target.value)))}
+                    className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-sky-500"
+                  />
+                )}
+              </div>
+              <p className="text-[11px] text-gray-500 mt-1">
+                {timeWindowMode === 'today'
+                  ? "Resets at midnight in the tenant's timezone — the usual meaning of a daily service level."
+                  : 'A moving window ending now — never resets.'}
+              </p>
+            </div>
           )}
         </div>
 

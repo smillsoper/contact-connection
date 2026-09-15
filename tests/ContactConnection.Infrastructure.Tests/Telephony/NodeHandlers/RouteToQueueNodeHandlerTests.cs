@@ -221,4 +221,39 @@ public class RouteToQueueNodeHandlerTests
             CallHistoryState.InQueue, It.IsAny<Guid>(), null, null,
             null, null, null, It.IsAny<CancellationToken>()), Times.Once);
     }
+
+    /// <summary>MaxQueueSize = 0 means unlimited -- the queue-full check must be skipped
+    /// entirely regardless of how many calls are already queued.</summary>
+    [Fact]
+    public async Task MaxQueueSizeZero_IsUnlimited_EntersQueueRegardlessOfCurrentCount()
+    {
+        var campaign = Campaign.Create(Guid.NewGuid(), Guid.NewGuid(), "Test", "test");
+        campaign.Update(
+            name: "Test", description: null,
+            direction: CampaignDirection.Inbound, dialMode: CampaignDialMode.Manual,
+            priority: 5, afterCallWorkSeconds: 30, callerIdNumber: null,
+            maxQueueSize: 0, queueTimeoutSeconds: 300, serviceLevelThresholdSeconds: 30,
+            shortAbandonThresholdSeconds: 10,
+            queueAccelerationEnabled: false, queueAccelerationIntervalSeconds: 60, queueAccelerationPriorityBoost: 1,
+            ringStrategy: CampaignRingStrategy.RingAll, ringTopN: 3);
+
+        await using var db = NewDb(campaign);
+
+        var sessionStore = new Mock<ITelephonyCallSessionStore>();
+        sessionStore.Setup(s => s.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(QueuedSessions(campaign.Id, count: 500)); // far past any normal ceiling
+
+        var callStateRecorder = new Mock<ICallStateHistoryRecorder>();
+
+        var handler = NewHandler(db, sessionStore, callStateRecorder, out _);
+        var ctx = NewContext(campaign.Id);
+        var result = await handler.ExecuteAsync(new JsonObject(), ctx);
+
+        Assert.Equal("queued", result.TransitionTaken);
+        Assert.Equal("true", ctx.Vars["_queued"]);
+        callStateRecorder.Verify(r => r.RecordAsync(
+            It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(),
+            CallHistoryState.Abandoned, It.IsAny<Guid>(), null, It.IsAny<string?>(),
+            CallAbandonType.QueueFull, null, null, It.IsAny<CancellationToken>()), Times.Never);
+    }
 }

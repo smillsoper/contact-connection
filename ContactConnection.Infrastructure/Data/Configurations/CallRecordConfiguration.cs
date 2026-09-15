@@ -3,6 +3,7 @@ using ContactConnection.Domain.Entities;
 using ContactConnection.Domain.ValueObjects;
 using ContactConnection.Domain.ValueObjects.Commerce;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace ContactConnection.Infrastructure.Data.Configurations;
@@ -10,6 +11,14 @@ namespace ContactConnection.Infrastructure.Data.Configurations;
 public class CallRecordConfiguration : IEntityTypeConfiguration<CallRecord>
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    // JSONB list properties are mutated in place (list.Add(...)) — without an explicit comparer
+    // EF's change detection compares by reference and misses the mutation, so the column never
+    // gets written. Snapshot with a shallow copy; equate by element sequence.
+    private static ValueComparer<List<T>> ListComparer<T>() => new(
+        (a, b) => (a ?? new List<T>()).SequenceEqual(b ?? new List<T>()),
+        v => v == null ? 0 : v.Aggregate(0, (h, x) => HashCode.Combine(h, x!.GetHashCode())),
+        v => v == null ? new List<T>() : v.ToList());
 
     public void Configure(EntityTypeBuilder<CallRecord> builder)
     {
@@ -84,7 +93,8 @@ public class CallRecordConfiguration : IEntityTypeConfiguration<CallRecord>
             .HasConversion(
                 v => JsonSerializer.Serialize(v, JsonOptions),
                 v => JsonSerializer.Deserialize<List<CommitmentEvent>>(v, JsonOptions) ?? new())
-            .HasDefaultValueSql("'[]'::jsonb");
+            .HasDefaultValueSql("'[]'::jsonb")
+            .Metadata.SetValueComparer(ListComparer<CommitmentEvent>());
 
         builder.Property(r => r.RecordingEvents)
             .HasColumnName("recording_events")
@@ -159,5 +169,9 @@ public class CallRecordConfiguration : IEntityTypeConfiguration<CallRecord>
         builder.HasIndex(r => new { r.TenantId, r.AgentId })
             .HasFilter("overall_status = 'active'")
             .HasDatabaseName("idx_call_records_active");
+        // Backs the phantom-re-park guard in EslBackgroundService.HandleDidCallAsync — looked up
+        // by raw FreeSWITCH channel UUID on every CHANNEL_PARK DID event.
+        builder.HasIndex(r => r.ContactIdExternal)
+            .HasDatabaseName("idx_call_records_contact_id_external");
     }
 }

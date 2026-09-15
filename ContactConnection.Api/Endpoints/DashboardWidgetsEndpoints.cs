@@ -209,6 +209,73 @@ public static class DashboardWidgetsEndpoints
 
             return Results.Ok(result);
         });
+
+        // Answered-on-time vs answered-late against Campaign.ServiceLevelThresholdSeconds,
+        // stamped per-call on CallStateHistoryEntry.MetServiceLevel when a queued call bridges
+        // to an agent (see EslBackgroundService). timeWindowMode/timeWindowValue pick the lookback
+        // window the widget's config chose — "today" (tenant-local calendar day, the standard
+        // call-center meaning of this stat), or a rolling N hours/minutes.
+        group.MapGet("/service-level-threshold", async (
+            Guid? campaignId,
+            Guid? clientId,
+            string? timeWindowMode,
+            int? timeWindowValue,
+            ICampaignRepository campaigns,
+            ICallStateHistoryRepository callStateHistory,
+            TenantContext tenantContext,
+            CancellationToken ct) =>
+        {
+            if (tenantContext.Current is null) return Results.Unauthorized();
+            var tenant = tenantContext.Current;
+
+            List<Guid>? campaignIds = null;
+            if (campaignId.HasValue)
+            {
+                campaignIds = [campaignId.Value];
+            }
+            else if (clientId.HasValue)
+            {
+                campaignIds = (await campaigns.GetAllAsync(clientId, ct)).Select(c => c.Id).ToList();
+            }
+
+            var sinceUtc = ComputeSinceUtc(tenant.Timezone, timeWindowMode, timeWindowValue);
+            var stats = await callStateHistory.GetServiceLevelStatsAsync(tenant.SchemaName, campaignIds, sinceUtc, ct);
+
+            var total = stats.Met + stats.Missed;
+            return Results.Ok(new
+            {
+                met           = stats.Met,
+                missed        = stats.Missed,
+                percent_in_sl = total > 0 ? Math.Round(stats.Met * 100.0 / total, 1) : (double?)null,
+            });
+        });
+    }
+
+    /// <summary>
+    /// "today" = tenant-local calendar day (the standard call-center meaning of Service Level),
+    /// converted to its UTC start via the tenant's IANA timezone so DST transitions land correctly.
+    /// "hours"/"minutes" = a simple rolling window back from now, no timezone conversion needed.
+    /// </summary>
+    private static DateTimeOffset ComputeSinceUtc(string tenantTimezone, string? mode, int? value)
+    {
+        var nowUtc = DateTimeOffset.UtcNow;
+        return mode switch
+        {
+            "hours"   => nowUtc.AddHours(-(value is > 0 ? value.Value : 1)),
+            "minutes" => nowUtc.AddMinutes(-(value is > 0 ? value.Value : 30)),
+            _         => TodayStartUtc(tenantTimezone, nowUtc),
+        };
+    }
+
+    private static DateTimeOffset TodayStartUtc(string tenantTimezone, DateTimeOffset nowUtc)
+    {
+        TimeZoneInfo tz;
+        try { tz = TimeZoneInfo.FindSystemTimeZoneById(tenantTimezone); }
+        catch (TimeZoneNotFoundException) { tz = TimeZoneInfo.Utc; }
+
+        var localNow = TimeZoneInfo.ConvertTime(nowUtc, tz);
+        var localMidnight = new DateTime(localNow.Year, localNow.Month, localNow.Day, 0, 0, 0, DateTimeKind.Unspecified);
+        return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(localMidnight, tz), TimeSpan.Zero);
     }
 
     private static int ParseIntOrZero(string? s) => int.TryParse(s, out var n) ? n : 0;

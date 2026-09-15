@@ -298,10 +298,11 @@ function SettingsForm({ campaign, flows, onSaved }: SettingsFormProps) {
           <div>
             <label className="block text-xs text-gray-400 mb-1">Max Queue Size</label>
             <input
-              type="number" min={1} value={maxQueueSize}
+              type="number" min={0} value={maxQueueSize}
               onChange={(e) => setMaxQueueSize(Number(e.target.value))}
               className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
             />
+            <p className="text-xs text-gray-500 mt-1">0 = unlimited (no queue ceiling)</p>
           </div>
           <div>
             <label className="block text-xs text-gray-400 mb-1">Queue Timeout (seconds)</label>
@@ -310,6 +311,7 @@ function SettingsForm({ campaign, flows, onSaved }: SettingsFormProps) {
               onChange={(e) => setQueueTimeout(Number(e.target.value))}
               className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
             />
+            <p className="text-xs text-gray-500 mt-1">0 = never time out (queue forever)</p>
           </div>
 
           {/* Service Level Threshold — inbound only */}

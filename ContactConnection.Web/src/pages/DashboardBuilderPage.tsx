@@ -17,6 +17,7 @@ import AgentStateCounterWidget from '../components/dashboard/widgets/AgentStateC
 import AgentListWidget from '../components/dashboard/widgets/AgentListWidget'
 import CallStateByCampaignWidget from '../components/dashboard/widgets/CallStateByCampaignWidget'
 import CallbacksWidget from '../components/dashboard/widgets/CallbacksWidget'
+import ServiceLevelThresholdWidget from '../components/dashboard/widgets/ServiceLevelThresholdWidget'
 import {
   DashboardLiveContext, DashboardCallStateLiveContext, DashboardRegistrationLiveContext,
   DashboardScheduledCallbackLiveContext,
@@ -32,6 +33,7 @@ function renderWidget(type: DashboardWidgetType, config: WidgetFilterConfig) {
     case 'agent_list':                return <AgentListWidget config={config} />
     case 'call_state_by_campaign':    return <CallStateByCampaignWidget config={config} />
     case 'callbacks':                 return <CallbacksWidget config={config} />
+    case 'service_level_threshold':   return <ServiceLevelThresholdWidget config={config} />
   }
 }
 
@@ -201,8 +203,8 @@ export default function DashboardBuilderPage() {
     setWidgets((prev) => prev.filter((w) => w.id !== widgetId))
   }
 
-  function handleConfigSave(widgetId: string, config: WidgetFilterConfig) {
-    setWidgets((prev) => prev.map((w) => (w.id === widgetId ? { ...w, config } : w)))
+  function handleConfigSave(widgetId: string, config: WidgetFilterConfig, title: string | undefined) {
+    setWidgets((prev) => prev.map((w) => (w.id === widgetId ? { ...w, config, title } : w)))
   }
 
   const handleSave = useCallback(async () => {
@@ -366,7 +368,7 @@ export default function DashboardBuilderPage() {
               {widgets.map((w) => (
                 <div key={w.id}>
                   <WidgetShell
-                    title={WIDGET_META[w.widgetType].label}
+                    title={w.title || WIDGET_META[w.widgetType].label}
                     onConfigure={editMode ? () => setConfiguringId(w.id) : undefined}
                     onRemove={editMode ? () => handleRemove(w.id) : undefined}
                   >
@@ -392,7 +394,8 @@ export default function DashboardBuilderPage() {
           title={`Configure — ${WIDGET_META[configuringWidget.widgetType].label}`}
           fields={WIDGET_FILTER_FIELDS[configuringWidget.widgetType]}
           initial={configuringWidget.config}
-          onSave={(config) => handleConfigSave(configuringWidget.id, config)}
+          initialWidgetTitle={configuringWidget.title ?? ''}
+          onSave={(config, title) => handleConfigSave(configuringWidget.id, config, title)}
           onClose={() => setConfiguringId(null)}
         />
       )}

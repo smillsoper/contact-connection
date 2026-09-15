@@ -152,6 +152,7 @@
 | 140 | 2026-09-14 | 8:29 AM PDT | 9:03 AM PDT | 34 min | ~14078 min |
 | 141 | 2026-09-14 | 9:04 AM PDT | 10:31 AM PDT | 87 min | ~14165 min |
 | 142 | 2026-09-14 | 10:35 AM PDT | 11:21 AM PDT | 46 min | ~14211 min |
+| 143 | 2026-09-15 | 9:46 AM PDT | 11:41 AM PDT | 115 min | ~14326 min |
 
 ---
 
@@ -7841,3 +7842,165 @@ override exists to accommodate is still not built.
 RMD filing; .cc → .io migration tail; contactconnection.io SPF/DKIM/DMARC; cc_timesync
 crash-loop; CommitmentEvents JSONB ValueComparer; ServiceLevelThresholdSeconds widget;
 Dashboards endpoint authz; broader FlowEngine test coverage; retire the .cc softphone route.
+
+## Session 143
+
+**Date:** 2026-09-15
+**Start:** 9:46 AM PDT
+**End:** 11:41 AM PDT
+**Duration:** 115 minutes
+**Total Duration:** ~14326 minutes
+
+### Focus
+
+Worked top-to-bottom through the carry-over list (queue timeout labeling, DMARC, cc_timesync,
+CommitmentEvents ValueComparer, Max Queue Size, ServiceLevelThresholdSeconds widget), then chased
+a real phantom-call bug the user hit while live-testing the new widget.
+
+### 1. Queue Timeout (seconds) — confirmed 0 already means "queue forever," just undocumented
+
+`QueuePollingService`'s eviction check was already gated on `QueueTimeoutSeconds > 0`, so 0 always
+meant unlimited — the gap was purely that the UI gave no hint. Added "0 = never time out (queue
+forever)" under the field on `CampaignDetailPage.tsx`. No backend change.
+
+### 2. contactconnection.io DMARC (closes a long-standing carry-over)
+
+SPF/DKIM were already done (Session 94-ish, per `project_domain` memory). Added
+`_dmarc.contactconnection.io` TXT (`v=DMARC1; p=none; rua=mailto:dmarc-reports@...; fo=1`) —
+monitor-only to start since two independent senders (M365, Resend) both DKIM-sign as
+`@contactconnection.io` and alignment needed confirming before enforcing. `dmarc-reports@` added
+as a free M365 alias (no new license) with an inbox rule filing reports to a subfolder. Still
+open: watch aggregate reports ~1-2 weeks, then tighten `p=none` → `quarantine` → `reject`.
+
+### 3. `cc_timesync` crash-loop — root-caused and fixed
+
+`chronyd -d` runs as PID 1 in this container under Docker's own restart supervision. Its default
+pidfile write/check meant every restart read back a stale pidfile from the previous failed start —
+and since PID 1 is always alive in a running container, chronyd always found "another chronyd"
+(itself) and refused to start. Fixed with `pidfile ''` in `chrony.conf` (chrony's documented way to
+disable the pidfile entirely) — nothing else in this single-process sidecar depends on it.
+Rebuilt + recreated the container; **live-verified**: 0 restarts, clean startup log, NTP source
+selected.
+
+### 4. `CommitmentEvents` JSONB `ValueComparer` (closes a Session-99-era latent bug)
+
+`CallRecord.CommitmentEvents` / `CallInteraction.CommitmentEvents` are `List<CommitmentEvent>`
+JSONB columns mapped via `.HasConversion(...)` with no `ValueComparer` — EF Core compared them by
+reference, so an in-place `.Add(evt)` between load and `SaveChanges` was never detected and the
+column silently never got written. Since CommitmentEvents IS the call's lock registry, this was a
+real correctness risk, not just a data-loss nicety. Fixed both configs with the same
+`ListComparer<T>()` pattern already established in `ScreenRecordingConfiguration`. 3 new
+`CommitmentEventsValueComparerTests` (CallRecord single-append, CallRecord multi-append across
+separate saves, CallInteraction single-append) — verified they actually catch the regression by
+temporarily reverting the `CallRecord` comparer and confirming 2 of 3 failed exactly as expected.
+
+### 5. Max Queue Size — found and fixed a real "0 = unlimited" bug (not just a labeling gap, unlike item 1)
+
+User asked what Max Queue Size does and whether 0 means unlimited. Traced the enforcement code
+(`RouteToQueueNodeHandler`, `TransferNodeHandler`) — both already gate on `MaxQueueSize > 0`,
+correctly treating 0 as "no ceiling." But `Campaign.Update()` clamped the floor to
+`Math.Max(1, maxQueueSize)` — so 0 could **never actually be saved**, making that unlimited branch
+dead code through the normal UI/API path. Fixed the clamp to `Math.Max(0, ...)`, matching
+`QueueTimeoutSeconds`'s existing pattern. Added the same UI hint style as item 1 (`min={0}` +
+"0 = unlimited (no queue ceiling)"). New tests: `CampaignQueueSizeTests` (3, domain clamp) +
+`RouteToQueueNodeHandlerTests.MaxQueueSizeZero_IsUnlimited_...` (1, end-to-end: 500 queued calls,
+ceiling 0, still enters queue) — both verified to fail against the old clamp before confirming the
+fix.
+
+### 6. ServiceLevelThresholdSeconds supervisor dashboard widget (closes a long-standing carry-over)
+
+Built end-to-end per the user's spec: prominent center `%` stat, green "In SL" / red "Missed"
+legend with counts, Client/Campaign filter (matching `call_state_by_campaign`'s scope resolution),
+plus a new **Time Window** control (Today in tenant timezone / Last N hours / Last N minutes) —
+the user's own follow-up requirement once asked, since this stat needs a lookback window that the
+existing live-snapshot widgets don't. Backend: `ICallStateHistoryRepository.
+GetServiceLevelStatsAsync` (counts `MetServiceLevel` true/false, scoped by campaign + a
+`sinceUtc` cutoff) + `GET /api/v1/dashboard-widgets/service-level-threshold` (tenant-timezone-aware
+"today" boundary via `TimeZoneInfo.ConvertTimeToUtc`, or a rolling hours/minutes window). Frontend:
+`ServiceLevelThresholdWidget.tsx` (donut, mirrors `AgentStateCounterWidget`'s layout), new
+`WIDGET_FILTER_FIELDS.timeWindow` flag threaded through `WidgetConfigModal.tsx`.
+
+**Also added, per the user's explicit ask**: every dashboard widget now supports an editable
+**Widget Title** in its config modal (falls back to the type's default label when blank) — not
+scoped to just this widget, since a filtered widget's generic type-name header stops making sense
+once it's narrowed to one client/campaign. `DashboardWidgetInstance` gained an optional `title`
+field; `WidgetConfigModal`'s `onSave` signature widened to carry it alongside the filter config.
+
+3 new `CallStateHistoryRepositoryServiceLevelTests`. **Live-verified** end to end: user placed 3
+real test calls (2 in SL, 1 missed), widget showed 66.7% — matches 2/3 exactly. Two UI iterations
+from live feedback: the "no data yet" placeholder (an em-dash) rendered as an unreadable bold bar
+at large font — changed to plain `0%` per user preference; then the donut's inner hole was too
+small for a 5-character `"66.7%"` string (tuned for `AgentStateCounterWidget`'s short integer
+counts) — widened `innerRadius` 60%→68%, `outerRadius` 90%→95%, center-font scale 0.22→0.17.
+
+### 7. Real bug found + fixed: phantom call after agent-initiated hangup
+
+While live-testing item 6, the user hit a genuine production bug twice: hanging up from the
+**agent's** side (not the caller's) left a "phantom" call showing on-call forever with no real
+caller — CRM popped, whisper played, but nothing was actually connected.
+
+**Root-caused via `call_state_history` timestamps + a captured live log trace** (started a
+`dotnet watch` instance specifically to catch it, per the user's request): a second, phantom
+`CallRecord` was created within ~22ms of the real call's `completed` row, every time. The log
+showed the real call's `CHANNEL_HANGUP` (agent leg) completing correctly, immediately followed by
+`CHANNEL_UNBRIDGE` and then a **second `CHANNEL_PARK`** for the *same caller channel UUID* —
+which `HandleChannelParkAsync` has no guard for, so it ran the whole inbound flow again as if it
+were a new call. The phantom flow's own log lines showed every ESL command against that channel
+failing with `-ERR No such channel!` (`uuid_setvar`, `uuid_broadcast`, the final `uuid_bridge`) —
+the channel was already dead the entire time the phantom flow ran, silently, since nothing checked
+those failures.
+
+Cause: `AnswerNodeHandler` sets `park_after_bridge=true` on every caller channel so it survives a
+**mid-call** leg pull (e.g. `tf_secure_collect`) and can be re-bridged afterward. That flag applies
+to *any* bridge teardown, though — including a normal, final, agent-initiated hangup — so
+FreeSWITCH re-parked the caller instead of ending the call. The existing reactive safety-net
+`uuid_kill` (in `HandleChannelHangupCoreAsync`, for exactly this "wrong leg hung up" case) couldn't
+win the race — it only fires after several hundred ms of DB/flow-engine work, by which point
+FreeSWITCH had already re-parked the caller and the phantom flow had already started.
+
+**Two-part fix, per the user's explicit ask to not break the mid-call secure-collect path**:
+1. `HandleChannelHangupCoreAsync`'s generic completion block (reached only once every mid-call
+   special case — `_sc_in_progress`, `_xfer_in_progress`, `_vm_in_progress`, queue-callback
+   placeholder — has already been checked and ruled out above it) now flips
+   `park_after_bridge=false` on the caller channel as its very first action, before any of the
+   slow DB/flow-engine work, closing the race at the source. Scoped precisely to the "call is
+   genuinely over" branch, so mid-call secure-collect leg-pulls are untouched.
+2. Defensive backstop in `HandleDidCallAsync`: if a `CHANNEL_PARK` DID event's channel UUID
+   already has a `CallRecord` that reached a terminal state, treat it as a stale re-park — kill
+   the channel, don't create a duplicate. New `idx_call_records_contact_id_external` index
+   (migration `AddCallRecordContactIdExternalIndex`) backs the added lookup.
+
+No new automated tests for either fix — `EslBackgroundService`'s bridge/hangup handlers need a
+live ESL connection to exercise meaningfully (this class's established convention; every prior fix
+here — S135/S136/S138 — was live-verified the same way). **Live-verified**: user reproduced the
+exact same scenario (agent on Break → call queues → agent available → delivered → CRM logged →
+agent hangs up) and confirmed no phantom call, agent state transitioned ACW → Available correctly.
+Confirmed in the log: `CHANNEL_HANGUP` → `CHANNEL_UNBRIDGE` → no second `CHANNEL_PARK`. Confirmed in
+`call_state_history`: zero non-terminal rows after the test. Fix #2 (the DB backstop) wasn't
+itself exercised in isolation — fix #1 alone closed the race on this retest.
+
+Two Redis `FLUSHDB`s + manual `call_state_history`/`call_records` cleanup (dev tenant only) to
+close out the two phantom rows from before the fix and reset the dashboard between test passes.
+
+### State
+
+`dotnet test`: **735/735 passing** (159 Domain, 20 Application, 455 Infrastructure, 101 Api — +10
+net this session). `dotnet build` and `npm run build`/`tsc -b` both clean, 0 new warnings. One new
+migration: `AddCallRecordContactIdExternalIndex` (applied to `tenant_test_tenant`).
+
+### Next session — pick up here
+
+Nothing explicitly queued. Worth keeping an eye on: the phantom-call fix's defensive DB backstop
+(item 7, fix #2) has build/logic coverage but hasn't itself been exercised live — fix #1 alone
+closed the race every time it was tested, so the backstop's own behavior is unconfirmed in
+practice. Also watch the DMARC aggregate reports (item 2) over the next 1-2 weeks before tightening
+policy. Otherwise pull from the standing carry-over list below.
+
+### Carry-overs (updated — several items closed this session)
+
+RMD filing; .cc → .io migration tail; Dashboards endpoint authz; broader FlowEngine test coverage;
+retire the .cc softphone route.
+
+**Closed this session:** contactconnection.io SPF/DKIM/DMARC (item 2); cc_timesync crash-loop
+(item 3); CommitmentEvents JSONB ValueComparer (item 4); ServiceLevelThresholdSeconds widget
+(item 6).
