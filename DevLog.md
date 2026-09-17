@@ -154,6 +154,7 @@
 | 142 | 2026-09-14 | 10:35 AM PDT | 11:21 AM PDT | 46 min | ~14211 min |
 | 143 | 2026-09-15 | 9:46 AM PDT | 11:41 AM PDT | 115 min | ~14326 min |
 | 144 | 2026-09-15 | 11:49 AM PDT | 12:25 PM PDT | 36 min | ~14362 min |
+| 145 | 2026-09-15 | 12:27 PM PDT | 12:52 PM PDT | 25 min | ~14387 min |
 
 ---
 
@@ -8096,3 +8097,81 @@ coverage; retire the .cc softphone route.
 
 **Closed this session:** `isVerified` wiring on the address node; address-validation jump-back
 re-confirmed (no code change needed, memory corrected); S143 phantom-call DB backstop live-verified.
+
+---
+
+## Session 145
+
+**Date:** 2026-09-15
+**Start:** 12:27 PM PDT
+**End:** 12:52 PM PDT
+**Duration:** 25 minutes
+**Total Duration:** ~14387 minutes
+
+### Focus
+
+User reported two supervisor-dashboard/softphone symptoms: after refreshing the agent portal, the
+dashboard sometimes still showed the agent as Available even though the softphone itself was
+Unavailable; and occasionally a "Could not reach FreeSWITCH" error required 2-3 refreshes to clear.
+Investigated live against the running dev stack with temporary diagnostic logging.
+
+### 1. Sofia registration handling itself is correct — verified, no bug found there
+
+Added temporary logging to `EslBackgroundService.HandleSofiaRegistrationAsync` dumping full raw
+ESL event vars, then reproduced live. Confirmed the existing `sofia::unregister`/`sofia::expire`
+→ force-Unavailable safety net (built S118) fires correctly and promptly (within ~1s) on a real
+browser-refresh socket-disconnection, and the frontend's own belt-and-suspenders explicit
+`PUT /api/v1/agent-state {code: unavailable}` on first registration (`SoftphonePanel.tsx`) also
+fires correctly. No defect found in this path. Diagnostic logging removed after use.
+
+### 2. Real bug found and fixed: SignalR groups never rejoined after automatic reconnect
+
+While investigating, traced why a dashboard tab could look "connected" yet stop receiving live
+pushes: `.withAutomaticReconnect()` reconnects the underlying transport, but SignalR groups
+(`Groups.AddToGroupAsync`) are tied to the connection id, which changes on every reconnect — a
+group joined via an explicit client `invoke()` call is silently lost unless re-joined after
+reconnecting. `FlowHub.OnConnectedAsync` already auto-rejoins the per-agent `agent:{agentId}`
+group on every connect (screen-pop delivery was never affected), but three explicit-join call
+sites had no `onreconnected` handler at all:
+- `DashboardBuilderPage.tsx` — `JoinSupervisorView(tenantId)`, affecting every dashboard widget's
+  live agent/call/registration/callback pushes.
+- `FlowPanel.tsx` — `JoinSession(sessionId)` per active flow-session tab.
+- `CallTraceWindowPage.tsx` — `JoinTrace(subscriptionId)` for a running call trace.
+
+This is a real, previously-latent bug independent of what actually triggered tonight's report
+(see below) — any transient network blip, not just an API restart, would have silently frozen
+these views while showing no error. Fixed all three with an `onreconnected(() => ...)` handler
+that re-invokes the appropriate join call; `FlowPanel.tsx`'s handler re-joins every session
+currently in `useFlowSessionsStore` (read via `.getState()`, matching the existing pattern already
+used elsewhere in that file for out-of-render-cycle store access).
+
+### What actually caused tonight's specific reports
+
+Both turned out to be non-issues once traced to their actual cause, not code defects:
+1. **Dashboard stuck on Available** — the user's dashboard tab predated an API restart I performed
+   earlier in the session (stopping/restarting `dotnet watch`); a plain dashboard refresh
+   resolved it. This is exactly the scenario item 2's fix now handles automatically without a
+   manual refresh — an incidental but real improvement from the investigation.
+2. **"Could not reach FreeSWITCH" needing repeated refreshes** — reproduced what looked like a
+   genuine rapid register/unregister flapping loop (new call-id every ~4-6s) while live-tracing
+   ext 1002; user clarified this was themselves repeatedly refreshing the tab during testing, not
+   an underlying instability. No fix needed; nginx's `/sip-ws` proxy already has
+   `proxy_read_timeout`/`proxy_send_timeout` at 3600s, ruling out a proxy-idle-timeout explanation
+   for any future recurrence.
+
+### State
+
+`dotnet build` (whole solution) and `dotnet test`: **744/744 passing** (unchanged — no backend
+test-relevant behavior change; the removed diagnostic log and the three frontend `onreconnected`
+handlers have no existing coverage gap they created). `npm run build` clean, 0 errors. No new
+migrations.
+
+### Next session — pick up here
+
+Nothing explicitly queued from this session. Remaining carry-overs unchanged from Session 144:
+DNC Registry Integration; Telnyx Verified Numbers; RMD filing; .cc → .io migration tail;
+contactconnection.io DMARC policy tightening (still in the 1-2 week monitor-only window);
+Dashboards endpoint authz; broader FlowEngine test coverage; retire the .cc softphone route.
+
+**Closed this session:** SignalR group-rejoin-after-reconnect bug (dashboard, flow sessions, call
+trace) — a real fix, even though it wasn't what triggered tonight's specific reports.

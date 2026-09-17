@@ -159,6 +159,13 @@ export default function DashboardBuilderPage() {
       setLiveScbEvent({ campaignId, change })
     })
 
+    // SignalR groups are tied to the connection id — an automatic reconnect (network blip, or
+    // the API process restarting) gets a new connection id server-side, so the initial
+    // JoinSupervisorView join is silently lost unless re-invoked here. Without this, the
+    // dashboard looks "connected" but stops receiving any live agent/call/registration pushes
+    // until the page is manually refreshed.
+    connection.onreconnected(() => { connection.invoke('JoinSupervisorView', tenantId).catch(console.error) })
+
     connection.start()
       .then(() => connection.invoke('JoinSupervisorView', tenantId))
       .catch((err) => console.error('[SignalR] supervisor dashboard connection failed:', err))

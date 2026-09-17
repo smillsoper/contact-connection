@@ -78,6 +78,16 @@ export default function CallTraceWindowPage() {
       setStopReason(reason)
     })
 
+    // SignalR groups are tied to the connection id — an automatic reconnect (network blip, or
+    // the API restarting) gets a new connection id server-side, so the JoinTrace call made when
+    // the trace started is silently lost unless re-invoked here. Without this, a running trace
+    // window looks "connected" but stops receiving any more matched-call/step/ended pushes.
+    connection.onreconnected(() => {
+      if (subscriptionIdRef.current) {
+        connection.invoke('JoinTrace', subscriptionIdRef.current).catch(console.error)
+      }
+    })
+
     connection.start().catch((err) => console.error('[SignalR] CallTraceHub connection failed:', err))
     connectionRef.current = connection
 

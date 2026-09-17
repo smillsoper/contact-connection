@@ -354,6 +354,18 @@ export default function FlowPanel() {
         current.setSecureCollectEnded(outcome as 'collected' | 'failed' | 'timeout' | 'caller_hung_up')
     })
 
+    // SignalR groups are tied to the connection id, not the (stable) HubConnection object —
+    // an automatic reconnect gets a new connection id server-side, so any explicit
+    // Groups.AddToGroupAsync join (JoinSession below; agent:{agentId} is auto-rejoined by
+    // FlowHub.OnConnectedAsync on every connect) is silently lost unless re-invoked here.
+    // Without this, a mid-session network blip leaves the flow view looking "connected" while
+    // no more node-state pushes for that session ever arrive.
+    connection.onreconnected(() => {
+      for (const entry of useFlowSessionsStore.getState().sessions) {
+        connection.invoke('JoinSession', entry.sessionId).catch(console.error)
+      }
+    })
+
     connection.start()
       .then(() => console.log('[SignalR] FlowHub connected'))
       .catch((err) => console.error('[SignalR] FlowHub connection failed:', err))
