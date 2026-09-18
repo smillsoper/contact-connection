@@ -130,7 +130,7 @@ export interface TelNodeData extends Record<string, unknown> {
   // tf_secure_collect — PCI guided DTMF capture. Ordered list of fields; each is one
   // play_and_get_digits step. Digits are AES-encrypted into call_records.sensitive_data and
   // exposed as {{secure.<key>}}. The recording is masked for the whole capture.
-  secureFields?: {
+  fields?: {
     key: string
     promptAudioFileId?: string
     minDigits?: number
@@ -539,7 +539,7 @@ export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
     case 'tf_secure_collect':
       return {
         label: 'Secure Collect',
-        secureFields: [
+        fields: [
           { key: 'pan', minDigits: 13, maxDigits: 19, terminator: '#', validation: 'luhn' },
           { key: 'expiry', minDigits: 4, maxDigits: 4, terminator: 'none', validation: 'expiry_mmyy' },
           { key: 'cvv', minDigits: 3, maxDigits: 4, terminator: 'none', validation: 'cvv' },

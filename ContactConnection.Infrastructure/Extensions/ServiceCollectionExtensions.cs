@@ -7,6 +7,7 @@ using ContactConnection.Infrastructure.ApiExecution;
 using ContactConnection.Infrastructure.Auth;
 using ContactConnection.Infrastructure.CallTrace;
 using ContactConnection.Infrastructure.Commerce;
+using ContactConnection.Infrastructure.Common;
 using ContactConnection.Infrastructure.Credentials;
 using ContactConnection.Infrastructure.CustomFields;
 using ContactConnection.Infrastructure.Data;
@@ -221,6 +222,10 @@ public static class ServiceCollectionExtensions
 
         // Call session store (singleton — Redis operations are inherently stateless)
         services.AddSingleton<ITelephonyCallSessionStore, RedisCallSessionStore>();
+
+        // {{shared.*}} variable store — bridges the CRM script flow and the telephony call flow
+        // for the same call. Singleton for the same reason as the call session store above.
+        services.AddSingleton<ISharedCallVariableStore, RedisSharedCallVariableStore>();
 
         // Telephony flow engine (scoped — used by EslBackgroundService per call via IServiceScope)
         services.AddScoped<ITelephonyFlowEngine, TelephonyFlowEngine>();

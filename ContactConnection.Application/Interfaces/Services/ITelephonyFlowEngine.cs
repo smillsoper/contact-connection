@@ -47,6 +47,12 @@ public class TelephonyFlowContext
     public IEslCommander? Esl { get; init; }
     public Dictionary<string, string> Vars { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>{{shared.*}} — call-wide variables visible to the CRM script flow for the same
+    /// call too (ISharedCallVariableStore, keyed by CallRecordId). Fetched fresh by the engine at
+    /// the start of ExecuteAsync/ResumeFromNodeAsync/FireEventAsync; distinct from <see cref="Vars"/>,
+    /// which stays private to this telephony call.</summary>
+    public Dictionary<string, string> SharedVars { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Session var keys a handler wants deleted from the persisted session. The engine's
     /// session-sync only ever copies <see cref="Vars"/> <em>into</em> the session, so removing a
     /// key from <see cref="Vars"/> alone is silently undone on the next sync (notably on the

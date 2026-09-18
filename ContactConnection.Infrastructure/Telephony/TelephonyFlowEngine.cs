@@ -19,6 +19,7 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
     private readonly ICallTraceRecorder _traceRecorder;
     private readonly ICallTraceSubscriptionRegistry _traceRegistry;
     private readonly ICallTraceNotifier _traceNotifier;
+    private readonly ISharedCallVariableStore _sharedVars;
     private readonly ILogger<TelephonyFlowEngine> _logger;
 
     public TelephonyFlowEngine(
@@ -28,6 +29,7 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
         ICallTraceRecorder traceRecorder,
         ICallTraceSubscriptionRegistry traceRegistry,
         ICallTraceNotifier traceNotifier,
+        ISharedCallVariableStore sharedVars,
         ILogger<TelephonyFlowEngine> logger)
     {
         _factory        = factory;
@@ -36,6 +38,7 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
         _traceRecorder  = traceRecorder;
         _traceRegistry  = traceRegistry;
         _traceNotifier  = traceNotifier;
+        _sharedVars     = sharedVars;
         _logger         = logger;
     }
 
@@ -43,6 +46,8 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
 
     public async Task ExecuteAsync(TelephonyFlowContext ctx, CancellationToken ct = default)
     {
+        ctx.SharedVars = await _sharedVars.GetAllAsync(ctx.CallRecordId, ct);
+
         await using var db = _factory.Create(ctx.TenantSchemaName);
 
         var phoneNumber = await db.PhoneNumbers
@@ -198,6 +203,7 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
 
         foreach (var (k, v) in session.Vars)
             ctx.Vars[k] = v;
+        ctx.SharedVars = await _sharedVars.GetAllAsync(ctx.CallRecordId, ct);
 
         ctx.Trace = new TelephonyFlowTrace { FlowId = session.FlowId, StartedAt = DateTimeOffset.UtcNow };
 
@@ -258,6 +264,7 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
         };
         foreach (var (k, v) in session.Vars)
             ctx.Vars[k] = v;
+        ctx.SharedVars = await _sharedVars.GetAllAsync(ctx.CallRecordId, ct);
 
         ctx.Trace = new TelephonyFlowTrace { FlowId = flow.Id, FlowName = flow.Name, StartedAt = DateTimeOffset.UtcNow };
 
@@ -338,6 +345,7 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
             ctx.Vars[k] = v;
         foreach (var (k, v) in eventCtx.AdditionalVars)
             ctx.Vars[k] = v;
+        ctx.SharedVars = await _sharedVars.GetAllAsync(ctx.CallRecordId, ct);
 
         ctx.Trace = new TelephonyFlowTrace
         {

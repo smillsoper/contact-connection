@@ -1543,7 +1543,7 @@ function IvrMenuNodeEditor({
   )
 }
 
-type SecureField = NonNullable<TelNodeData['secureFields']>[number]
+type SecureField = NonNullable<TelNodeData['fields']>[number]
 
 const SECURE_VALIDATIONS: { value: NonNullable<SecureField['validation']>; label: string }[] = [
   { value: 'none', label: 'None (any digits of the given length)' },
@@ -1561,9 +1561,9 @@ function SecureCollectNodeEditor({
 }) {
   const inputCls = 'w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-rose-500'
   const labelCls = 'block text-xs text-gray-400 mb-1'
-  const fields = (data.secureFields as SecureField[] | undefined) ?? []
+  const fields = (data.fields as SecureField[] | undefined) ?? []
 
-  const setFields = (next: SecureField[]) => onChange({ secureFields: next })
+  const setFields = (next: SecureField[]) => onChange({ fields: next })
   const updateField = (i: number, patch: Partial<SecureField>) =>
     setFields(fields.map((f, idx) => (idx === i ? { ...f, ...patch } : f)))
 

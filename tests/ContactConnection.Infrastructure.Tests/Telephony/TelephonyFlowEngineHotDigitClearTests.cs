@@ -60,6 +60,8 @@ public class TelephonyFlowEngineHotDigitClearTests
             Mock.Of<ICallTraceRecorder>(),
             Mock.Of<ICallTraceSubscriptionRegistry>(),
             Mock.Of<ICallTraceNotifier>(),
+            Mock.Of<ISharedCallVariableStore>(s =>
+                s.GetAllAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()) == Task.FromResult(new Dictionary<string, string>())),
             NullLogger<TelephonyFlowEngine>.Instance);
 
         await engine.ResumeFromNodeAsync("hd-uuid-1", "n1", Mock.Of<IEslCommander>());
@@ -104,6 +106,8 @@ public class TelephonyFlowEngineHotDigitClearTests
             Mock.Of<ICallTraceRecorder>(),
             Mock.Of<ICallTraceSubscriptionRegistry>(),
             Mock.Of<ICallTraceNotifier>(),
+            Mock.Of<ISharedCallVariableStore>(s =>
+                s.GetAllAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()) == Task.FromResult(new Dictionary<string, string>())),
             NullLogger<TelephonyFlowEngine>.Instance);
 
         await engine.ResumeFromNodeAsync("hd-uuid-2", "n1", Mock.Of<IEslCommander>());
@@ -155,6 +159,8 @@ public class TelephonyFlowEngineHotDigitClearTests
             Mock.Of<ICallTraceRecorder>(),
             Mock.Of<ICallTraceSubscriptionRegistry>(),
             Mock.Of<ICallTraceNotifier>(),
+            Mock.Of<ISharedCallVariableStore>(s =>
+                s.GetAllAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()) == Task.FromResult(new Dictionary<string, string>())),
             NullLogger<TelephonyFlowEngine>.Instance);
 
         await engine.ResumeFromNodeAsync("hd-uuid-3", "n1", Mock.Of<IEslCommander>());

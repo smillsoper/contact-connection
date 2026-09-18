@@ -11,6 +11,9 @@ namespace ContactConnection.Application.Interfaces.Services;
 ///   {{input.[node_id]}} — value captured at a specific input node
 ///   {{api.[node_id].*}} — value from a specific api_call node response
 ///   {{flow.*}}          — variables set during flow execution via set_variable nodes
+///   {{shared.*}}        — variables shared with the telephony call flow for the same call
+///                         (ISharedCallVariableStore, keyed by CallRecordId) — distinct from
+///                         flow.*, which stays private to this CRM session
 /// </summary>
 public interface IVariableResolver
 {
@@ -59,4 +62,11 @@ public class VariableContext
 
     // Variables set via set_variable nodes — keyed by variable name
     public Dictionary<string, string> FlowVars { get; init; } = [];
+
+    // {{shared.*}} — call-wide variables visible to both this CRM session and the telephony call
+    // flow for the same call. Fetched fresh from ISharedCallVariableStore at the start of each
+    // StartAsync/AdvanceAsync/GetCurrentStateAsync call (not cached across requests like the
+    // dictionaries above), so a value the telephony side just set is visible as soon as the agent
+    // next interacts with the script.
+    public Dictionary<string, string> SharedVars { get; init; } = [];
 }

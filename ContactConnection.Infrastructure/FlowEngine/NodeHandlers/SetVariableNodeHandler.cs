@@ -20,11 +20,12 @@ namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 ///   "transitions": { "default": "node_010" }
 /// }
 /// </summary>
-public class SetVariableNodeHandler(IVariableResolver resolver) : NodeHandlerBase(resolver), INodeHandler
+public class SetVariableNodeHandler(IVariableResolver resolver, ISharedCallVariableStore sharedVars)
+    : NodeHandlerBase(resolver), INodeHandler
 {
     public string NodeType => "set_variable";
 
-    public Task<NodeResult> ExecuteAsync(
+    public async Task<NodeResult> ExecuteAsync(
         JsonObject node, FlowExecutionContext ctx,
         string? agentInput, string agentTransition, CancellationToken ct = default)
     {
@@ -66,6 +67,13 @@ public class SetVariableNodeHandler(IVariableResolver resolver) : NodeHandlerBas
                             else
                                 ctx.FlowVars[key] = resolvedValue;
                             break;
+                        case "shared":
+                            // Call-wide, visible to the telephony call flow for the same call too —
+                            // written straight to the shared store, not ctx.FlowVars. No nested-JSON
+                            // form (unlike flow.*) — keep the cross-engine contract to flat values.
+                            ctx.SharedVars[key] = resolvedValue;
+                            await sharedVars.SetAsync(ctx.CallRecordId, key, resolvedValue, ct);
+                            break;
                         default: ctx.FlowVars[targetKey] = resolvedValue; break;
                     }
                 }
@@ -80,7 +88,7 @@ public class SetVariableNodeHandler(IVariableResolver resolver) : NodeHandlerBas
         AppendHistory(ctx, node, input: null, transition: next);
 
         var state = BuildState(ctx, node, resolvedContent: string.Empty);
-        return Task.FromResult(new NodeResult(state, next));
+        return new NodeResult(state, next);
     }
 
     /// <summary>

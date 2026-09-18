@@ -33,6 +33,7 @@ public class FlowEngine : IFlowEngine
     private readonly TenantContext _tenantContext;
     private readonly IFlowNotifier _notifier;
     private readonly ICallTraceRecorder _traceRecorder;
+    private readonly ISharedCallVariableStore _sharedVars;
     private readonly Dictionary<string, INodeHandler> _handlers;
     private readonly ILogger<FlowEngine> _logger;
 
@@ -58,6 +59,7 @@ public class FlowEngine : IFlowEngine
         TenantContext tenantContext,
         IFlowNotifier notifier,
         ICallTraceRecorder traceRecorder,
+        ISharedCallVariableStore sharedVars,
         IEnumerable<INodeHandler> handlers,
         ILogger<FlowEngine> logger)
     {
@@ -69,6 +71,7 @@ public class FlowEngine : IFlowEngine
         _tenantContext = tenantContext;
         _notifier      = notifier;
         _traceRecorder = traceRecorder;
+        _sharedVars    = sharedVars;
         _handlers      = handlers.ToDictionary(h => h.NodeType, StringComparer.OrdinalIgnoreCase);
         _logger        = logger;
     }
@@ -127,6 +130,7 @@ public class FlowEngine : IFlowEngine
         // Populate call_record/caller context from the call record so {{call_record.*}} and
         // {{caller.*}} tags resolve correctly — previously always empty (never wired up).
         await PopulateCallContextAsync(ctx, request.CallRecordId, request.InteractionId, ct);
+        ctx.SharedVars = await _sharedVars.GetAllAsync(ctx.CallRecordId, ct);
 
         var state = await AdvanceInternalAsync(ctx, entryNodeId, agentInput: null, transition: "default", isStart: true, ct);
         state.FlowName = flow.Name;
@@ -154,6 +158,7 @@ public class FlowEngine : IFlowEngine
     {
         var ctx = await LoadFromRedis(request.SessionId, ct)
             ?? throw new InvalidOperationException($"No active session {request.SessionId}.");
+        ctx.SharedVars = await _sharedVars.GetAllAsync(ctx.CallRecordId, ct);
 
         FlowNodeState state;
 
@@ -225,6 +230,7 @@ public class FlowEngine : IFlowEngine
     {
         var ctx = await LoadFromRedis(sessionId, ct);
         if (ctx is null) return null;
+        ctx.SharedVars = await _sharedVars.GetAllAsync(ctx.CallRecordId, ct);
 
         var node = GetNode(ctx.FlowDefinition, ctx.CurrentNodeId);
         if (node is null) return null;

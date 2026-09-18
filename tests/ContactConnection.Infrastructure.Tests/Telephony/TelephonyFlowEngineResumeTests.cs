@@ -63,6 +63,8 @@ public class TelephonyFlowEngineResumeTests
             Mock.Of<ICallTraceRecorder>(),
             Mock.Of<ICallTraceSubscriptionRegistry>(),
             Mock.Of<ICallTraceNotifier>(),
+            Mock.Of<ISharedCallVariableStore>(s =>
+                s.GetAllAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()) == Task.FromResult(new Dictionary<string, string>())),
             NullLogger<TelephonyFlowEngine>.Instance);
 
         await engine.ResumeFromNodeAsync(uuid, "n1", Mock.Of<IEslCommander>());

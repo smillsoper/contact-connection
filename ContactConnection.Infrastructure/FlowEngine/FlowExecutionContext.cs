@@ -24,6 +24,12 @@ public class FlowExecutionContext
 
     // Variable state — projected into VariableContext for resolver calls
     public Dictionary<string, string> FlowVars { get; init; } = [];
+
+    // {{shared.*}} — fetched fresh from ISharedCallVariableStore at the top of every
+    // StartAsync/AdvanceAsync/GetCurrentStateAsync call (see FlowEngine); never persisted as part
+    // of this session's own Redis/Postgres state, since the shared store is itself the source of
+    // truth and is shared with the telephony call flow.
+    public Dictionary<string, string> SharedVars { get; set; } = [];
     public Dictionary<string, string> Inputs { get; init; } = [];
     public Dictionary<string, string> ApiResults { get; init; } = [];
 
@@ -61,7 +67,8 @@ public class FlowExecutionContext
         Tenant     = Tenant,
         Inputs     = Inputs,
         ApiResults = ApiResults,
-        FlowVars   = FlowVars
+        FlowVars   = FlowVars,
+        SharedVars = SharedVars
     };
 
     public string SerializeVariableStore() =>

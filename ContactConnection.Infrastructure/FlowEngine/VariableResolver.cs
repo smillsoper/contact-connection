@@ -8,7 +8,7 @@ namespace ContactConnection.Infrastructure.FlowEngine;
 /// Resolves {{namespace.field}} template tags against a VariableContext.
 ///
 /// Tag format: {{namespace.field}} where namespace is one of:
-///   call_record, caller, agent, tenant, input, api, flow
+///   call_record, caller, agent, tenant, input, api, flow, shared
 ///
 /// For input and api namespaces the field itself contains the node_id:
 ///   {{input.node_001}}          → Inputs["node_001"]
@@ -62,13 +62,15 @@ public partial class VariableResolver : IVariableResolver
     // ── Private helpers ────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Resolves a flow variable key, supporting dot-notation access into stored JSON objects.
-    /// "phone" → returns the raw JSON string stored under "phone"
-    /// "phone.isTollFree" → parses the JSON under "phone" and extracts ["isTollFree"]
+    /// Resolves a variable key out of a flat dictionary, supporting dot-notation access into
+    /// stored JSON objects. "phone" → returns the raw JSON string stored under "phone".
+    /// "phone.isTollFree" → parses the JSON under "phone" and extracts ["isTollFree"]. Shared by
+    /// the flow.* and shared.* namespaces — both are flat string dictionaries with the same
+    /// JSON-object-value convention.
     /// </summary>
-    private static string? ResolveFlowVar(string key, VariableContext context)
+    private static string? ResolveDictVar(Dictionary<string, string> dict, string key)
     {
-        if (context.FlowVars.TryGetValue(key, out var direct))
+        if (dict.TryGetValue(key, out var direct))
             return direct;
 
         var dotIdx = key.IndexOf('.');
@@ -76,7 +78,7 @@ public partial class VariableResolver : IVariableResolver
 
         var objKey = key[..dotIdx];
         var prop   = key[(dotIdx + 1)..];
-        if (!context.FlowVars.TryGetValue(objKey, out var json)) return null;
+        if (!dict.TryGetValue(objKey, out var json)) return null;
 
         try
         {
@@ -102,9 +104,10 @@ public partial class VariableResolver : IVariableResolver
             "caller"      => context.Caller.GetValueOrDefault(key),
             "agent"       => context.Agent.GetValueOrDefault(key),
             "tenant"      => context.Tenant.GetValueOrDefault(key),
-            "flow"        => ResolveFlowVar(key, context),
+            "flow"        => ResolveDictVar(context.FlowVars, key),
             "input"       => context.Inputs.GetValueOrDefault(key),
             "api"         => context.ApiResults.GetValueOrDefault(key),
+            "shared"      => ResolveDictVar(context.SharedVars, key),
             _             => null
         };
     }

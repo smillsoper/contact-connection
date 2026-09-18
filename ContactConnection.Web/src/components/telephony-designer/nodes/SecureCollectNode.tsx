@@ -10,7 +10,7 @@ const SLOT_COLOR: Record<(typeof SLOTS)[number], string> = {
 }
 
 export default function SecureCollectNode({ data, selected }: NodeProps & { data: TelNodeData }) {
-  const fields = (data.secureFields as { key: string }[] | undefined) ?? []
+  const fields = (data.fields as { key: string }[] | undefined) ?? []
 
   const extraHandles = (
     <>

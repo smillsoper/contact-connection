@@ -5,14 +5,17 @@ namespace ContactConnection.Infrastructure.Telephony.NodeHandlers;
 
 /// <summary>
 /// Sets one or more named variables in the flow context.
-/// Values support {{caller.ani}}, {{call.did}}, or {{varName}} references.
+/// Values support {{caller.ani}}, {{call.did}}, {{shared.*}}, or {{varName}} references.
 /// Node data: { "assignments": [{ "key": "myVar", "value": "{{caller.ani}}" }] }
+/// A "shared." key prefix (e.g. "shared.CC_Capture_Success") writes to the call-wide
+/// ISharedCallVariableStore instead of this telephony call's own ctx.Vars — visible to the CRM
+/// script flow for the same call as {{shared.*}} there too.
 /// </summary>
-public class TelSetVariableNodeHandler : ITelephonyNodeHandler
+public class TelSetVariableNodeHandler(ISharedCallVariableStore sharedVars) : ITelephonyNodeHandler
 {
     public string NodeType => "tf_set_variable";
 
-    public Task<TelephonyNodeResult> ExecuteAsync(
+    public async Task<TelephonyNodeResult> ExecuteAsync(
         JsonObject node, TelephonyFlowContext ctx, CancellationToken ct = default)
     {
         var assignments = node["assignments"]?.AsArray();
@@ -24,12 +27,23 @@ public class TelSetVariableNodeHandler : ITelephonyNodeHandler
                 var key = a["key"]?.GetValue<string>();
                 var rawValue = a["value"]?.GetValue<string>() ?? "";
                 if (string.IsNullOrEmpty(key)) continue;
-                ctx.Vars[key] = Resolve(rawValue, ctx);
+                var resolvedValue = Resolve(rawValue, ctx);
+
+                if (key.StartsWith("shared.", StringComparison.OrdinalIgnoreCase))
+                {
+                    var sharedKey = key["shared.".Length..];
+                    ctx.SharedVars[sharedKey] = resolvedValue;
+                    await sharedVars.SetAsync(ctx.CallRecordId, sharedKey, resolvedValue, ct);
+                }
+                else
+                {
+                    ctx.Vars[key] = resolvedValue;
+                }
             }
         }
 
         var nextNodeId = node["transitions"]?["default"]?.GetValue<string>();
-        return Task.FromResult(new TelephonyNodeResult(nextNodeId, "default"));
+        return new TelephonyNodeResult(nextNodeId, "default");
     }
 
     internal static string Resolve(string template, TelephonyFlowContext ctx)
@@ -67,6 +81,13 @@ public class TelSetVariableNodeHandler : ITelephonyNodeHandler
                 "timezone" => tzi.Id,
                 _ => string.Empty,
             };
+        }
+
+        // {{shared.varname}} — call-wide, also visible to the CRM script flow for the same call
+        if (key.StartsWith("shared.", StringComparison.OrdinalIgnoreCase))
+        {
+            var sharedKey = key["shared.".Length..];
+            return ctx.SharedVars.TryGetValue(sharedKey, out var sv) ? sv : string.Empty;
         }
 
         // {{flow.varname}} — strip the "flow." prefix and look up in Vars

@@ -155,6 +155,7 @@
 | 143 | 2026-09-15 | 9:46 AM PDT | 11:41 AM PDT | 115 min | ~14326 min |
 | 144 | 2026-09-15 | 11:49 AM PDT | 12:25 PM PDT | 36 min | ~14362 min |
 | 145 | 2026-09-15 | 12:27 PM PDT | 12:52 PM PDT | 25 min | ~14387 min |
+| 146 | 2026-09-18 | 9:40 AM PDT | 11:13 AM PDT | 93 min | ~14480 min |
 
 ---
 
@@ -8175,3 +8176,114 @@ Dashboards endpoint authz; broader FlowEngine test coverage; retire the .cc soft
 
 **Closed this session:** SignalR group-rejoin-after-reconnect bug (dashboard, flow sessions, call
 trace) — a real fix, even though it wasn't what triggered tonight's specific reports.
+
+---
+
+## Session 146
+
+**Date:** 2026-09-18
+**Start:** 9:40 AM PDT
+**End:** 11:13 AM PDT
+**Duration:** 93 minutes
+**Total Duration:** ~14480 minutes
+
+### Focus
+
+User ran the first real end-to-end test of `trigger_telephony_event` → `tf_secure_collect` against
+their own hand-built flow pair (CRM "Test Script 1" + telephony "Test Campaign 1 - Inbound Call
+Flow"), not a purpose-built scratch fixture, and hit a chain of real issues. Traced and fixed all
+of them live, then built a new feature the last one exposed a genuine need for.
+
+### 1. First repro looked like a stale-session issue — corrected by the user with evidence
+
+Initial theory (a definition edit landing after the call had already started, so
+`ScanEventHandlers` never saw the new Custom Event node) didn't hold up: the user confirmed every
+node was configured, saved, and published *before* every test call, and every call failed
+identically. Live re-test with diagnostic logging showed the custom event *did* fire correctly on
+a fresh call — the real, reproducible failure was downstream.
+
+### 2. Real designer bug: `secureFields` vs `fields` property mismatch
+
+`tf_secure_collect`'s properties panel (`SecureCollectNodeEditor` in
+`TelephonyNodePropertiesPanel.tsx`) and its on-canvas summary badge (`SecureCollectNode.tsx`) both
+read/wrote the field array under `secureFields`; the backend (`SecureCollect.ParseFields`) has
+always read `fields`. This was even the *default template* for a brand-new node
+(`types/telephony-designer.ts`), so every secure-collect node ever built through the visual
+designer — including the user's fully-configured pan/expiry/cvv setup — silently had zero usable
+fields, always taking the `failed` exit. Fixed by renaming the frontend to `fields` in all 3 files
+to match the backend's established, tested contract. One-time consequence: the user's
+already-saved node had to be reconfigured once (same 3 fields, same 3 audio prompts) since its
+data was saved under the old key. Confirmed fixed live — full pan/expiry/cvv capture succeeded
+end to end on the very next test call.
+
+### 3. New feature: `{{shared.*}}` — bidirectional CRM ↔ telephony variable bridge
+
+Once secure-collect itself worked, the user's flow design revealed a real, previously-unknown gap:
+the telephony branch set a result variable (`CC_Capture_Success`) via `tf_set_variable`, but the
+CRM script — already running, waiting for the agent to click Continue — had no way to see it.
+`tf_set_variable`'s telephony-side write only ever reached `TelephonyCallSession.Vars`, entirely
+separate from the CRM `FlowExecutionContext.FlowVars`. Asked the user how they wanted this solved;
+they wanted a general bidirectional mechanism, not a one-off push node ("way more powerful"), then
+confirmed (given the choice) that it should be a **new, separate namespace** rather than unifying
+`flow.*` itself, to avoid changing behavior for every already-built flow.
+
+Built `ISharedCallVariableStore`/`RedisSharedCallVariableStore` (`Infrastructure/Common/`,
+Redis hash keyed by `CallRecordId`, 12h TTL). Wired into both engines: CRM `VariableContext`/
+`VariableResolver` (new `"shared"` namespace dispatch, generalized the old `ResolveFlowVar` into a
+shared `ResolveDictVar` helper) and `FlowEngine` (fetches fresh at the top of
+`StartAsync`/`AdvanceAsync`/`GetCurrentStateAsync`); telephony `TelephonyFlowContext`/
+`TelephonyFlowEngine` (fetches fresh at all 4 entry points: `ExecuteAsync`, `ResumeFromNodeAsync`,
+`SwitchFlowAsync`, `FireEventAsync`). `SetVariableNodeHandler` (CRM) and `TelSetVariableNodeHandler`
+(telephony, previously parameterless) both gained the store dependency for the write side; the
+telephony read side needed no new plumbing — `TelSetVariableNodeHandler`'s static
+`Resolve`/`ResolveKey` helpers are already reused by 6 other telephony node handlers (including
+`TelBranchNodeHandler`'s condition evaluator), so `{{shared.*}}` reads work in all of them for free
+once `ctx.SharedVars` is populated centrally.
+
+Convention: prefix a variable name with `shared.` on either side to cross the boundary (e.g.
+telephony `tf_set_variable` key `shared.CC_Capture_Success`, CRM branch condition
+`{{shared.CC_Capture_Success}} == true`); unprefixed (or explicit `flow.`) behaves exactly as
+before on both sides — purely additive, no existing flow's behavior changed.
+
+New tests: `RedisSharedCallVariableStoreTests` (5, real Redis), `SetVariableNodeHandlerTests` (4,
+CRM handler's first-ever coverage), `VariableResolverSharedNamespaceTests` (5, this resolver's
+first-ever coverage), `TelSetVariableNodeHandlerSharedVarsTests` (5, this telephony handler's
+first-ever coverage) — 19 new, 763/763 solution-wide passing.
+
+**Live-verified end-to-end** on a real Telnyx call using the user's own real-world flow pair: full
+pan/expiry/cvv capture → `tf_set_variable` wrote `shared.CC_Capture_Success = true` → agent
+clicked Continue on the CRM script → branch correctly evaluated `{{shared.CC_Capture_Success}} ==
+true` and took the true exit. User confirmed directly.
+
+### 4. Real race condition flagged by the user, not yet fixed
+
+User correctly identified that `trigger_telephony_event` is fire-and-continue — it only waits for
+`tf_secure_collect` to *start* (returns `"collecting"` almost instantly), not for the branch's
+actual completion, which happens later via FreeSWITCH DTMF events outside the original call's
+lifetime. Nothing currently stops an agent from clicking past a "wait" step before the telephony
+side has written its result. Low practical risk today (DTMF entry across 3 fields takes real
+seconds), but a genuine race. Discussed two possible fixes — reusing the existing
+`ReceiveSecureCollectEnded` SignalR push to auto-advance the CRM script (favored, no new blocking
+primitive needed) vs. a general synchronous-trigger mode requiring real suspend/resume support in
+the CRM `FlowEngine` (bigger lift, doesn't exist today). **User's explicit plan: pick this up as
+its own item next session.**
+
+### State
+
+`dotnet build` (whole solution) and `dotnet test`: **763/763 passing** (159 Domain, 20 Application,
+483 Infrastructure — +19 net this session, 101 Api). `npm run build` clean, 0 errors. No new
+migrations. API stopped at the end of this session per the user — next session will need a fresh
+`dotnet watch run --project ContactConnection.Api` (or equivalent solution build) before live
+testing resumes.
+
+### Next session — pick up here
+
+1. **The async-trigger race** (item 4 above) — user's explicit next-session item. Start with the
+   `ReceiveSecureCollectEnded` auto-advance direction unless redirected.
+2. Otherwise pull from the standing carry-over list, unchanged since Session 145: DNC Registry
+   Integration; Telnyx Verified Numbers; RMD filing; .cc → .io migration tail; contactconnection.io
+   DMARC policy tightening; Dashboards endpoint authz; broader FlowEngine test coverage; retire the
+   .cc softphone route.
+
+**Closed this session:** `secureFields`/`fields` designer property mismatch (tf_secure_collect);
+new `{{shared.*}}` bidirectional variable bridge between CRM and telephony flows.
