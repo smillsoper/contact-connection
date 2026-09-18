@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, type FormEvent } from 'react'
 import type { FlowNodeState } from '../types/flow'
 import type { ZipLookupResult, AutocompleteSuggestion, AutocompleteSelectionResult } from '../api/flows'
 import { COUNTRIES } from '../data/countries'
+import { useCallStore } from '../stores/callStore'
 
 // ── Address form constants ────────────────────────────────────────────────────
 
@@ -156,6 +157,32 @@ interface Props {
 export default function NodeDisplay({ node, onAdvance, onJump, advancing, validating, onValidateAddress, zipLookupResult, zipLookupPending, onLookupZip, onClearZipLookup, autocompleteSuggestions, autocompletePending, autocompleteSelection, onAutocompleteSearch, onAutocompleteSelect, onClearAutocomplete }: Props) {
   const [inputValue, setInputValue] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
+
+  // waitForTelephonyEventName nodes: block the manual Continue click until the named
+  // trigger_telephony_event branch reports done (receiveTelephonyEventEnded), so the agent can't
+  // race ahead of the {{shared.*}} write it's waiting on. FlowPanel's FlowSessionView handles the
+  // actual auto-advance once that push arrives. A per-node fallback timeout (default 60s, tunable
+  // in the designer for events that legitimately take longer) re-enables Continue even if the push
+  // never arrives (e.g. a dropped SignalR reconnect — see project_signalr_reconnect_rejoin) so the
+  // agent is never permanently stuck, since nothing is parked here to force resolution another way.
+  const lastTelephonyEventEnded = useCallStore((s) => s.lastTelephonyEventEnded)
+  const nodeDisplayedAtRef = useRef(Date.now())
+  const [telephonyWaitTimedOut, setTelephonyWaitTimedOut] = useState(false)
+  useEffect(() => {
+    nodeDisplayedAtRef.current = Date.now()
+    setTelephonyWaitTimedOut(false)
+    if (!node.waitForTelephonyEventName) return
+    const timeoutMs = (node.waitForTelephonyEventTimeoutSeconds ?? 60) * 1000
+    const timer = setTimeout(() => setTelephonyWaitTimedOut(true), timeoutMs)
+    return () => clearTimeout(timer)
+  }, [node.nodeId, node.waitForTelephonyEventName, node.waitForTelephonyEventTimeoutSeconds])
+  const hasMatchingTelephonyEndedPush = Boolean(
+    lastTelephonyEventEnded &&
+    lastTelephonyEventEnded.eventName === node.waitForTelephonyEventName &&
+    lastTelephonyEventEnded.at >= nodeDisplayedAtRef.current,
+  )
+  const waitingOnTelephonyEvent =
+    Boolean(node.waitForTelephonyEventName) && !hasMatchingTelephonyEndedPush && !telephonyWaitTimedOut
 
   // Address form state
   const [addrForm, setAddrForm] = useState<AddrForm>(EMPTY_ADDR)
@@ -1135,13 +1162,21 @@ export default function NodeDisplay({ node, onAdvance, onJump, advancing, valida
 
       {/* Script node — just a Next button */}
       {(node.nodeType === 'script' || node.nodeType === 'branch' || node.nodeType === 'set_variable' || node.nodeType === 'api_call') && (
-        <button
-          onClick={() => onAdvance()}
-          disabled={advancing}
-          className="self-start bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg px-5 py-2 text-sm font-medium transition-colors"
-        >
-          {advancing ? 'Advancing…' : 'Continue'}
-        </button>
+        <div className="flex flex-col items-start gap-1.5">
+          <button
+            onClick={() => onAdvance()}
+            disabled={advancing || waitingOnTelephonyEvent}
+            className="self-start bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg px-5 py-2 text-sm font-medium transition-colors"
+          >
+            {advancing ? 'Advancing…' : 'Continue'}
+          </button>
+          {waitingOnTelephonyEvent && (
+            <p className="text-xs text-rose-400">
+              Waiting for telephony event '{node.waitForTelephonyEventName}' to finish… this will
+              advance automatically.
+            </p>
+          )}
+        </div>
       )}
     </div>
   )

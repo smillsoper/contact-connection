@@ -50,6 +50,7 @@ builder.Services.AddSignalR()
 builder.Services.AddScoped<IFlowNotifier, FlowNotifier>();
 builder.Services.AddScoped<ICallTraceNotifier, CallTraceNotifier>();
 builder.Services.AddScoped<ISecureCollectNotifier, SecureCollectNotifier>();
+builder.Services.AddScoped<ITelephonyEventNotifier, TelephonyEventNotifier>();
 // Singleton (not scoped like the two above) — AgentStateStore, its only caller, is itself a
 // singleton with no HTTP request scope, so it cannot depend on a scoped service.
 builder.Services.AddSingleton<IDashboardNotifier, DashboardNotifier>();

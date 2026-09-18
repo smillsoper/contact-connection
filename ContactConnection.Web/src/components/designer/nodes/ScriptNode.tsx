@@ -15,6 +15,9 @@ export default function ScriptNode({ data, selected }: NodeProps & { data: NodeD
       ) : (
         <p className="text-xs text-gray-500 mt-0.5 italic">No content</p>
       )}
+      {data.waitForTelephonyEventName ? (
+        <p className="text-[10px] text-rose-400 mt-1">⏱ auto-advances on '{data.waitForTelephonyEventName as string}' end</p>
+      ) : null}
     </NodeShell>
   )
 }

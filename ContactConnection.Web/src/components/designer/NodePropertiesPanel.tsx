@@ -177,13 +177,48 @@ export default function NodePropertiesPanel({
     switch (type) {
       case 'script':
         return (
-          <ScriptContentEditor
-            key={node.id}
-            content={(data.content as string) ?? ''}
-            onUpdate={(html) => onUpdate(node.id, { content: html })}
-            dark
-            {...scriptCtx}
-          />
+          <>
+            <ScriptContentEditor
+              key={node.id}
+              content={(data.content as string) ?? ''}
+              onUpdate={(html) => onUpdate(node.id, { content: html })}
+              dark
+              {...scriptCtx}
+            />
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-400">Wait for telephony event</label>
+              <input
+                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-sky-500"
+                value={(data.waitForTelephonyEventName as string) ?? ''}
+                placeholder="capture_card"
+                onChange={(e) => onUpdate(node.id, { waitForTelephonyEventName: e.target.value })}
+              />
+              <p className="text-[10px] text-gray-500 leading-snug">
+                For a node that tells the agent to wait on a mid-call telephony branch (started via
+                Trigger Telephony Event with this same event name). Advances automatically the
+                instant that branch reaches its own End node, instead of relying on the agent to
+                click Continue at the right moment.
+              </p>
+            </div>
+            {(data.waitForTelephonyEventName as string) ? (
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-400">Wait timeout (seconds)</label>
+                <input
+                  type="number"
+                  min={1}
+                  className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-sky-500"
+                  value={(data.waitForTelephonyEventTimeoutSeconds as number) ?? 60}
+                  onChange={(e) => onUpdate(node.id, { waitForTelephonyEventTimeoutSeconds: e.target.value === '' ? undefined : Number(e.target.value) })}
+                />
+                <p className="text-[10px] text-gray-500 leading-snug">
+                  If the branch hasn't finished within this many seconds, Continue re-enables for the
+                  agent anyway (a missed push shouldn't strand them). Raise it for events that
+                  legitimately take longer — an older caller keying in digits slowly, or a different
+                  telephony flow entirely. Defaults to 60.
+                </p>
+              </div>
+            ) : null}
+          </>
         )
 
       case 'input': {

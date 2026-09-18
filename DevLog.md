@@ -156,6 +156,7 @@
 | 144 | 2026-09-15 | 11:49 AM PDT | 12:25 PM PDT | 36 min | ~14362 min |
 | 145 | 2026-09-15 | 12:27 PM PDT | 12:52 PM PDT | 25 min | ~14387 min |
 | 146 | 2026-09-18 | 9:40 AM PDT | 11:13 AM PDT | 93 min | ~14480 min |
+| 147 | 2026-09-18 | 11:18 AM PDT | 1:15 PM PDT | 117 min | ~14597 min |
 
 ---
 
@@ -8287,3 +8288,141 @@ testing resumes.
 
 **Closed this session:** `secureFields`/`fields` designer property mismatch (tf_secure_collect);
 new `{{shared.*}}` bidirectional variable bridge between CRM and telephony flows.
+
+---
+
+## Session 147
+
+**Date:** 2026-09-18
+**Start:** 11:18 AM PDT
+**End:** 1:15 PM PDT
+**Duration:** 117 minutes
+**Total Duration:** ~14597 minutes
+
+### Focus
+
+Session 146's explicit next-item: the `trigger_telephony_event` fire-and-continue race flagged by
+the user. Went through two wrong turns before landing on the right fix, live-verified end to end,
+then added a UX refinement the user asked for on the spot.
+
+### 1. First attempt — wrong signal (built, then found mistimed before it shipped)
+
+Built `waitForSecureCollect` (bool flag on a CRM script node) + auto-advance in `FlowPanel.tsx`
+listening for `ReceiveSecureCollectEnded`. Backend: `FlowNodeState.WaitForSecureCollect`,
+`NodeHandlerBase.BuildState` reads it off the node JSON. Frontend: designer checkbox, canvas badge,
+Continue-button disable in `NodeDisplay.tsx`. 3 new tests, 766/766 passing, build clean.
+
+Before live-testing, re-read `EslBackgroundService.HandleSecureCollectDoneAsync` directly and found
+the real timing: `ReceiveSecureCollectEnded` fires **before** the method resumes the flow graph
+into Set Variable/Play/End — i.e. before the very `{{shared.*}}` write the CRM node is waiting on.
+Wrong signal, never shipped as the final mechanism (see #2).
+
+### 2. User's fuller bug report → plan-mode detour → scaled-back design
+
+User clarified the real-world symptom: `HandleSecureCollectDoneAsync` re-bridges the agent
+immediately at capture-end, before Set Variable/Play even run — so Play (success/failure
+announcement) nodes fire into an already-reconnected call instead of isolating the caller, *and*
+an agent clicking Continue too fast can race the shared-var write. Entered plan mode to design a
+proper fix; first proposal was a bigger architectural change (move leg-isolation to
+`trigger_telephony_event` itself — `legs: both|caller_only|agent_only`, park/reconnect owned at
+the trigger level, `tf_secure_collect`'s own parking bypassed). User pushed back mid-review:
+*"Let's back up a bit... just discuss ways that we can make the telephony event flow through and
+execute the remaining nodes past the secure capture node alerting the agent when the flow is
+complete"* — wanted the lightweight version, not the full redesign. Rescoped and got explicit
+sign-off: **zero changes to bridging/parking/hangup-safety-net logic**, just a correctly-timed
+"branch reached its own end" signal.
+
+Built: `TriggerTelephonyEventNodeHandler` stamps `_trig_wait_event_name`/`_trig_wait_agent_id` onto
+the telephony session (via `FireEventContext.AdditionalVars`, which `FireEventAsync` already merges
+back into the session unconditionally — no new load/save needed). `TelEndNodeHandler` (`tf_end`)
+checks for the flag and pushes a new `ReceiveTelephonyEventEnded(callRecordId, eventName,
+"completed")` via new `ITelephonyEventNotifier`/`TelephonyEventNotifier` (mirrors
+`ISecureCollectNotifier` exactly) — fires correctly regardless of how many async hops the branch
+takes to reach `tf_end` (`tf_play` doesn't block; it resumes later off `PLAYBACK_STOP`/`tts_done`
+in a separate `ResumeFromNodeAsync` call), since the check lives in whichever segment actually
+dispatches `tf_end`. Renamed session 146's morning plumbing rather than throwing it away:
+`WaitForSecureCollect` (bool) → `WaitForTelephonyEventName` (string, the event name to wait for) on
+`FlowNodeState`; designer checkbox → text input; `FlowPanel.tsx`'s auto-advance effect and
+`NodeDisplay.tsx`'s Continue-disable retargeted to the new push, with a 60s client-side fallback
+timer so a dropped SignalR push (see `project_signalr_reconnect_rejoin`) can't permanently strand
+an agent with nothing parked to force resolution another way. 4 new/updated tests, 770/770.
+
+### 3. Live test #1 — auto-advance never fired, 60s fallback had to expire
+
+Root-caused from the API log: the branch *did* eventually reach a `tf_end` (`tf_end_7`), but only
+via the **main call's own hangup cleanup path** (`call_disconnected` → ... → `tf_end_7`), not via
+the capture branch's dedicated End node. The Play node (`tf_play_...`) broadcast fired but
+**never completed** — zero `PLAYBACK_STOP` for it anywhere in the log, and the user confirmed live
+the audio never played at all. Root cause: `EslClient.BroadcastAsync` is hardcoded to
+`uuid_broadcast {uuid} {mediaArg} aleg`, and `HandleSecureCollectDoneAsync` re-bridges the agent
+**before** Set Variable/Play run — broadcasting into a channel that's just been bridged out from
+under it apparently doesn't work (the codebase's own proven mechanism for live-bridge audio
+injection is `uuid_displace ... mux`, used by the recording-notification beep, not
+`uuid_broadcast`). This is a real, confirmed-broken production gap, not a hypothetical.
+
+Laid out three options for the user: (1) defer the rebridge to `tf_end` — reuse the hook just
+built, Play then runs exactly like every other Play node in the app (solo channel, proven
+mechanism); (2) keep rebridge-immediate, switch `BroadcastAsync` to `both` leg — smallest diff, but
+unverified whether `uuid_broadcast` reliably signals completion on an *already-bridged* channel;
+(3) keep rebridge-immediate, use `uuid_displace ... mux` (the proven live-bridge mechanism) instead
+of `uuid_broadcast` when bridged — most technically certain, but `uuid_displace` completion isn't
+PLAYBACK_STOP-based, more new engineering. **User chose option 1** — cleanest resolution path.
+
+### 4. Deferred re-bridge, reusing the tf_end hook
+
+`HandleSecureCollectDoneAsync`'s "common exit" no longer bridges the agent or pushes
+`ReceiveSecureCollectEnded` immediately when `rebridge` is true — it stashes `_sc_pending_outcome`
+and, critically, **leaves `_sc_in_progress`/`_sc_peer_uuid` set** instead of clearing them right
+away. That one choice means the existing hangup safety nets
+(`HandleChannelUnbridgeAsync`'s `_sc_in_progress` guard, `HandleChannelHangupCoreAsync`'s
+`_sc_in_progress` block — both S136/S140 work) keep protecting the parked agent leg through the
+whole deferred window *for free*, with zero new guard code. `TelEndNodeHandler` gained the actual
+deferred action: bridge the peer, push `ReceiveSecureCollectEnded` via `ISecureCollectNotifier`,
+delete the `sc_peer:{uuid}` reverse key, clear the `_sc_*` vars — needed two new constructor
+dependencies (`ISecureCollectNotifier`, `ITelephonyCallSessionStore`). Dead-end fallback preserved
+in `HandleSecureCollectDoneAsync`: if the branch has no downstream node at all (nothing will ever
+reach `tf_end`), reconnect immediately rather than stranding the agent. `SecureCollectNodeHandler`
+itself needed zero changes — the fix is entirely in when `HandleSecureCollectDoneAsync`/
+`TelEndNodeHandler` act on the flags it already sets. 6 new/updated tests, 774/774.
+
+**Live-verified end to end** — user confirmed: "the full collect, set variable, and play action set
+fired cleanly before the successful bridge back to the agent."
+
+### 5. Follow-up UX request: configurable wait-timeout
+
+User: a flat 60s fallback doesn't fit every case — an older caller keying in digits slowly, or an
+entirely different (slower) triggered flow, needs more headroom, and it should be tunable rather
+than hardcoded. Asked scope (per-node vs tenant-wide vs both); user picked per-node. Added
+`WaitForTelephonyEventTimeoutSeconds` (nullable int) alongside `WaitForTelephonyEventName` end to
+end: `FlowNodeState`, `NodeHandlerBase.BuildState`, designer's new "Wait timeout (seconds)" numeric
+field (shown once an event name is set, defaults to 60), `NodeDisplay.tsx`'s fallback timer now
+reads `(node.waitForTelephonyEventTimeoutSeconds ?? 60) * 1000` instead of the hardcoded 60000.
+2 new tests, 776/776.
+
+### Environment note
+
+Discovered mid-session: something outside this session's control (likely a `dotnet watch` the user
+has running separately, or VS Code's own tooling) auto-restarts `ContactConnection.Api` on every
+file save — explains the "took 2 refreshes to re-register the softphone" the user saw, and meant
+every `dotnet build` in this session first had to kill whatever had just grabbed port 5135 (or
+retry past a transient PDB file lock) before it could succeed. Not a bug to fix, just a fact of
+this dev environment worth remembering for next session's build/live-test cadence.
+
+### State
+
+`dotnet build` (whole solution) and `dotnet test`: **776/776 passing** (159 Domain, 20 Application,
+496 Infrastructure — +33 net this session, 101 Api). `tsc -b` clean, 0 errors. No new migrations.
+API left running (auto-restarting dev watcher) on `:5135`; Vite dev server on `:5173`.
+
+### Next session — pick up here
+
+Nothing outstanding from this session — the race is closed and live-verified, the UX follow-up is
+shipped. Otherwise pull from the standing carry-over list, unchanged since Session 145: DNC
+Registry Integration; Telnyx Verified Numbers; RMD filing; .cc → .io migration tail;
+contactconnection.io DMARC policy tightening; Dashboards endpoint authz; broader FlowEngine test
+coverage; retire the .cc softphone route.
+
+**Closed this session:** `trigger_telephony_event` fire-and-continue race (correctly-timed
+`ReceiveTelephonyEventEnded` signal, tied to the triggered branch's own `tf_end`); the Play-node-
+never-completes-on-an-already-rebridged-channel bug (deferred `tf_secure_collect` reconnect to the
+same `tf_end` hook); per-node configurable wait-timeout UX follow-up.

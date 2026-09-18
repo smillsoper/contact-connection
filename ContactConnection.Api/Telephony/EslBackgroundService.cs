@@ -766,7 +766,7 @@ public sealed class EslBackgroundService : BackgroundService
             await _sessionStore.DeleteKeyAsync(blobKey, ct);
         }
 
-        // ── Common exit: clean up state, unmask, re-bridge, resume ───────────────
+        // ── Common exit: clean up capture-only state, unmask, resume ─────────────
         var maskedRecording = session.Vars.GetValueOrDefault("_sc_recording_masked") == "true";
         var rebridge        = session.Vars.GetValueOrDefault("_sc_rebridge") == "true";
         var peerUuid        = session.Vars.GetValueOrDefault("_sc_peer_uuid");
@@ -774,28 +774,34 @@ public sealed class EslBackgroundService : BackgroundService
 
         foreach (var k in new[]
         {
-            "_sc_in_progress", "_sc_node_id", "_sc_fields_json", "_sc_field_index", "_sc_max_tries",
+            "_sc_node_id", "_sc_fields_json", "_sc_field_index", "_sc_max_tries",
             "_sc_timeout_ms", "_sc_interdigit_ms", "_sc_invalid_arg", "_sc_recording_masked",
-            "_sc_rebridge", "_sc_peer_uuid", "_sc_next_collected", "_sc_next_failed", "_sc_next_timeout",
+            "_sc_next_collected", "_sc_next_failed", "_sc_next_timeout",
         })
             session.Vars.Remove(k);
-        await _sessionStore.SaveAsync(session, ct);
 
+        // Reconnecting the agent (and the softphone's "ended" push) is deliberately NOT done here
+        // when rebridge is needed — bridging immediately races any downstream Play/announcement
+        // node: it tears down the parked leg's solo media path, and uuid_broadcast (aleg) never
+        // completes on a channel that's already been bridged out from under it (confirmed live —
+        // the announcement never played at all). Instead defer both to TelEndNodeHandler, which
+        // fires them once the triggered branch (Set Variable, Play, whatever else) reaches its own
+        // tf_end. _sc_in_progress / _sc_peer_uuid are deliberately LEFT SET (not cleared here) so
+        // the existing hangup safety nets (HandleChannelUnbridgeAsync's guard,
+        // HandleChannelHangupCoreAsync's _sc_in_progress block) keep protecting the parked agent
+        // leg for the whole deferred window, exactly as they already do during the capture itself
+        // — no new guard code needed.
         if (rebridge && !string.IsNullOrEmpty(peerUuid))
-            await _sessionStore.DeleteKeyAsync($"sc_peer:{peerUuid}", ct);
-
-        if (rebridge && Guid.TryParse(session.Vars.GetValueOrDefault("_assigned_agent_id"), out var endedAgentId))
         {
-            try
-            {
-                await _hub.Clients.Group($"agent:{endedAgentId}")
-                    .ReceiveSecureCollectEnded(session.CallRecordId.ToString(), outcome);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "secure_collect_done {Uuid}: ended push failed — resume continues regardless", uuid);
-            }
+            session.Vars["_sc_pending_outcome"] = outcome;
         }
+        else
+        {
+            session.Vars.Remove("_sc_in_progress");
+            session.Vars.Remove("_sc_peer_uuid");
+            session.Vars.Remove("_sc_rebridge");
+        }
+        await _sessionStore.SaveAsync(session, ct);
 
         using var scope = _scopeFactory.CreateScope();
 
@@ -813,14 +819,40 @@ public sealed class EslBackgroundService : BackgroundService
             }, esl, ct);
         }
 
-        if (rebridge && !string.IsNullOrEmpty(peerUuid))
-        {
-            _logger.LogInformation("secure_collect_done {Uuid}: re-bridging held agent leg {Peer}", uuid, peerUuid);
-            await esl.BridgeChannelsAsync(session.ChannelUuid, peerUuid, ct);
-        }
-
         _logger.LogInformation("secure_collect_done {Uuid}: {Outcome} → node {Next}", uuid, outcome, nextNode ?? "(dead-end)");
-        if (string.IsNullOrEmpty(nextNode)) return;
+
+        if (string.IsNullOrEmpty(nextNode))
+        {
+            // No downstream flow at all — nothing will ever reach tf_end to perform the deferred
+            // reconnect, so do it now rather than stranding the agent forever.
+            if (rebridge && !string.IsNullOrEmpty(peerUuid))
+            {
+                await _sessionStore.DeleteKeyAsync($"sc_peer:{peerUuid}", ct);
+                session.Vars.Remove("_sc_in_progress");
+                session.Vars.Remove("_sc_peer_uuid");
+                session.Vars.Remove("_sc_rebridge");
+                session.Vars.Remove("_sc_pending_outcome");
+                await _sessionStore.SaveAsync(session, ct);
+
+                _logger.LogInformation(
+                    "secure_collect_done {Uuid}: dead-end branch — reconnecting held agent leg {Peer} now", uuid, peerUuid);
+                await esl.BridgeChannelsAsync(session.ChannelUuid, peerUuid, ct);
+
+                if (Guid.TryParse(session.Vars.GetValueOrDefault("_assigned_agent_id"), out var deadEndAgentId))
+                {
+                    try
+                    {
+                        await _hub.Clients.Group($"agent:{deadEndAgentId}")
+                            .ReceiveSecureCollectEnded(session.CallRecordId.ToString(), outcome);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "secure_collect_done {Uuid}: ended push failed", uuid);
+                    }
+                }
+            }
+            return;
+        }
 
         await scope.ServiceProvider
             .GetRequiredService<ITelephonyFlowEngine>()

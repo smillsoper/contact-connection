@@ -40,6 +40,16 @@ function FlowSessionView({ entry, hub, onEnd }: FlowSessionViewProps) {
   const onEndRef = useRef(onEnd)
   useEffect(() => { onEndRef.current = onEnd })
 
+  // Auto-advance race fix (project_shared_call_variables "known follow-up"): trigger_telephony_event
+  // is fire-and-continue, so a script node telling the agent to wait on a triggered telephony branch
+  // has no guarantee the agent won't click Continue before that branch (and its {{shared.*}} write)
+  // actually finishes. A node author opts in via waitForTelephonyEventName (the event name to wait
+  // for) — when set, skip the agent's own judgment entirely and advance the instant that branch
+  // reaches its own tf_end, via receiveTelephonyEventEnded (pushed correctly-timed, unlike
+  // receiveSecureCollectEnded which fires before downstream set_variable/play nodes run).
+  const lastTelephonyEventEnded = useCallStore((s) => s.lastTelephonyEventEnded)
+  const autoAdvancedForRef = useRef<string | null>(null)
+
   // Join SignalR session room for live updates
   useEffect(() => {
     if (!hub) return
@@ -76,6 +86,17 @@ function FlowSessionView({ entry, hub, onEnd }: FlowSessionViewProps) {
     },
     [state, entry.sessionId],
   )
+
+  useEffect(() => {
+    if (state.phase !== 'running') return
+    const waitEventName = state.node.waitForTelephonyEventName
+    if (!waitEventName || !lastTelephonyEventEnded) return
+    if (lastTelephonyEventEnded.eventName !== waitEventName) return
+    const key = `${state.node.nodeId}:${lastTelephonyEventEnded.at}`
+    if (autoAdvancedForRef.current === key) return
+    autoAdvancedForRef.current = key
+    advance()
+  }, [state, lastTelephonyEventEnded, advance])
 
   const jump = useCallback(
     async (sectionNodeId: string) => {
@@ -352,6 +373,14 @@ export default function FlowPanel() {
       const current = useCallStore.getState()
       if (current.callRecordId === callRecordId)
         current.setSecureCollectEnded(outcome as 'collected' | 'failed' | 'timeout' | 'caller_hung_up')
+    })
+
+    // A CRM trigger_telephony_event branch reached its own tf_end — the correctly-timed signal a
+    // waitForTelephonyEventName script node auto-advances on (see FlowSessionView).
+    connection.on('receiveTelephonyEventEnded', (callRecordId: string, eventName: string, outcome: string) => {
+      const current = useCallStore.getState()
+      if (current.callRecordId === callRecordId)
+        current.setTelephonyEventEnded(callRecordId, eventName, outcome)
     })
 
     // SignalR groups are tied to the connection id, not the (stable) HubConnection object —

@@ -44,6 +44,11 @@ export interface FlowNodeState {
   currentSectionName?: string
   sectionLocked?: boolean
   jumpTargets?: JumpTarget[]
+  // auto-advance when the named trigger_telephony_event branch reaches its own tf_end (closes
+  // the trigger_telephony_event fire-and-continue race — see project_shared_call_variables)
+  waitForTelephonyEventName?: string
+  // fallback re-enable for Continue if the matching event-ended push never arrives; null/unset = 60s
+  waitForTelephonyEventTimeoutSeconds?: number
 }
 
 export interface StartSessionRequest {

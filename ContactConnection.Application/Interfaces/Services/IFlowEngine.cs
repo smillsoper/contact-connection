@@ -174,6 +174,25 @@ public class FlowNodeState
 
     /// <summary>Sections visible in the jump dropdown for this node.</summary>
     public List<JumpTarget>? JumpTargets { get; set; }
+
+    /// <summary>
+    /// When set, names a trigger_telephony_event eventName this node is waiting on — the agent UI
+    /// disables manual advance and auto-advances the instant that event's telephony branch reaches
+    /// its own tf_end (receiveTelephonyEventEnded), instead of relying on the agent to click
+    /// Continue at the right moment. Closes the trigger_telephony_event fire-and-continue race —
+    /// see project_shared_call_variables memory. Any node type may set it; only meaningful on a
+    /// node with a manual "Continue" advance (typically script).
+    /// </summary>
+    public string? WaitForTelephonyEventName { get; init; }
+
+    /// <summary>
+    /// How long the agent UI waits for the matching receiveTelephonyEventEnded push before
+    /// re-enabling manual Continue as a fallback (a missed/dropped SignalR push must not strand
+    /// the agent). Null means the UI's own default (60s) applies. Per-node so a flow author can
+    /// tune it for events that legitimately take longer (e.g. an older caller keying in digits
+    /// slowly) without affecting other waits.
+    /// </summary>
+    public int? WaitForTelephonyEventTimeoutSeconds { get; init; }
 }
 
 public class FlowOption

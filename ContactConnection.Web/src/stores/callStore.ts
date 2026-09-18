@@ -34,6 +34,12 @@ interface CallState {
   // tf_secure_collect progress — null when no capture is active on this call
   secureCollect: SecureCollectState | null
 
+  // Most recent trigger_telephony_event branch completion (receiveTelephonyEventEnded) — the
+  // correctly-timed signal a CRM script node's waitForTelephonyEventName auto-advance watches for.
+  // Not cleared automatically; FlowSessionView dedups by nodeId+eventName so a stale value from an
+  // earlier node/event never double-fires.
+  lastTelephonyEventEnded: { callRecordId: string; eventName: string; outcome: string; at: number } | null
+
   // "Playing greeting…" indicator (project_agent_connect_tone) — true while a connect prompt is
   // playing to the CALLER during the receiveAutoConnecting window, so the agent knows to hold off
   // rather than speak before the caller has actually been greeted. Pushed via receivePlayingGreeting.
@@ -59,6 +65,7 @@ interface CallState {
   setSecureCollectProgress: (fieldKey: string, fieldIndex: number, fieldCount: number) => void
   setSecureCollectEnded: (outcome: SecureCollectState['endedOutcome']) => void
   clearSecureCollect: () => void
+  setTelephonyEventEnded: (callRecordId: string, eventName: string, outcome: string) => void
   reset: () => void
 }
 
@@ -83,13 +90,14 @@ export const useCallStore = create<CallState>((set) => ({
   transferTarget: null,
   transferTargetLabel: null,
   secureCollect: null,
+  lastTelephonyEventEnded: null,
   playingGreeting: false,
 
   setQueued: (callerNumber, callerName, callRecordId, destinationNumber, campaignId) =>
-    set({ callStatus: 'queued', callerNumber, callerName, destinationNumber: destinationNumber ?? null, callRecordId, isMuted: false, callStartedAt: null, campaignId: campaignId || null, secureCollect: null, playingGreeting: false, ...TRANSFER_RESET }),
+    set({ callStatus: 'queued', callerNumber, callerName, destinationNumber: destinationNumber ?? null, callRecordId, isMuted: false, callStartedAt: null, campaignId: campaignId || null, secureCollect: null, lastTelephonyEventEnded: null, playingGreeting: false, ...TRANSFER_RESET }),
 
   setAutoConnecting: (callerNumber, callerName, callRecordId, destinationNumber, campaignId) =>
-    set({ callStatus: 'auto-connecting', callerNumber, callerName, destinationNumber: destinationNumber ?? null, callRecordId, isMuted: false, callStartedAt: null, campaignId: campaignId || null, secureCollect: null, playingGreeting: false, ...TRANSFER_RESET }),
+    set({ callStatus: 'auto-connecting', callerNumber, callerName, destinationNumber: destinationNumber ?? null, callRecordId, isMuted: false, callStartedAt: null, campaignId: campaignId || null, secureCollect: null, lastTelephonyEventEnded: null, playingGreeting: false, ...TRANSFER_RESET }),
 
   setPlayingGreeting: (playing) => set({ playingGreeting: playing }),
 
@@ -105,15 +113,16 @@ export const useCallStore = create<CallState>((set) => ({
       callRecordId: state.callStatus === 'queued' ? state.callRecordId : null,
       campaignId: null,
       secureCollect: null,
+      lastTelephonyEventEnded: null,
       playingGreeting: false,
       ...TRANSFER_RESET,
     })),
 
   setDialing: (dialedNumber) =>
-    set({ callStatus: 'dialing', callerNumber: dialedNumber, callerName: null, isMuted: false, callStartedAt: null, callRecordId: null, campaignId: null, secureCollect: null, playingGreeting: false, ...TRANSFER_RESET }),
+    set({ callStatus: 'dialing', callerNumber: dialedNumber, callerName: null, isMuted: false, callStartedAt: null, callRecordId: null, campaignId: null, secureCollect: null, lastTelephonyEventEnded: null, playingGreeting: false, ...TRANSFER_RESET }),
 
   setOnCall: () =>
-    set({ callStatus: 'on-call', callStartedAt: Date.now(), secureCollect: null, playingGreeting: false }),
+    set({ callStatus: 'on-call', callStartedAt: Date.now(), secureCollect: null, lastTelephonyEventEnded: null, playingGreeting: false }),
 
   setMuted:  (muted) => set({ isMuted: muted }),
   setOnHold: (held)  => set({ isOnHold: held }),
@@ -149,6 +158,9 @@ export const useCallStore = create<CallState>((set) => ({
 
   clearSecureCollect: () => set({ secureCollect: null }),
 
+  setTelephonyEventEnded: (callRecordId, eventName, outcome) =>
+    set({ lastTelephonyEventEnded: { callRecordId, eventName, outcome, at: Date.now() } }),
+
   reset: () =>
-    set({ callStatus: 'idle', callerNumber: null, callerName: null, destinationNumber: null, isMuted: false, callStartedAt: null, callRecordId: null, campaignId: null, secureCollect: null, playingGreeting: false, ...TRANSFER_RESET }),
+    set({ callStatus: 'idle', callerNumber: null, callerName: null, destinationNumber: null, isMuted: false, callStartedAt: null, callRecordId: null, campaignId: null, secureCollect: null, lastTelephonyEventEnded: null, playingGreeting: false, ...TRANSFER_RESET }),
 }))

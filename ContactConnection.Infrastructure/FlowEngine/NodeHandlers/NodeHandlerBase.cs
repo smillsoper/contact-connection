@@ -45,7 +45,9 @@ public abstract class NodeHandlerBase
         InputType    = inputType,
         Condition    = condition,
         Required     = required,
-        LockedFields = [.. ctx.LockedFields]
+        LockedFields = [.. ctx.LockedFields],
+        WaitForTelephonyEventName = node["waitForTelephonyEventName"]?.GetValue<string>(),
+        WaitForTelephonyEventTimeoutSeconds = node["waitForTelephonyEventTimeoutSeconds"]?.GetValue<int>()
     };
 
     protected static void AppendHistory(FlowExecutionContext ctx, JsonObject node, string? input, string? transition)

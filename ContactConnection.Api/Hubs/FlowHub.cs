@@ -120,4 +120,10 @@ public interface IFlowHubClient
     /// <summary>tf_secure_collect: the capture finished — outcome is "collected" | "failed" |
     /// "timeout" | "caller_hung_up".</summary>
     Task ReceiveSecureCollectEnded(string callRecordId, string outcome);
+
+    /// <summary>A CRM trigger_telephony_event branch reached its own tf_end node — eventName
+    /// matches the eventName the triggering trigger_telephony_event node fired. outcome is
+    /// "completed". Fires only once the branch has genuinely finished (including any
+    /// set_variable/play nodes downstream), not when the branch merely starts.</summary>
+    Task ReceiveTelephonyEventEnded(string callRecordId, string eventName, string outcome);
 }

@@ -69,7 +69,19 @@ public class TriggerTelephonyEventNodeHandler(
                     var result = await telephonyEngine.FireEventAsync(
                         callSession.ChannelUuid,
                         $"custom:{eventName}",
-                        new FireEventContext { AgentId = ctx.AgentId },
+                        new FireEventContext
+                        {
+                            AgentId = ctx.AgentId,
+                            // Read by TelEndNodeHandler when the branch reaches tf_end — the
+                            // correctly-timed signal for a CRM script waiting on this event's
+                            // outcome (see ITelephonyEventNotifier). Fire-and-continue to the CRM
+                            // side is unchanged; this only arms the eventual push.
+                            AdditionalVars = new Dictionary<string, string>
+                            {
+                                ["_trig_wait_event_name"] = eventName,
+                                ["_trig_wait_agent_id"]   = ctx.AgentId.ToString(),
+                            },
+                        },
                         ct);
 
                     logger.LogInformation(

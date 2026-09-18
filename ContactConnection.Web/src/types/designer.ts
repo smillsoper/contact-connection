@@ -19,6 +19,8 @@ export interface NodeData extends Record<string, unknown> {
   isEntry?: boolean
   // script
   content?: string
+  waitForTelephonyEventName?: string
+  waitForTelephonyEventTimeoutSeconds?: number
   // input / email shared script
   scriptLabel?: string
   scriptContent?: string
@@ -84,6 +86,8 @@ export interface ContactConnectionNodeDef {
   type: ContactConnectionNodeType
   label: string
   content?: string
+  waitForTelephonyEventName?: string
+  waitForTelephonyEventTimeoutSeconds?: number
   scriptLabel?: string
   scriptContent?: string
   fieldType?: string
@@ -223,7 +227,7 @@ export const NODE_META: Record<
 export function defaultNodeData(type: ContactConnectionNodeType): NodeData {
   switch (type) {
     case 'script':
-      return { label: 'New Script', content: '' }
+      return { label: 'New Script', content: '', waitForTelephonyEventName: '', waitForTelephonyEventTimeoutSeconds: 60 }
     case 'input':
       return { label: 'New Input', scriptLabel: '', scriptContent: '', fieldType: 'text', required: false, options: '', outputVariable: '', minChars: undefined, maxChars: undefined, inputMask: '', customMask: '' }
     case 'email':

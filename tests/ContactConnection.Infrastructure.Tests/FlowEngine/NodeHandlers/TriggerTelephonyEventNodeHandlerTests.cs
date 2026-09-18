@@ -86,6 +86,27 @@ public class TriggerTelephonyEventNodeHandlerTests
     }
 
     [Fact]
+    public async Task LiveSessionFound_StampsPendingWaitVars_ForTelEndNodeHandlerToNotifyLater()
+    {
+        var session = new TelephonyCallSession { ChannelUuid = "uuid-123", CallRecordId = CallId };
+        _sessionStore.Setup(s => s.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([session]);
+        _telephonyEngine.Setup(e => e.FireEventAsync(
+                "uuid-123", "custom:capture_card", It.IsAny<FireEventContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FireEventResult { Handled = true });
+
+        var ctx = Ctx();
+        await NewHandler().ExecuteAsync(Node(), ctx, agentInput: null, agentTransition: "");
+
+        _telephonyEngine.Verify(e => e.FireEventAsync(
+            "uuid-123", "custom:capture_card",
+            It.Is<FireEventContext>(c =>
+                c.AdditionalVars["_trig_wait_event_name"] == "capture_card" &&
+                c.AdditionalVars["_trig_wait_agent_id"] == ctx.AgentId.ToString()),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task FireEventThrows_StillFollowsDefault()
     {
         var session = new TelephonyCallSession { ChannelUuid = "uuid-123", CallRecordId = CallId };
