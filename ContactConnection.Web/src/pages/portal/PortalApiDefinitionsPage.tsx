@@ -17,6 +17,7 @@ import {
   setPortalCredential,
   testPortalAuth,
   getPortalTtsProviders,
+  getPortalSttProviders,
   type ApiDefinitionRecord,
 } from '../../api/portal'
 import {
@@ -69,6 +70,7 @@ export default function PortalApiDefinitionsPage() {
   const [togglingId, setTogglingId] = useState<string | null>(null)
   const [knownCreds, setKnownCreds] = useState<string[]>([])
   const [ttsProviders, setTtsProviders] = useState<string[]>([])
+  const [sttProviders, setSttProviders] = useState<string[]>([])
 
   useEffect(() => {
     load()
@@ -78,7 +80,16 @@ export default function PortalApiDefinitionsPage() {
     getPortalTtsProviders()
       .then(setTtsProviders)
       .catch(() => {})
+    getPortalSttProviders()
+      .then(setSttProviders)
+      .catch(() => {})
   }, [])
+
+  // A "media" definition's Provider is picked before its endpoints (and their sub-type — TTS
+  // vs. STT streaming) exist, so the dropdown offers every registered provider from either
+  // factory rather than guessing; TtsProviderValidation/SttProviderValidation enforce the
+  // correct one once an endpoint's sub-type is actually known.
+  const mediaProviders = Array.from(new Set([...ttsProviders, ...sttProviders])).sort()
 
   async function load() {
     setLoading(true)
@@ -309,14 +320,14 @@ export default function PortalApiDefinitionsPage() {
                 </div>
                 <div>
                   <label className="block text-gray-400 text-xs font-medium mb-1.5">Provider</label>
-                  {form.apiCategory === 'media' && ttsProviders.length > 0 ? (
+                  {form.apiCategory === 'media' && mediaProviders.length > 0 ? (
                     <select
                       value={form.provider}
                       onChange={(e) => setForm((f) => ({ ...f, provider: e.target.value }))}
                       className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
                     >
                       <option value="">— Select a provider —</option>
-                      {ttsProviders.map((p) => (
+                      {mediaProviders.map((p) => (
                         <option key={p} value={p}>{TTS_PROVIDER_LABELS[p] ?? p}</option>
                       ))}
                     </select>

@@ -7,6 +7,7 @@ import {
   deleteAdminApiPreference,
   getAvailableEndpoints,
   listAdminTtsProviders,
+  listAdminSttProviders,
   type TenantApiPreferenceRecord,
   type AvailableEndpointsResult,
   type AvailableEndpointItem,
@@ -20,6 +21,7 @@ import {
 } from '../../constants/apiTypes'
 
 const TTS_SUB_TYPE = 'tts_streaming'
+const STT_SUB_TYPE = 'stt_streaming'
 
 export default function AdminApiPreferencesPage() {
   const [prefsBySubType, setPrefsBySubType] = useState<Record<string, TenantApiPreferenceRecord>>({})
@@ -32,6 +34,7 @@ export default function AdminApiPreferencesPage() {
   const [savingKey, setSavingKey] = useState<string | null>(null)
 
   const [ttsProviders, setTtsProviders] = useState<TtsProviderInfo[]>([])
+  const [sttProviders, setSttProviders] = useState<TtsProviderInfo[]>([])
   const [knownCreds, setKnownCreds] = useState<string[]>([])
   const [credValues, setCredValues] = useState<Record<string, string>>({})
   const [savingCred, setSavingCred] = useState<string | null>(null)
@@ -39,6 +42,7 @@ export default function AdminApiPreferencesPage() {
   useEffect(() => {
     loadPreferences()
     listAdminTtsProviders().then(setTtsProviders).catch(() => {})
+    listAdminSttProviders().then(setSttProviders).catch(() => {})
     listAdminCredentials()
       .then((list) => setKnownCreds(list.map((c) => c.keyName)))
       .catch(() => {})
@@ -157,6 +161,15 @@ export default function AdminApiPreferencesPage() {
     return pool.find((e) => e.id === pref.endpointId)?.definitionProvider ?? null
   }
 
+  // Recognition mirror of selectedTtsProvider (S148).
+  function selectedSttProvider(): string | null {
+    const pref = prefsBySubType[STT_SUB_TYPE]
+    const avail = availableCache[STT_SUB_TYPE]
+    if (!pref || !avail) return null
+    const pool = pref.source === 'tenant' ? avail.tenantEndpoints : avail.portalEndpoints
+    return pool.find((e) => e.id === pref.endpointId)?.definitionProvider ?? null
+  }
+
   function renderOption(subType: string, item: AvailableEndpointItem) {
     const key = `${subType}:${item.source}:${item.id}`
     return (
@@ -215,6 +228,57 @@ export default function AdminApiPreferencesPage() {
         <div className="grid grid-cols-2 gap-3">
           {info.requiredCredentialFields.map((field) => {
             const keyName = `tts_${provider}_${field}`
+            const isKnown = knownCreds.includes(keyName)
+            return (
+              <div key={field}>
+                <label className="block text-gray-400 text-xs font-medium mb-1.5 capitalize">
+                  {field} {isKnown && <span className="text-emerald-400 normal-case">· saved</span>}
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    value={credValues[keyName] ?? ''}
+                    onChange={(e) => setCredValues((prev) => ({ ...prev, [keyName]: e.target.value }))}
+                    placeholder={isKnown ? '••••••••  (leave blank to keep)' : 'Enter value'}
+                    className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                  />
+                  <button
+                    onClick={() => handleSaveCred(keyName)}
+                    disabled={!credValues[keyName]?.trim() || savingCred === keyName}
+                    className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-medium px-3 rounded-lg transition-colors"
+                  >
+                    {savingCred === keyName ? '…' : 'Save'}
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+
+  // Recognition mirror of renderTtsCredentials (S148) — credential key prefix "stt_" matches
+  // SttCredentialKeys.For.
+  function renderSttCredentials() {
+    const provider = selectedSttProvider()
+    if (!provider) {
+      return <p className="text-gray-500 text-xs mt-4">Select an STT option above to configure its credentials.</p>
+    }
+    const info = sttProviders.find((p) => p.key === provider)
+    if (!info || info.requiredCredentialFields.length === 0) return null
+    return (
+      <div className="mt-4 pt-4 border-t border-gray-800">
+        <p className="text-gray-300 text-sm font-medium mb-1">
+          {TTS_PROVIDER_LABELS[provider] ?? provider} credentials
+        </p>
+        <p className="text-gray-500 text-xs mb-3">
+          Stored securely per-tenant — required to recognize speech through this provider, whether it's a
+          platform-defined option or your own.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          {info.requiredCredentialFields.map((field) => {
+            const keyName = `stt_${provider}_${field}`
             const isKnown = knownCreds.includes(keyName)
             return (
               <div key={field}>
@@ -336,6 +400,7 @@ export default function AdminApiPreferencesPage() {
                               )}
 
                               {sub.value === TTS_SUB_TYPE && renderTtsCredentials()}
+                              {sub.value === STT_SUB_TYPE && renderSttCredentials()}
                             </>
                           )}
                         </div>

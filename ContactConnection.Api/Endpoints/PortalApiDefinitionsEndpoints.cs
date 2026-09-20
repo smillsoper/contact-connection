@@ -78,6 +78,7 @@ public static class PortalApiDefinitionsEndpoints
         IPortalApiDefinitionRepository repo,
         IPortalApiEndpointRepository endpointRepo,
         ITtsStreamProviderFactory ttsFactory,
+        ISpeechRecognitionProviderFactory sttFactory,
         [FromKeyedServices("portal")] IVersionHistoryService versions,
         HttpContext http,
         CancellationToken ct)
@@ -96,14 +97,19 @@ public static class PortalApiDefinitionsEndpoints
         }
 
         // Provider doubles as a runtime dispatch key only for definitions backing a TtsStreaming
-        // endpoint (see TtsProviderValidation) — block a change that would break the mapping
-        // instead of letting it fail silently on the next call.
+        // or SttStreaming endpoint (see TtsProviderValidation/SttProviderValidation) — block a
+        // change that would break the mapping instead of letting it fail silently on the next call.
         if (request.Provider is not null)
         {
             var endpoints = await endpointRepo.GetByDefinitionAsync(id, ct);
             if (endpoints.Any(e => e.ApiSubType == ApiSubType.TtsStreaming))
             {
                 var error = TtsProviderValidation.Validate(request.Provider, ttsFactory);
+                if (error is not null) return Results.BadRequest(new { error });
+            }
+            if (endpoints.Any(e => e.ApiSubType == ApiSubType.SttStreaming))
+            {
+                var error = SttProviderValidation.Validate(request.Provider, sttFactory);
                 if (error is not null) return Results.BadRequest(new { error });
             }
         }

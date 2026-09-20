@@ -1373,13 +1373,26 @@ function IvrMenuNodeEditor({
 }) {
   const inputCls = 'w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-teal-500'
   const labelCls = 'block text-xs text-gray-400 mb-1'
-  const options = (data.options as { digit: string; transition: string }[] | undefined) ?? []
+  const options = (data.options as { digit: string; transition: string; phrases?: string[] }[] | undefined) ?? []
   const maxDigits = (data.maxDigits as number) ?? 1
   const alwaysListen = !!(data.alwaysListen as boolean)
 
-  const setOptions = (next: { digit: string; transition: string }[]) => onChange({ options: next })
-  const updateOption = (i: number, patch: Partial<{ digit: string; transition: string }>) =>
+  const setOptions = (next: { digit: string; transition: string; phrases?: string[] }[]) => onChange({ options: next })
+  const updateOption = (i: number, patch: Partial<{ digit: string; transition: string; phrases?: string[] }>) =>
     setOptions(options.map((o, idx) => (idx === i ? { ...o, ...patch } : o)))
+
+  // The phrases input can't be a plain controlled input bound to (o.phrases ?? []).join(', ') —
+  // re-splitting and re-joining the array on every keystroke collapses a trailing comma or space
+  // right back out the instant it's typed (it's a temporarily-empty segment, stripped by the
+  // filter that keeps real phrases clean), which reads as "the box won't let me type a comma."
+  // Local draft text is the source of truth for what's displayed while editing; it's parsed into
+  // the real phrases array on every change, but the box itself just shows what was typed.
+  const [phraseDrafts, setPhraseDrafts] = useState<Record<number, string>>({})
+  const phrasesValue = (i: number, o: { phrases?: string[] }) => phraseDrafts[i] ?? (o.phrases ?? []).join(', ')
+  const updatePhrasesDraft = (i: number, raw: string) => {
+    setPhraseDrafts((prev) => ({ ...prev, [i]: raw }))
+    updateOption(i, { phrases: raw.split(',').map((p) => p.trim()).filter(Boolean) })
+  }
 
   const asyncToggle = (
     <label className="flex items-start gap-2 bg-indigo-950/40 border border-indigo-800 rounded px-2.5 py-2 cursor-pointer">
@@ -1411,7 +1424,7 @@ function IvrMenuNodeEditor({
             {options.map((o, i) => (
               <div key={i} className="flex items-center gap-1.5">
                 <input
-                  className={`${inputCls} font-mono w-16 text-center`}
+                  className={`${inputCls} font-mono !w-16 shrink-0 text-center`}
                   placeholder="1"
                   maxLength={1}
                   value={o.digit}
@@ -1419,7 +1432,7 @@ function IvrMenuNodeEditor({
                 />
                 <span className="text-gray-600 text-xs">→</span>
                 <input
-                  className={`${inputCls} font-mono`}
+                  className={`${inputCls} font-mono min-w-0 flex-1`}
                   placeholder="callback_offer"
                   value={o.transition}
                   onChange={(e) => updateOption(i, { transition: e.target.value.replace(/[^a-z0-9_]/gi, '_').toLowerCase() })}
@@ -1504,39 +1517,55 @@ function IvrMenuNodeEditor({
       </div>
 
       <div>
-        <label className={labelCls}>Options — DTMF entry → transition name (its own handle)</label>
-        <div className="flex flex-col gap-1.5">
+        <label className={labelCls}>Options — DTMF digit and/or voice phrases → transition name (its own handle)</label>
+        <p className="text-[10px] text-gray-500 mb-1.5 leading-snug">
+          For voice phrases, type each word or short phrase a caller might say, separated by a
+          comma — e.g. <span className="font-mono text-gray-400">yes, yeah, sure</span>. Any one
+          of them matches this option.
+        </p>
+        <div className="flex flex-col gap-2.5">
           {options.map((o, i) => (
-            <div key={i} className="flex items-center gap-1.5">
+            <div key={i} className="rounded border border-gray-700 bg-gray-800/40 p-2 flex flex-col gap-1.5">
+              <div className="flex items-center gap-1.5">
+                <input
+                  className={`${inputCls} font-mono !w-16 shrink-0 text-center`}
+                  placeholder="1"
+                  value={o.digit}
+                  onChange={(e) => updateOption(i, { digit: e.target.value.replace(/[^0-9*#]/g, '') })}
+                />
+                <span className="text-gray-600 text-xs">→</span>
+                <input
+                  className={`${inputCls} font-mono min-w-0 flex-1`}
+                  placeholder="option_1"
+                  value={o.transition}
+                  onChange={(e) => updateOption(i, { transition: e.target.value.replace(/[^a-z0-9_]/gi, '_').toLowerCase() })}
+                />
+                <button
+                  type="button"
+                  onClick={() => setOptions(options.filter((_, idx) => idx !== i))}
+                  className="text-gray-500 hover:text-red-400 text-sm px-1"
+                >×</button>
+              </div>
               <input
-                className={`${inputCls} font-mono w-16 text-center`}
-                placeholder="1"
-                value={o.digit}
-                onChange={(e) => updateOption(i, { digit: e.target.value.replace(/[^0-9*#]/g, '') })}
+                className={`${inputCls} w-full`}
+                placeholder="Voice phrases (optional), separated by commas — e.g. yes, yeah, sure"
+                title="Phrases that also match this option (voice recognition) — type a comma between each one"
+                value={phrasesValue(i, o)}
+                onChange={(e) => updatePhrasesDraft(i, e.target.value)}
               />
-              <span className="text-gray-600 text-xs">→</span>
-              <input
-                className={`${inputCls} font-mono`}
-                placeholder="option_1"
-                value={o.transition}
-                onChange={(e) => updateOption(i, { transition: e.target.value.replace(/[^a-z0-9_]/gi, '_').toLowerCase() })}
-              />
-              <button
-                type="button"
-                onClick={() => setOptions(options.filter((_, idx) => idx !== i))}
-                className="text-gray-500 hover:text-red-400 text-sm px-1"
-              >×</button>
             </div>
           ))}
         </div>
         <button
           type="button"
-          onClick={() => setOptions([...options, { digit: '', transition: `option_${options.length + 1}` }])}
+          onClick={() => setOptions([...options, { digit: '', transition: `option_${options.length + 1}`, phrases: [] }])}
           className="mt-2 text-xs text-teal-400 hover:text-teal-300"
         >+ Add option</button>
         <p className="text-[10px] text-gray-500 mt-1.5 leading-snug">
           Each transition gets a source handle on the node. Unmatched / timed-out entries take the
-          <span className="font-mono text-gray-400"> no_match</span> handle.
+          <span className="font-mono text-gray-400"> no_match</span> handle. Phrases need a tenant
+          voice-recognition provider configured (API Preferences → STT Streaming) and only work when
+          every option is single-digit — a multi-digit menu (Max digits above 1) ignores phrases.
         </p>
       </div>
     </div>

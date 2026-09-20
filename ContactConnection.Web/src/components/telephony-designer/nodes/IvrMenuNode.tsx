@@ -3,9 +3,10 @@ import TelNodeShell from '../TelNodeShell'
 import type { TelNodeData } from '../../../types/telephony-designer'
 
 export default function IvrMenuNode({ data, selected }: NodeProps & { data: TelNodeData }) {
-  const options = (data.options as { digit: string; transition: string }[] | undefined) ?? []
+  const options = (data.options as { digit: string; transition: string; phrases?: string[] }[] | undefined) ?? []
   const hasPrompt = !!(data.promptAudioFileId as string)
   const isAsync = !!(data.alwaysListen as boolean)
+  const hasVoice = !isAsync && options.some((o) => (o.phrases ?? []).length > 0)
 
   // Sync: one source handle per option's transition, plus a trailing no_match.
   // Async (hot-digit listener): same per-option handles, but "default" replaces no_match — that's
@@ -41,7 +42,7 @@ export default function IvrMenuNode({ data, selected }: NodeProps & { data: TelN
         <p className="text-[11px] text-indigo-300 mt-0.5">🎧 always listening</p>
       ) : (
         <p className="text-[11px] text-teal-300 mt-0.5 truncate">
-          {hasPrompt ? 'audio prompt' : '⚠ no prompt set'}
+          {hasPrompt ? 'audio prompt' : '⚠ no prompt set'}{hasVoice ? ' · 🎙 voice' : ''}
         </p>
       )}
       <p className="text-[10px] text-gray-500 mt-0.5">

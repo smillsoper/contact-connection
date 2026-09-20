@@ -39,4 +39,20 @@ public static class IvrMenu
 
         return string.IsNullOrEmpty(noMatchTarget) ? null : noMatchTarget;
     }
+
+    /// <summary>
+    /// Lowercases, strips punctuation, and collapses whitespace — used both when indexing a
+    /// voice-enabled option's configured phrases (S148) and when normalizing an STT vendor's
+    /// recognized text, so "Yes ", "yes", "YES", and a committed transcript's "Yes." all match
+    /// the same phrase-index entry. Live-observed gap (first real test call): a vendor's final/
+    /// committed transcript routinely carries sentence-ending punctuation a configured phrase
+    /// never has, so leaving punctuation in place silently broke every match. Apostrophes are
+    /// kept (contractions like "don't" are still one word); everything else non-alphanumeric
+    /// becomes a space, so "uh-uh" and "uh uh" both normalize to "uh uh".
+    /// </summary>
+    public static string NormalizePhrase(string phrase)
+    {
+        var noPunctuation = Regex.Replace(phrase.ToLowerInvariant(), @"[^a-z0-9'\s]", " ");
+        return Regex.Replace(noPunctuation, @"\s+", " ").Trim();
+    }
 }

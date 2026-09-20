@@ -29,6 +29,10 @@ public static class ApiSubType
     // field, not as separate sub-types per vendor. See ITtsStreamProvider.
     public const string TtsStreaming = "tts_streaming";
 
+    // Media category (telephony audio) — recognition mirror of TtsStreaming, for tf_ivr_menu's
+    // voice-recognition option. See ISpeechRecognitionProvider.
+    public const string SttStreaming = "stt_streaming";
+
     private static readonly Dictionary<string, string> _categoryMap = new()
     {
         [AddressValidation]           = ApiCategory.Address,
@@ -46,6 +50,7 @@ public static class ApiSubType
         [TfnAssignmentDelete]         = ApiCategory.Media,
         [CampaignResults]             = ApiCategory.Media,
         [TtsStreaming]                = ApiCategory.Media,
+        [SttStreaming]                = ApiCategory.Media,
     };
 
     public static bool IsValid(string subType) => _categoryMap.ContainsKey(subType);

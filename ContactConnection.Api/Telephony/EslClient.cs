@@ -17,6 +17,19 @@ public sealed class EslClient(ILogger<EslClient>? logger = null, IConfiguration?
     private StreamReader? _reader;
     private StreamWriter? _writer;
 
+    // Channel events (Content-Type: text/event-plain) can land on the wire between a command
+    // and its own reply — e.g. uuid_answer's CHANNEL_ANSWER event arriving before uuid_answer's
+    // own "+OK". A single blind read after sending a command used to treat whatever came back
+    // next as that command's reply, silently consuming the event instead and leaving the real
+    // reply for the NEXT command to (wrongly) receive — every subsequent command reply on the
+    // connection shifted by one from that point on. Caught live (S149): two back-to-back
+    // uuid_getvar calls came back with each other's answers, one of them literally "+OK" (a
+    // stray reply-of-a-different-command, not a variable value at all). ReadReplyAsync fixes
+    // this by discriminating on Content-Type and queuing anything that isn't the reply it's
+    // waiting for; ReadMessageAsync (the main event loop's) drains that queue first so no event
+    // is ever lost, just reordered to arrive after whichever reply-wait caught it first.
+    private readonly Queue<EslMessage> _pendingEvents = new();
+
     public async Task ConnectAsync(string host, int port, string password, CancellationToken ct)
     {
         _tcp = new TcpClient();
@@ -30,13 +43,16 @@ public sealed class EslClient(ILogger<EslClient>? logger = null, IConfiguration?
             NewLine = "\n",
         };
 
-        // FreeSWITCH sends "Content-Type: auth/request" first
-        await ReadMessageAsync(ct);
+        // FreeSWITCH's unsolicited opening greeting (Content-Type: auth/request) — not a reply
+        // to any command we've sent, and nothing else can be in flight on a brand-new
+        // connection, so a raw read (not ReadReplyAsync, which would wait forever for a
+        // command/reply that will never come) is correct here.
+        await ReadRawMessageAsync(ct);
 
         await _writer.WriteLineAsync($"auth {password}");
         await _writer.WriteLineAsync();
 
-        var reply = await ReadMessageAsync(ct);
+        var reply = await ReadReplyAsync(ct);
         if (reply?.GetHeader("Reply-Text")?.StartsWith("+OK") != true)
             throw new InvalidOperationException("ESL authentication failed — check EslPassword config.");
     }
@@ -45,11 +61,37 @@ public sealed class EslClient(ILogger<EslClient>? logger = null, IConfiguration?
     {
         await _writer!.WriteLineAsync($"event plain {eventNames}");
         await _writer.WriteLineAsync();
-        await ReadMessageAsync(ct); // consumes the +OK reply
+        await ReadReplyAsync(ct); // consumes the +OK reply
     }
 
-    /// <summary>Reads one ESL message (headers + optional body). Returns null on clean disconnect.</summary>
+    /// <summary>Reads the next channel EVENT for the main event loop — never a command reply
+    /// (those are matched separately by ReadReplyAsync). Drains anything ReadReplyAsync had to
+    /// queue past while it was waiting for its own reply before reading fresh off the socket, so
+    /// events are reordered at worst, never dropped. Returns null on clean disconnect.</summary>
     public async Task<EslMessage?> ReadMessageAsync(CancellationToken ct)
+    {
+        if (_pendingEvents.TryDequeue(out var queued)) return queued;
+        return await ReadRawMessageAsync(ct);
+    }
+
+    /// <summary>Reads messages off the socket until one is actually the reply to a command we
+    /// sent (Content-Type api/response or command/reply) — anything else encountered along the
+    /// way is a channel event that arrived out of turn; queued for ReadMessageAsync rather than
+    /// misread as this command's reply (see _pendingEvents doc).</summary>
+    private async Task<EslMessage?> ReadReplyAsync(CancellationToken ct)
+    {
+        while (true)
+        {
+            var msg = await ReadRawMessageAsync(ct);
+            if (msg is null) return null;
+            if (msg.ContentType is "api/response" or "command/reply") return msg;
+            _pendingEvents.Enqueue(msg);
+        }
+    }
+
+    /// <summary>Reads exactly one ESL message (headers + optional body) straight off the socket,
+    /// no matter its Content-Type. Returns null on clean disconnect.</summary>
+    private async Task<EslMessage?> ReadRawMessageAsync(CancellationToken ct)
     {
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -87,7 +129,7 @@ public sealed class EslClient(ILogger<EslClient>? logger = null, IConfiguration?
     {
         await _writer!.WriteLineAsync($"api {command}");
         await _writer.WriteLineAsync();
-        var reply = await ReadMessageAsync(ct);
+        var reply = await ReadReplyAsync(ct);
 
         // "api" replies carry the result in the body, not a header — "-ERR ..." on failure.
         // Previously discarded unconditionally, which let a wrong command name (uuid_hangup,
@@ -107,7 +149,7 @@ public sealed class EslClient(ILogger<EslClient>? logger = null, IConfiguration?
     {
         await _writer!.WriteLineAsync($"bgapi {command}");
         await _writer.WriteLineAsync();
-        var reply = await ReadMessageAsync(ct);
+        var reply = await ReadReplyAsync(ct);
         if (reply?.Body?.StartsWith("-ERR", StringComparison.Ordinal) == true)
             logger?.LogWarning("ESL bgapi command failed: '{Command}' → {Response}", command, reply.Body.Trim());
     }
@@ -215,7 +257,7 @@ public sealed class EslClient(ILogger<EslClient>? logger = null, IConfiguration?
     {
         await _writer!.WriteLineAsync($"api {command}");
         await _writer.WriteLineAsync();
-        var msg = await ReadMessageAsync(ct);
+        var msg = await ReadReplyAsync(ct);
         return msg?.Body?.Trim();
     }
 

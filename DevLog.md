@@ -157,6 +157,8 @@
 | 145 | 2026-09-15 | 12:27 PM PDT | 12:52 PM PDT | 25 min | ~14387 min |
 | 146 | 2026-09-18 | 9:40 AM PDT | 11:13 AM PDT | 93 min | ~14480 min |
 | 147 | 2026-09-18 | 11:18 AM PDT | 1:15 PM PDT | 117 min | ~14597 min |
+| 148 | 2026-09-20 | 9:50 AM PDT | 2:20 PM PDT | 270 min | ~14867 min |
+| 149 | 2026-09-20 | 2:57 PM PDT | 4:19 PM PDT | 82 min | ~14949 min |
 
 ---
 
@@ -8426,3 +8428,341 @@ coverage; retire the .cc softphone route.
 `ReceiveTelephonyEventEnded` signal, tied to the triggered branch's own `tf_end`); the Play-node-
 never-completes-on-an-already-rebridged-channel bug (deferred `tf_secure_collect` reconnect to the
 same `tf_end` hook); per-node configurable wait-timeout UX follow-up.
+
+## Session 148
+
+**Date:** 2026-09-20
+**Start:** 9:50 AM PDT
+**End:** 2:20 PM PDT
+**Duration:** 270 minutes
+**Total Duration:** ~14867 minutes
+
+### Focus
+
+Expand `tf_ivr_menu` with voice recognition (say "yes" or press 1), then generalize into a data-
+collect node in a later session. Got voice recognition built end to end, live-verified DTMF still
+works, but **speech recognition itself is not yet working** — real bugs found and partially fixed
+via live testing, root cause not yet confirmed. **Not committed or pushed** — user wants the bug
+resolved before anything lands, so the whole session's diff is sitting in the working tree for
+Session 149 to pick up (or discard/redo pieces of, at the user's discretion).
+
+### 1. First attempt — mod_pocketsphinx (built, verified, then reverted)
+
+Built voice recognition on FreeSWITCH-native `mod_pocketsphinx` (JSGF grammar ASR, no external
+server unlike `mod_unimrcp` which was pulled out of the FreeSWITCH tree in 2022): added it to the
+Dockerfile's `fsheaders` build stage (`asr_tts/mod_pocketsphinx` in `modules.conf`, `bison`/`flex`
+apt deps), copied `mod_pocketsphinx.so` + its "communicator" acoustic model/dictionary into the
+runtime image, `pocketsphinx.conf.xml`, `grammar_dir` in `vars.xml`, a `freeswitch/grammars/` mount.
+**Fully built and live-verified** — module loads cleanly, registers its ASR interface, `ldd` clean
+against the runtime image. New `play_and_detect_speech`-based `ivr-collect-voice` dialplan extension
+unified DTMF (`playback_terminators`) and voice in one FreeSWITCH app call.
+
+User caught the real problem before this shipped: recognition runs **inside the shared FreeSWITCH
+process** — every tenant's voice menu burns CPU on one shared telephony host, no per-tenant cost
+isolation or vendor choice. Real concern for a multi-tenant platform. **Reverted entirely** (`git
+checkout` back to session-start baseline for every touched FreeSWITCH/dialplan/config file, deleted
+the new ones, rebuilt the image to confirm a clean pocketsphinx-free baseline) and rebuilt on a
+different architecture below. The revert is clean; nothing pocketsphinx-related remains.
+
+### 2. Rebuilt on cloud STT — mirrors the existing TTS-streaming architecture exactly
+
+Recognition now runs on the tenant's own vendor subscription, same pattern TTS already uses:
+- `ISpeechRecognitionProvider`/`ISpeechRecognitionProviderFactory` (Application) mirror
+  `ITtsStreamProvider`/`ITtsStreamProviderFactory`. `ElevenLabsSttStreamProvider` (Infrastructure/Stt)
+  is a direct `ClientWebSocket` implementation of ElevenLabs' realtime STT protocol (`wss://api.
+  elevenlabs.io/v1/speech-to-text/realtime`, `input_audio_chunk` out, `partial_transcript`/
+  `committed_transcript` in) — first vendor, chosen because it's already this project's primary TTS
+  vendor and publishes a documented streaming STT protocol.
+- `ISttStreamingService`/`SttStreamingService` mirror `ITtsStreamingService`/`TtsStreamingService`
+  (same `TenantApiPreferences` lookup against `ApiSubType.SttStreaming`, new constant). Stashes a
+  `SttStreamRelayRequest` (phrase index, option map, no-match target) in Redis under a token.
+- Key discovery that shaped the design: this project's TTS streaming **used to** run over
+  `mod_audio_stream` (a bidirectional WS bridge) before Session 126 replaced it with a simpler HTTP/
+  mod_shout relay — for an *outbound playback quality* problem (chunked WS delivery caused stutter),
+  nothing to do with *capturing* audio. Session 126's own cleanup commit deliberately left
+  `mod_audio_stream` loaded and `EslClient.StartAudioStreamAsync`/`StopAudioStreamAsync` in place
+  with the comment "future STT" — this was anticipated. Recovered the deleted pre-126 WS relay via
+  `git show` on the commit before the rewrite to get the exact, already-proven wire protocol
+  (FreeSWITCH connects as WS client, sends a correlation token as its first text frame, then streams
+  caller audio as binary frames) rather than guessing at mod_audio_stream's protocol from scratch.
+- `SttStreamRelayEndpoints` (new `/relay/stt-stream` WS endpoint, mirrors the recovered pre-126 TTS
+  relay) resolves the cached request, forwards binary audio frames into
+  `ISpeechRecognitionProvider.TranscribeAsync`, matches each transcript against the phrase index.
+- `IIvrVoiceResolutionCoordinator`/`IvrVoiceResolutionCoordinator`: arbitrates the race between a
+  DTMF press (`EslBackgroundService.HandleDtmfAsync`, new `_ivr_voice_digit_options` branch, kept
+  fully separate from the existing hot-digit-listener session vars/lifetime) and a matched phrase
+  (the relay) — both can resolve the same menu concurrently, exactly one should win. Uses
+  `ITelephonyCallSessionStore.TrySetKeyAsync` (Redis SETNX, the same "exclusive claim" primitive
+  already used for `RingStrategy.AutoAnswerBestAgent`) rather than new in-memory state.
+- `IvrMenuNodeHandler`'s voice branch is pure direct-ESL, no dialplan extension at all: answer,
+  `StartAudioStreamAsync` (capture), `BroadcastAsync` the prompt, arm the DTMF listener. Falls back
+  to the existing digits-only path unchanged if the tenant has no `SttStreaming` preference
+  configured, or if `maxDigits > 1` (voice only supports single-digit menus — the DTMF side reuses
+  the same no-inter-digit-timer raw-DTMF mechanism the `alwaysListen` hot-digit feature already
+  uses). Deliberately no retry/reprompt loop for v1 — one prompt, one listen window, then resolve or
+  `no_match`.
+- Designer UI: `phrases?: string[]` per `tf_ivr_menu` option, 🎙 badge on the canvas node when
+  configured.
+- 10 new tests (handler voice branch, coordinator race behavior, phrase normalization), 786/786.
+
+### 3. Platform-level API setup + a real parity gap found and closed
+
+User asked to stand up the platform-level "ElevenLabs STT" API definition and, per their request,
+to use that as a chance to audit the platform-level setup for gaps against the existing TTS
+equivalent. Found: TTS streaming has full plumbing — provider validation on save
+(`TtsProviderValidation`, prevents a typo'd `Provider` from failing silently mid-call), a
+`/tts-providers` catalog endpoint, a provider picker in both Portal and tenant-admin "API
+Definitions" create forms, and a dedicated credential-entry form on the tenant "API Preferences"
+page. STT had none of it — just the raw plumbing from #2. Closed the gap, mirroring TTS exactly:
+`SttProviderValidation`, `SttProvidersEndpoints` (`/api/v1/portal/stt-providers` +
+`/api/v1/admin/stt-providers`), wired into all four Portal/Admin definition+endpoint create/update
+call sites, Portal + Admin API Definitions provider dropdowns now union TTS and STT provider keys
+(Provider is picked before an endpoint's sub-type exists, so the picker can't know which factory
+applies yet — validation at the endpoint level enforces the right one), and a full `renderSttCredentials`
+credential-entry section on `AdminApiPreferencesPage.tsx` mirroring `renderTtsCredentials`. Created
+the actual `PortalApiDefinition`/`PortalApiEndpoint` rows for ElevenLabs STT via direct SQL insert
+into the dev DB (mirrors how the existing TTS row got there — no seed script exists for this table,
+confirmed by grepping every migration; it's authenticated-API-or-manual-insert only in this
+codebase).
+
+### 4. Designer UI bugs found via live use, both fixed
+
+- **Phrases input unreadable** — user's screenshot showed the phrases box rendered as a sliver too
+  narrow to see typed text. Root cause: cramming digit + transition + phrases + delete-button into
+  one flex row inside a ~288px-wide properties panel — a `flex-1` (flex-basis:0%) input shrinks to
+  near-nothing once its `flex-basis:auto` siblings (which refuse to shrink below their intrinsic
+  content width) claim their share first. Fixed by restructuring each option into a bordered card:
+  digit/transition/delete on one row, phrases on its own full-width row below.
+- **Digit box then took over the row instead** — after the above fix, the *digit* input started
+  stretching to fill most of the row. Root cause: `inputCls` bakes in `w-full`; Tailwind resolves
+  two utility classes that both set `width` by their order in the *generated stylesheet*, not by
+  their order in the className string, so `w-16` appended after `w-full` isn't guaranteed to win —
+  and after the restructure, it stopped winning. Fixed with Tailwind's `!` important-modifier
+  (`!w-16 shrink-0` on the digit input, `min-w-0 flex-1` on the transition input) so the digit box's
+  width can't be pre-empted regardless of generation order. Same latent bug fixed in the hot-digit
+  (`alwaysListen`) editor above it, which had the identical pattern.
+- **Phrases box appeared to reject commas/spaces entirely** — real bug, not just unclear UX: the
+  box was a controlled input whose displayed value was recomputed by splitting the raw phrases
+  array and rejoining with `, ` on every keystroke. Typing a trailing comma or space produces a
+  momentarily-empty segment, which the "keep only real phrases" filter strips out on the very next
+  render — so the character visually vanished the instant it was typed, reading as "the box won't
+  let me type a comma." Fixed with local per-row draft-text state (`phraseDrafts`) that's the source
+  of truth for what's *displayed* while editing; the real `phrases` array is still parsed from it on
+  every change, but the input itself never gets force-corrected mid-type. Also added explanatory
+  text above the options list ("type each phrase separated by a comma — e.g. `yes, yeah, sure`")
+  per the user's request, since if they had to ask, a tenant would too.
+
+### 5. Live test — DTMF works, voice recognition does not (unresolved)
+
+User built a real test flow (Answer → voice-enabled IVR Menu, digit 1/phrases "yes, yeah, sure, ok,
+absolutely, cool" and digit 2/phrases "no, nope, not, uh uh, knew" → Set Variable per branch → End)
+and placed real calls. **DTMF resolved correctly every time.** Voice did not, across multiple
+attempts, with two rounds of live-log-driven fixes in between:
+
+- **Round 1 finding:** log showed `ElevenLabs STT: connected`, then almost immediately `STT relay:
+  unknown or expired correlation token` for a *second* connection with the same token — the relay
+  was deleting the Redis-cached request the instant it was read once (copied from the old TTS
+  relay's single-use pattern, correct there since TTS is one-shot delivery, wrong here since a live
+  multi-second audio capture can see `mod_audio_stream`'s underlying WS library reconnect mid-
+  stream). Fixed: stopped deleting the token on read, left it to expire via its own TTL so a
+  reconnect can also succeed. Also found and fixed a real matching bug in the same pass:
+  `IvrMenu.NormalizePhrase` only lowercased and collapsed whitespace — never stripped punctuation —
+  so a vendor's committed transcript like `"Yes."` would never match a configured `"yes"` phrase.
+  Fixed, with new test cases. Added logging for every transcript (not just matches) and for
+  audio-frame throughput, since the relay had zero visibility into *why* a match failed short of
+  guessing.
+- **Round 2 finding (this session's last test, log captured before wrapping up):** audio genuinely
+  reached ElevenLabs this time — `ElevenLabs STT: audio send loop ended — 996 frame(s), 1912320
+  byte(s) forwarded`. But all three `committed_transcript` messages that came back had **empty
+  text**. The `session_started` response ElevenLabs sent back confirms `"vad_commit_strategy":
+  false` — i.e. ElevenLabs is running in **manual commit mode**, its own default. This code never
+  requests `commit_strategy=vad` in the connection URL, and never sends an explicit `"commit": true`
+  signal on any `input_audio_chunk` message (the documented example payload includes that field;
+  this implementation omits it). Leading hypothesis for next session, **not yet fixed**: audio is
+  being buffered but nothing is ever telling ElevenLabs to actually commit/transcribe it, hence
+  empty commits on a timer rather than real recognition output. User also separately observed the
+  prompt greeting keeps playing in full even when they speak during it — expected given the current
+  design (no barge-in on the voice path, capture starts before the prompt broadcast so speaking
+  during playback should still work in principle), but worth confirming it isn't somehow part of
+  the same problem once the commit-strategy fix is tried.
+
+### Environment note
+
+Hit the same class of issue Session 147 flagged: a `dotnet watch run --project ContactConnection.Api`
+left running from a *prior* session (since 9/18, two days stale) held file locks that made every
+`dotnet build`/`dotnet test` in the first half of this session fail with `MSB3027`/file-in-use
+errors even though the actual code compiled with zero `error CS` lines — easy to misread as a real
+build failure. Killed the stale process tree and started a fresh watch; had to repeat this 2-3 times
+more as the session went on, since `dotnet watch`'s hot-reload can't apply a changed method
+signature or certain edits (`ENC1006`/`ENC1001` errors, "Restart is needed") and just sits there
+needing a manual kill+restart rather than failing loudly. Worth checking for a stale watch process
+first thing next session before trusting any build/test failure output.
+
+### State
+
+`dotnet build` (whole solution) and `dotnet test`: **791/791 passing** (159 Domain, 20 Application,
+511 Infrastructure, 101 Api — +15 net this session). `tsc -b` clean, 0 errors. New DB rows in the
+dev Postgres `public` schema only (`portal_api_definitions`/`portal_api_endpoints` for ElevenLabs
+STT) — no EF migrations needed (no new tables/columns, `ApiSubType.SttStreaming` is just a new
+string constant). **Nothing committed or pushed — explicit user instruction, whole session's diff
+is uncommitted in the working tree.** FreeSWITCH image rebuilt clean (no pocketsphinx). Api running
+under `dotnet watch` on `:5135`.
+
+### Next session — pick up here
+
+1. **Try `commit_strategy=vad` on the ElevenLabs STT connection URL** (`ElevenLabsSttStreamProvider.
+   cs`) — top hypothesis for the empty-transcript bug. If chunk-level `"commit": true` is instead
+   the right lever (re-check ElevenLabs' docs for how `vad` vs `manual` actually interact with the
+   `commit` field per-chunk), try that too.
+2. If VAD mode doesn't fix it, verify the actual encoding of `mod_audio_stream`'s inbound binary
+   frames — this session's WS relay was built assuming raw linear PCM16 matching the requested
+   "8k"/"mono" `StartAudioStreamAsync` params, mirrored from the outbound TTS direction's documented
+   format, but never independently confirmed for the *capture* direction (the old TTS-only relay
+   drained inbound frames without ever inspecting them).
+3. Once a real transcript with actual text comes back, confirm it matches the configured phrase
+   list end to end (the punctuation-stripping fix from this session should cover common cases, but
+   watch for anything else vendor-specific).
+4. Live-verify: digit press, spoken phrase, silence-timeout-to-no_match, and a no-phrases menu
+   behaving exactly as before (regression check on the untouched digits-only path) — none of this
+   was reached yet since voice recognition itself never returned real text.
+5. Only after voice recognition is confirmed working end to end: commit and push (explicitly held
+   back this session), then move on to the originally-planned fast-follow — the general-purpose
+   "data collect → variable" node built on this same capture mechanism.
+
+---
+
+## Session 149
+
+**Date:** 2026-09-20
+**Start:** 2:57 PM PDT
+**End:** 4:19 PM PDT
+**Duration:** 82 minutes
+**Total Duration:** ~14949 minutes
+
+### Focus
+
+Pick up Session 148's tf_ivr_menu voice-recognition bug (empty transcripts) and add the user's
+second ask: surface any transcribed STT in the call trace UI so tenants can see what was heard
+without pulling API logs. **Both fully done and live-verified by end of session** — real root
+cause turned out to be a pre-existing bug in `EslClient` itself, not anything specific to STT.
+
+### 1. Call-trace transcript visibility — built first, verified last
+
+`IIvrVoiceResolutionCoordinator.TryResolveAsync` gained a `resolutionDetail` parameter; on a
+successful claim it now calls `ICallTraceRecorder.RecordStepAsync` for the menu node (node id
+read from `_ivr_voice_node_id` before that var is cleared) — a separate trace row layered on top
+of the "collecting" row the node's synchronous handler already produced, since the real
+resolution happens asynchronously off `TelephonyFlowEngine`'s normal per-node loop and nothing
+previously recorded it. `SttStreamRelayEndpoints.Handle` tracks every transcript heard (interim +
+final, deduped) and builds a human-readable detail: `voice: recognized "X" — matched`,
+`voice: heard "X" / "Y" — no phrase match`, or `voice: no speech detected before timeout`.
+`EslBackgroundService.HandleVoiceMenuDtmfAsync` passes `DTMF: digit 'N' pressed` for the DTMF side
+of the same race. No frontend changes needed — `CallTraceRunningView.tsx` already renders any
+step's `detail` generically. Confirmed both via a direct `call_trace_events` query and, at the very
+end of the session, in the actual browser Call Trace UI (`tf_ivr_menu` row showing
+`voice: recognized "Absolutely." — matched`).
+
+### 2. The empty-transcript bug — a long chain of disproven hypotheses before the real one
+
+**Applied the Session 148 hypothesis first:** ElevenLabs defaults to manual-commit mode, and this
+code never sent `commit_strategy=vad` on the connect URL nor an explicit `"commit": true` per
+chunk — confirmed against ElevenLabs' own docs (fetched live). Added `&commit_strategy=vad` to
+`ElevenLabsSttStreamProvider.cs`'s connection URL. **Correct and still needed**, but not
+sufficient alone — live testing kept coming back with empty `committed_transcript` text even with
+VAD confirmed active (`session_started` echoed `vad_commit_strategy:true`).
+
+**Long detour into sample-rate hypotheses, each live-tested and each disproven:**
+- Requested "8k" from `mod_audio_stream` (original), declared 8000Hz to ElevenLabs → always empty.
+- Dumped raw captured PCM to disk (temp debug code, later removed) and found via ear (re-tagging
+  the same bytes at several candidate WAV sample rates) that the real audio was genuinely 48kHz —
+  this build's codec-prefs list Opus first, and Opus's SDP clock rate is always 48000 regardless
+  of actual bandwidth (RFC 7587).
+- Switched to requesting "16k" from the module, declared 16000Hz → partial improvement (one real
+  word, "House", came back for the first time) but still mostly empty/wrong — module doesn't
+  actually resample to what's requested; it delivers native audio unchanged no matter what label
+  is passed.
+- Tried deriving the true rate dynamically from FreeSWITCH's `read_rate` channel var → returned
+  "8000" on a call independently confirmed by ear to be genuinely 48kHz. Unreliable.
+- Tried deriving it from the codec *name* instead (`read_codec`, mapped via RFC: Opus=48000,
+  G.722=16000 despite its deceptive 8000 SDP declaration, else 8000) — more principled, but the
+  live test still came back `read_codec=+OK read_rate=opus`. **That was the tell**, not another
+  failed hypothesis about codecs.
+
+**Real root cause: a pre-existing `EslClient` command/event reply-correlation bug.**
+`SendApiAsync`/`GetChannelVarAsync` did one blind `ReadMessageAsync()` after sending a command and
+treated whatever came back next as that command's reply, with no `Content-Type` check. This same
+connection is also subscribed to FreeSWITCH channel events — if `uuid_answer` triggers a
+`CHANNEL_ANSWER` event that lands on the wire *before* `uuid_answer`'s own `"+OK"` reply, the
+blind read swallows the event instead, leaving the real reply to be picked up by the *next*
+command's read — shifting every subsequent reply on the connection by one from that point on.
+Two sequential `uuid_getvar` calls (`read_codec`, `read_rate`) came back with **each other's**
+answers, one of them literally the string `"+OK"` — a stray reply from `uuid_answer`, not a
+variable value at all. This retroactively explains every "unreliable" reading in the whole
+detour: it was never really about which channel var to trust, the reply stream itself was
+desynchronized, and every test call that session was in fact real 48kHz Opus audio the entire
+time (independently confirmed by ear each round).
+
+**Fix (`ContactConnection.Api/Telephony/EslClient.cs`):** split reading into `ReadReplyAsync`
+(loops until a message's `Content-Type` is `api/response` or `command/reply`; anything else — an
+out-of-turn event — gets queued, never dropped) and the public `ReadMessageAsync` used only by
+`EslBackgroundService`'s main event loop, which now drains that queue first before reading fresh
+off the socket (an event is reordered, never lost). Every command-sending method (`SendApiAsync`,
+`SendBgApiAsync`, `SendApiBodyAsync`, `SubscribeAsync`, the post-auth reply in `ConnectAsync`) now
+goes through `ReadReplyAsync`; only the pre-auth greeting stays a raw single read. New regression
+test `EslClientReplyCorrelationTests.cs` spins up a loopback TCP fake ESL server scripting the
+exact interleaving byte-for-byte and asserts both correct correlation and that the interleaved
+event is still observable afterward. **This bug affects any ESL command issued from inside an
+event handler context, not just this feature** — worth revisiting if any other per-call
+`uuid_getvar` value has ever looked unexplainably flaky.
+
+### 3. Final state of the sample-rate fix, once diagnosis was actually reliable
+
+`IvrMenuNodeHandler` derives the true sample rate from `read_codec` (name, not the disproven
+`read_rate`) via `ResolveSampleRateForCodec`: Opus → 48000, G.722 → 16000 (RFC 3551 §4.5.2
+historical quirk — its own test locks this down since it's easy to get backwards), else → 8000.
+`mod_audio_stream`'s own `"8k"`/`"16k"` sampling-rate argument doesn't actually resample in this
+build regardless — what matters is declaring the true rate to the STT vendor.
+`ISttStreamingService.PrepareCaptureAsync` gained a `sampleRateHz` param threaded through
+`SttStreamRelayRequest` → `SttStreamRelayEndpoints` so the two can't drift out of sync with each
+other the way two independent hardcoded magic numbers previously could. Added diagnostic logging
+(`read_codec=... read_rate=... → declaring sampleRateHz=...`) so any future mismatch is visible
+in logs immediately instead of requiring raw-PCM archaeology again.
+
+### Live verification
+
+Three separate real test calls after the ESL fix landed, all successful:
+1. Said "yeah" → `transcript (interim) 'Yeah.' → normalized 'yeah'` → `phrase 'Yeah.' matched →
+   tf_set_variable_1789937600871` → correct flow resolution (not the no-match fallback).
+2. Repeat of the above, same result.
+3. Said "absolutely" → exact match, confirmed in the browser Call Trace UI:
+   `tf_ivr_menu — voice: recognized "Absolutely." — matched`.
+
+User separately asked whether a "yes" → "Yeah." mis-transcription (test 1) meant lingering audio
+clarity problems — explained that nonsense mis-hears (e.g. "House", seen mid-session before the
+fix) are the signature of corrupted audio, while a phonetically-adjacent real-word mis-hear on
+clean audio is ordinary ASR ambiguity between two of the most commonly conflated words in casual
+speech, unrelated to the pipeline; test 3's exact match on a longer, less ambiguous word supports
+that reading.
+
+### State
+
+`dotnet test` (whole solution): **795/795 passing** (159 Domain, 20 Application, 514
+Infrastructure, 102 Api — +4 net this session: `EslClientReplyCorrelationTests`,
+`IvrVoiceResolutionCoordinatorTests`' new trace-recording case, and two new
+`IvrMenuNodeHandlerTests` covering the G.711/G.722 codec-rate branches). `dotnet build`: 0
+`error CS`, same pre-existing unrelated warnings as before this session. Temp debug code (raw PCM
+file dump in `SttStreamRelayEndpoints.cs`, used only for live ear-verification this session) added
+and then fully removed once root-caused. **Nothing committed or pushed yet** — pending the user's
+go-ahead next session, per standing instruction to hold commits until explicitly asked.
+
+### Next session — pick up here
+
+1. Commit and push this session's + Session 148's combined diff (voice recognition feature,
+   EslClient reply-correlation fix, call-trace transcript visibility) — first confirm with the
+   user before committing, per standing practice.
+2. Originally-planned fast-follow: a general-purpose "data collect → variable" node built on the
+   same voice-capture mechanism.
+3. Worth a deliberate pass over other ESL-heavy node handlers/services for anywhere a per-call
+   `uuid_getvar`/`SendApiAsync` result has seemed inconsistent or "flaky" in the past — the
+   reply-correlation bug fixed this session could be the real explanation, and it would have been
+   silent (no exception, no error log) wherever it happened.

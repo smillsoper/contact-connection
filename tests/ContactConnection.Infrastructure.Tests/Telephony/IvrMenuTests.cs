@@ -46,4 +46,21 @@ public class IvrMenuTests
     [Fact]
     public void ResolveTarget_NoMatchAndNoFallback_ReturnsNull()
         => Assert.Null(IvrMenu.ResolveTarget("7", new Dictionary<string, string> { ["1"] = "x" }, null));
+
+    [Theory]
+    [InlineData("Yes", "yes")]
+    [InlineData("  yeah  ", "yeah")]
+    [InlineData("NOT   NOW", "not now")]
+    [InlineData("Sure thing", "sure thing")]
+    public void NormalizePhrase_LowercasesTrimsAndCollapsesWhitespace(string input, string expected)
+        => Assert.Equal(expected, IvrMenu.NormalizePhrase(input));
+
+    [Theory]
+    [InlineData("Yes.", "yes")]
+    [InlineData("Yeah!", "yeah")]
+    [InlineData("uh-uh", "uh uh")]
+    [InlineData("don't", "don't")]
+    [InlineData("No, thanks.", "no thanks")]
+    public void NormalizePhrase_StripsPunctuationFromASttTranscript(string input, string expected)
+        => Assert.Equal(expected, IvrMenu.NormalizePhrase(input));
 }

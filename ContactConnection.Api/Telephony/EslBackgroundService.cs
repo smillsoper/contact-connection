@@ -35,6 +35,7 @@ public sealed class EslBackgroundService : BackgroundService
     private readonly IAgentStateStore _stateStore;
     private readonly IAgentRegistrationStore _registrationStore;
     private readonly IDashboardNotifier _dashboardNotifier;
+    private readonly IIvrVoiceResolutionCoordinator _voiceCoordinator;
 
     public EslBackgroundService(
         IHubContext<FlowHub, IFlowHubClient> hub,
@@ -45,7 +46,8 @@ public sealed class EslBackgroundService : BackgroundService
         ITelephonyCallSessionStore sessionStore,
         IAgentStateStore stateStore,
         IAgentRegistrationStore registrationStore,
-        IDashboardNotifier dashboardNotifier)
+        IDashboardNotifier dashboardNotifier,
+        IIvrVoiceResolutionCoordinator voiceCoordinator)
     {
         _hub                    = hub;
         _scopeFactory           = scopeFactory;
@@ -56,6 +58,7 @@ public sealed class EslBackgroundService : BackgroundService
         _stateStore             = stateStore;
         _registrationStore      = registrationStore;
         _dashboardNotifier      = dashboardNotifier;
+        _voiceCoordinator       = voiceCoordinator;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -1967,6 +1970,17 @@ public sealed class EslBackgroundService : BackgroundService
         var session = await ResolveSessionAsync(uuid, vars, ct);
         if (session is null) return;
 
+        // tf_ivr_menu's voice-recognition option (S148) — a raw DTMF press racing against a
+        // concurrently-running speech recognition capture (SttStreamRelayEndpoints). Checked
+        // before the hot-digit map below: distinct session vars, distinct lifetime (this node's
+        // own one-shot resolution, not a listener meant to persist across later nodes), so the
+        // two features can never interfere with each other.
+        if (session.Vars.ContainsKey("_ivr_voice_digit_options"))
+        {
+            await HandleVoiceMenuDtmfAsync(session, digit, esl, ct);
+            return;
+        }
+
         Dictionary<string, string> optionMap;
         try
         {
@@ -2004,6 +2018,41 @@ public sealed class EslBackgroundService : BackgroundService
         await scope.ServiceProvider
             .GetRequiredService<ITelephonyFlowEngine>()
             .ResumeFromNodeAsync(session.ChannelUuid, targetNodeId, esl, ct);
+    }
+
+    /// <summary>
+    /// The DTMF half of tf_ivr_menu's voice-recognition race (S148) — see IvrMenuNodeHandler.
+    /// StartVoiceCaptureAsync and SttStreamRelayEndpoints for the other half. An unmatched digit
+    /// is ignored (same "ignore invalid entirely" philosophy as the hot-digit listener); a
+    /// matched one interrupts the prompt broadcast and hands off to the shared coordinator,
+    /// which is what actually decides whether this press or a same-moment phrase match wins.
+    /// </summary>
+    private async Task HandleVoiceMenuDtmfAsync(
+        TelephonyCallSession session, string digit, EslClient esl, CancellationToken ct)
+    {
+        Dictionary<string, string> optionMap;
+        try
+        {
+            optionMap = JsonSerializer.Deserialize<Dictionary<string, string>>(
+                session.Vars.GetValueOrDefault("_ivr_voice_digit_options", "{}")) ?? new();
+        }
+        catch (JsonException) { return; }
+
+        if (!optionMap.TryGetValue(digit, out var target) || string.IsNullOrEmpty(target))
+            return; // not one of this menu's configured digits — ignored, not an error
+
+        _logger.LogInformation(
+            "DTMF {Uuid}: voice-menu digit '{Digit}' matched (armed by {NodeId}) → target {Target}",
+            session.ChannelUuid, digit, session.Vars.GetValueOrDefault("_ivr_voice_node_id"), target);
+
+        try { await esl.BreakChannelAsync(session.ChannelUuid, ct); }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "DTMF {Uuid}: uuid_break before voice-menu redirect failed — continuing anyway", session.ChannelUuid);
+        }
+
+        await _voiceCoordinator.TryResolveAsync(
+            session.ChannelUuid, target, esl, resolutionDetail: $"DTMF: digit '{digit}' pressed", ct: ct);
     }
 
     /// <summary>

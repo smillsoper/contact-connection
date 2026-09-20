@@ -251,6 +251,14 @@ export async function getPortalTtsProviders(): Promise<string[]> {
   return providers.map((p) => p.key)
 }
 
+/** Recognition mirror of getPortalTtsProviders (S148) — live-registered
+ *  ISpeechRecognitionProvider keys, the valid Provider values for a definition backing an
+ *  SttStreaming endpoint. See SttProviderValidation. */
+export async function getPortalSttProviders(): Promise<string[]> {
+  const providers = await portalFetch<TtsProviderInfo[]>('/api/v1/portal/stt-providers')
+  return providers.map((p) => p.key)
+}
+
 export async function createPortalApiDefinition(data: CreateApiDefinitionData): Promise<ApiDefinitionRecord> {
   return portalFetch<ApiDefinitionRecord>('/api/v1/portal/api-definitions', {
     method: 'POST',

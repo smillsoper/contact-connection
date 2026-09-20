@@ -85,6 +85,7 @@ public static class AdminApiDefinitionsEndpoints
         ITenantApiDefinitionRepository repo,
         ITenantApiEndpointRepository endpointRepo,
         ITtsStreamProviderFactory ttsFactory,
+        ISpeechRecognitionProviderFactory sttFactory,
         [FromKeyedServices("tenant")] IVersionHistoryService versions,
         TenantContext tenantContext,
         HttpContext http,
@@ -105,14 +106,20 @@ public static class AdminApiDefinitionsEndpoints
         }
 
         // Provider doubles as a runtime dispatch key only for definitions backing a TtsStreaming
-        // endpoint (see TtsProviderValidation) — a tenant registering their own TTS vendor
-        // account is subject to the same constraint as the platform catalog.
+        // or SttStreaming endpoint (see TtsProviderValidation/SttProviderValidation) — a tenant
+        // registering their own vendor account is subject to the same constraint as the
+        // platform catalog.
         if (request.Provider is not null)
         {
             var endpoints = await endpointRepo.GetByDefinitionAsync(id, ct);
             if (endpoints.Any(e => e.ApiSubType == ApiSubType.TtsStreaming))
             {
                 var error = TtsProviderValidation.Validate(request.Provider, ttsFactory);
+                if (error is not null) return Results.BadRequest(new { error });
+            }
+            if (endpoints.Any(e => e.ApiSubType == ApiSubType.SttStreaming))
+            {
+                var error = SttProviderValidation.Validate(request.Provider, sttFactory);
                 if (error is not null) return Results.BadRequest(new { error });
             }
         }

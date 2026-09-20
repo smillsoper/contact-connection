@@ -339,6 +339,12 @@ export function listAdminTtsProviders(): Promise<TtsProviderInfo[]> {
   return api.get<TtsProviderInfo[]>('/api/v1/admin/tts-providers')
 }
 
+/** Recognition mirror of listAdminTtsProviders (S148) — same {key, requiredCredentialFields}
+ *  shape, so TtsProviderInfo is reused rather than duplicated. */
+export function listAdminSttProviders(): Promise<TtsProviderInfo[]> {
+  return api.get<TtsProviderInfo[]>('/api/v1/admin/stt-providers')
+}
+
 export interface EndpointTestPayload {
   path: string
   httpMethod?: string

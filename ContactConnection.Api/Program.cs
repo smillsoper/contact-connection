@@ -226,6 +226,7 @@ app.MapAdminApiEndpointsEndpoints();
 app.MapAdminApiPreferencesEndpoints();
 app.MapAdminCredentialsEndpoints();
 app.MapAdminTtsProvidersEndpoints();
+app.MapAdminSttProvidersEndpoints();
 app.MapAdminWebhooksEndpoints();
 
 // Portal (platform administration)
@@ -234,6 +235,7 @@ app.MapPortalTenantsEndpoints();
 app.MapPortalApiDefinitionsEndpoints();
 app.MapPortalApiEndpointsEndpoints();
 app.MapPortalTtsProvidersEndpoints();
+app.MapPortalSttProvidersEndpoints();
 app.MapPortalCredentialsEndpoints();
 app.MapPortalMaintenanceEndpoints();
 
@@ -244,6 +246,7 @@ app.MapTenantAdminInviteEndpoints();
 // FreeSWITCH internal endpoints (no bearer auth — internal network only)
 app.MapFreeSwitchDirectoryEndpoints();
 app.MapTtsStreamRelayEndpoints();
+app.MapSttStreamRelayEndpoints();
 
 // Inbound vendor webhooks (public — authenticated via per-endpoint HMAC signature, not bearer JWT)
 app.MapWebhooksEndpoints();

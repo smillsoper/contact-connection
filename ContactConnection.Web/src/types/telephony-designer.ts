@@ -118,8 +118,11 @@ export interface TelNodeData extends Record<string, unknown> {
   timeoutMs?: number
   interDigitTimeoutMs?: number
   terminators?: string
-  /** Each maps an exact DTMF entry to a named transition (its own source handle on the canvas). */
-  options?: { digit: string; transition: string; label?: string }[]
+  /** Each maps an exact DTMF entry to a named transition (its own source handle on the canvas).
+   * `phrases` (S148) are spoken alternatives that resolve to the same transition — voice
+   * recognition, sync mode only (ignored when alwaysListen or maxDigits > 1), and only takes
+   * effect when the tenant has an SttStreaming provider configured. */
+  options?: { digit: string; transition: string; label?: string; phrases?: string[] }[]
   // tf_ivr_menu — hot-digit / async mode (S141). When true: arms a single-digit-only background
   // listener from `options` above and returns via "default" immediately, instead of running the
   // usual blocking play_and_get_digits capture. Every other tf_ivr_menu field above (prompt,

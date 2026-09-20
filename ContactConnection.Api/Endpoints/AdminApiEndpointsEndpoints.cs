@@ -61,6 +61,7 @@ public static class AdminApiEndpointsEndpoints
         ITenantApiDefinitionRepository defRepo,
         ITenantApiEndpointRepository repo,
         ITtsStreamProviderFactory ttsFactory,
+        ISpeechRecognitionProviderFactory sttFactory,
         [FromKeyedServices("tenant")] IVersionHistoryService versions,
         TenantContext tenantContext,
         HttpContext http,
@@ -79,6 +80,11 @@ public static class AdminApiEndpointsEndpoints
         if (request.ApiSubType == ApiSubType.TtsStreaming)
         {
             var error = TtsProviderValidation.Validate(def.Provider, ttsFactory);
+            if (error is not null) return Results.BadRequest(new { error });
+        }
+        if (request.ApiSubType == ApiSubType.SttStreaming)
+        {
+            var error = SttProviderValidation.Validate(def.Provider, sttFactory);
             if (error is not null) return Results.BadRequest(new { error });
         }
 
@@ -115,6 +121,7 @@ public static class AdminApiEndpointsEndpoints
         ITenantApiDefinitionRepository defRepo,
         ITenantApiEndpointRepository repo,
         ITtsStreamProviderFactory ttsFactory,
+        ISpeechRecognitionProviderFactory sttFactory,
         [FromKeyedServices("tenant")] IVersionHistoryService versions,
         TenantContext tenantContext,
         HttpContext http,
@@ -128,13 +135,19 @@ public static class AdminApiEndpointsEndpoints
         if (endpoint is null || endpoint.DefinitionId != definitionId) return Results.NotFound();
 
         var effectiveSubType = request.ApiSubType ?? endpoint.ApiSubType;
-        var needsDefinition = request.ApiSubType is not null || effectiveSubType == ApiSubType.TtsStreaming;
+        var needsDefinition = request.ApiSubType is not null
+            || effectiveSubType == ApiSubType.TtsStreaming || effectiveSubType == ApiSubType.SttStreaming;
         var def = needsDefinition ? await defRepo.GetByIdAsync(definitionId, ct) : null;
         if (needsDefinition && def is null) return Results.NotFound();
 
         if (effectiveSubType == ApiSubType.TtsStreaming)
         {
             var error = TtsProviderValidation.Validate(def!.Provider, ttsFactory);
+            if (error is not null) return Results.BadRequest(new { error });
+        }
+        if (effectiveSubType == ApiSubType.SttStreaming)
+        {
+            var error = SttProviderValidation.Validate(def!.Provider, sttFactory);
             if (error is not null) return Results.BadRequest(new { error });
         }
 

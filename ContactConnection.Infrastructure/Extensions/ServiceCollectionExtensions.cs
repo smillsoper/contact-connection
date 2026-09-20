@@ -17,6 +17,7 @@ using ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 using ContactConnection.Infrastructure.FlowEngine.Services;
 using ContactConnection.Infrastructure.Repositories;
 using ContactConnection.Infrastructure.Storage;
+using ContactConnection.Infrastructure.Stt;
 using ContactConnection.Infrastructure.Telephony;
 using ContactConnection.Infrastructure.Telephony.NodeHandlers;
 using ContactConnection.Infrastructure.Telephony.Recording;
@@ -119,6 +120,14 @@ public static class ServiceCollectionExtensions
         // dialplan uuid_transfer with no live ESL hook mid-execution).
         services.AddScoped<ITtsStreamingService, TtsStreamingService>();
         services.AddScoped<ITtsFileSynthesizer, TtsFileSynthesizer>();
+
+        // STT streaming providers (S148) — recognition mirror of the TTS block above. No
+        // default/fallback: a tenant with no SttStreaming preference just doesn't get voice
+        // recognition on tf_ivr_menu, DTMF-only.
+        services.AddSingleton<ISpeechRecognitionProvider, ElevenLabsSttStreamProvider>();
+        services.AddSingleton<ISpeechRecognitionProviderFactory, SpeechRecognitionProviderFactory>();
+        services.AddScoped<ISttStreamingService, SttStreamingService>();
+        services.AddSingleton<IIvrVoiceResolutionCoordinator, IvrVoiceResolutionCoordinator>();
 
         // Variable resolver (singleton — stateless, thread-safe regex engine)
         services.AddSingleton<IVariableResolver, VariableResolver>();
