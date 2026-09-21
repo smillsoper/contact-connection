@@ -50,6 +50,22 @@
       </condition>
     </extension>
 
+    <!-- Generic DTMF collection for the tf_data_collect node — identical mechanics to ivr_collect
+         (play_and_get_digits, no option matching: cc_dc_regex is always "any digits") but its own
+         extension/event name so DataCollectResolutionCoordinator/HandleDataCollectDoneAsync can
+         tell it apart from an tf_ivr_menu capture in flight on the same channel (data_collect
+         optionally also races a concurrent voice capture — see DataCollectNodeHandler). -->
+    <extension name="data-collect">
+      <condition field="destination_number" expression="^data_collect$">
+        <action application="answer"/>
+        <action application="play_and_get_digits"
+                data="${cc_dc_min} ${cc_dc_max} ${cc_dc_tries} ${cc_dc_timeout} ${cc_dc_term} ${cc_dc_prompt} ${cc_dc_invalid} cc_dc_result ${cc_dc_regex} ${cc_dc_digit_timeout}"/>
+        <action application="event"
+                data="Event-Name=CUSTOM,Event-Subclass=contactconnection::data_collect_done,cc_dc_digits=${cc_dc_result}"/>
+        <action application="park"/>
+      </condition>
+    </extension>
+
     <!-- PCI guided-DTMF capture for the tf_secure_collect node. SecureCollectNodeHandler /
          EslBackgroundService set cc_sc_* channel vars then `uuid_transfer <uuid> secure_collect
          XML default` into here, once per field. Same play_and_get_digits mechanics as ivr_collect;

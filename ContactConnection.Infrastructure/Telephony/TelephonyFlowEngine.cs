@@ -526,6 +526,7 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
     private static bool IsSyncDtmfCaptureNode(string nodeType, JsonObject nodeObj) => nodeType switch
     {
         "tf_secure_collect" => true,
+        "tf_data_collect"   => true,
         "tf_ivr_menu"        => nodeObj["alwaysListen"]?.GetValue<bool>() != true,
         _                    => false,
     };

@@ -377,6 +377,10 @@ export default function TelephonyNodePropertiesPanel({
         <SecureCollectNodeEditor data={data} onChange={(patch) => onChange(node.id, patch)} />
       )}
 
+      {type === 'tf_data_collect' && (
+        <DataCollectNodeEditor data={data} onChange={(patch) => onChange(node.id, patch)} />
+      )}
+
       {type === 'tf_delay' && (
         <div>
           <label className="block text-xs text-gray-400 mb-1">Duration (ms)</label>
@@ -1568,6 +1572,137 @@ function IvrMenuNodeEditor({
           every option is single-digit — a multi-digit menu (Max digits above 1) ignores phrases.
         </p>
       </div>
+    </div>
+  )
+}
+
+function DataCollectNodeEditor({
+  data,
+  onChange,
+}: {
+  data: TelNodeData
+  onChange: (patch: Partial<TelNodeData>) => void
+}) {
+  const inputCls = 'w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-teal-500'
+  const labelCls = 'block text-xs text-gray-400 mb-1'
+  const maxDigits = (data.maxDigits as number) ?? 20
+  const allowVoice = !!(data.allowVoice as boolean)
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div>
+        <label className={labelCls}>Store into variable</label>
+        <input
+          className={`${inputCls} font-mono`}
+          placeholder="e.g. account_number"
+          value={(data.variableName as string) ?? ''}
+          onChange={(e) => onChange({ variableName: e.target.value.replace(/[^a-z0-9_]/gi, '_') })}
+        />
+        <p className="text-[10px] text-gray-500 mt-1">
+          Available to later nodes as <span className="font-mono text-gray-400">{'{{flow.<name>}}'}</span>.
+        </p>
+      </div>
+
+      <div>
+        <AudioPicker
+          value={(data.promptAudioFileId as string) ?? ''}
+          onChange={(v) => onChange({ promptAudioFileId: v })}
+          accent="teal"
+          label="Prompt audio file"
+          blankLabel="— Select audio (required) —"
+          helpText={<>Must be a recorded file — FreeSWITCH's <span className="font-mono">play_and_get_digits</span> can't
+            take a TTS string. Record or upload one right here, or pick a file you've already saved.</>}
+        />
+      </div>
+
+      <div>
+        <AudioPicker
+          value={(data.invalidAudioFileId as string) ?? ''}
+          onChange={(v) => onChange({ invalidAudioFileId: v })}
+          accent="teal"
+          label="Invalid-entry prompt audio (optional)"
+          blankLabel="— None —"
+        />
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        <div>
+          <label className={labelCls}>Min digits</label>
+          <input type="number" min={1} max={32} className={inputCls} value={(data.minDigits as number) ?? 1}
+            onChange={(e) => onChange({ minDigits: parseInt(e.target.value) || 1 })} />
+        </div>
+        <div>
+          <label className={labelCls}>Max digits</label>
+          <input type="number" min={1} max={32} className={inputCls} value={maxDigits}
+            onChange={(e) => onChange({ maxDigits: parseInt(e.target.value) || 1 })} />
+        </div>
+        <div>
+          <label className={labelCls}>Max tries</label>
+          <input type="number" min={1} max={10} className={inputCls} value={(data.maxTries as number) ?? 3}
+            onChange={(e) => onChange({ maxTries: parseInt(e.target.value) || 1 })} />
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <div>
+          <label className={labelCls}>Terminators</label>
+          <input className={`${inputCls} font-mono`} placeholder={maxDigits > 1 ? '#' : 'none'}
+            value={(data.terminators as string) ?? ''}
+            onChange={(e) => onChange({ terminators: e.target.value })} />
+        </div>
+        <div>
+          <label className={labelCls}>First-digit timeout (ms)</label>
+          <input type="number" min={1000} step={500} className={inputCls} value={(data.timeoutMs as number) ?? 6000}
+            onChange={(e) => onChange({ timeoutMs: parseInt(e.target.value) || 6000 })} />
+        </div>
+        <div>
+          <label className={labelCls}>Inter-digit timeout (ms)</label>
+          <input type="number" min={500} step={250} className={inputCls} value={(data.interDigitTimeoutMs as number) ?? 3000}
+            onChange={(e) => onChange({ interDigitTimeoutMs: parseInt(e.target.value) || 3000 })} />
+        </div>
+      </div>
+
+      <label className="flex items-start gap-2 bg-indigo-950/40 border border-indigo-800 rounded px-2.5 py-2 cursor-pointer">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={allowVoice}
+          onChange={(e) => onChange({ allowVoice: e.target.checked })}
+        />
+        <span>
+          <span className="block text-xs font-medium text-indigo-300">Also allow spoken input</span>
+          <span className="block text-[10px] text-gray-400 leading-snug mt-0.5">
+            Lets the caller say the value instead of (or as well as) keying it in — whichever finishes
+            first wins, no phrase matching involved, the raw transcript is stored verbatim. Needs a
+            tenant voice-recognition provider configured (API Preferences → STT Streaming); falls
+            back to DTMF-only otherwise. Do not enable this for anything sensitive (card numbers,
+            SSNs) — spoken values transit a third-party STT vendor. Use Secure Collect for that.
+          </span>
+        </span>
+      </label>
+
+      {allowVoice && (
+        <label className="flex items-start gap-2 bg-gray-800/60 border border-gray-600 rounded px-2.5 py-2 cursor-pointer">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={!!(data.numericOnly as boolean)}
+            onChange={(e) => onChange({ numericOnly: e.target.checked })}
+          />
+          <span>
+            <span className="block text-xs font-medium text-gray-200">Digits only</span>
+            <span className="block text-[10px] text-gray-400 leading-snug mt-0.5">
+              Strips anything that isn't a digit from a spoken value (a vendor transcript may add
+              punctuation — e.g. a trailing period) and maps spelled-out single digits ("five") to
+              numerals. Has no effect on DTMF, which is already clean digits.
+            </span>
+          </span>
+        </label>
+      )}
+
+      <p className="text-[10px] text-gray-500 leading-snug">
+        Unmatched or timed-out entries take the <span className="font-mono text-gray-400">timeout</span> handle;
+        anything captured (digits or, if enabled, a transcript) takes <span className="font-mono text-gray-400">collected</span>.
+      </p>
     </div>
   )
 }

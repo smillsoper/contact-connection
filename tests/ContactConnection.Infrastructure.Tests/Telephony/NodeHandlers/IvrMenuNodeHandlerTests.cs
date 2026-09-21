@@ -258,7 +258,7 @@ public class IvrMenuNodeHandlerTests
         stt.Setup(s => s.PrepareCaptureAsync(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<SttStreamingProviderInfo>(),
                 It.IsAny<IReadOnlyDictionary<string, string>>(), It.IsAny<IReadOnlyDictionary<string, string>>(),
-                It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
            .ReturnsAsync("relay-token-1");
         return stt;
     }
@@ -288,7 +288,7 @@ public class IvrMenuNodeHandlerTests
             Uuid, "test-tenant", It.IsAny<SttStreamingProviderInfo>(),
             It.Is<IReadOnlyDictionary<string, string>>(m => m["yes"] == "1" && m["yeah"] == "1"),
             It.Is<IReadOnlyDictionary<string, string>>(m => m["1"] == "node_sales" && m["2"] == "node_support"),
-            "node_operator", 6000, 48000, It.IsAny<CancellationToken>()), Times.Once);
+            "node_operator", 6000, 48000, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     /// <summary>A plain G711 channel (read_codec="PCMU"/"PCMA", or missing entirely on an older
@@ -309,7 +309,7 @@ public class IvrMenuNodeHandlerTests
         stt.Verify(s => s.PrepareCaptureAsync(
             Uuid, "test-tenant", It.IsAny<SttStreamingProviderInfo>(),
             It.IsAny<IReadOnlyDictionary<string, string>>(), It.IsAny<IReadOnlyDictionary<string, string>>(),
-            It.IsAny<string?>(), It.IsAny<int>(), 8000, It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<string?>(), It.IsAny<int>(), 8000, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     /// <summary>G.722's SDP-declared clock rate is fixed at 8000 for historical compatibility
@@ -331,7 +331,7 @@ public class IvrMenuNodeHandlerTests
         stt.Verify(s => s.PrepareCaptureAsync(
             Uuid, "test-tenant", It.IsAny<SttStreamingProviderInfo>(),
             It.IsAny<IReadOnlyDictionary<string, string>>(), It.IsAny<IReadOnlyDictionary<string, string>>(),
-            It.IsAny<string?>(), It.IsAny<int>(), 16000, It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<string?>(), It.IsAny<int>(), 16000, It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

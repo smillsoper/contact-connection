@@ -159,6 +159,7 @@
 | 147 | 2026-09-18 | 11:18 AM PDT | 1:15 PM PDT | 117 min | ~14597 min |
 | 148 | 2026-09-20 | 9:50 AM PDT | 2:20 PM PDT | 270 min | ~14867 min |
 | 149 | 2026-09-20 | 2:57 PM PDT | 4:19 PM PDT | 82 min | ~14949 min |
+| 150 | 2026-09-20 | 4:32 PM PDT | 6:16 PM PDT | 104 min | ~15053 min |
 
 ---
 
@@ -8752,17 +8753,158 @@ Infrastructure, 102 Api — +4 net this session: `EslClientReplyCorrelationTests
 `IvrMenuNodeHandlerTests` covering the G.711/G.722 codec-rate branches). `dotnet build`: 0
 `error CS`, same pre-existing unrelated warnings as before this session. Temp debug code (raw PCM
 file dump in `SttStreamRelayEndpoints.cs`, used only for live ear-verification this session) added
-and then fully removed once root-caused. **Nothing committed or pushed yet** — pending the user's
-go-ahead next session, per standing instruction to hold commits until explicitly asked.
+and then fully removed once root-caused. **Committed and pushed** — user approved at end of
+session; commit `54578db` on `session-92-supervisor-dashboard-flow-engine-build` covers this
+session's diff plus the whole Session 148 diff that had been held back pending the fix.
 
 ### Next session — pick up here
 
-1. Commit and push this session's + Session 148's combined diff (voice recognition feature,
-   EslClient reply-correlation fix, call-trace transcript visibility) — first confirm with the
-   user before committing, per standing practice.
-2. Originally-planned fast-follow: a general-purpose "data collect → variable" node built on the
+1. Originally-planned fast-follow: a general-purpose "data collect → variable" node built on the
    same voice-capture mechanism.
-3. Worth a deliberate pass over other ESL-heavy node handlers/services for anywhere a per-call
+2. Worth a deliberate pass over other ESL-heavy node handlers/services for anywhere a per-call
    `uuid_getvar`/`SendApiAsync` result has seemed inconsistent or "flaky" in the past — the
    reply-correlation bug fixed this session could be the real explanation, and it would have been
    silent (no exception, no error log) wherever it happened.
+
+---
+
+## Session 150
+
+**Date:** 2026-09-20
+**Start:** 4:32 PM PDT
+**End:** 6:16 PM PDT
+**Duration:** 104 minutes
+**Total Duration:** ~15053 minutes
+
+### Focus
+
+Two parts. First, a discussion (no code): the security risks of extending STT/voice capture to
+`tf_secure_collect` (PCI card/CVV/SSN), prompted by real-world IVRs that say "say or enter your
+card number." Second, this session's main build, picking up Session 149's "next session" item 1:
+a general-purpose `tf_data_collect` node — DTMF and/or voice value collection into a named flow
+variable, reusing the STT pipeline Session 148/149 built. **Both fully done; the node is live-
+verified end to end (DTMF path, voice path, and a normalization fix), with two real concurrency
+bugs found and fixed along the way.**
+
+### 1. PCI/security discussion — decision locked, no code
+
+Walked through why DTMF-only is the right call for `tf_secure_collect`: voice capture would
+require streaming spoken PAN/CVV/SSN audio to a third-party cloud ASR vendor (ElevenLabs) that
+isn't PCI-attested for cardholder data, expanding PCI scope with real vendor-retention/breach
+exposure and no check-digit protection for CVV/SSN misrecognition. **Locked with the user:**
+`tf_secure_collect` stays DTMF-only permanently, reversible only if a *local, in-stack* ASR is
+ever built (audio never leaving our own environment). Recorded in
+`memory/project_tf_secure_collect.md` and cross-referenced from `project_ivr_voice_recognition.md`
+so the general-purpose data-collect node built this session doesn't get retrofitted with voice
+for sensitive fields by default.
+
+### 2. `tf_data_collect` node — built, then live-verified through several real bugs
+
+**Design:** same prompt/min-max-digits/tries/timeout/terminators config as `tf_ivr_menu`, minus
+`options` — no per-value branching, just DTMF (`play_and_get_digits` via a new `data_collect`
+dialplan extension + `contactconnection::data_collect_done` event) and, optionally, a concurrent
+free-form voice capture (no phrase matching — first final transcript wins verbatim). Two exits:
+`collected` / `timeout`. New `IDataCollectResolutionCoordinator` arbitrates the DTMF-vs-voice race
+(same Redis-SETNX-claim shape as `IIvrVoiceResolutionCoordinator`, kept as its own type since this
+node resolves into a variable + a fixed exit pair rather than an arbitrary target).
+`ISttStreamingService.PrepareCaptureAsync` gained a `freeForm` parameter and
+`SttStreamRelayEndpoints` gained a free-form branch (first non-empty *final* transcript, verbatim)
+alongside the existing phrase-matching path, so the two features share the capture/relay plumbing
+without touching `tf_ivr_menu`'s proven-working code. Full designer support added: node type,
+palette entry, canvas node (`collected`/`timeout` handles, teal), properties panel (prompt/invalid
+audio pickers, min/max/tries/timeouts/terminators, "Store into variable", "Also allow spoken
+input" toggle with an explicit PCI warning not to use it for sensitive fields).
+
+**Bug — stale `dotnet watch` process locked the build.** First build attempt failed with an
+MSB3027 file-lock error that looked like a real compile error. Per standing memory
+(`feedback_stale_dotnet_watch`), found and killed a leftover `dotnet watch run --project
+ContactConnection.Api` from earlier in the session; rebuild succeeded clean, 795/795 tests still
+passing.
+
+**Bug — new dialplan extension not live.** First live test calls got no prompt audio and hung up
+with `NO_ROUTE_DESTINATION`. Root cause: the `data_collect` extension was only on disk —
+`cc_freeswitch` had loaded its dialplan at container startup and never re-read it. Fixed with
+`fs_cli -x reloadxml` against the container's real ESL password (not the `ClueCon` default).
+
+**Unrelated pre-existing bug found + fixed: `tf_play`/`tf_whisper` TTS never resolved
+`{{variable}}` tags.** Live-testing the collected phone number's readback showed the TTS literally
+saying "flow.entered_phone" instead of the digits. `PlayNodeHandler`/`WhisperNodeHandler` passed
+`ttsText` straight to the TTS provider with zero interpolation — `tf_set_variable`'s
+`TelSetVariableNodeHandler.Resolve` already did this correctly but was never wired into `tf_play`.
+Fixed by routing `ttsText` through it in both handlers before use; hot-reloaded and confirmed live
+(correct readback of the collected number).
+
+**Real bug — starting the voice media bug before the DTMF transfer corrupted the STT
+handshake.** Enabling voice produced an infinite-reconnect flood of `STT relay: unknown or
+expired correlation token` warnings carrying raw garbled audio bytes as the "token" — mod_audio_
+stream's outbound WebSocket to the relay never got to send its correlation-token text frame before
+`uuid_transfer` (moving the channel into the `data_collect` extension) interrupted it, so the
+relay misread binary audio as the token and rejected it, and mod_audio_stream's client auto-
+reconnected and repeated this forever. `tf_ivr_menu`'s voice path never hit this because it only
+ever pairs the media bug with `uuid_broadcast`, never a dialplan-transferring `uuid_transfer`.
+Fixed by reordering `DataCollectNodeHandler`: `uuid_transfer` first, then (if voice is requested) a
+300ms settle delay before starting `uuid_audio_stream` — mirrors the WebRTC ICE/DTLS settle-window
+pattern already used elsewhere (`WhisperNodeHandler`) for a freshly-changed channel state.
+
+**Real bug — stale resolution claim survived across a retry loop.** The user's test flow
+correctly loops `tf_data_collect` back on a `timeout`/no-answer retry (re-entering the *same*
+channel uuid). `DataCollectResolutionCoordinator`'s Redis claim key was scoped only to the channel
+and left to its 30s TTL rather than cleared — a second attempt's own legitimate completion could
+spuriously "lose the race" against the first attempt's already-resolved, still-live claim. Fixed
+by deleting the claim key immediately after a successful resolve instead of waiting out the TTL.
+
+**Feature — "digits only" normalization, added after real output showed why it was needed.**
+Deliberately deferred building this speculatively (per the earlier design discussion) until a real
+call showed the actual failure mode: a fully-successful voice capture of a 10-digit phone number
+came back as `'5416704541.'` — a trailing period the vendor added, which would break anything
+downstream expecting exactly 10 digits. Added a `numericOnly` node option: `DataCollectResolution
+Coordinator` strips non-digit characters and maps spelled-out single-digit words ("five" → "5",
+"oh" → "0"; deliberately not full compound-number parsing like "sixteen") before writing the
+variable, while the call trace still shows the raw transcript for debugging. New "Digits only"
+checkbox in the designer, shown only when voice is enabled.
+
+### Live verification
+
+Multiple real Telnyx test calls, end to end, via the browser Call Trace UI:
+- DTMF-only path: 10 digits entered → `DataCollectResolutionCoordinator: resolved value=
+  '5416704541'` → correctly routed to the "collected" target; hot-digit confirm (press 1) → played
+  goodbye → hangup.
+- Voice path (after the handshake-ordering fix): real ElevenLabs STT connection, full audio
+  forwarded, `resolved value='5416704541.' (raw same)` → correct routing — confirmed BEFORE the
+  digits-only fix that voice capture itself worked end to end.
+- Voice path with `numericOnly` enabled: trace detail correctly still shows the raw
+  `voice: captured "5416704541."`, while the next node's `vars` snapshot shows the stored variable
+  as clean `entered_phone: 5416704541` — normalization confirmed working exactly as designed.
+- Also separately confirmed: too-short a `timeoutMs` for a spoken 10-digit number (6s) reliably
+  produces `voice: no speech detected before timeout` on every try, since ElevenLabs' VAD-commit
+  strategy (`vad_silence_threshold_secs: 1.5`) needs speaking time *plus* a trailing pause before
+  it will finalize any segment — increasing the timeout to ~12–15s resolved it.
+
+### State
+
+`dotnet build`: 0 `error CS`, same pre-existing unrelated `CS8602` warnings as before this session
+(none in files touched this session). `dotnet test`: 795/795 passing (4 existing
+`IvrMenuNodeHandlerTests` updated for `PrepareCaptureAsync`'s new `freeForm` parameter; **no new
+tests added for `tf_data_collect` or `DataCollectResolutionCoordinator` — flagged below**).
+Frontend `tsc -b && vite build`: clean. Committed and pushed to
+`session-92-supervisor-dashboard-flow-engine-build`.
+
+### Next session — pick up here
+
+Per the user's explicit request: a deliberate review pass over the telephony flow node system as
+a whole, not a specific bug or feature. Suggested scope:
+
+1. **Gap review** — read through every `tf_*` node handler and ask what a real-world IVR/CCaaS
+   flow would need that isn't there yet (this session alone surfaced two: no generic "collect a
+   value" node existed before today, and `tf_play`/`tf_whisper` TTS had no variable interpolation
+   for over a dozen sessions of use).
+2. **New node candidates** — brainstorm and propose additions once the gap review is done, rather
+   than guessing blind.
+3. **Test coverage** — `tf_data_collect`/`DataCollectResolutionCoordinator` shipped this session
+   with zero new unit tests (time went to live verification instead); worth both backfilling those
+   and doing a broader pass for which other telephony node handlers are under-tested relative to
+   their complexity.
+4. **Designer quirks** — a working session already surfaced real designer bugs before (e.g. the
+   `secureFields`/`fields` mismatch, S148's phrase-input width bugs) purely from live use; worth a
+   deliberate pass through the telephony designer's node editors/canvas looking for similar
+   friction rather than waiting for the next one to surface by accident.

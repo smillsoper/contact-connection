@@ -239,7 +239,7 @@ public class IvrMenuNodeHandler : ITelephonyNodeHandler
 
         var token = await _sttStreaming.PrepareCaptureAsync(
             ctx.ChannelUuid, ctx.TenantSubdomain, sttProvider, phraseIndex, optionMap,
-            string.IsNullOrEmpty(noMatchTarget) ? null : noMatchTarget, timeoutMs, sttSampleRateHz, ct);
+            string.IsNullOrEmpty(noMatchTarget) ? null : noMatchTarget, timeoutMs, sttSampleRateHz, ct: ct);
 
         var sttWsUrl = _config["FreeSWITCH:SttRelayWsUrl"] ?? "ws://host.docker.internal:5135/relay/stt-stream";
         await ctx.Esl.StartAudioStreamAsync(ctx.ChannelUuid, sttWsUrl, "mono", sttSamplingRateLabel, token, ct);

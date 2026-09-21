@@ -128,6 +128,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ISpeechRecognitionProviderFactory, SpeechRecognitionProviderFactory>();
         services.AddScoped<ISttStreamingService, SttStreamingService>();
         services.AddSingleton<IIvrVoiceResolutionCoordinator, IvrVoiceResolutionCoordinator>();
+        services.AddSingleton<IDataCollectResolutionCoordinator, DataCollectResolutionCoordinator>();
 
         // Variable resolver (singleton — stateless, thread-safe regex engine)
         services.AddSingleton<IVariableResolver, VariableResolver>();
@@ -220,6 +221,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ITelephonyNodeHandler, GeneralApiCallNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, RecordNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, IvrMenuNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, DataCollectNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, VoicemailNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, Telephony.NodeHandlers.ScheduledCallbackNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, QueueCallbackNodeHandler>();

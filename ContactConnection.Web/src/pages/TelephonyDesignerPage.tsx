@@ -45,6 +45,7 @@ import DtmfNode from '../components/telephony-designer/nodes/DtmfNode'
 import IvrMenuNode from '../components/telephony-designer/nodes/IvrMenuNode'
 import ClearHotDigitListenerNode from '../components/telephony-designer/nodes/ClearHotDigitListenerNode'
 import SecureCollectNode from '../components/telephony-designer/nodes/SecureCollectNode'
+import DataCollectNode from '../components/telephony-designer/nodes/DataCollectNode'
 import DelayNode from '../components/telephony-designer/nodes/DelayNode'
 import RepeatNode from '../components/telephony-designer/nodes/RepeatNode'
 import RecordNode from '../components/telephony-designer/nodes/RecordNode'
@@ -104,6 +105,7 @@ const nodeTypes = {
   tf_ivr_menu: IvrMenuNode,
   tf_clear_hot_digit: ClearHotDigitListenerNode,
   tf_secure_collect: SecureCollectNode,
+  tf_data_collect: DataCollectNode,
   tf_delay: DelayNode,
   tf_repeat: RepeatNode,
   tf_record: RecordNode,

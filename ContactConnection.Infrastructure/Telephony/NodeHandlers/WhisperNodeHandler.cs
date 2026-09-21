@@ -68,7 +68,7 @@ public class WhisperNodeHandler : ITelephonyNodeHandler
 
         if (audioSource == "tts")
         {
-            var ttsText  = node["ttsText"]?.GetValue<string>() ?? "";
+            var ttsText  = TelSetVariableNodeHandler.Resolve(node["ttsText"]?.GetValue<string>() ?? "", ctx);
             var ttsVoice = node["ttsVoice"]?.GetValue<string>() ?? "kal";
             if (string.IsNullOrWhiteSpace(ttsText))
             {

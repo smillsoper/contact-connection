@@ -22,6 +22,7 @@ export type TelephonyNodeType =
   | 'tf_ivr_menu'
   | 'tf_clear_hot_digit'
   | 'tf_secure_collect'
+  | 'tf_data_collect'
   | 'tf_delay'
   | 'tf_repeat'
   | 'tf_record'
@@ -141,6 +142,19 @@ export interface TelNodeData extends Record<string, unknown> {
     terminator?: string
     validation?: 'none' | 'luhn' | 'expiry_mmyy' | 'cvv'
   }[]
+  // tf_data_collect — like tf_ivr_menu minus options: collects a DTMF value (any digits, no
+  // per-value branching) and writes it verbatim into `variableName` (shared field, declared
+  // above under tf_get_sip_header). promptAudioFileId/invalidAudioFileId/minDigits/maxDigits/
+  // maxTries/timeoutMs/interDigitTimeoutMs/terminators are all shared with tf_ivr_menu above.
+  // Two fixed exits: "collected" (non-empty value) / "timeout" (nothing captured).
+  // allowVoice additionally starts a concurrent free-form spoken-value capture (no phrase
+  // matching — the first final transcript is taken verbatim) racing the DTMF collection; needs a
+  // tenant SttStreaming provider configured, same as tf_ivr_menu's voice option.
+  allowVoice?: boolean
+  // numericOnly — strips non-digit characters (a vendor transcript may add punctuation, e.g. a
+  // trailing period) and maps spelled-out single digit words to numerals before storing. DTMF
+  // digits are already clean, so this only actually changes anything on the voice path.
+  numericOnly?: boolean
   // tf_delay — pauses the flow for a duration before continuing. Literal ms as text, or a
   // {{variable}} template resolved the same way tf_set_caller_id/tf_set_sip_header values are.
   // (Named delayDurationMs, not durationMs, to avoid colliding with tf_dtmf's numeric field above.)
@@ -381,6 +395,13 @@ export const TELEPHONY_NODE_META: Record<
     // + 'timeout' (no entry).
     handles: 'multi',
   },
+  tf_data_collect: {
+    label: 'Data Collect',
+    color: '#0d9488',
+    description: 'Play a prompt, collect a value (DTMF and/or voice), and store it in a variable',
+    // 'collected' (non-empty value captured) + 'timeout' (nothing captured).
+    handles: 'multi',
+  },
   tf_delay: {
     label: 'Delay',
     color: '#65a30d',
@@ -549,6 +570,14 @@ export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
         ],
         invalidAudioFileId: '',
         maxTries: 3, timeoutMs: 12000, interDigitTimeoutMs: 5000,
+      }
+    case 'tf_data_collect':
+      return {
+        label: 'Data Collect',
+        promptAudioFileId: '', invalidAudioFileId: '',
+        minDigits: 1, maxDigits: 20, maxTries: 3,
+        timeoutMs: 6000, interDigitTimeoutMs: 3000, terminators: '',
+        variableName: '', allowVoice: false, numericOnly: false,
       }
     case 'tf_delay':
       return { label: 'Delay', delayDurationMs: '2000' }

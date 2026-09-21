@@ -40,9 +40,13 @@ public interface ISttStreamingService
     /// misreport. A hardcoded single assumption here (8000, then a fixed 16000, then trusting
     /// read_rate) is what caused a live empty/garbled-transcript bug each time — always derive
     /// the truth per-call from the codec name instead of assuming or trusting a channel var.
+    ///
+    /// freeForm (tf_data_collect) — when true, phraseIndex/optionMap/noMatchTarget are ignored;
+    /// pass empty dictionaries and null. See SttStreamRelayRequest.FreeForm for what this changes
+    /// in SttStreamRelayEndpoints.
     /// </summary>
     Task<string> PrepareCaptureAsync(
         string channelUuid, string tenantSubdomain, SttStreamingProviderInfo provider,
         IReadOnlyDictionary<string, string> phraseIndex, IReadOnlyDictionary<string, string> optionMap,
-        string? noMatchTarget, int timeoutMs, int sampleRateHz, CancellationToken ct = default);
+        string? noMatchTarget, int timeoutMs, int sampleRateHz, bool freeForm = false, CancellationToken ct = default);
 }

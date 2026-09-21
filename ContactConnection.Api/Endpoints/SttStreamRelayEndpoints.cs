@@ -42,6 +42,7 @@ public static class SttStreamRelayEndpoints
         ITenantCredentialStore credentialStore,
         ITelephonyCallSessionStore cache,
         IIvrVoiceResolutionCoordinator coordinator,
+        IDataCollectResolutionCoordinator dataCollectCoordinator,
         IConfiguration config,
         ILoggerFactory loggerFactory,
         CancellationToken ct)
@@ -129,6 +130,7 @@ public static class SttStreamRelayEndpoints
 
         string? resolveTarget = null;
         string? matchedPhrase = null;
+        string? capturedValue = null;
         var heardTranscripts = new List<string>();
         using (var cts = CancellationTokenSource.CreateLinkedTokenSource(ct))
         {
@@ -137,14 +139,26 @@ public static class SttStreamRelayEndpoints
             {
                 await foreach (var evt in provider.TranscribeAsync(ReadBinaryFramesAsync(socket, cts.Token), sttRequest, cts.Token))
                 {
-                    var normalized = IvrMenu.NormalizePhrase(evt.Text);
                     logger.LogInformation(
-                        "STT relay [{Uuid}]: transcript ({Kind}) '{Text}' → normalized '{Normalized}'",
-                        request.ChannelUuid, evt.IsFinal ? "final" : "interim", evt.Text, normalized);
+                        "STT relay [{Uuid}]: transcript ({Kind}) '{Text}'",
+                        request.ChannelUuid, evt.IsFinal ? "final" : "interim", evt.Text);
 
                     if (!string.IsNullOrWhiteSpace(evt.Text) && !heardTranscripts.Contains(evt.Text))
                         heardTranscripts.Add(evt.Text);
 
+                    if (request.FreeForm)
+                    {
+                        // tf_data_collect — no phrase matching, just take the first stable
+                        // (final) non-empty transcript verbatim as the captured value.
+                        if (evt.IsFinal && !string.IsNullOrWhiteSpace(evt.Text))
+                        {
+                            capturedValue = evt.Text.Trim();
+                            break;
+                        }
+                        continue;
+                    }
+
+                    var normalized = IvrMenu.NormalizePhrase(evt.Text);
                     if (request.PhraseIndex.TryGetValue(normalized, out var matchKey)
                         && request.OptionMap.TryGetValue(matchKey, out var target))
                     {
@@ -167,14 +181,17 @@ public static class SttStreamRelayEndpoints
             }
         }
 
-        // Surfaced in the call trace (ICallTraceRecorder, via IIvrVoiceResolutionCoordinator)
-        // rather than only logged — a tenant tuning phrases for this menu needs to see exactly
-        // what STT transcribed without pulling API logs.
-        var resolutionDetail = matchedPhrase is not null
-            ? $"voice: recognized \"{matchedPhrase}\" — matched"
-            : heardTranscripts.Count > 0
-                ? $"voice: heard {string.Join(" / ", heardTranscripts.Select(t => $"\"{t}\""))} — no phrase match"
-                : "voice: no speech detected before timeout";
+        // Surfaced in the call trace (ICallTraceRecorder, via the coordinator) rather than only
+        // logged — a tenant needs to see exactly what STT transcribed without pulling API logs.
+        var resolutionDetail = request.FreeForm
+            ? (capturedValue is not null
+                ? $"voice: captured \"{capturedValue}\""
+                : "voice: no speech detected before timeout")
+            : matchedPhrase is not null
+                ? $"voice: recognized \"{matchedPhrase}\" — matched"
+                : heardTranscripts.Count > 0
+                    ? $"voice: heard {string.Join(" / ", heardTranscripts.Select(t => $"\"{t}\""))} — no phrase match"
+                    : "voice: no speech detected before timeout";
 
         resolveTarget ??= request.NoMatchTarget;
 
@@ -190,8 +207,17 @@ public static class SttStreamRelayEndpoints
 
             await using var esl = new EslClient();
             await esl.ConnectAsync(host, port, pass, CancellationToken.None);
-            await coordinator.TryResolveAsync(
-                request.ChannelUuid, resolveTarget, esl, resolutionDetail, CancellationToken.None);
+
+            if (request.FreeForm)
+            {
+                await dataCollectCoordinator.TryResolveAsync(
+                    request.ChannelUuid, capturedValue, esl, resolutionDetail, CancellationToken.None);
+            }
+            else
+            {
+                await coordinator.TryResolveAsync(
+                    request.ChannelUuid, resolveTarget, esl, resolutionDetail, CancellationToken.None);
+            }
         }
         catch (Exception ex)
         {

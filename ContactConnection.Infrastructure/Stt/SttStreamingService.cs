@@ -78,7 +78,7 @@ public sealed class SttStreamingService : ISttStreamingService
     public async Task<string> PrepareCaptureAsync(
         string channelUuid, string tenantSubdomain, SttStreamingProviderInfo provider,
         IReadOnlyDictionary<string, string> phraseIndex, IReadOnlyDictionary<string, string> optionMap,
-        string? noMatchTarget, int timeoutMs, int sampleRateHz, CancellationToken ct = default)
+        string? noMatchTarget, int timeoutMs, int sampleRateHz, bool freeForm = false, CancellationToken ct = default)
     {
         Dictionary<string, string>? providerSettings = null;
         if (!string.IsNullOrWhiteSpace(provider.SettingsJson))
@@ -104,7 +104,8 @@ public sealed class SttStreamingService : ISttStreamingService
             noMatchTarget,
             timeoutMs,
             providerSettings,
-            sampleRateHz);
+            sampleRateHz,
+            freeForm);
 
         var token = Guid.NewGuid().ToString("N");
         await _sessionStore.SetKeyAsync(

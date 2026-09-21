@@ -36,6 +36,7 @@ public sealed class EslBackgroundService : BackgroundService
     private readonly IAgentRegistrationStore _registrationStore;
     private readonly IDashboardNotifier _dashboardNotifier;
     private readonly IIvrVoiceResolutionCoordinator _voiceCoordinator;
+    private readonly IDataCollectResolutionCoordinator _dataCollectCoordinator;
 
     public EslBackgroundService(
         IHubContext<FlowHub, IFlowHubClient> hub,
@@ -47,18 +48,20 @@ public sealed class EslBackgroundService : BackgroundService
         IAgentStateStore stateStore,
         IAgentRegistrationStore registrationStore,
         IDashboardNotifier dashboardNotifier,
-        IIvrVoiceResolutionCoordinator voiceCoordinator)
+        IIvrVoiceResolutionCoordinator voiceCoordinator,
+        IDataCollectResolutionCoordinator dataCollectCoordinator)
     {
-        _hub                    = hub;
-        _scopeFactory           = scopeFactory;
-        _config                 = config;
-        _logger                 = logger;
-        _eslClientLogger        = eslClientLogger;
-        _sessionStore           = sessionStore;
-        _stateStore             = stateStore;
-        _registrationStore      = registrationStore;
-        _dashboardNotifier      = dashboardNotifier;
-        _voiceCoordinator       = voiceCoordinator;
+        _hub                     = hub;
+        _scopeFactory            = scopeFactory;
+        _config                  = config;
+        _logger                  = logger;
+        _eslClientLogger         = eslClientLogger;
+        _sessionStore            = sessionStore;
+        _stateStore              = stateStore;
+        _registrationStore       = registrationStore;
+        _dashboardNotifier       = dashboardNotifier;
+        _voiceCoordinator        = voiceCoordinator;
+        _dataCollectCoordinator  = dataCollectCoordinator;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -94,6 +97,7 @@ public sealed class EslBackgroundService : BackgroundService
             "CHANNEL_HOLD CHANNEL_UNHOLD PLAYBACK_STOP DTMF " +
             "CUSTOM contactconnection::ivr_done contactconnection::vm_done contactconnection::xfer_failed " +
             "contactconnection::tts_done contactconnection::secure_collect_done contactconnection::delay_done " +
+            "contactconnection::data_collect_done " +
             "sofia::register sofia::unregister sofia::expire", ct);
 
         _logger.LogInformation("ESL connected to FreeSWITCH at {Host}:{Port}", host, port);
@@ -181,6 +185,19 @@ public sealed class EslBackgroundService : BackgroundService
             || ivrSession?.Vars.GetValueOrDefault("_ivr_in_progress") == "true")
         {
             _logger.LogInformation("CHANNEL_PARK {Uuid}: returned from IVR collection — not a new call", channelUuid);
+            return;
+        }
+
+        // tf_data_collect: the data_collect extension re-parks after play_and_get_digits finishes.
+        // Detected by transfer bookkeeping (not just the session var) for the same reason as
+        // ivr_collect above — IDataCollectResolutionCoordinator may have already cleared
+        // _dc_in_progress by the time this fires (e.g. a concurrent voice capture won the race).
+        if (destination == "data_collect"
+            || rawDestination == "data_collect"
+            || transferSource.Contains("data_collect")
+            || ivrSession?.Vars.GetValueOrDefault("_dc_in_progress") == "true")
+        {
+            _logger.LogInformation("CHANNEL_PARK {Uuid}: returned from data collection — not a new call", channelUuid);
             return;
         }
 
@@ -624,6 +641,36 @@ public sealed class EslBackgroundService : BackgroundService
         await scope.ServiceProvider
             .GetRequiredService<ITelephonyFlowEngine>()
             .ResumeFromNodeAsync(session.ChannelUuid, target, esl, ct);
+    }
+
+    /// <summary>
+    /// The data_collect extension finished play_and_get_digits for a tf_data_collect node.
+    /// Unlike HandleIvrDoneAsync, this always routes through IDataCollectResolutionCoordinator
+    /// rather than resuming directly — the node may also have a concurrent voice capture running
+    /// (SttStreamRelayEndpoints), and only one of the two should ever win. If voice already
+    /// claimed resolution, `_dc_in_progress` will already be cleared and this is a no-op (the
+    /// stale-event guard, same pattern HandleIvrDoneAsync/HandleSecureCollectDoneAsync use).
+    /// </summary>
+    private async Task HandleDataCollectDoneAsync(
+        Dictionary<string, string> vars, EslClient esl, CancellationToken ct)
+    {
+        var uuid = vars.GetValueOrDefault("Unique-ID");
+        if (string.IsNullOrEmpty(uuid)) return;
+
+        var session = await ResolveSessionAsync(uuid, vars, ct);
+        if (session is null || session.Vars.GetValueOrDefault("_dc_in_progress") != "true") return;
+
+        // Same header/channel-var fallback shape as HandleIvrDoneAsync — do NOT fall back to
+        // uuid_getvar from inside an event handler (races the queued CHANNEL_PARK the extension's
+        // trailing park() emits).
+        var digits = vars.GetValueOrDefault("cc_dc_digits");
+        if (string.IsNullOrEmpty(digits))
+            digits = vars.GetValueOrDefault("variable_cc_dc_result");
+
+        var detail = string.IsNullOrEmpty(digits) ? "DTMF: no digits entered" : $"DTMF: entered \"{digits}\"";
+
+        await _dataCollectCoordinator.TryResolveAsync(
+            session.ChannelUuid, string.IsNullOrEmpty(digits) ? null : digits, esl, detail, ct);
     }
 
     /// <summary>
@@ -2250,6 +2297,9 @@ public sealed class EslBackgroundService : BackgroundService
                 break;
             case "contactconnection::delay_done":
                 await HandleDelayDoneAsync(vars, esl, ct);
+                break;
+            case "contactconnection::data_collect_done":
+                await HandleDataCollectDoneAsync(vars, esl, ct);
                 break;
             case "contactconnection::xfer_failed":
                 await HandleXferFailedAsync(vars, esl, ct);
