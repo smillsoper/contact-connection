@@ -160,6 +160,7 @@
 | 148 | 2026-09-20 | 9:50 AM PDT | 2:20 PM PDT | 270 min | ~14867 min |
 | 149 | 2026-09-20 | 2:57 PM PDT | 4:19 PM PDT | 82 min | ~14949 min |
 | 150 | 2026-09-20 | 4:32 PM PDT | 6:16 PM PDT | 104 min | ~15053 min |
+| 151 | 2026-09-21 | 3:46 PM PDT | 4:22 PM PDT | 36 min | ~15089 min |
 
 ---
 
@@ -8908,3 +8909,140 @@ a whole, not a specific bug or feature. Suggested scope:
    `secureFields`/`fields` mismatch, S148's phrase-input width bugs) purely from live use; worth a
    deliberate pass through the telephony designer's node editors/canvas looking for similar
    friction rather than waiting for the next one to surface by accident.
+
+## Session 151
+
+**Date:** 2026-09-21
+**Start:** 3:46 PM PDT
+**End:** 4:22 PM PDT
+**Duration:** 36 minutes
+**Total Duration:** ~15089 minutes
+
+### Focus
+
+The deliberate telephony-node review pass flagged at the end of Session 150: gap review, designer
+quirks pass, and test coverage backfill (new-node candidates deferred to next session per the
+user). All three delivered concretely — this was not just an audit, it found and fixed real bugs
+and closed out every previously-untested telephony node handler.
+
+### 1. Gap review — full inventory of all 34 `tf_*` node handlers
+
+Two parallel Explore agents built a complete inventory: every handler's node type, purpose,
+dependencies, complexity, and test status, cross-referenced against `TelephonyFlowEngine`'s DI-
+driven dispatch (no hardcoded switch table — handlers register themselves via
+`AddScoped<ITelephonyNodeHandler, X>()`). Result: all 34 handlers are correctly wired, no orphaned
+dispatch entries either direction. One hygiene fix: `EventWaitNodeHandler.cs` actually contained a
+class named `OnAgentSelectedNodeHandler` (`NodeType => "tf_on_agent_selected"`) — the file was
+never renamed after an earlier redesign. Renamed the file to `OnAgentSelectedNodeHandler.cs`
+(no other references existed anywhere — DI registers by class, not file path).
+
+### 2. Designer quirks pass — 3 real findings, all resolved
+
+A second Explore agent cross-referenced every telephony node's designer property-editor JSON keys
+against what its backend handler actually reads, hunting specifically for the same bug class as
+the earlier `tf_secure_collect` `secureFields`/`fields` mismatch.
+
+- **Real, live bug (same class as `secureFields`):** `tf_set_sip_header`'s designer wrote
+  `sipHeaderName`/`sipHeaderValue` into the flow JSON (`TelephonyNodePropertiesPanel.tsx`,
+  `types/telephony-designer.ts`) while `SetSipHeaderNodeHandler.cs` reads `headerName`/`value` —
+  every SIP-header node built through the visual designer was a silent no-op since the feature
+  shipped. **Fixed** by renaming the frontend keys to match the backend's established names
+  (`headerName`/`value`) across the type, properties panel, and canvas node display component.
+- **Dead UI:** `tf_play`'s "Remember position (resume from last offset)" checkbox
+  (`rememberPosition`) had no backend implementation at all — `PlayNodeHandler` never reads it, and
+  there's no interrupt/position-tracking mechanism to make it meaningful (mid-playback interruption
+  isn't tracked anywhere in the handler). Implementing it for real is a small feature, not a
+  quirks-pass fix, so the checkbox was **removed** rather than left as decoration; flagged as a
+  future candidate if genuinely wanted.
+- **Orphaned dead code:** `tf_event_wait` — a full node type/meta/default-data/canvas component
+  (`EventWaitNode.tsx`) left over from before the event-listener redesign (4 independent
+  `tf_on_*` entry-point nodes superseded it; deliberately pulled from the palette at that time per
+  existing DevLog history, but the type definition and component were never deleted). No backend
+  handler exists for it either — reaching the engine would hard-fail with "no handler registered."
+  **Deleted** the remaining frontend plumbing.
+
+Everything else checked line-by-line — every other node's property keys, sub-object schemas
+(`fields[]`, `options[]`, `windows[]`, `assignments[]`), and every multi-handle canvas wiring —
+matched exactly between designer and backend.
+
+### 3. Test coverage backfill — 18 untested handlers → 0, plus shared resolver logic
+
+Started with `tf_data_collect` (explicitly flagged from Session 150, shipped with zero tests), then
+worked through every other handler the inventory flagged as untested, prioritized by risk:
+
+- **`DataCollectNodeHandlerTests`** (14 tests) — happy path channel-var wiring, terminator
+  defaulting, `numericOnly` passthrough, the allowVoice DTMF/STT race including a pinned
+  `uuid_transfer`-before-`uuid_audio_stream` ordering assertion (regression coverage for the real
+  handshake-corruption bug Session 150 found live), and narrowband/G.722/wideband sample-rate
+  mapping.
+- **`TelSetVariableNodeHandlerResolveTests`** (14 tests) — the shared `Resolve`/`ResolveKey`
+  template engine nearly every other handler calls (TTS text, SIP headers, caller ID, branch
+  operands) had only its `shared.*` path tested before. Added coverage for `call.dnis`, `flow.`
+  prefix stripping, unresolved-key-to-empty-string, multi-token interpolation, and the full `now.*`
+  namespace including invalid-timezone fallback to UTC.
+- **`TelBranchNodeHandlerTests`** (16 tests) — operator precedence (`>=` correctly checked before
+  bare `>`), quoted-operand unwrapping, numeric-parse-failure fallthrough, and an explicit
+  regression test for the `{{flow.*}}`-always-resolved-false bug documented in the handler's own
+  source comment.
+- **`TimeOfDayNodeHandlerTests`** (24 tests) — pure calculation helpers (`IsTimeInRange`,
+  `IsHoliday`, and by extension `NthWeekdayOfMonth`/`LastWeekdayOfMonth`) exercised via reflection
+  since they're private static with no time-provider seam; holiday dates cross-checked against an
+  independently-implemented LINQ-scan reference calculation across 4 different years rather than
+  hardcoded "trust me" calendar dates — passed on the first run, confirming the offset-arithmetic
+  implementation is actually correct. Also covers the 3-pass priority evaluator (date override >
+  holiday > weekly) and invalid-timezone fallback.
+- **`PlayNodeHandlerTests`** (18 tests) — file vs. TTS-via-flite vs. TTS-via-streaming-vendor
+  branches, lead-in silence ordering, periodic announcement playlist resolution, and an explicit
+  regression test for the real Session 150 bug (TTS text never resolved `{{variable}}` tags).
+- **`ScriptPopNodeHandlerTests`** (12 tests) — the 4-tier flow-resolution fallback chain (node
+  override → transfer screen-pop override → DID-level `PhoneNumber.FlowId` → campaign fallback),
+  the FlowEngine-exception swallow (a broken CRM flow must not take the telephony call down with
+  it), and the "no live agent context" guard. Found and fixed 4 of my own test-authoring bugs along
+  the way (unsaved-entity query visibility under EF InMemory, and generated-Guid mismatches between
+  a locally-created `Campaign`/`PhoneNumber` and a separately-generated `ctx.CampaignId`) —- a
+  reminder that a green run on the first try for a DB-backed test deserves a second look.
+- **`GeneralApiCallNodeHandlerTests`** (22 tests) — tenant-vs-portal scope dispatch (including the
+  negative case: a portal-scope lookup must never fall back to a tenant-scoped endpoint sharing the
+  same id), missing/inactive endpoint guards, success/error/timeout transition mapping, output-
+  variable JSON+flattened-dot-path writing, header/query-param/HMAC-payload template resolution
+  (including the `_skipIfEmpty` query-param convention), timeout override precedence, and sensitive-
+  response-field masking wired correctly ahead of `ApiResponseWrapper`. `ResponseFieldMasker` and
+  `IApiDefinitionExecutor`'s own HTTP mechanics are tested elsewhere (Tier 3/Tier 1 hardening work);
+  this file covers only this handler's own glue logic.
+- **9 simpler handlers, one file each plus one shared file** (45 tests total) —
+  `CancelDialNodeHandlerTests`, `CheckBlockListNodeHandlerTests` (exact/prefix/expired/cross-tenant
+  block-list matching, country-code normalization), `DtmfNodeHandlerTests` (character-set
+  stripping, `{{var}}` substitution, `w`/`W` pause chars never reaching `SendDtmfAsync`),
+  `GetSipHeaderNodeHandlerTests`, `HangupNodeHandlerTests`, `RejectNodeHandlerTests` (Q.850 cause
+  code mapping), `SetCallerIdNodeHandlerTests`, `SetSipHeaderNodeHandlerTests` (pins down the
+  handler contract now that the designer bug above is fixed), and `EventListenerNodeHandlersTests`
+  — the 4 identical-body pass-through entry points (`tf_on_agent_selected`, `tf_on_agent_answer`,
+  `tf_on_call_disconnected`, `tf_on_custom_event`) covered together via `[Theory]`/`MemberData`
+  rather than four near-duplicate files.
+
+**Every handler the inventory flagged as untested now has coverage.** 185 new tests added this
+session; full suite 980/980 passing (up from 795), 0 build warnings introduced.
+
+### 4. New node candidates — deferred
+
+Held for next session per the user's explicit request — a short candidate list was drafted in
+conversation (SMS/text node, multi-party conference bridge, true supervisor whisper/barge-in as
+distinct from the existing pre-bridge `tf_whisper` announcement, and a possible barge-in/interrupt
+option on `tf_play`) but deliberately not committed to memory/backlog yet since the user wants to
+discuss it directly rather than have a pre-baked list presented.
+
+### State
+
+`dotnet build ContactConnection.slnx`: 0 errors (4 pre-existing `NU1903` package-vulnerability
+warnings only, unrelated to this session). `dotnet test`: 980/980 passing across all 4 test
+projects (159 Domain + 20 Application + 699 Infrastructure + 102 Api). Frontend `tsc --noEmit`:
+clean. Not yet committed/pushed — pending this DevLog/memory update.
+
+### Next session — pick up here
+
+Per the user, explicitly two things:
+1. **New telephony node candidates** — discuss the short list above (SMS, conference bridge,
+   supervisor whisper/barge-in, `tf_play` interrupt option) and any others, then decide what to
+   build.
+2. **Designer UI issues/inconsistencies to clean up** — the user has specific items in mind, not
+   yet described in this conversation; ask at session start rather than assuming scope.

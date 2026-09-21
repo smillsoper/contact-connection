@@ -280,18 +280,18 @@ export default function TelephonyNodePropertiesPanel({
             <input
               className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-cyan-500"
               placeholder="e.g. X-Campaign-ID"
-              value={(data.sipHeaderName as string) ?? ''}
-              onChange={(e) => set('sipHeaderName', e.target.value)}
+              value={(data.headerName as string) ?? ''}
+              onChange={(e) => set('headerName', e.target.value)}
             />
-            <p className="text-xs text-gray-500 mt-1">Will be sent as <span className="font-mono">X-{(data.sipHeaderName as string) || 'HeaderName'}</span></p>
+            <p className="text-xs text-gray-500 mt-1">Will be sent as <span className="font-mono">X-{(data.headerName as string) || 'HeaderName'}</span></p>
           </div>
           <div>
             <label className="block text-xs text-gray-400 mb-1">Value</label>
             <input
               className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-cyan-500"
               placeholder='e.g. {{caller.ani}} or literal'
-              value={(data.sipHeaderValue as string) ?? ''}
-              onChange={(e) => set('sipHeaderValue', e.target.value)}
+              value={(data.value as string) ?? ''}
+              onChange={(e) => set('value', e.target.value)}
             />
             <p className="text-xs text-gray-500 mt-1">Supports <span className="font-mono">{'{{caller.ani}}'}</span>, <span className="font-mono">{'{{call.did}}'}</span>, or any stored variable.</p>
           </div>
@@ -2270,15 +2270,6 @@ function PlayNodeEditor({
             <span className="text-xs text-gray-300">Auto-restart (loop indefinitely)</span>
           </label>
         )}
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            className="accent-teal-500"
-            checked={(data.rememberPosition as boolean) ?? false}
-            onChange={(e) => onChange({ rememberPosition: e.target.checked })}
-          />
-          <span className="text-xs text-gray-300">Remember position (resume from last offset)</span>
-        </label>
       </div>
 
       {/* Periodic announcement playlist — only meaningful when looping */}

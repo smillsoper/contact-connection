@@ -36,7 +36,6 @@ export type TelephonyNodeType =
   | 'tf_on_agent_answer'
   | 'tf_on_call_disconnected'
   | 'tf_on_custom_event'
-  | 'tf_event_wait'
 
 export interface TelVariableAssignment {
   key: string
@@ -71,7 +70,6 @@ export interface TelNodeData extends Record<string, unknown> {
   ttsVoice?: string
   durationSeconds?: number
   startOffsetSeconds?: number
-  rememberPosition?: boolean
   autoRestart?: boolean
   periodicAnnouncements?: Array<{ fileId: string }>
   periodicAnnouncementIntervalSeconds?: number
@@ -89,9 +87,8 @@ export interface TelNodeData extends Record<string, unknown> {
   // tf_get_sip_header
   headerName?: string
   variableName?: string
-  // tf_set_sip_header
-  sipHeaderName?: string
-  sipHeaderValue?: string
+  // tf_set_sip_header (shares `headerName` key with tf_get_sip_header)
+  value?: string
   // tf_set_caller_id
   callerIdValue?: string
   // tf_cancel_dial
@@ -473,12 +470,6 @@ export const TELEPHONY_NODE_META: Record<
     description: 'Fires when a named custom event is emitted (e.g. from a script flow)',
     handles: 'source-only',
   },
-  tf_event_wait: {
-    label: 'Wait for Event',
-    color: '#6d28d9',
-    description: 'Pauses flow execution until a named event fires',
-    handles: 'single',
-  },
 }
 
 export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
@@ -514,7 +505,6 @@ export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
         durationSeconds: 0,
         startOffsetSeconds: 0,
         leadInSilenceMs: 0,
-        rememberPosition: false,
         autoRestart: false,
         periodicAnnouncements: [],
         periodicAnnouncementIntervalSeconds: 30,
@@ -538,7 +528,7 @@ export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
     case 'tf_get_sip_header':
       return { label: 'Get SIP Header', headerName: 'X-Original-ANI', variableName: 'custom_ani' }
     case 'tf_set_sip_header':
-      return { label: 'Set SIP Header', sipHeaderName: '', sipHeaderValue: '' }
+      return { label: 'Set SIP Header', headerName: '', value: '' }
     case 'tf_set_caller_id':
       return { label: 'Set Caller ID', callerIdValue: '{{caller.ani}}' }
     case 'tf_cancel_dial':
@@ -621,7 +611,5 @@ export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
       return { label: 'Call Disconnected' }
     case 'tf_on_custom_event':
       return { label: 'Custom Event', eventName: '' }
-    case 'tf_event_wait':
-      return { label: 'Wait for Event', eventName: 'agent_answer' }
   }
 }
