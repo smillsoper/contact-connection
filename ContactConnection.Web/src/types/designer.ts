@@ -12,6 +12,8 @@ export type ContactConnectionNodeType =
   | 'set_variable'
   | 'trigger_telephony_event'
   | 'api_call'
+  | 'set_custom_field'
+  | 'get_custom_field'
   | 'end'
 
 export interface NodeData extends Record<string, unknown> {
@@ -76,6 +78,15 @@ export interface NodeData extends Record<string, unknown> {
   apiDefinitionName?: string
   apiEndpointName?: string
   timeoutSeconds?: number
+  // set_custom_field / get_custom_field — write/read an existing Custom Field Definition's value
+  // for the current call record. definitionFieldName/definitionDisplayLabel/definitionDataTypeName
+  // are denormalized display fields (same pattern as apiDefinitionName/apiEndpointName) so the
+  // canvas node and properties panel don't need a fresh lookup just to show the picked field.
+  definitionId?: string
+  definitionFieldName?: string
+  definitionDisplayLabel?: string
+  definitionDataTypeName?: string
+  value?: string
   // end
   status?: string
 }
@@ -121,6 +132,11 @@ export interface ContactConnectionNodeDef {
   apiDefinitionName?: string
   apiEndpointName?: string
   timeoutSeconds?: number
+  definitionId?: string
+  definitionFieldName?: string
+  definitionDisplayLabel?: string
+  definitionDataTypeName?: string
+  value?: string
   status?: string
   _pos?: { x: number; y: number }
   transitions: Record<string, string>
@@ -216,6 +232,18 @@ export const NODE_META: Record<
     description: 'Call a saved General API Definition',
     handles: 'single',
   },
+  set_custom_field: {
+    label: 'Set Call Record Value',
+    color: '#65a30d',
+    description: 'Save a value into a defined custom field for this call',
+    handles: 'single',
+  },
+  get_custom_field: {
+    label: 'Get Call Record Value',
+    color: '#4d7c0f',
+    description: 'Read a defined custom field’s value into a flow variable',
+    handles: 'single',
+  },
   end: {
     label: 'End',
     color: '#ef4444',
@@ -258,6 +286,10 @@ export function defaultNodeData(type: ContactConnectionNodeType): NodeData {
       return { label: 'Trigger Telephony Event', eventName: '' }
     case 'api_call':
       return { label: 'New API Call', apiEndpointId: '', apiDefinitionScope: 'tenant', apiDefinitionName: '', apiEndpointName: '', outputVariable: '', timeoutSeconds: 30 }
+    case 'set_custom_field':
+      return { label: 'Set Call Record Value', definitionId: '', definitionFieldName: '', definitionDisplayLabel: '', definitionDataTypeName: '', value: '' }
+    case 'get_custom_field':
+      return { label: 'Get Call Record Value', definitionId: '', definitionFieldName: '', definitionDisplayLabel: '', definitionDataTypeName: '', outputVariable: '' }
     case 'end':
       return { label: 'End', status: 'complete' }
   }

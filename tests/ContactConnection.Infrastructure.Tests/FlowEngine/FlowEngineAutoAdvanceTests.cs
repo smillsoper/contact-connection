@@ -25,6 +25,8 @@ public class FlowEngineAutoAdvanceTests
     [InlineData("transition_to_flow")]
     [InlineData("api_call")]
     [InlineData("scheduled_callback")]
+    [InlineData("set_custom_field")]
+    [InlineData("get_custom_field")]
     public void TransparentNodeType_IsAutoAdvanced(string nodeType) =>
         Assert.Contains(nodeType, AutoAdvanceTypes);
 }

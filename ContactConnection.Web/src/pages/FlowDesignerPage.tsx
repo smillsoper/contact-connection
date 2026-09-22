@@ -33,6 +33,8 @@ import SetVariableNode from '../components/designer/nodes/SetVariableNode'
 import TriggerTelephonyEventNode from '../components/designer/nodes/TriggerTelephonyEventNode'
 import ApiCallNode from '../components/designer/nodes/ApiCallNode'
 import ScheduledCallbackNode from '../components/designer/nodes/ScheduledCallbackNode'
+import SetCustomFieldNode from '../components/designer/nodes/SetCustomFieldNode'
+import GetCustomFieldNode from '../components/designer/nodes/GetCustomFieldNode'
 import EndNode from '../components/designer/nodes/EndNode'
 
 import type { NodeData, ContactConnectionNodeType, ContactConnectionFlowDefinition, FlowOption } from '../types/designer'
@@ -53,6 +55,8 @@ const nodeTypes = {
   trigger_telephony_event: TriggerTelephonyEventNode,
   api_call: ApiCallNode,
   scheduled_callback: ScheduledCallbackNode,
+  set_custom_field: SetCustomFieldNode,
+  get_custom_field: GetCustomFieldNode,
   end: EndNode,
 }
 
@@ -65,6 +69,7 @@ const edgeTypes = {
 const FIXED_EXIT_OPTIONS: Partial<Record<ContactConnectionNodeType, string[]>> = {
   api_call: ['success', 'error', 'timeout'],
   scheduled_callback: ['scheduled', 'invalid_time', 'failed'],
+  set_custom_field: ['success', 'invalid_value', 'error'],
 }
 
 // Options for a node that uses the fixed-handle picker (select-type input, or a

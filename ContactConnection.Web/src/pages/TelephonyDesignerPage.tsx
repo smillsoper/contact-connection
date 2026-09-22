@@ -54,6 +54,8 @@ import ScheduledCallbackNode from '../components/telephony-designer/nodes/Schedu
 import QueueCallbackNode from '../components/telephony-designer/nodes/QueueCallbackNode'
 import WhisperNode from '../components/telephony-designer/nodes/WhisperNode'
 import GeneralApiCallNode from '../components/telephony-designer/nodes/GeneralApiCallNode'
+import SetCustomFieldNode from '../components/telephony-designer/nodes/SetCustomFieldNode'
+import GetCustomFieldNode from '../components/telephony-designer/nodes/GetCustomFieldNode'
 
 import type { TelNodeData, TelephonyNodeType, TelephonyFlowDefinition, TelephonyNodeDef } from '../types/telephony-designer'
 import { defaultTelNodeData, TELEPHONY_NODE_META } from '../types/telephony-designer'
@@ -81,6 +83,7 @@ const HANDLE_DISPLAY_LABELS: Record<string, string> = {
 // one physical handle, so a direct handle-id-as-transition connect won't work).
 const FIXED_EXIT_OPTIONS: Partial<Record<TelephonyNodeType, string[]>> = {
   tf_general_api_call: ['success', 'error', 'timeout'],
+  tf_set_custom_field: ['success', 'invalid_value', 'error'],
 }
 
 const nodeTypes = {
@@ -114,6 +117,8 @@ const nodeTypes = {
   tf_queue_callback: QueueCallbackNode,
   tf_whisper: WhisperNode,
   tf_general_api_call: GeneralApiCallNode,
+  tf_set_custom_field: SetCustomFieldNode,
+  tf_get_custom_field: GetCustomFieldNode,
   tf_on_agent_selected: OnAgentSelectedNode,
   tf_on_agent_answer: OnAgentAnswerNode,
   tf_on_call_disconnected: OnCallDisconnectedNode,

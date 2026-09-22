@@ -39,6 +39,9 @@ public class CustomFieldDefinition
         if (!CustomFieldDataType.All.Contains(dataTypeName))
             throw new ArgumentException($"Unknown data type: {dataTypeName}", nameof(dataTypeName));
 
+        if (campaignId.HasValue && !clientId.HasValue)
+            throw new ArgumentException("A campaign-scoped field must also specify its client.", nameof(clientId));
+
         return new CustomFieldDefinition
         {
             Id = Guid.NewGuid(),

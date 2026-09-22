@@ -7,7 +7,7 @@ import { useTenantTimezone } from '../../hooks/useTenantTimezone'
 import { BUILTIN_AUDIO_OPTIONS, type AudioFileRecord } from '../../api/audioFiles'
 import { ttsServiceApi, type TtsServiceStatus } from '../../api/ttsService'
 import { AudioPicker, useAudioFiles } from './AudioPicker'
-import { flowsApi, type GeneralApiSummary, type FlowSummary } from '../../api/flows'
+import { flowsApi, type GeneralApiSummary, type FlowSummary, type CustomFieldDefinitionSummary } from '../../api/flows'
 import { listAdminAgents, type AgentRecord } from '../../api/adminAgents'
 import { listCampaigns, listSipGateways } from '../../api/telephony'
 import { api } from '../../api/client'
@@ -79,6 +79,13 @@ export default function TelephonyNodePropertiesPanel({
   useEffect(() => {
     if (type !== 'tf_general_api_call') return
     flowsApi.listGeneralApis().then(setGeneralApis).catch(console.error)
+  }, [type])
+
+  // Custom Field Definitions for tf_set_custom_field / tf_get_custom_field — fetched lazily
+  const [customFieldDefs, setCustomFieldDefs] = useState<CustomFieldDefinitionSummary[]>([])
+  useEffect(() => {
+    if (type !== 'tf_set_custom_field' && type !== 'tf_get_custom_field') return
+    flowsApi.listCustomFieldDefinitions().then(setCustomFieldDefs).catch(console.error)
   }, [type])
 
   // Shared name→id pickers (agents / flows / campaigns / gateways) — fetched once when a node
@@ -728,6 +735,89 @@ export default function TelephonyNodePropertiesPanel({
               pieces of it with {'{{flow.'}{(data.outputVariable as string) || 'variable'}{'.response.field}}'}.
               Connect the exit handle to wire up Success / Error / Timeout.
             </p>
+          </div>
+        )
+      })()}
+
+      {(type === 'tf_set_custom_field' || type === 'tf_get_custom_field') && (() => {
+        const activeDefs = customFieldDefs.filter((d) => d.isActive)
+        const tenantWide = activeDefs.filter((d) => !d.clientId)
+        const clientScoped = activeDefs.filter((d) => d.clientId && !d.campaignId)
+        const campaignScoped = activeDefs.filter((d) => d.campaignId)
+        const selectedDefId = (data.definitionId as string) ?? ''
+
+        const renderOption = (d: CustomFieldDefinitionSummary) => (
+          <option key={d.id} value={d.id}>{d.displayLabel} ({d.dataTypeName})</option>
+        )
+
+        return (
+          <div className="flex flex-col gap-2">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Custom Field</label>
+              <select
+                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-blue-500"
+                value={selectedDefId}
+                onChange={(e) => {
+                  const chosen = activeDefs.find((d) => d.id === e.target.value)
+                  onChange(node.id, {
+                    definitionId: chosen?.id ?? '',
+                    definitionFieldName: chosen?.fieldName ?? '',
+                    definitionDisplayLabel: chosen?.displayLabel ?? '',
+                    definitionDataTypeName: chosen?.dataTypeName ?? '',
+                  })
+                }}
+              >
+                <option value="">— Select a field —</option>
+                {tenantWide.length > 0 && (
+                  <optgroup label="Tenant-wide">{tenantWide.map(renderOption)}</optgroup>
+                )}
+                {clientScoped.length > 0 && (
+                  <optgroup label="Client-scoped">{clientScoped.map(renderOption)}</optgroup>
+                )}
+                {campaignScoped.length > 0 && (
+                  <optgroup label="Campaign-scoped">{campaignScoped.map(renderOption)}</optgroup>
+                )}
+              </select>
+              {customFieldDefs.length === 0 && (
+                <p className="text-[10px] text-amber-400 mt-1">
+                  No custom fields defined yet. Create one in Admin → Custom Fields.
+                </p>
+              )}
+            </div>
+            {type === 'tf_set_custom_field' ? (
+              <>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Value</label>
+                  <input
+                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-blue-500"
+                    placeholder="{{flow.entered_value}}"
+                    value={(data.value as string) ?? ''}
+                    onChange={(e) => set('value', e.target.value)}
+                  />
+                </div>
+                <p className="text-xs text-gray-500 leading-snug">
+                  Connect the exit handle to wire up Success / Invalid Value / Error — Invalid
+                  Value fires when this value doesn't match the field's data type
+                  ({(data.definitionDataTypeName as string) || 'e.g. a non-numeric value for an integer field'}).
+                </p>
+              </>
+            ) : (
+              <>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Store into variable</label>
+                  <input
+                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-blue-500"
+                    placeholder="prior_contact_preference"
+                    value={(data.variableName as string) ?? ''}
+                    onChange={(e) => set('variableName', e.target.value)}
+                  />
+                </div>
+                <p className="text-xs text-gray-500 leading-snug">
+                  Stored as {'{{flow.'}{(data.variableName as string) || 'variable'}{'}}'} — a field
+                  with no value yet resolves to an empty string.
+                </p>
+              </>
+            )}
           </div>
         )
       })()}

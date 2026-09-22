@@ -172,10 +172,16 @@ export function computeAncestorVars(
         apis.push({ id: n.id, label: nodeLabel })
         break
       }
+      case 'get_custom_field': {
+        const outVar = (data.outputVariable as string | undefined)?.trim()
+        if (outVar) addFlat(outVar, `${nodeLabel} → value`)
+        break
+      }
       // these node types don't expose variables directly
       case 'section':
       case 'execute_flow':
       case 'transition_to_flow':
+      case 'set_custom_field':
         break
     }
   }

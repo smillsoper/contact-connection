@@ -2,6 +2,7 @@ using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
 using ContactConnection.Domain.Entities;
+using Microsoft.EntityFrameworkCore;
 
 namespace ContactConnection.Api.Endpoints;
 
@@ -68,7 +69,17 @@ public static class CustomFieldsEndpoints
         }
 
         await definitions.AddAsync(def, ct);
-        await definitions.SaveChangesAsync(ct);
+        try
+        {
+            await definitions.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            return Results.Conflict(new
+            {
+                error = "A field with this name already exists at this scope (tenant/client/campaign)."
+            });
+        }
 
         return Results.Created($"/api/v1/custom-field-definitions/{def.Id}", ToDefinitionResponse(def));
     }

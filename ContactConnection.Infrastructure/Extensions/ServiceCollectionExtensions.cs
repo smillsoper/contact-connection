@@ -190,6 +190,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<INodeHandler, EndNodeHandler>();
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.ScheduledCallbackNodeHandler>();
         services.AddScoped<INodeHandler, TriggerTelephonyEventNodeHandler>();
+        services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.SetCustomFieldNodeHandler>();
+        services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.GetCustomFieldNodeHandler>();
 
         // Flow engine (scoped — uses scoped repositories and tenant context)
         services.AddScoped<IFlowEngine, FlowEngine.FlowEngine>();
@@ -230,6 +232,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ITelephonyNodeHandler, DelayNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, RepeatNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, ClearHotDigitListenerNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, Telephony.NodeHandlers.SetCustomFieldNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, Telephony.NodeHandlers.GetCustomFieldNodeHandler>();
 
         // Call session store (singleton — Redis operations are inherently stateless)
         services.AddSingleton<ITelephonyCallSessionStore, RedisCallSessionStore>();

@@ -5,7 +5,7 @@ import ScriptContentEditor from './ScriptContentEditor'
 import VariablePanel from './VariablePanel'
 import { computeAncestorVars } from '../../utils/flowGraph'
 import { flowsApi } from '../../api/flows'
-import type { FlowSummary, GeneralApiSummary } from '../../api/flows'
+import type { FlowSummary, GeneralApiSummary, CustomFieldDefinitionSummary } from '../../api/flows'
 import { useTenantTimezone } from '../../hooks/useTenantTimezone'
 import { timezoneLabel } from '../../utils/timezones'
 
@@ -76,6 +76,13 @@ export default function NodePropertiesPanel({
   useEffect(() => {
     if (type !== 'scheduled_callback') return
     flowsApi.listAllByType('telephony').then(setTelephonyFlows).catch(console.error)
+  }, [type])
+
+  // Custom Field Definitions for set_custom_field / get_custom_field — fetched lazily
+  const [customFieldDefs, setCustomFieldDefs] = useState<CustomFieldDefinitionSummary[]>([])
+  useEffect(() => {
+    if (type !== 'set_custom_field' && type !== 'get_custom_field') return
+    flowsApi.listCustomFieldDefinitions().then(setCustomFieldDefs).catch(console.error)
   }, [type])
 
   // Address node — active script tab ('main' | field key)
@@ -1009,6 +1016,75 @@ export default function NodePropertiesPanel({
               {' '}{'{{flow.'}{(data.outputVariable as string) || 'variable'}{'.success}}'}, etc. Connect the exit
               handle to wire up Success / Error / Timeout.
             </p>
+          </>
+        )
+      }
+
+      case 'set_custom_field':
+      case 'get_custom_field': {
+        const activeDefs = customFieldDefs.filter((d) => d.isActive)
+        const tenantWide = activeDefs.filter((d) => !d.clientId)
+        const clientScoped = activeDefs.filter((d) => d.clientId && !d.campaignId)
+        const campaignScoped = activeDefs.filter((d) => d.campaignId)
+        const selectedDefId = (data.definitionId as string) ?? ''
+
+        const renderOption = (d: CustomFieldDefinitionSummary) => (
+          <option key={d.id} value={d.id}>{d.displayLabel} ({d.dataTypeName})</option>
+        )
+
+        return (
+          <>
+            {field(
+              'definitionId',
+              'Custom Field',
+              <select
+                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-sky-500"
+                value={selectedDefId}
+                onChange={(e) => {
+                  const chosen = activeDefs.find((d) => d.id === e.target.value)
+                  onUpdate(node.id, {
+                    definitionId: chosen?.id ?? '',
+                    definitionFieldName: chosen?.fieldName ?? '',
+                    definitionDisplayLabel: chosen?.displayLabel ?? '',
+                    definitionDataTypeName: chosen?.dataTypeName ?? '',
+                  })
+                }}
+              >
+                <option value="">— Select a field —</option>
+                {tenantWide.length > 0 && (
+                  <optgroup label="Tenant-wide">{tenantWide.map(renderOption)}</optgroup>
+                )}
+                {clientScoped.length > 0 && (
+                  <optgroup label="Client-scoped">{clientScoped.map(renderOption)}</optgroup>
+                )}
+                {campaignScoped.length > 0 && (
+                  <optgroup label="Campaign-scoped">{campaignScoped.map(renderOption)}</optgroup>
+                )}
+              </select>,
+            )}
+            {customFieldDefs.length === 0 && (
+              <p className="text-[10px] text-amber-400">
+                No custom fields defined yet. Create one in Admin → Custom Fields.
+              </p>
+            )}
+            {type === 'set_custom_field' ? (
+              <>
+                {field('value', 'Value', input('value', '{{input.node_003}}'))}
+                <p className="text-[10px] text-gray-500 leading-snug">
+                  Connect the exit handle to wire up Success / Invalid Value / Error — Invalid
+                  Value fires when this value doesn't match the field's data type
+                  ({(data.definitionDataTypeName as string) || 'e.g. a non-numeric value for an integer field'}).
+                </p>
+              </>
+            ) : (
+              <>
+                {field('outputVariable', 'Store into variable', input('outputVariable', 'priorContactPreference'))}
+                <p className="text-[10px] text-gray-500 leading-snug">
+                  Stored as {'{{flow.'}{(data.outputVariable as string) || 'variable'}{'}}'} — a field
+                  with no value yet resolves to an empty string.
+                </p>
+              </>
+            )}
           </>
         )
       }

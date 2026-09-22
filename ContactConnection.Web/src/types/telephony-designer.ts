@@ -17,6 +17,8 @@ export type TelephonyNodeType =
   | 'tf_cancel_dial'
   | 'tf_script_pop'
   | 'tf_general_api_call'
+  | 'tf_set_custom_field'
+  | 'tf_get_custom_field'
   // Signal / media actions
   | 'tf_dtmf'
   | 'tf_ivr_menu'
@@ -102,6 +104,16 @@ export interface TelNodeData extends Record<string, unknown> {
   apiEndpointName?: string
   outputVariable?: string
   timeoutSeconds?: number
+  // tf_set_custom_field / tf_get_custom_field — write/read an existing Custom Field Definition's
+  // value for the current call record. Shares `value` (tf_set_sip_header) for the Set node's
+  // template and `variableName` (tf_get_sip_header) for the Get node's store-into field.
+  // definitionFieldName/definitionDisplayLabel/definitionDataTypeName are denormalized display
+  // fields (same pattern as apiDefinitionName/apiEndpointName above) so the canvas node doesn't
+  // need a fresh lookup just to show the picked field.
+  definitionId?: string
+  definitionFieldName?: string
+  definitionDisplayLabel?: string
+  definitionDataTypeName?: string
   // tf_dtmf
   digits?: string
   durationMs?: number
@@ -366,6 +378,18 @@ export const TELEPHONY_NODE_META: Record<
     description: 'Call a saved General API Definition',
     handles: 'single',
   },
+  tf_set_custom_field: {
+    label: 'Set Call Record Value',
+    color: '#65a30d',
+    description: 'Save a value into a defined custom field for this call',
+    handles: 'single',
+  },
+  tf_get_custom_field: {
+    label: 'Get Call Record Value',
+    color: '#4d7c0f',
+    description: "Read a defined custom field's value into a flow variable",
+    handles: 'single',
+  },
   tf_dtmf: {
     label: 'Send DTMF',
     color: '#ca8a04',
@@ -537,6 +561,10 @@ export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
       return { label: 'Script Pop', flowId: '' }
     case 'tf_general_api_call':
       return { label: 'New API Call', apiEndpointId: '', apiDefinitionScope: 'tenant', apiDefinitionName: '', apiEndpointName: '', outputVariable: '', timeoutSeconds: 30 }
+    case 'tf_set_custom_field':
+      return { label: 'Set Call Record Value', definitionId: '', definitionFieldName: '', definitionDisplayLabel: '', definitionDataTypeName: '', value: '' }
+    case 'tf_get_custom_field':
+      return { label: 'Get Call Record Value', definitionId: '', definitionFieldName: '', definitionDisplayLabel: '', definitionDataTypeName: '', variableName: '' }
     case 'tf_dtmf':
       return { label: 'Send DTMF', digits: '', durationMs: 100, interDigitGapMs: 50, waitForCompletion: true }
     case 'tf_ivr_menu':

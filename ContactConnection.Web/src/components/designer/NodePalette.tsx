@@ -15,6 +15,8 @@ const NODE_TYPES: ContactConnectionNodeType[] = [
   'set_variable',
   'trigger_telephony_event',
   'api_call',
+  'set_custom_field',
+  'get_custom_field',
   'end',
 ]
 

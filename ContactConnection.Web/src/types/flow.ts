@@ -14,7 +14,7 @@ export interface JumpTarget {
 export interface FlowNodeState {
   sessionId: string
   nodeId: string
-  nodeType: 'script' | 'input' | 'email' | 'phone' | 'address' | 'branch' | 'set_variable' | 'api_call' | 'end' | 'section' | 'execute_flow' | 'transition_to_flow'
+  nodeType: 'script' | 'input' | 'email' | 'phone' | 'address' | 'branch' | 'set_variable' | 'api_call' | 'end' | 'section' | 'execute_flow' | 'transition_to_flow' | 'set_custom_field' | 'get_custom_field'
   label: string
   flowName?: string
   content?: string

@@ -19,6 +19,7 @@ import TenantAdminInviteAcceptPage from './pages/TenantAdminInviteAcceptPage'
 import TenantAdminPage from './pages/admin/TenantAdminPage'
 import AdminAgentsPage from './pages/admin/AdminAgentsPage'
 import AdminRolesPage from './pages/admin/AdminRolesPage'
+import AdminCustomFieldDefinitionsPage from './pages/admin/AdminCustomFieldDefinitionsPage'
 import AdminApiDefinitionsPage from './pages/admin/AdminApiDefinitionsPage'
 import AdminApiDefinitionDetailPage from './pages/admin/AdminApiDefinitionDetailPage'
 import AdminApiPreferencesPage from './pages/admin/AdminApiPreferencesPage'
@@ -223,6 +224,14 @@ export default function App() {
           element={
             <RequireAdminAuth>
               <AdminRolesPage />
+            </RequireAdminAuth>
+          }
+        />
+        <Route
+          path="/admin/custom-field-definitions"
+          element={
+            <RequireAdminAuth>
+              <AdminCustomFieldDefinitionsPage />
             </RequireAdminAuth>
           }
         />

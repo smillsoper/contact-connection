@@ -63,6 +63,21 @@ export interface GeneralApiSummary {
   scope: 'tenant' | 'portal'
 }
 
+// A Custom Field Definition, for the set_custom_field / get_custom_field (and telephony
+// tf_set_custom_field / tf_get_custom_field) node dropdowns. Scope is implicit: both null =
+// tenant-wide, clientId only = client-wide, both set = campaign-specific.
+export interface CustomFieldDefinitionSummary {
+  id: string
+  clientId: string | null
+  campaignId: string | null
+  fieldName: string
+  displayLabel: string
+  dataTypeName: string
+  isRequired: boolean
+  displayOrder: number
+  isActive: boolean
+}
+
 export const flowsApi = {
   // Agent panel — published flows only
   list: () => api.get<FlowSummary[]>('/api/v1/flows'),
@@ -76,6 +91,11 @@ export const flowsApi = {
   // "general"-category API Definitions available to this tenant's flow designers (tenant's own
   // + platform-provided), for the api_call / tf_general_api_call node dropdowns
   listGeneralApis: () => api.get<GeneralApiSummary[]>('/api/v1/flows/general-apis'),
+
+  // Custom Field Definitions for the Set/Get Call Record Value node dropdowns — reuses the
+  // existing admin CRUD endpoint directly (no query params = every definition for the tenant,
+  // active and inactive; callers filter to isActive client-side).
+  listCustomFieldDefinitions: () => api.get<CustomFieldDefinitionSummary[]>('/api/v1/custom-field-definitions'),
 
   startSession: (req: StartSessionRequest) =>
     api.post<FlowNodeState>('/api/v1/flow-sessions', req),
