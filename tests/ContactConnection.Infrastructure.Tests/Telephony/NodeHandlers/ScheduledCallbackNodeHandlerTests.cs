@@ -221,6 +221,44 @@ public class ScheduledCallbackNodeHandlerTests
         Assert.Equal("+15559998888", (await check.ScheduledCallbacks.SingleAsync()).CallbackNumber);
     }
 
+    [Theory]
+    [InlineData("{{flow.cb_num}}")]
+    [InlineData("{{cb_num}}")]
+    [InlineData("flow.cb_num")]
+    public async Task CollectedNumberSource_AcceptsTemplateWrappedVarName(string collectedVar)
+    {
+        // Every other value field in the telephony designer uses {{flow.x}} template syntax, so a
+        // user typing that here instead of the bare name the field actually wants is an easy
+        // mistake — the handler should resolve it anyway rather than silently failing.
+        var dbName = DbName;
+        var ctx = Ctx(caller: "anonymous");
+        ctx.Vars["cb_num"] = "+15559998888";
+
+        var node = Node(new JsonObject { ["numberSource"] = "collected", ["collectedVar"] = collectedVar });
+        var result = await NewHandler(dbName).ExecuteAsync(node, ctx);
+
+        Assert.Equal("scheduled", result.TransitionTaken);
+        await using var check = Db(dbName);
+        Assert.Equal("+15559998888", (await check.ScheduledCallbacks.SingleAsync()).CallbackNumber);
+    }
+
+    [Fact]
+    public async Task CollectedNumberSource_SharedNamespace_ReadsSharedVars()
+    {
+        // {{shared.x}} bridges a value set by the CRM script flow for the same call — a legitimate
+        // real-world source for a callback number, not just a ctx.Vars/session var.
+        var dbName = DbName;
+        var ctx = Ctx(caller: "anonymous");
+        ctx.SharedVars["original_ani"] = "+15559998888";
+
+        var node = Node(new JsonObject { ["numberSource"] = "collected", ["collectedVar"] = "{{shared.original_ani}}" });
+        var result = await NewHandler(dbName).ExecuteAsync(node, ctx);
+
+        Assert.Equal("scheduled", result.TransitionTaken);
+        await using var check = Db(dbName);
+        Assert.Equal("+15559998888", (await check.ScheduledCallbacks.SingleAsync()).CallbackNumber);
+    }
+
     [Fact]
     public async Task CallerIdOverride_LiteralAndVariable_FrozenToLiteral()
     {

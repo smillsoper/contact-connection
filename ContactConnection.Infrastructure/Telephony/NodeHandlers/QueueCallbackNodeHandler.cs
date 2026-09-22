@@ -117,21 +117,41 @@ public class QueueCallbackNodeHandler : ITelephonyNodeHandler
 
         if (string.Equals(source, "collected", StringComparison.OrdinalIgnoreCase))
         {
-            var varName = node["collectedVar"]?.GetValue<string>();
-            if (!string.IsNullOrWhiteSpace(varName))
-            {
-                if (ctx.Vars.TryGetValue(varName, out var v) && !string.IsNullOrWhiteSpace(v))
-                    return v.Trim();
-                if (ctx.ChannelVars.TryGetValue(varName, out var cv) && !string.IsNullOrWhiteSpace(cv))
-                    return cv.Trim();
-            }
-            return null;
+            var value = ResolveCollectedNumber(node["collectedVar"]?.GetValue<string>(), ctx);
+            return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
         }
 
         var ani = ctx.CallerNumber?.Trim();
         if (string.IsNullOrWhiteSpace(ani)) return null;
         var digits = new string(ani.Where(char.IsDigit).ToArray());
         return digits.Length >= 7 ? ani : null;
+    }
+
+    /// <summary>
+    /// The designer's "Number variable" field is documented as a bare var name (placeholder
+    /// "e.g. callback_digits"), but every other value field in the telephony designer uses
+    /// {{flow.x}}/{{shared.x}}/{{caller.ani}} template syntax — an easy, reasonable mix-up.
+    /// Accepts either: a bare name (or "{{name}}"/"{{flow.name}}") is looked up in ctx.Vars, then
+    /// ctx.ChannelVars (e.g. a SIP header extracted earlier in the call); any other {{...}}
+    /// namespace (shared./caller./call./now.) resolves through the same
+    /// TelSetVariableNodeHandler.ResolveKey every other value field uses.
+    /// </summary>
+    private static string ResolveCollectedNumber(string? raw, TelephonyFlowContext ctx)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "";
+        var key = raw.Trim();
+        if (key.StartsWith("{{") && key.EndsWith("}}"))
+            key = key[2..^2].Trim();
+
+        if (key.StartsWith("shared.", StringComparison.OrdinalIgnoreCase) ||
+            key is "caller.ani" or "call.did" or "call.dnis" ||
+            key.StartsWith("now.", StringComparison.OrdinalIgnoreCase))
+            return TelSetVariableNodeHandler.ResolveKey(key, ctx);
+
+        var name = key.StartsWith("flow.", StringComparison.OrdinalIgnoreCase) ? key[5..] : key;
+        if (ctx.Vars.TryGetValue(name, out var v)) return v;
+        if (ctx.ChannelVars.TryGetValue(name, out var cv)) return cv;
+        return "";
     }
 
     private static TelephonyNodeResult Follow(JsonObject? transitions, string preferredKey)

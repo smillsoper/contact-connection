@@ -162,6 +162,7 @@
 | 150 | 2026-09-20 | 4:32 PM PDT | 6:16 PM PDT | 104 min | ~15053 min |
 | 151 | 2026-09-21 | 3:46 PM PDT | 4:22 PM PDT | 36 min | ~15089 min |
 | 152 | 2026-09-21 | 4:27 PM PDT | 6:34 PM PDT | 127 min | ~15216 min |
+| 153 | 2026-09-22 | 9:21 AM PDT | 10:06 AM PDT | 45 min | ~15261 min |
 
 ---
 
@@ -9190,3 +9191,97 @@ Per the user, explicitly:
    `tenant_test_tenant` schema) — separate root cause, not yet located.
 3. Once both are resolved and re-verified live, continue the build order: **Store/Get Scoped
    Value**, then **`tf_play` interrupt option**.
+
+---
+
+## Session 153
+
+**Date:** 2026-09-22
+**Start:** 9:21 AM PDT
+**End:** 10:06 AM PDT
+**Duration:** 45 minutes
+**Total Duration:** ~15261 minutes
+
+### Focus
+
+Picked up exactly where Session 152 left off: the two bundled causes behind the Custom Field
+scope bug. Fixed and live-verified both, then live-testing immediately surfaced a second, unrelated
+bug in the queue/scheduled-callback nodes — fixed that too, and generalized it further mid-session
+after the user asked a sharp follow-up question. Session closed with a new backlog item banked at
+the user's explicit request rather than solving it ad hoc.
+
+### 1. Custom Field SetValue scope bug — both causes fixed
+
+- **`ICustomFieldService.SetValueAsync` had no scope validation** (`CustomFieldService.cs`) — it
+  wrote to whatever `definitionId` it was given with no check that the definition's client/campaign
+  scope matched the call record. Added an `IsInScope` check mirroring `GetForContextAsync`'s
+  read-side predicate; a mismatch now throws `InvalidOperationException`, which both
+  `set_custom_field`/`tf_set_custom_field` handlers already caught into their `error` exit — no
+  handler changes needed.
+- **Root-caused the `client_id = Guid.Empty` mystery.** `CallRecord.SetCampaign(campaignId)` only
+  ever stamped `CampaignId`, never `ClientId` — every inbound/outbound call starts with
+  `ClientId = Guid.Empty` (`CreateInbound`/`CreateOutbound`) and relies on `SetCampaign` to resolve
+  it later, but it never did. Real production calls were permanently stranded with an empty client.
+  Changed the signature to `SetCampaign(campaignId, clientId)`, forcing both call sites to supply
+  the real client: `EslBackgroundService`'s DID routing (now loads the routed `Campaign` for its
+  `ClientId`) and `TransferNodeHandler`'s campaign-queue transfer (already had the target `Campaign`
+  loaded).
+- 6 new tests (5 scope-validation cases + 1 full `campaign_queue` transfer success path proving
+  `ClientId` now propagates). Full suite 1018/1018 at this point.
+- **Live-verified via direct Postgres query** against the user's real test call
+  (`fb46b884-09bf-4852-86b7-1150dcee3054`, `tenant_test_tenant`): `client_id`/`campaign_id` both
+  correctly matched the "Original ANI" field's own scope, and the write went through cleanly under
+  the new scope check. The stored value itself was blank — traced to a flow-authoring issue, not a
+  bug: the user's Set node used `{{flow.callerNumber}}`, CRM-tag syntax, but the **telephony**
+  engine's `TelSetVariableNodeHandler.Resolve` only recognizes `{{flow.x}}` as a `ctx.Vars` lookup;
+  the caller's number there is `{{caller.ani}}`. User corrected it and confirmed `caller_phone`
+  round-tripped correctly (`+15416704541`) on a real call.
+- [[project_custom_field_set_value_scope_bug]] updated to CLOSED.
+
+### 2. A second real bug, found immediately after — queue callback `collectedVar`
+
+User's next real-world step: feed the retrieved `{{flow.caller_phone}}` into a `tf_queue_callback`
+node's "Number variable" field to call it back later. Silently failed (`failed` transition, no
+error). Root cause: `QueueCallbackNodeHandler`/`ScheduledCallbackNodeHandler`'s `collectedVar` did
+a **raw dictionary lookup** (`ctx.Vars[collectedVar]`) expecting a bare name like `caller_phone` —
+while every other value field in the same designer, including this node's own sibling Date/Time
+fields, uses `{{flow.x}}` template syntax. The user typed `{{flow.caller_phone}}` by completely
+reasonable pattern-matching and got nothing back.
+
+First pass fixed the immediate case (strip `{{ }}` + `flow.` prefix). Then the user asked directly:
+*"does this also resolve variable name keys for other contexts such as `{{shared.variableName}}`?"*
+— it didn't yet. Generalized properly instead of answering "no, want me to add that too": both
+handlers' `ResolveNumber` now route through `ResolveCollectedNumber`, which accepts a bare name or
+a full `{{flow.x}}`/`{{shared.x}}`/`{{caller.ani}}`/`{{call.did}}` template — the latter three
+delegate to `TelSetVariableNodeHandler.ResolveKey` (exposed `internal` for this reuse) so it stays
+in sync with the one real resolver instead of a second hand-rolled copy. Designer placeholder text
+and canvas label rendering updated on both node types to match. 9 new tests total (3 input-format
+variants × 2 handlers, plus `{{shared.x}}` × 2 handlers and `{{caller.ani}}` × 1) — full suite
+1027/1027 passing. User deferred re-verifying this one live (deemed already confirmed sufficiently
+by code review + the earlier round-trip test) since it'll be touched again by item 3 below anyway.
+
+### 3. Backlog item banked — Unified Variable Resolution
+
+The user's response to finding a second inconsistent "variable name" field in one session: stop
+patching these one at a time as they're discovered. Explicitly asked to bank a full audit-and-unify
+pass across **both** the CRM and telephony designers/engines — every field that accepts a variable
+name or reference, landing on one consistent syntax and consistent UI labeling, for its own
+dedicated future session. Recorded as `memory/project_unified_variable_resolution.md`, same
+"don't build ad hoc" pattern as `project_omnichannel_messaging`.
+
+### Housekeeping
+
+Hit the known stale-`dotnet watch` file-lock issue twice this session — once from the session's own
+API watch process left running across an edit, once when a hot-reload attempt hit an
+unsupported-change restart prompt (`ENC0047: Changing visibility of method requires restarting the
+application`) and sat stuck on an interactive Y/N prompt it couldn't receive, holding the same file
+lock. Both times the fix was killing the stray `dotnet.exe` process tree and rebuilding clean, not a
+real compile error — consistent with `feedback_stale_dotnet_watch.md`. Both dev-server processes
+(API watch, Vite) stopped cleanly before ending the session.
+
+### State
+
+Build order item 1 (**Set/Get Call Record Value**) is now fully done and live-verified. Work is
+**not yet committed** as of session end (14 modified files + 1 new test file) — user did not ask
+for a commit this session; do that first thing next session if it's still pending. Next up per the
+locked-in order: **Store/Get Scoped Value**, then **`tf_play` interrupt option**.

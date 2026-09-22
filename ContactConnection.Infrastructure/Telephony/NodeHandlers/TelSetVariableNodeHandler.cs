@@ -59,7 +59,10 @@ public class TelSetVariableNodeHandler(ISharedCallVariableStore sharedVars) : IT
         });
     }
 
-    private static string ResolveKey(string key, TelephonyFlowContext ctx)
+    /// <summary>Exposed for handlers (e.g. QueueCallbackNodeHandler/ScheduledCallbackNodeHandler's
+    /// "collected variable" field) that need to resolve a single already-unwrapped {{...}} key
+    /// rather than interpolate it inside a larger string.</summary>
+    internal static string ResolveKey(string key, TelephonyFlowContext ctx)
     {
         // Well-known namespaces
         if (key == "caller.ani")  return ctx.CallerNumber;

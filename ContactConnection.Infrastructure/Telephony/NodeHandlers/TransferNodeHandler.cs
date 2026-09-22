@@ -247,7 +247,7 @@ public class TransferNodeHandler : ITelephonyNodeHandler
         // Redis session's CampaignId (a handler can't persist that itself — see
         // TelephonyFlowEngine.ApplyPendingSessionMutations).
         var record = await db.CallRecords.FirstOrDefaultAsync(r => r.Id == ctx.CallRecordId, ct);
-        record?.SetCampaign(targetCampaignId);
+        record?.SetCampaign(targetCampaignId, target.ClientId);
         if (record is not null) await db.SaveChangesAsync(ct);
 
         ctx.Vars["_switch_campaign_id"] = targetCampaignId.ToString();

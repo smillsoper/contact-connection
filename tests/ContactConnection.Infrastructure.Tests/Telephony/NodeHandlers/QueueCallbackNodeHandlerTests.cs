@@ -116,6 +116,52 @@ public class QueueCallbackNodeHandlerTests
         Assert.Equal("+15559998888", ctx.Vars["_queue_callback_number"]);
     }
 
+    [Theory]
+    [InlineData("{{flow.cb_num}}")]
+    [InlineData("{{cb_num}}")]
+    [InlineData("flow.cb_num")]
+    public async Task CollectedNumberSource_AcceptsTemplateWrappedVarName(string collectedVar)
+    {
+        // Every other value field in the telephony designer uses {{flow.x}} template syntax, so a
+        // user typing that here instead of the bare name the field actually wants is an easy
+        // mistake — the handler should resolve it anyway rather than silently failing.
+        var ctx = Ctx(caller: "anonymous");
+        ctx.Vars["cb_num"] = "+15559998888";
+        var node = Node(new JsonObject { ["numberSource"] = "collected", ["collectedVar"] = collectedVar });
+
+        var result = await NewHandler().ExecuteAsync(node, ctx);
+
+        Assert.Equal("queued", result.TransitionTaken);
+        Assert.Equal("+15559998888", ctx.Vars["_queue_callback_number"]);
+    }
+
+    [Fact]
+    public async Task CollectedNumberSource_SharedNamespace_ReadsSharedVars()
+    {
+        // {{shared.x}} bridges a value set by the CRM script flow for the same call — a legitimate
+        // real-world source for a callback number, not just a ctx.Vars/session var.
+        var ctx = Ctx(caller: "anonymous");
+        ctx.SharedVars["original_ani"] = "+15559998888";
+        var node = Node(new JsonObject { ["numberSource"] = "collected", ["collectedVar"] = "{{shared.original_ani}}" });
+
+        var result = await NewHandler().ExecuteAsync(node, ctx);
+
+        Assert.Equal("queued", result.TransitionTaken);
+        Assert.Equal("+15559998888", ctx.Vars["_queue_callback_number"]);
+    }
+
+    [Fact]
+    public async Task CollectedNumberSource_CallerAniNamespace_ReadsCallerNumber()
+    {
+        var ctx = Ctx();
+        var node = Node(new JsonObject { ["numberSource"] = "collected", ["collectedVar"] = "{{caller.ani}}" });
+
+        var result = await NewHandler().ExecuteAsync(node, ctx);
+
+        Assert.Equal("queued", result.TransitionTaken);
+        Assert.Equal(ctx.CallerNumber, ctx.Vars["_queue_callback_number"]);
+    }
+
     [Fact]
     public async Task PersistsMarkersToSessionDirectly()
     {

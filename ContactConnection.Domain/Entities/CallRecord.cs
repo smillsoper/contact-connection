@@ -211,9 +211,17 @@ public class CallRecord
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
-    public void SetCampaign(Guid campaignId)
+    /// <summary>
+    /// Stamps the call record's campaign, and the campaign's owning client alongside it — the two
+    /// must move together or ClientId is left stranded at its prior value (e.g. Guid.Empty for a
+    /// record created via CreateInbound/CreateOutbound before routing resolved), which silently
+    /// breaks client/campaign-scoped custom field lookups for the call. See
+    /// ARCHITECTURE.md §20 / CustomFieldService scope resolution.
+    /// </summary>
+    public void SetCampaign(Guid campaignId, Guid clientId)
     {
         CampaignId = campaignId;
+        ClientId = clientId;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 

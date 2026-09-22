@@ -20,6 +20,7 @@ public class TransferNodeHandlerTests
     private static readonly Guid TenantId = Guid.Parse("bbbbbbbb-0000-0000-0000-0000000000aa");
 
     private readonly Mock<ITelephonyFlowEngine> _engine = new();
+    private readonly Mock<ITelephonyCallSessionStore> _sessionStore = new();
 
     private static TenantDbContext NewDb() =>
         new(new DbContextOptionsBuilder<TenantDbContext>()
@@ -39,11 +40,14 @@ public class TransferNodeHandlerTests
         if (db is not null)
             factory.Setup(f => f.Create(It.IsAny<string>())).Returns(db);
 
+        _sessionStore.Setup(s => s.GetAllAsync(It.IsAny<CancellationToken>()))
+                     .ReturnsAsync((IReadOnlyList<TelephonyCallSession>)[]);
+
         return new TransferNodeHandler(
             factory.Object,
             new EligibleAgentRanker(new Mock<IAgentStateStore>().Object),
             new Mock<ICallStateHistoryRecorder>().Object,
-            new Mock<ITelephonyCallSessionStore>().Object,
+            _sessionStore.Object,
             new Mock<ITtsStreamingService>().Object,
             new Mock<ITtsFileSynthesizer>().Object,
             sp, cfg, NullLogger<TransferNodeHandler>.Instance);
@@ -234,6 +238,45 @@ public class TransferNodeHandlerTests
         var esl = NewEsl();
         var result = await NewHandler().ExecuteAsync(Node("campaign_queue"), Ctx(esl.Object));
         Assert.Equal("failed", result.TransitionTaken);
+    }
+
+    [Fact]
+    public async Task CampaignQueue_Success_MovesCallRecordOntoTargetCampaignAndItsClient()
+    {
+        // The handler opens (and disposes) its own db context internally, so seed and later
+        // re-read through separate contexts sharing one InMemory database name.
+        var dbName = Guid.NewGuid().ToString();
+        DbContextOptions<TenantDbContext> Options() =>
+            new DbContextOptionsBuilder<TenantDbContext>().UseInMemoryDatabase(dbName).Options;
+
+        var clientId = Guid.NewGuid();
+        var targetCampaign = Campaign.Create(TenantId, clientId, "Target Campaign", "target-campaign");
+        // Record starts stranded on Guid.Empty client/a different campaign — the exact state a
+        // record created via CreateInbound/CreateOutbound is left in before routing resolves it.
+        var record = CallRecord.Create(TenantId, Guid.Empty, Guid.NewGuid());
+        await using (var seedDb = new TenantDbContext(Options()))
+        {
+            seedDb.Campaigns.Add(targetCampaign);
+            seedDb.CallRecords.Add(record);
+            await seedDb.SaveChangesAsync();
+        }
+
+        var esl = NewEsl();
+        var ctx = new TelephonyFlowContext
+        {
+            ChannelUuid = Uuid, CallerNumber = "+15551110000", DestinationNumber = "+15552220000",
+            TenantId = TenantId, CampaignId = Guid.NewGuid(), CallRecordId = record.Id,
+            TenantSubdomain = "test-tenant", TenantSchemaName = "tenant_test_tenant", TenantTimezone = "America/Chicago",
+            Esl = esl.Object,
+        };
+        var result = await NewHandler(db: new TenantDbContext(Options())).ExecuteAsync(
+            Node("campaign_queue", new JsonObject { ["targetCampaignId"] = targetCampaign.Id.ToString() }), ctx);
+
+        Assert.Equal("transferred", result.TransitionTaken);
+        await using var verifyDb = new TenantDbContext(Options());
+        var updated = await verifyDb.CallRecords.FindAsync(record.Id);
+        Assert.Equal(targetCampaign.Id, updated!.CampaignId);
+        Assert.Equal(clientId, updated.ClientId);
     }
 
     [Fact]

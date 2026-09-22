@@ -453,7 +453,7 @@ export default function TelephonyNodePropertiesPanel({
               <label className="block text-xs text-gray-400 mb-1">Number variable</label>
               <input
                 className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-blue-500"
-                placeholder="e.g. callback_digits"
+                placeholder="e.g. callback_digits or {{flow.callback_digits}}"
                 value={(data.collectedVar as string) ?? ''}
                 onChange={(e) => set('collectedVar', e.target.value)}
               />
@@ -601,7 +601,7 @@ export default function TelephonyNodePropertiesPanel({
               <label className="block text-xs text-gray-400 mb-1">Number variable</label>
               <input
                 className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-blue-500"
-                placeholder="e.g. callback_digits"
+                placeholder="e.g. callback_digits or {{flow.callback_digits}}"
                 value={(data.collectedVar as string) ?? ''}
                 onChange={(e) => set('collectedVar', e.target.value)}
               />

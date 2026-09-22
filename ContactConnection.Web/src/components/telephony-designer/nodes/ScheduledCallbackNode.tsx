@@ -40,7 +40,9 @@ export default function ScheduledCallbackNode({ data, selected }: NodeProps & { 
         {date || time ? `when: ${date} ${time}`.trim() : '⚠ no date/time set'}
       </p>
       <p className="text-[10px] text-gray-500 mt-0.5 truncate">
-        {source === 'collected' ? `number: {{${(data.collectedVar as string) || '…'}}}` : "number: caller's ANI"}
+        {source === 'collected'
+          ? `number: {{${((data.collectedVar as string) || '…').replace(/^\{\{|\}\}$/g, '').replace(/^flow\./i, '')}}}`
+          : "number: caller's ANI"}
         {' · '}
         {(data.targetFlowId as string) ? 'target flow set' : '⚠ no target flow'}
       </p>

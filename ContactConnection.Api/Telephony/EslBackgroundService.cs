@@ -412,14 +412,21 @@ public sealed class EslBackgroundService : BackgroundService
         Guid? targetFlowId =
             Guid.TryParse(eventVars.GetValueOrDefault("variable_cc_target_flow_id"), out var tf) ? tf : null;
 
+        var routedCampaign = await db.Campaigns.FirstOrDefaultAsync(c => c.Id == routing.CampaignId, ct);
+        if (routedCampaign is null)
+            _logger.LogWarning(
+                "CHANNEL_PARK DID {Uuid}: routed campaign {Campaign} not found — call record's ClientId will be left unresolved",
+                channelUuid, routing.CampaignId);
+
         var record = isCallbackLeg
             ? CallRecord.CreateCallback(tenant.Id, routing.CampaignId, callerNumber)
             : CallRecord.CreateInbound(
                 tenantId: tenant.Id, callerId: callerNumber, agentId: null, contactIdExternal: channelUuid);
 
         record.SetContactIdExternal(channelUuid);
-        // Stamp the campaign and dialed number so the CallRecord knows where it belongs
-        record.SetCampaign(routing.CampaignId);
+        // Stamp the campaign (and its owning client — see CallRecord.SetCampaign) and dialed number
+        // so the CallRecord knows where it belongs.
+        record.SetCampaign(routing.CampaignId, routedCampaign?.ClientId ?? Guid.Empty);
         record.SetDnis(routing.Number);
 
         db.CallRecords.Add(record);

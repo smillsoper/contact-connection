@@ -35,7 +35,9 @@ export default function QueueCallbackNode({ data, selected }: NodeProps & { data
     >
       <p className="text-[11px] text-cyan-300 mt-0.5 truncate">virtual hold · keeps queue position</p>
       <p className="text-[10px] text-gray-500 mt-0.5 truncate">
-        {source === 'collected' ? `number: {{${(data.collectedVar as string) || '…'}}}` : "number: caller's ANI"}
+        {source === 'collected'
+          ? `number: {{${((data.collectedVar as string) || '…').replace(/^\{\{|\}\}$/g, '').replace(/^flow\./i, '')}}}`
+          : "number: caller's ANI"}
         {' · '}
         {`${(data.maxAttempts as number) ?? 3} tries`}
       </p>

@@ -40,8 +40,18 @@ public class CustomFieldService : ICustomFieldService
 
     public async Task SetValueAsync(Guid callRecordId, Guid definitionId, string rawValue, CancellationToken ct = default)
     {
+        var record = await _callRecords.GetByIdAsync(callRecordId, ct)
+            ?? throw new InvalidOperationException($"Call record {callRecordId} not found");
+
         var def = await _definitions.GetByIdAsync(definitionId, ct)
             ?? throw new InvalidOperationException($"Custom field definition {definitionId} not found");
+
+        // Mirror GetForContextAsync's scope predicate — a definition that wouldn't be returned for
+        // this call's tenant/client/campaign must not be writable either, or the value becomes
+        // permanently unreadable through the only read path (GetFieldsForCallAsync).
+        if (!IsInScope(def, record))
+            throw new InvalidOperationException(
+                $"Custom field definition {definitionId} is not in scope for call record {callRecordId}");
 
         var existing = await _values.GetByCallRecordAndDefinitionAsync(callRecordId, definitionId, ct);
         var cfv = existing ?? CustomFieldValue.Create(callRecordId, definitionId);
@@ -69,6 +79,12 @@ public class CustomFieldService : ICustomFieldService
             .Select(g => g.OrderBy(d => d.ScopeRank).ThenBy(d => d.DisplayOrder).First())
             .OrderBy(d => d.DisplayOrder)
             .ToList();
+
+    private static bool IsInScope(CustomFieldDefinition def, CallRecord record)
+        => def.IsActive &&
+           def.TenantId == record.TenantId &&
+           (def.ClientId == null || def.ClientId == record.ClientId) &&
+           (def.CampaignId == null || def.CampaignId == record.CampaignId);
 
     private static void ApplyTypedValue(CustomFieldValue cfv, string dataTypeName, string raw)
     {
