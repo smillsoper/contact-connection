@@ -161,6 +161,7 @@
 | 149 | 2026-09-20 | 2:57 PM PDT | 4:19 PM PDT | 82 min | ~14949 min |
 | 150 | 2026-09-20 | 4:32 PM PDT | 6:16 PM PDT | 104 min | ~15053 min |
 | 151 | 2026-09-21 | 3:46 PM PDT | 4:22 PM PDT | 36 min | ~15089 min |
+| 152 | 2026-09-21 | 4:27 PM PDT | 6:34 PM PDT | 127 min | ~15216 min |
 
 ---
 
@@ -9038,7 +9039,7 @@ warnings only, unrelated to this session). `dotnet test`: 980/980 passing across
 projects (159 Domain + 20 Application + 699 Infrastructure + 102 Api). Frontend `tsc --noEmit`:
 clean. Not yet committed/pushed — pending this DevLog/memory update.
 
-### Next session — pick up here
+### Next session — pick up here (superseded by Session 152 below — see that entry's own "Next session" note for the current one)
 
 Per the user, explicitly two things:
 1. **New telephony node candidates** — discuss the short list above (SMS, conference bridge,
@@ -9046,3 +9047,146 @@ Per the user, explicitly two things:
    build.
 2. **Designer UI issues/inconsistencies to clean up** — the user has specific items in mind, not
    yet described in this conversation; ask at session start rather than assuming scope.
+
+## Session 152
+
+**Date:** 2026-09-21
+**Start:** 4:27 PM PDT
+**End:** 6:34 PM PDT
+**Duration:** 127 minutes
+**Total Duration:** ~15216 minutes
+
+### Focus
+
+Continuation of Session 151's new-node discussion, then a full build. Talked through the four
+candidates from Session 151 with the user and landed on a very different final scope than what was
+first proposed — two of the four candidates were retracted entirely once the user pushed back with
+better real-world framing, and two brand-new ideas emerged from that same discussion. Then built
+the first of the three items the user ordered, live-tested it, and found a real pre-existing bug
+in the process.
+
+### 1. New-node discussion — candidates resolved
+
+- **SMS/MMS** — the user liked the idea but, thinking it through out loud, correctly identified
+  this as far bigger than a flow node: needs an outbound queue + tenant-configurable allowed-hours
+  gating + a Worker dispatcher (same shape as `ScheduledCallbackProcessingService`), an inbound
+  webhook + conversation model, and a new agent-facing messaging UI that doesn't exist today. The
+  user also connected it to Live Chat as likely sharing the same underlying model (external
+  customer messaging — distinct from the already-documented internal Chat System). **Banked as its
+  own future platform pillar**, recorded in `memory/project_omnichannel_messaging.md` rather than
+  built ad hoc.
+- **Conference bridge** — **retracted.** The user gave the real use case: agent-initiated warm
+  transfer (dial a third party, consult privately, then merge-or-complete) is a live softphone
+  action, not something authored into a flow at design time. Moved to a future softphone/agent-
+  actions backlog item. Found in passing: `freeswitch/conf/modules.conf.xml` doesn't load
+  `mod_conference` — true 3-party mixing needs that regardless of where the trigger eventually
+  lives.
+- **Supervisor whisper/barge-in** — **retracted**, same reasoning. `mod_dptools`'s `eavesdrop` app
+  (already loaded) is the actual mechanism whenever the supervisor dashboard gets this — pure
+  ESL work against a live channel uuid, no flow node involved.
+- **`tf_play` interrupt option** — confirmed for building (not started this session — see build
+  order below).
+- **NEW: Set/Get Call Record Value** — the user's own idea, refined through discussion: write/read
+  through the EXISTING Custom Fields backend (deliberately not a new parallel store) specifically
+  so this data feeds reporting the same way manually-configured custom fields do. Chose the
+  "definitions admin page first" route over inline-create-in-the-node for reporting structure.
+  **Built this session — see below.**
+- **NEW: Store/Get Scoped Value** — a second new idea from the same discussion: a standalone
+  free-form key/value store, scopes narrowed to tenant/client/campaign only (call-record scope
+  deliberately excluded in favor of the item above, keeping "reportable structured call data" and
+  "cross-call cache data" a deliberate split rather than blurred).
+
+Full reasoning and the final candidate list are in `memory/project_telephony_node_review.md`
+(updated this session) — not repeated here.
+
+### Build order locked in
+
+1. **Set/Get Call Record Value** ← this session
+2. **Store/Get Scoped Value**
+3. **`tf_play` interrupt option**
+
+### 2. Set/Get Call Record Value — built via a formal plan
+
+Entered plan mode; 3 parallel Explore agents mapped the existing Custom Fields backend contract
+(`CustomFieldsEndpoints.cs`, `CustomFieldService.cs`, the domain entities, the scope-resolution
+mechanics) and the exact file-by-file checklist for adding a new node type to each designer,
+traced through real existing examples (`SetVariableNodeHandler`/`AddressNodeHandler` for CRM,
+`GetSipHeaderNodeHandler` for telephony, `AdminRolesPage.tsx`'s modal CRUD pattern for the new
+admin page). Plan approved, then built exactly as scoped — see the commit for the full file list.
+Highlights:
+
+- **Two small backend fixes surfaced by the design work, not by testing:** `CustomFieldDefinition.
+  Create` now rejects a campaign-scoped field with no client (was silently allowed); duplicate
+  field name at the same scope now returns a clean `409` instead of a raw unhandled-exception 500.
+- **New nodes, both engines:** `set_custom_field`/`get_custom_field` (CRM),
+  `tf_set_custom_field`/`tf_get_custom_field` (telephony) — internal names match backend
+  terminology, designer labels are the business-friendly "Set/Get Call Record Value." Set has
+  `success`/`invalid_value`/`error` exits (catches the type-coercion exceptions
+  `ICustomFieldService.SetValueAsync` already throws); Get has a single `default` exit (a field
+  with no value yet resolves to `""`, not a failure).
+  `CustomFieldValueFormatter` (new, shared by both engines) converts a `CustomFieldValue`'s typed
+  column to a flow-variable string per type (bool → lowercase `"true"`/`"false"`, date →
+  `yyyy-MM-dd`, datetime → `"O"`, numeric → invariant-culture).
+- **Telephony-side ambient-`TenantContext` priming** — `CustomFieldDefinitionRepository`/
+  `CustomFieldValueRepository` resolve their tenant DB context off ambient `TenantContext.Current`,
+  which is only populated on the HTTP path. Both new telephony handlers prime it themselves before
+  calling the service, the same fix `ScriptPopNodeHandler` already needed for the same reason.
+- **New admin page** — `/admin/custom-field-definitions`: list, create (Field Name/Display Label/
+  Data Type/Scope picker cascading Client→Campaign/Display Order/Required, with a client-side
+  duplicate-name-at-scope pre-check), edit (Display Label/Display Order/Required/Active only — the
+  rest is immutable per the existing `PATCH` contract). Nav card added under Admin → Flow Engine.
+- **Tests** — 30 new: a domain test file for the new `Create()` guard, and handler tests for all
+  four new node handlers (mocking `ICustomFieldService` directly rather than EF InMemory, since
+  that's the actual seam each handler depends on) including a case proving the telephony handlers
+  correctly prime `TenantContext.Current` only when it's unset.
+
+`dotnet build`: 0 errors. `dotnet test`: full suite green (1012 tests, up from 980).
+`tsc --noEmit`: clean.
+
+### 3. Live verification — found a real, pre-existing bug
+
+Spun up the full stack (API + Vite) for the user to test directly. Found and killed a second stale
+dev-process leftover in the process — a Vite instance squatting on port 5173 since 9/13, same
+class of issue as the stale-`dotnet watch` problem documented in `feedback_stale_dotnet_watch.md`;
+that memory note is arguably broader than its name suggests and should probably be generalized to
+"stale dev server processes" rather than dotnet-specific, next time it's touched.
+
+User built a real CRM test flow with both new nodes wired in and placed live test calls. Two
+findings:
+
+1. **User's own flow-authoring mistake** (their words) — a string field (`original_ani`) stored
+   empty because the node was configured with the wrong source variable. Not a bug.
+2. **A real, pre-existing bug in `ICustomFieldService`, surfaced by this live test, not introduced
+   by this session's new nodes.** A boolean field (`selected_main_offer`, scoped to a specific
+   client + campaign) was set successfully — confirmed directly against
+   `tenant_test_tenant.custom_field_values` (`value_boolean = t`) — but the paired Get node found
+   nothing (`(empty)` in the trace) on the very same call. Root cause, confirmed via direct
+   Postgres queries across `call_records`/`campaigns`/`custom_field_definitions`: the call record's
+   own `client_id` column was `00000000-0000-0000-0000-000000000000` instead of the campaign's
+   real client (`eda21e91-...`) — so `GetFieldsForCallAsync`'s scope-matching predicate
+   (`ClientId == null || ClientId == callClientId`) correctly excluded the field from the call's
+   resolved list, while `SetValueAsync` — which does **no scope validation at all**, it writes to
+   whatever `definitionId` it's given — wrote successfully regardless. Two distinct things bundled
+   in that one symptom: (a) something is populating `call_records.client_id` incorrectly for this
+   call (root cause not yet located — outside this session's scope, needs its own investigation),
+   and (b) `SetValueAsync`'s total lack of scope-checking is a real, independent correctness gap —
+   a value that can never be read back through the normal path shouldn't be writable through it
+   either. **Neither fixed yet** — the user chose to end the session here and pick both up next
+   time rather than rush a fix.
+
+### State
+
+Committed and pushed (`529f8e5`). Both dev-server processes (API watch, Vite) stopped cleanly
+before ending the session — see the stale-process note above for why that matters.
+
+### Next session — pick up here
+
+Per the user, explicitly:
+1. **Fix the `SetValueAsync` scope-validation gap** — make it reject (or at least the new node
+   handlers treat as an error) a `definitionId` that isn't actually in scope for the call's
+   tenant/client/campaign, mirroring what `GetFieldsForCallAsync` already enforces on read.
+2. **Investigate why `call_records.client_id` was `00000000-...` instead of the campaign's real
+   client** for the test call used above (`a24bc87d-81c0-4876-9ff3-cbcd12a5d9fe`,
+   `tenant_test_tenant` schema) — separate root cause, not yet located.
+3. Once both are resolved and re-verified live, continue the build order: **Store/Get Scoped
+   Value**, then **`tf_play` interrupt option**.
