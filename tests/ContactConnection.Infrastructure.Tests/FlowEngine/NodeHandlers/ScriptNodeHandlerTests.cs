@@ -90,4 +90,23 @@ public class ScriptNodeHandlerTests
 
         Assert.Null(result.State.WaitForTelephonyEventTimeoutSeconds);
     }
+
+    [Fact]
+    public async Task UnresolvedVariableInContent_ShowsNotCapturedPlaceholder_AgentFacingContentOnly()
+    {
+        // Script content is agent-facing display, so it goes through ResolveForDisplay, not the
+        // plain Resolve every functional (non-display) consumer uses — see
+        // ContactConnection.Infrastructure/FlowEngine/VariableResolver.cs.
+        var handler = new ScriptNodeHandler(new VariableResolver());
+        var node = new JsonObject
+        {
+            ["type"]        = "script",
+            ["content"]     = "Hello {{flow.never_captured}}!",
+            ["transitions"] = new JsonObject { ["default"] = "n_next" },
+        };
+
+        var result = await handler.ExecuteAsync(node, Ctx(), agentInput: null, agentTransition: "default");
+
+        Assert.Equal("Hello [not captured]!", result.State.Content);
+    }
 }

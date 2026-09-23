@@ -133,4 +133,40 @@ public class CheckBlockListNodeHandlerTests
 
         Assert.Equal("blocked", result.TransitionTaken);
     }
+
+    [Fact]
+    public async Task CheckVariable_AcceptsTemplateSyntax_SameAsEveryOtherValueField()
+    {
+        // Every other value field in the telephony designer accepts {{flow.x}}. Before this fix,
+        // checkVariable was bare-name-only — a user typing {{flow.transfer_target}} here (a
+        // completely reasonable pattern-match from every other field) got a silent failed lookup
+        // and fell through to checking the caller's own ANI instead.
+        await using var db = NewDb();
+        var tenantId = Guid.NewGuid();
+        db.BlockListEntries.Add(BlockListEntry.Create(tenantId, "5559990000", BlockListMatchType.Exact, null, null));
+        await db.SaveChangesAsync();
+
+        var ctx = Ctx(tenantId, "+15551234567"); // caller ANI itself is clean
+        ctx.Vars["transfer_target"] = "+15559990000"; // but the number about to be dialed is blocked
+
+        var result = await NewHandler(db).ExecuteAsync(Node("{{flow.transfer_target}}"), ctx);
+
+        Assert.Equal("blocked", result.TransitionTaken);
+    }
+
+    [Fact]
+    public async Task CheckVariable_AcceptsSharedNamespaceTemplate()
+    {
+        await using var db = NewDb();
+        var tenantId = Guid.NewGuid();
+        db.BlockListEntries.Add(BlockListEntry.Create(tenantId, "5559990000", BlockListMatchType.Exact, null, null));
+        await db.SaveChangesAsync();
+
+        var ctx = Ctx(tenantId, "+15551234567");
+        ctx.SharedVars["dialed_number"] = "+15559990000";
+
+        var result = await NewHandler(db).ExecuteAsync(Node("{{shared.dialed_number}}"), ctx);
+
+        Assert.Equal("blocked", result.TransitionTaken);
+    }
 }

@@ -242,11 +242,15 @@ export default function TelephonyNodePropertiesPanel({
           <label className="block text-xs text-gray-400 mb-1">Check variable (optional)</label>
           <input
             className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-blue-500"
-            placeholder="Leave blank to use call ANI"
+            placeholder="e.g. original_ani or {{flow.original_ani}}"
             value={(data.checkVariable as string) ?? ''}
             onChange={(e) => set('checkVariable', e.target.value)}
           />
-          <p className="text-xs text-gray-500 mt-1">Enter a variable name to check instead of ANI. Useful for X-Original-ANI header values.</p>
+          <p className="text-xs text-gray-500 mt-1">
+            Check this number instead of ANI — useful for X-Original-ANI header values. Literal
+            variable name or a <span className="font-mono">{'{{variable}}'}</span> template. Leave
+            blank to use call ANI.
+          </p>
         </div>
       )}
 

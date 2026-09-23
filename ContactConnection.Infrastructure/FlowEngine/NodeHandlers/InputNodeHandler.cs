@@ -31,7 +31,7 @@ public class InputNodeHandler(IVariableResolver resolver) : NodeHandlerBase(reso
     {
         var varCtx    = ctx.ToVariableContext();
         var inputType = Str(node, "input_type") ?? Str(node, "fieldType") ?? "text";
-        var prompt    = Resolver.Resolve(Str(node, "prompt") ?? string.Empty, varCtx);
+        var prompt    = Resolver.ResolveForDisplay(Str(node, "prompt") ?? string.Empty, varCtx);
         var outputVar = Str(node, "outputVariable")?.Trim();
 
         // If agent has submitted a value, store it and advance
@@ -99,9 +99,9 @@ public class InputNodeHandler(IVariableResolver resolver) : NodeHandlerBase(reso
         var scriptLabel   = Str(node, "scriptLabel");
         var scriptContent = Str(node, "scriptContent");
         if (!string.IsNullOrWhiteSpace(scriptLabel))
-            state.NodeScriptLabel = Resolver.Resolve(scriptLabel, varCtx);
+            state.NodeScriptLabel = Resolver.ResolveForDisplay(scriptLabel, varCtx);
         if (!string.IsNullOrWhiteSpace(scriptContent))
-            state.NodeScriptContent = Resolver.Resolve(scriptContent, varCtx);
+            state.NodeScriptContent = Resolver.ResolveForDisplay(scriptContent, varCtx);
     }
 
     private static List<FlowOption>? ParseOptions(JsonObject node)

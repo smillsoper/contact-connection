@@ -38,7 +38,7 @@ public abstract class NodeHandlerBase
         SessionId    = ctx.SessionId,
         NodeId       = ctx.CurrentNodeId,
         NodeType     = StrReq(node, "type"),
-        Label        = Resolver.Resolve(Str(node, "label") ?? string.Empty, ctx.ToVariableContext()),
+        Label        = Resolver.ResolveForDisplay(Str(node, "label") ?? string.Empty, ctx.ToVariableContext()),
         Content      = resolvedContent,
         IsTerminal   = isTerminal,
         Options      = options,

@@ -17,7 +17,7 @@ public class ScriptNodeHandler(IVariableResolver resolver) : NodeHandlerBase(res
         string? agentInput, string agentTransition, CancellationToken ct = default)
     {
         var varCtx  = ctx.ToVariableContext();
-        var content = Resolver.Resolve(Str(node, "content") ?? string.Empty, varCtx);
+        var content = Resolver.ResolveForDisplay(Str(node, "content") ?? string.Empty, varCtx);
         var next    = Transition(node, agentTransition) ?? Transition(node, "default");
 
         AppendHistory(ctx, node, input: null, transition: next);

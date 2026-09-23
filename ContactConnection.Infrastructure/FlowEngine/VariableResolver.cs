@@ -20,14 +20,20 @@ public partial class VariableResolver : IVariableResolver
     [GeneratedRegex(@"\{\{([^}]+)\}\}", RegexOptions.Compiled)]
     private static partial Regex TagPattern();
 
-    public string Resolve(string template, VariableContext context)
+    public string Resolve(string template, VariableContext context) =>
+        ResolveInternal(template, context, missingFallback: string.Empty);
+
+    public string ResolveForDisplay(string template, VariableContext context) =>
+        ResolveInternal(template, context, missingFallback: "[not captured]");
+
+    private string ResolveInternal(string template, VariableContext context, string missingFallback)
     {
         if (string.IsNullOrEmpty(template)) return template;
 
         return TagPattern().Replace(template, match =>
         {
             var tag = match.Groups[1].Value.Trim();
-            return ResolveTag(tag, context) ?? "[not captured]";
+            return ResolveTag(tag, context) ?? missingFallback;
         });
     }
 

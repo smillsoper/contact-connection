@@ -18,9 +18,22 @@ namespace ContactConnection.Application.Interfaces.Services;
 public interface IVariableResolver
 {
     /// <summary>
-    /// Resolves all {{...}} tags in the template string. Unknown tags are left as-is.
+    /// Resolves all {{...}} tags in the template string. An unresolved tag (the referenced
+    /// variable was never captured) resolves to "" — the correct default for any value that
+    /// feeds a branch condition, an API call, a stored value, or any other functional consumer.
+    /// Use <see cref="ResolveForDisplay"/> instead for content shown directly to an agent.
     /// </summary>
     string Resolve(string template, VariableContext context);
+
+    /// <summary>
+    /// Same resolution as <see cref="Resolve"/>, but an unresolved tag renders as the literal
+    /// placeholder "[not captured]" instead of "". This is a UX signal for agent-facing script
+    /// box / prompt / label content only — showing the agent that a variable they expected to
+    /// see was never actually captured, rather than silently leaving a blank. Never use this for
+    /// a value that feeds anything functional (a condition, an API call, a stored value, a phone
+    /// number) — the literal placeholder text would end up in that data.
+    /// </summary>
+    string ResolveForDisplay(string template, VariableContext context);
 
     /// <summary>
     /// Extracts all {{...}} tag references from a template without resolving them.

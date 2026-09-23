@@ -88,9 +88,9 @@ public partial class AddressNodeHandler(IVariableResolver resolver)
             var scriptLabel   = Str(node, "scriptLabel");
             var scriptContent = Str(node, "scriptContent");
             if (!string.IsNullOrWhiteSpace(scriptLabel))
-                s.NodeScriptLabel = Resolver.Resolve(scriptLabel, varCtx);
+                s.NodeScriptLabel = Resolver.ResolveForDisplay(scriptLabel, varCtx);
             if (!string.IsNullOrWhiteSpace(scriptContent))
-                s.NodeScriptContent = Resolver.Resolve(scriptContent, varCtx);
+                s.NodeScriptContent = Resolver.ResolveForDisplay(scriptContent, varCtx);
 
             // Pre-populate form: prefer FlowVars (normalized, has computed fields stripped)
             // then fall back to the raw last submission stored in execution history.
@@ -192,7 +192,7 @@ public partial class AddressNodeHandler(IVariableResolver resolver)
         foreach (var kv in fs)
         {
             var raw = kv.Value?.GetValue<string>() ?? string.Empty;
-            result[kv.Key] = string.IsNullOrWhiteSpace(raw) ? raw : Resolver.Resolve(raw, varCtx);
+            result[kv.Key] = string.IsNullOrWhiteSpace(raw) ? raw : Resolver.ResolveForDisplay(raw, varCtx);
         }
         return result;
     }

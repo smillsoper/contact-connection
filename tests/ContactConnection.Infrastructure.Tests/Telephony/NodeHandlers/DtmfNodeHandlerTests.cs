@@ -81,6 +81,22 @@ public class DtmfNodeHandlerTests
     }
 
     [Fact]
+    public async Task VariableSubstitution_SupportsNamespacedTags_NotJustBareVars()
+    {
+        // Before this fix, DtmfNodeHandler had its own hand-rolled substitution loop that only
+        // matched raw ctx.Vars keys — {{caller.ani}}/{{call.did}}/{{shared.x}}/{{now.*}} silently
+        // passed through unresolved. Now it shares TelSetVariableNodeHandler.Resolve, the same
+        // resolver every other value field in the telephony designer uses.
+        var esl = NewEsl();
+        var ctx = Ctx(esl.Object); // CallerNumber = "+15551234567"
+
+        await NewHandler().ExecuteAsync(Node("{{caller.ani}}", durationMs: 5, interDigitGapMs: 0), ctx);
+
+        esl.Verify(e => e.SendDtmfAsync("uuid-1", "1", 5, It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        esl.Verify(e => e.SendDtmfAsync("uuid-1", "5", 5, It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+    }
+
+    [Fact]
     public async Task NoValidDigitsAfterStripping_SendsNothing_StillFollowsDefault()
     {
         var esl = NewEsl();

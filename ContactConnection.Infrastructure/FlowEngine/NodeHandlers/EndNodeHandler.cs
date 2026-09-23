@@ -24,7 +24,7 @@ public class EndNodeHandler(IVariableResolver resolver) : NodeHandlerBase(resolv
         string? agentInput, string agentTransition, CancellationToken ct = default)
     {
         var varCtx  = ctx.ToVariableContext();
-        var content = Resolver.Resolve(Str(node, "content") ?? string.Empty, varCtx);
+        var content = Resolver.ResolveForDisplay(Str(node, "content") ?? string.Empty, varCtx);
 
         AppendHistory(ctx, node, input: null, transition: null);
 

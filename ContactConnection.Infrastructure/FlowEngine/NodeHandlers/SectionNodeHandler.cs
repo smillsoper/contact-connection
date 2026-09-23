@@ -54,7 +54,7 @@ public class SectionNodeHandler(IVariableResolver resolver)
         }
 
         ctx.CurrentSectionNodeId = ctx.CurrentNodeId;
-        ctx.CurrentSectionName   = Resolver.Resolve(name, ctx.ToVariableContext());
+        ctx.CurrentSectionName   = Resolver.ResolveForDisplay(name, ctx.ToVariableContext());
         ctx.CurrentSectionLocked = isLocked;
 
         var next = Transition(node, agentTransition) ?? Transition(node, "default");

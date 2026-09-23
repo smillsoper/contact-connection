@@ -78,16 +78,32 @@ public class StoreValueNodeHandlerTests
     public async Task BlankKey_SkipsServiceCall_StillFollowsDefault()
     {
         // A literal blank/whitespace-only key — the guard this test targets protects against the
-        // flow author leaving the Key field empty in the designer. Note: an *unresolved* {{...}}
-        // tag is NOT a way to produce an empty key here — VariableResolver.Resolve falls back to
-        // the literal "[not captured]" for an unresolved tag (unlike the telephony engine's
-        // resolver, which returns ""), so it would resolve to a non-empty (if odd) key instead.
+        // flow author leaving the Key field empty in the designer.
         var ctx = Ctx();
         var storedValues = new Mock<IStoredValueService>();
         var handler = new StoreValueNodeHandler(new VariableResolver(), storedValues.Object);
 
         var result = await handler.ExecuteAsync(
             Node("tenant", "   ", "value"), ctx, agentInput: null, agentTransition: "");
+
+        Assert.Equal("n_next", result.NextNodeId);
+        storedValues.Verify(s => s.SetAsync(
+            It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTimeOffset?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task UnresolvedTagAsKey_ResolvesToEmpty_SkipsServiceCall()
+    {
+        // VariableResolver.Resolve (unlike the display-only ResolveForDisplay) falls back to ""
+        // for an unresolved {{...}} tag, so a Key field referencing a never-captured variable
+        // hits the same blank-key guard as an actually-empty field, instead of writing a stored
+        // value under the literal key "[not captured]".
+        var ctx = Ctx();
+        var storedValues = new Mock<IStoredValueService>();
+        var handler = new StoreValueNodeHandler(new VariableResolver(), storedValues.Object);
+
+        var result = await handler.ExecuteAsync(
+            Node("tenant", "{{flow.never_captured}}", "value"), ctx, agentInput: null, agentTransition: "");
 
         Assert.Equal("n_next", result.NextNodeId);
         storedValues.Verify(s => s.SetAsync(

@@ -108,7 +108,7 @@ public class ScheduledCallbackNodeHandlerTests
     [Fact]
     public async Task NoNumber_FollowsFailed_NoRow()
     {
-        var ctx = Ctx();   // customer_phone unset → template resolves to "[not captured]"
+        var ctx = Ctx();   // customer_phone unset → template resolves to "" → ExtractNumber → null
 
         var result = await NewHandler().ExecuteAsync(Node(), ctx, null, "");
 

@@ -10,8 +10,10 @@ namespace ContactConnection.Infrastructure.Telephony.NodeHandlers;
 /// Uses FreeSWITCH uuid_send_dtmf which queues the tones asynchronously —
 /// the command returns immediately and the flow continues via the default transition.
 ///
-/// Supports {{variable}} substitution from session vars so callers' account numbers,
-/// PINs, or other stored values can be dialled automatically (e.g. into conference bridges).
+/// Supports {{variable}} substitution — {{flow.x}}, {{shared.x}}, {{caller.ani}}, {{call.did}},
+/// {{now.*}}, same resolution every other value field in the telephony designer uses (see
+/// TelSetVariableNodeHandler.Resolve) — so callers' account numbers, PINs, or other stored
+/// values can be dialled automatically (e.g. into conference bridges).
 ///
 /// Invalid characters are stripped before sending. Valid: 0-9 * # A-D w (500ms pause) W (1s pause).
 /// </summary>
@@ -37,9 +39,8 @@ public class DtmfNodeHandler : ITelephonyNodeHandler
         var interDigitGapMs   = node["interDigitGapMs"]?.GetValue<int>() ?? 50;
         var waitForCompletion = node["waitForCompletion"]?.GetValue<bool>() ?? true;
 
-        // Substitute {{key}} placeholders from session vars
-        foreach (var (key, val) in ctx.Vars)
-            digits = digits.Replace($"{{{{{key}}}}}", val);
+        // Substitute {{...}} placeholders using the same resolution every other value field uses.
+        digits = TelSetVariableNodeHandler.Resolve(digits, ctx);
 
         // Strip anything that isn't a valid FreeSWITCH DTMF character
         var valid = new string(digits.Where(static c =>

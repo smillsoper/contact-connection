@@ -87,9 +87,9 @@ public partial class PhoneNodeHandler(IVariableResolver resolver)
         var label   = Str(node, "scriptLabel");
         var content = Str(node, "scriptContent");
         if (!string.IsNullOrWhiteSpace(label))
-            state.NodeScriptLabel = Resolver.Resolve(label, varCtx);
+            state.NodeScriptLabel = Resolver.ResolveForDisplay(label, varCtx);
         if (!string.IsNullOrWhiteSpace(content))
-            state.NodeScriptContent = Resolver.Resolve(content, varCtx);
+            state.NodeScriptContent = Resolver.ResolveForDisplay(content, varCtx);
     }
 
     public Task<NodeResult> ExecuteAsync(

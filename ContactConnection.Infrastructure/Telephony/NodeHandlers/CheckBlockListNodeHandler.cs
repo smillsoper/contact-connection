@@ -25,10 +25,14 @@ public class CheckBlockListNodeHandler : ITelephonyNodeHandler
             .Select(e => new { e.PhoneNumber, e.MatchType })
             .ToListAsync(ct);
 
-        // Use checkVariable if set; otherwise fall back to the call's ANI
+        // Use checkVariable if set; otherwise fall back to the call's ANI. Accepts a bare
+        // variable name or a {{flow.x}}/{{shared.x}}/{{caller.ani}} template — same resolution
+        // every other value field in the telephony designer uses (see
+        // TelSetVariableNodeHandler.ResolveNameOrTemplate).
         var checkVariable = node["checkVariable"]?.GetValue<string>();
-        var numberToCheck = !string.IsNullOrWhiteSpace(checkVariable) && ctx.Vars.TryGetValue(checkVariable, out var varVal)
-            ? varVal
+        var resolvedCheck = TelSetVariableNodeHandler.ResolveNameOrTemplate(checkVariable, ctx);
+        var numberToCheck = !string.IsNullOrWhiteSpace(checkVariable) && !string.IsNullOrEmpty(resolvedCheck)
+            ? resolvedCheck
             : ctx.CallerNumber;
 
         var normalizedCheck = NormalizeNumber(numberToCheck);

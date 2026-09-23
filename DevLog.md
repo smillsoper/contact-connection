@@ -165,6 +165,8 @@
 | 153 | 2026-09-22 | 9:21 AM PDT | 10:06 AM PDT | 45 min | ~15261 min |
 | 154 | 2026-09-22 | 10:27 AM PDT | 2:15 PM PDT | 228 min | ~15489 min |
 | 155 | 2026-09-22 | 2:24 PM PDT | 2:47 PM PDT | 23 min | ~15512 min |
+| 156 | 2026-09-22 | 5:06 PM PDT | 5:55 PM PDT | 49 min | ~15561 min |
+| 157 | 2026-09-22 | 5:57 PM PDT | 6:10 PM PDT | 13 min | ~15574 min |
 
 ---
 
@@ -9516,3 +9518,210 @@ everything works.
 4. Consider the flagged-but-not-done regression test for the queue-callback fix (needs
    `QueueCallbackDeliveryService`'s inline `EslClient` construction refactored to go through a
    factory first, the way `SecureCollectNodeHandler` already does via `IEslCommanderFactory`).
+
+## Session 156
+
+**Date:** 2026-09-22
+**Start:** 5:06 PM PDT
+**End:** 5:55 PM PDT
+**Duration:** 49 minutes
+**Total Duration:** ~15561 minutes
+
+### Focus
+
+Continuation of the same day (user stepped away for a doctor's appointment between sessions). Live-
+verified both of Session 155's fixes, committed and pushed all outstanding work, then built, tested,
+and live-verified the last item in the locked-in build order: the `tf_play` interrupt digit option.
+All three items from the Session 151/152 telephony node review are now closed.
+
+### 1. Live re-verification of Session 155's two fixes
+
+User ran a real test call. Pulled `call_trace_events` for it directly (`57fae235-98e8-4045-8fd0-
+c2382f5330a7`) rather than taking "looks like it worked" at face value:
+
+- **Stale PLAYBACK_STOP / hot-digit bug**: `tf_play` (confirmation message) → `tf_hangup` now
+  showed a normal ~5-second gap instead of the previous ~96ms premature cutoff — confirmation
+  message played to completion.
+- **Queue callback `park_after_bridge` gap**: cross-referenced the real FreeSWITCH container log
+  for the exact channel UUIDs. The agent leg transferred to `park_with_moh` at 00:13:52.770, and —
+  this time — the caller leg ALSO survived and was transferred into `secure_collect` at
+  00:13:53.250 (the ~400ms delay right on schedule). No premature hangup; the capture ran for real
+  (~47s, two field passes) and the call reconnected normally.
+
+Both marked CLOSED (not just fixed) in `project_stale_playback_stop_hot_digit_bug.md` and
+`project_queue_callback_park_after_bridge_bug.md`.
+
+### 2. Committed and pushed Session 154-155's accumulated work
+
+One commit (`eb723bd` on `session-92-supervisor-dashboard-flow-engine-build`, pushed): Store/Get
+Scoped Value + `{{call.id}}` resolver (build order item 2, Session 154) bundled with both bug fixes
+(Session 155) — 51 files, 5854 insertions. 1074 tests passing pre-commit.
+
+### 3. Build order item 3 — `tf_play` interrupt digit option (built + live-verified)
+
+Design was already locked in from the Session 151/152 discussion (`project_telephony_node_review.md`
+§4): optional `interruptDigits` + an `onInterrupt`-style transition, scoped to only the currently-
+playing node's own broadcast — not a persistent listener across nodes like `tf_ivr_menu`'s
+`alwaysListen` hot-digit mode.
+
+- **`PlayNodeHandler.cs`** — reads `interruptDigits` (comma/space-stripped) + a new `"interrupted"`
+  transition key. When both are present, arms `_play_interrupt_digits`/`_play_interrupt_target`
+  session vars; when not, explicitly clears them so a previous tf_play node's interrupt target can
+  never leak into a node that didn't configure one. Deliberately namespaced under `_play_` so the
+  EXISTING `ClearPlayVars` (normal completion) and `ClearHoldLoopVars` (hot-digit/bridge
+  supersession) sweeps already tear the new vars down for free — no new cleanup path needed.
+- **`EslBackgroundService.HandleDtmfAsync`** — checks the new interrupt vars FIRST, before the
+  existing hot-digit map and voice-menu checks (narrowest/most immediate context wins). On a match:
+  `uuid_break`s the current broadcast and `ResumeFromNodeAsync`s straight to the interrupt target.
+  A late, stale `PLAYBACK_STOP` for the interrupted media that arrives after the target's own new
+  `tf_play` has taken over the same vars is caught for free by Session 155's `IsStaleFileStop` guard
+  — this feature and that fix compose cleanly.
+- Works for file and flite-TTS playback (both `uuid_broadcast`-based). Explicitly NOT supported for
+  streaming-vendor TTS (foreground `tts_play` transfer has no `uuid_broadcast` to interrupt) — same
+  limitation `autoRestart` already has there.
+- **Designer**: new "Interrupt Digits" text field in `PlayNodeEditor`
+  (`TelephonyNodePropertiesPanel.tsx`) and a dynamic "Interrupted" canvas handle in `PlayNode.tsx`,
+  following the exact pattern already used for `duration_reached`/`tts_finished`. Added `interrupted`
+  to `TelephonyDesignerPage.tsx`'s `HANDLE_DISPLAY_LABELS` map too (caught in review — otherwise the
+  edge would've shown the raw id instead of a readable label).
+- **5 new tests** in `PlayNodeHandlerTests` (arm-with-target, comma-stripping, no-arm-without-
+  transition, no-arm-without-digits, stale-leftover-explicitly-cleared). Full suite 1079/1079
+  (Release). `tsc --noEmit` clean.
+
+**Mid-build UX question, resolved as "working as designed, not a bug":** user reported the new
+"Interrupted" exit handle wasn't visibly appearing when `autoRestart` was checked. Root cause:
+without looping, adding an interrupt digit takes a node from 1 handle to 2 (an obviously new dot);
+but a looping node with no duration already has exactly one handle (a gray `id="default"`
+placeholder with no real meaning), so adding an interrupt digit turns that SAME dot into the real
+`interrupted` handle (teal, `id="interrupted"`) — the dot *count* never changes, only its color and
+id, and the color difference is small enough on a tiny canvas dot to be easy to miss. Confirmed with
+the user this was the actual explanation, not a rendering bug — noted in
+`project_telephony_node_review.md` as a UX gotcha worth remembering for any future dynamic-handle
+addition, but not changed.
+
+**Live verification**: user built a real flow using this feature in place of a separate hot-digit
+`tf_ivr_menu` — interrupt digit `1` wired directly on a looping "Queue MOH / Announcements" `tf_play`
+node, `Interrupted` → Get Value → Queue Callback. Placed a real call, let the loop play, pressed 1.
+Confirmed via `call_trace_events` (call `97c837cf-bc00-4bb1-80c6-eb30915458a2`) — the looping node's
+ONLY possible exit is `interrupted`, and it jumped straight to `tf_get_value` mid-loop — and
+independently via the real FreeSWITCH log (`RECV DTMF 1` on the live channel, timing consistent with
+the trace within the already-documented ~9s clock drift). No audio overlap; the call continued
+normally through Queue Callback, a real agent connection, a mid-bridge secure collect, and a clean
+disconnect at the end.
+
+Committed and pushed separately (`5ed24f9` on `session-92-supervisor-dashboard-flow-engine-build`,
+7 files, 178 insertions) — kept as its own commit rather than bundled with the S154-155 commit since
+it was built and verified in a distinct step.
+
+### State
+
+All three items from the Session 151/152 telephony node review build order are now built,
+live-verified, committed, and pushed. Nothing outstanding from that plan. Both dev-server processes
+(API `dotnet watch` on :5135, Vite on :5173) still running.
+
+### Next session — pick up here
+
+No specific next task was queued by the user as of this session's end — the telephony node review's
+build order is fully closed. Known, deliberately-deferred backlog items still sitting untouched
+(check with the user before assuming which, if any, to pick up next):
+- `memory/project_unified_variable_resolution.md` — bare-name vs. `{{...}}` template inconsistency
+  audit, and moving the CRM `"[not captured]"` fallback out of the core resolver.
+- The ~9 second FreeSWITCH/API clock drift, noted multiple times this session chain but never
+  investigated (`cc_timesync`/chronyd exists specifically to prevent this).
+- The flagged-but-not-done regression test for the queue-callback `park_after_bridge` fix (S155) —
+  needs `QueueCallbackDeliveryService`'s inline `EslClient` construction refactored through a
+  factory first.
+- "UI issues and inconsistencies" in the telephony designer the user mentioned having specific
+  items in mind for, as far back as Session 151 — never described in detail; ask when picked up.
+
+## Session 157
+
+**Date:** 2026-09-22
+**Start:** 5:57 PM PDT
+**End:** 6:10 PM PDT
+**Duration:** 13 minutes
+**Total Duration:** ~15574 minutes
+
+### Focus
+
+Picked up the banked "Unified Variable Resolution" backlog item (`project_unified_variable_
+resolution.md`), untouched since Session 153. Both items closed in one session.
+
+### 1. Audit — bare-name vs `{{...}}` template inconsistency across both engines
+
+Full pass over every CRM (`ContactConnection.Infrastructure/FlowEngine/NodeHandlers/`) and
+telephony (`ContactConnection.Infrastructure/Telephony/NodeHandlers/`) node handler that accepts a
+variable-referencing field.
+
+**CRM engine: already fully consistent.** Every handler routes through the shared
+`IVariableResolver.Resolve` — no ad hoc lookups found anywhere. Item 1 turned out to be
+telephony-only.
+
+**Telephony engine: 2 confirmed live gaps**, same bug class as the S153 `collectedVar` fix (a user
+pattern-matching `{{flow.x}}` from every other field gets a silent failed lookup, no error):
+- `CheckBlockListNodeHandler.checkVariable` — did a raw `ctx.Vars` dictionary lookup only, zero
+  `{{...}}` support at all.
+- `DtmfNodeHandler.digits` — its own hand-rolled `{{key}}` substitution loop, matched only bare
+  `ctx.Vars` keys; `{{caller.ani}}`, `{{call.did}}`, `{{shared.*}}`, `{{now.*}}` silently passed
+  through unresolved.
+
+**Fix:** promoted the bare-name-or-template resolution logic (previously duplicated identically in
+`QueueCallbackNodeHandler` and `ScheduledCallbackNodeHandler` as a private `ResolveCollectedNumber`)
+into one shared `TelSetVariableNodeHandler.ResolveNameOrTemplate`, deleted both duplicates, and
+wired `CheckBlockListNodeHandler` through it. `DtmfNodeHandler` now calls the plain
+`TelSetVariableNodeHandler.Resolve` instead of its own loop — a strict superset of its old behavior.
+Updated the designer's "Check variable" field placeholder/help text
+(`TelephonyNodePropertiesPanel.tsx`) to match the pattern already used for the queue/scheduled
+callback fields.
+
+Also checked (raised as a "worth checking" item in the banked memory): telephony's `{{flow.x}}` and
+CRM's `{{flow.x}}` are intentionally separate variable spaces (different engines, different
+sessions) — `{{shared.*}}` already exists specifically to bridge them. Not a bug; no change made.
+
+### 2. Fix — misplaced `"[not captured]"` fallback in `VariableResolver.Resolve`
+
+Confirmed this was a live, real bug, not just a code-smell: `Resolve()`'s `"[not captured]"`
+fallback for an unresolved `{{...}}` tag was reachable by every consumer, not just agent-facing
+display. Two concrete danger cases confirmed by reading the code:
+- `ScheduledCallbackNodeHandler` resolves `callbackNumber` through `Resolve` — an unresolved tag
+  there would try to write the literal string `"[not captured]"` into a phone number field (saved
+  by luck only because `ExtractNumber` strips non-digits, leaving zero digits → correctly fails).
+- `BranchNodeHandler`'s condition evaluator (`VariableResolver.EvaluateCondition` → `Resolve`) — a
+  condition like `{{flow.x}} == ""` against a never-captured `x` would wrongly evaluate `false`
+  (comparing against the literal placeholder text, not empty), silently taking the wrong branch.
+
+**Fix:** split `IVariableResolver` into `Resolve` (now defaults an unresolved tag to `""` — correct
+for every functional consumer: branch conditions, `api_call` bodies, `set_variable`/`store_value`/
+`get_value`, custom fields, scheduled callback fields) and a new `ResolveForDisplay` (keeps the old
+`"[not captured]"` placeholder — the deliberate UX signal for agent-facing content only). Both share
+one internal implementation (`ResolveInternal`) parameterized by the missing-tag fallback string.
+
+Repointed every agent-facing display call site to `ResolveForDisplay`: `NodeHandlerBase.BuildState`
+(`Label`, used by every node type), `ScriptNodeHandler`/`EndNodeHandler` (`content`),
+`SectionNodeHandler` (`CurrentSectionName`), and the inline-script `NodeScriptLabel`/
+`NodeScriptContent` pair across `InputNodeHandler`, `EmailNodeHandler`, `PhoneNodeHandler`,
+`AddressNodeHandler` (including `AddressNodeHandler.ResolveFieldScripts`'s per-field script text —
+also agent-facing, easy to miss). Every other call site (branch conditions, `ApiCallNodeHandler`,
+`ScheduledCallbackNodeHandler`, `StoreValueNodeHandler`/`GetValueNodeHandler`,
+`SetCustomFieldNodeHandler`) stays on plain `Resolve`, now safely defaulting to `""`.
+
+### 3. Tests
+
+Updated 3 existing tests whose comments/assertions referenced the old `"[not captured]"`-by-default
+behavior (`VariableResolverSharedNamespaceTests`, `ScheduledCallbackNodeHandlerTests`,
+`StoreValueNodeHandlerTests`). Added 9 new tests: `CheckBlockListNodeHandler` template + shared-
+namespace support (2), `DtmfNodeHandler` namespaced-tag support (1), `VariableResolver`
+`ResolveForDisplay` placeholder behavior + the branch-condition danger case (2), `StoreValueNodeHandler`
+unresolved-tag-as-key now correctly blank-guarded (1), `ScriptNodeHandler` confirms display content
+still shows the placeholder (1) — plus the 2 telephony tests already counted above overlap with the
+first item. Full suite: **1086/1086 passing** (Release). `tsc --noEmit` clean on
+`ContactConnection.Web`.
+
+### Not done / follow-up
+
+- No live-call verification possible from this environment — the telephony fixes
+  (`CheckBlockListNodeHandler`, `DtmfNodeHandler`) should get a real test call before being
+  considered fully closed, same as every other telephony change in this project's history.
+- Did not touch the CRM designer's variable-tag reference popup to call out that telephony's
+  `{{flow.*}}` and CRM's `{{flow.*}}` are different namespaces — judged documentation-only, not a
+  bug; flag if a user actually gets confused by it in practice.

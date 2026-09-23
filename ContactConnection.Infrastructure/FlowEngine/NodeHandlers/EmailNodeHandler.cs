@@ -38,9 +38,9 @@ public class EmailNodeHandler(IVariableResolver resolver, IEmailValidationServic
         var scriptLabel   = Str(node, "scriptLabel");
         var scriptContent = Str(node, "scriptContent");
         if (!string.IsNullOrWhiteSpace(scriptLabel))
-            state.NodeScriptLabel = Resolver.Resolve(scriptLabel, varCtx);
+            state.NodeScriptLabel = Resolver.ResolveForDisplay(scriptLabel, varCtx);
         if (!string.IsNullOrWhiteSpace(scriptContent))
-            state.NodeScriptContent = Resolver.Resolve(scriptContent, varCtx);
+            state.NodeScriptContent = Resolver.ResolveForDisplay(scriptContent, varCtx);
     }
 
     private static string? GetValidationError(
@@ -66,7 +66,7 @@ public class EmailNodeHandler(IVariableResolver resolver, IEmailValidationServic
         var checkMX         = node["checkMX"]?.GetValue<bool>() ?? false;
         var checkDisposable = node["checkDisposable"]?.GetValue<bool>() ?? false;
         var outputVar       = Str(node, "outputVariable")?.Trim() ?? string.Empty;
-        var prompt          = Resolver.Resolve(Str(node, "prompt") ?? string.Empty, ctx.ToVariableContext());
+        var prompt          = Resolver.ResolveForDisplay(Str(node, "prompt") ?? string.Empty, ctx.ToVariableContext());
 
         FlowNodeState MakeState() => BuildState(ctx, node, resolvedContent: prompt,
             inputType: "email", required: required);
