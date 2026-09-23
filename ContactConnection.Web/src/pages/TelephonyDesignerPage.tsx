@@ -75,6 +75,7 @@ const HANDLE_DISPLAY_LABELS: Record<string, string> = {
   end_of_stream: 'End Of Play Stream',
   duration_reached: 'Duration Reached',
   tts_finished: 'TTS Finished',
+  interrupted: 'Interrupted',
   available: 'Available',
   unavailable: 'Not Available',
 }

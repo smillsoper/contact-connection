@@ -81,6 +81,12 @@ export interface TelNodeData extends Record<string, unknown> {
   // prompt, to prime the RTP path so the first syllable isn't clipped. tf_answer defaults 300;
   // tf_play defaults 0 (relies on the answer-time prime). 0 disables.
   leadInSilenceMs?: number
+  // tf_play — optional DTMF digits that bail out of THIS node's own playback immediately (skip a
+  // long disclaimer, bail out of a promotional hold announcement). Any character in the string is
+  // a valid interrupt key; wire the "Interrupted" exit handle to arm it. Not a listener that
+  // persists across nodes like tf_ivr_menu's alwaysListen hot-digit mode — scoped to only this
+  // node's own broadcast.
+  interruptDigits?: string
   // tf_time_of_day
   timezone?: string
   windows?: TimeWindow[]
@@ -552,6 +558,7 @@ export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
         autoRestart: false,
         periodicAnnouncements: [],
         periodicAnnouncementIntervalSeconds: 30,
+        interruptDigits: '',
       }
     case 'tf_time_of_day':
       return {

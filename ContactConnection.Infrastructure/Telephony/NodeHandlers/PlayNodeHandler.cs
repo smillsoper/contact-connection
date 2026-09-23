@@ -25,6 +25,12 @@ namespace ContactConnection.Infrastructure.Telephony.NodeHandlers;
 /// by EslBackgroundService: PLAYBACK_STOP for the uuid_broadcast paths (file, flite tts), or the
 /// contactconnection::tts_done CUSTOM event for the streaming tts path — both ultimately call
 /// TelephonyFlowEngine.ResumeFromNodeAsync on the node's "tts_finished" / "end_of_stream" transition.
+///
+/// Optional interruptDigits + an "interrupted" transition arm a DTMF listener scoped to only this
+/// invocation's own broadcast (uuid_broadcast/flite paths only, not streaming TTS) — pressing one
+/// of those digits uuid_breaks the playback and jumps straight there. See EslBackgroundService.
+/// HandleDtmfAsync. Unlike tf_ivr_menu's alwaysListen hot-digit listener, this does not persist
+/// past this node's own completion.
 /// </summary>
 public class PlayNodeHandler : ITelephonyNodeHandler
 {
@@ -146,6 +152,32 @@ public class PlayNodeHandler : ITelephonyNodeHandler
             ctx.Vars["_play_announcement_index"]    = "0";
             ctx.Vars["_play_announcement_interval"] = periodicAnnouncementInterval.ToString();
             ctx.Vars["_play_last_announcement_at"]  = "";
+        }
+
+        // ── Optional interrupt digits — bail out of THIS node's own playback immediately ──
+        // (build-order item 3). Deliberately scoped to only this invocation, unlike tf_ivr_menu's
+        // alwaysListen hot-digit listener which persists across every subsequent hold-style node
+        // until explicitly cleared: EslBackgroundService.HandleDtmfAsync checks these vars before
+        // the hot-digit map, and both cleanup paths that already sweep every "_play_" prefixed key
+        // (ClearPlayVars on normal completion, ClearHoldLoopVars on hot-digit/bridge supersession)
+        // tear it down for free — no separate cleanup path needed. Explicitly reset (not left to
+        // linger) when this node doesn't configure one, so a PREVIOUS tf_play's interrupt target
+        // can never survive into a node that didn't ask for it.
+        var interruptDigits = (node["interruptDigits"]?.GetValue<string>() ?? "")
+            .Replace(",", "").Replace(" ", "").Trim();
+        var interruptTarget = transitions?["interrupted"]?.GetValue<string>();
+        if (!string.IsNullOrEmpty(interruptDigits) && !string.IsNullOrEmpty(interruptTarget))
+        {
+            ctx.Vars["_play_interrupt_digits"] = interruptDigits;
+            ctx.Vars["_play_interrupt_target"] = interruptTarget;
+            _logger.LogInformation(
+                "PlayNodeHandler [{Uuid}]: interrupt armed — digits=[{Digits}] → {Target}",
+                ctx.ChannelUuid, interruptDigits, interruptTarget);
+        }
+        else
+        {
+            ctx.Vars.Remove("_play_interrupt_digits");
+            ctx.Vars.Remove("_play_interrupt_target");
         }
 
         StoreTransitions(transitions, ctx.Vars);

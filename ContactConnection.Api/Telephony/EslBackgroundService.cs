@@ -2024,6 +2024,40 @@ public sealed class EslBackgroundService : BackgroundService
         var session = await ResolveSessionAsync(uuid, vars, ct);
         if (session is null) return;
 
+        // tf_play's own interrupt-digit option (build-order item 3) — scoped to whichever tf_play
+        // node is CURRENTLY playing, not a listener that persists across nodes like the hot-digit
+        // map below. Checked first: this is the narrowest, most immediate context, so it takes
+        // priority over a broader listener an earlier node (e.g. tf_ivr_menu's alwaysListen) may
+        // still have armed underneath it — that listener is left untouched either way, since
+        // ClearPlayVars only sweeps "_play_" prefixed keys.
+        var interruptDigits = session.Vars.GetValueOrDefault("_play_interrupt_digits");
+        if (!string.IsNullOrEmpty(interruptDigits) && interruptDigits.Contains(digit, StringComparison.Ordinal))
+        {
+            var interruptTarget = session.Vars.GetValueOrDefault("_play_interrupt_target");
+            _logger.LogInformation(
+                "DTMF {Uuid}: tf_play interrupt digit '{Digit}' matched → redirecting to {Target}",
+                uuid, digit, interruptTarget);
+
+            ClearPlayVars(session);
+            await _sessionStore.SaveAsync(session, ct);
+
+            try { await esl.BreakChannelAsync(session.ChannelUuid, ct); }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "DTMF {Uuid}: uuid_break before tf_play interrupt redirect failed — continuing anyway", uuid);
+            }
+
+            if (!string.IsNullOrEmpty(interruptTarget))
+            {
+                using var interruptScope = _scopeFactory.CreateScope();
+                await interruptScope.ServiceProvider
+                    .GetRequiredService<ITelephonyFlowEngine>()
+                    .ResumeFromNodeAsync(session.ChannelUuid, interruptTarget, esl, ct);
+            }
+            return;
+        }
+
         // tf_ivr_menu's voice-recognition option (S148) — a raw DTMF press racing against a
         // concurrently-running speech recognition capture (SttStreamRelayEndpoints). Checked
         // before the hot-digit map below: distinct session vars, distinct lifetime (this node's

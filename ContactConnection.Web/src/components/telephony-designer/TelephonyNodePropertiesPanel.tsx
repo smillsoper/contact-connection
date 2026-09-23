@@ -2443,18 +2443,40 @@ function PlayNodeEditor({
         />
       )}
 
+      {/* Interrupt digits — bail out of this node's own playback immediately */}
+      <div>
+        <label className={labelCls}>Interrupt Digits (optional)</label>
+        <input
+          className={`${inputCls} font-mono`}
+          placeholder="e.g. 19"
+          value={(data.interruptDigits as string) ?? ''}
+          onChange={(e) => onChange({ interruptDigits: e.target.value })}
+        />
+        <p className="text-[10px] text-gray-500 mt-1 leading-snug">
+          Any of these digits pressed while this prompt is playing stops it immediately and follows
+          the <span className="text-teal-400">Interrupted</span> exit handle below — e.g. skip a long
+          disclaimer, or bail out of a looping promotional hold announcement back to the menu/queue.
+          Not a listener that persists across later nodes (unlike tf_ivr_menu&rsquo;s always-listen
+          hot-digit mode) — it only exists while this specific play is running. Not supported when a
+          streaming TTS voice vendor is configured for this tenant.
+        </p>
+      </div>
+
       {/* Exit handle info */}
       <div className="bg-gray-800 border border-gray-700 rounded p-2 text-xs text-gray-400 leading-relaxed">
         <strong className="text-gray-300 block mb-1">Exit handles:</strong>
         {audioSource === 'tts' ? (
           <span><span className="text-teal-400">TTS Finished</span> — fires when speech ends</span>
         ) : autoRestart ? (
-          <span>No exit (loops forever until bridged or hung up)</span>
+          <span>No exit (loops forever until bridged, hung up, or interrupted)</span>
         ) : (
           <span><span className="text-teal-400">End Of Play Stream</span> — fires when file ends</span>
         )}
         {(data.durationSeconds as number) > 0 && (
           <div><span className="text-teal-400">Duration Reached</span> — fires at {data.durationSeconds as number}s</div>
+        )}
+        {((data.interruptDigits as string) ?? '').trim() && (
+          <div><span className="text-teal-400">Interrupted</span> — fires when an interrupt digit is pressed</div>
         )}
       </div>
     </div>

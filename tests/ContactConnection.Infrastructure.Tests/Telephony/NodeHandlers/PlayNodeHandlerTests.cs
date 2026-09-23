@@ -218,6 +218,83 @@ public class PlayNodeHandlerTests
         Assert.Equal(["silence", "main"], callOrder);
     }
 
+    // ── Interrupt digits (build-order item 3) ───────────────────────────────────
+
+    [Fact]
+    public async Task InterruptDigits_WithInterruptedTransition_ArmsInterruptVars()
+    {
+        var esl = NewEsl();
+        var node = FileNode();
+        node["interruptDigits"] = "19";
+        node["transitions"] = new JsonObject { ["default"] = "node_next", ["interrupted"] = "node_skip" };
+        var ctx = Ctx(esl.Object);
+
+        await NewHandler().ExecuteAsync(node, ctx);
+
+        Assert.Equal("19", ctx.Vars["_play_interrupt_digits"]);
+        Assert.Equal("node_skip", ctx.Vars["_play_interrupt_target"]);
+    }
+
+    [Fact]
+    public async Task InterruptDigits_StripsCommasAndSpaces()
+    {
+        var esl = NewEsl();
+        var node = FileNode();
+        node["interruptDigits"] = "1, 9";
+        node["transitions"] = new JsonObject { ["default"] = "node_next", ["interrupted"] = "node_skip" };
+        var ctx = Ctx(esl.Object);
+
+        await NewHandler().ExecuteAsync(node, ctx);
+
+        Assert.Equal("19", ctx.Vars["_play_interrupt_digits"]);
+    }
+
+    [Fact]
+    public async Task InterruptDigits_WithoutInterruptedTransition_IsNotArmed()
+    {
+        var esl = NewEsl();
+        var node = FileNode();
+        node["interruptDigits"] = "19";
+        // No "interrupted" key wired — arming would dead-end a live interrupt press.
+        var ctx = Ctx(esl.Object);
+
+        await NewHandler().ExecuteAsync(node, ctx);
+
+        Assert.False(ctx.Vars.ContainsKey("_play_interrupt_digits"));
+        Assert.False(ctx.Vars.ContainsKey("_play_interrupt_target"));
+    }
+
+    [Fact]
+    public async Task NoInterruptDigitsConfigured_IsNotArmed()
+    {
+        var esl = NewEsl();
+        var node = FileNode();
+        node["transitions"] = new JsonObject { ["default"] = "node_next", ["interrupted"] = "node_skip" };
+        var ctx = Ctx(esl.Object);
+
+        await NewHandler().ExecuteAsync(node, ctx);
+
+        Assert.False(ctx.Vars.ContainsKey("_play_interrupt_digits"));
+        Assert.False(ctx.Vars.ContainsKey("_play_interrupt_target"));
+    }
+
+    [Fact]
+    public async Task InterruptDigits_LeftoverFromEarlierNode_IsExplicitlyCleared()
+    {
+        // A previous tf_play in the same call armed an interrupt; this node doesn't configure one
+        // — its stale target must not survive to catch a digit press meant for THIS playback.
+        var esl = NewEsl();
+        var node = FileNode();
+        var ctx = Ctx(esl.Object);
+        ctx.Vars["_play_interrupt_digits"] = "5";
+        ctx.Vars["_play_interrupt_target"] = "stale_node";
+
+        await NewHandler().ExecuteAsync(node, ctx);
+
+        Assert.False(ctx.Vars.ContainsKey("_play_interrupt_digits"));
+        Assert.False(ctx.Vars.ContainsKey("_play_interrupt_target"));
+    }
+
     // ── TTS via flite (no streaming provider configured) ───────────────────────
 
     private static JsonObject TtsNode(string text) => new()

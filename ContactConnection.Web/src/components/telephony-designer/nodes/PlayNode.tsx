@@ -20,6 +20,10 @@ function getPlayHandles(data: TelNodeData): PlayHandle[] {
   if (durationSeconds > 0) {
     handles.push({ id: 'duration_reached', label: 'Duration Reached' })
   }
+  const interruptDigits = (data.interruptDigits as string | undefined)?.trim()
+  if (interruptDigits) {
+    handles.push({ id: 'interrupted', label: 'Interrupted' })
+  }
   return handles
 }
 
