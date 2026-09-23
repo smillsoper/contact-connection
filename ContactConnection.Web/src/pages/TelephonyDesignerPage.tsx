@@ -56,6 +56,8 @@ import WhisperNode from '../components/telephony-designer/nodes/WhisperNode'
 import GeneralApiCallNode from '../components/telephony-designer/nodes/GeneralApiCallNode'
 import SetCustomFieldNode from '../components/telephony-designer/nodes/SetCustomFieldNode'
 import GetCustomFieldNode from '../components/telephony-designer/nodes/GetCustomFieldNode'
+import StoreValueNode from '../components/telephony-designer/nodes/StoreValueNode'
+import GetValueNode from '../components/telephony-designer/nodes/GetValueNode'
 
 import type { TelNodeData, TelephonyNodeType, TelephonyFlowDefinition, TelephonyNodeDef } from '../types/telephony-designer'
 import { defaultTelNodeData, TELEPHONY_NODE_META } from '../types/telephony-designer'
@@ -119,6 +121,8 @@ const nodeTypes = {
   tf_general_api_call: GeneralApiCallNode,
   tf_set_custom_field: SetCustomFieldNode,
   tf_get_custom_field: GetCustomFieldNode,
+  tf_store_value: StoreValueNode,
+  tf_get_value: GetValueNode,
   tf_on_agent_selected: OnAgentSelectedNode,
   tf_on_agent_answer: OnAgentAnswerNode,
   tf_on_call_disconnected: OnCallDisconnectedNode,

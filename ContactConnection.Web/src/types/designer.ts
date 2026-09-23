@@ -14,6 +14,8 @@ export type ContactConnectionNodeType =
   | 'api_call'
   | 'set_custom_field'
   | 'get_custom_field'
+  | 'store_value'
+  | 'get_value'
   | 'end'
 
 export interface NodeData extends Record<string, unknown> {
@@ -87,6 +89,11 @@ export interface NodeData extends Record<string, unknown> {
   definitionDisplayLabel?: string
   definitionDataTypeName?: string
   value?: string
+  // store_value / get_value — generic tenant/client/campaign key-value store, free-form key
+  // (variables allowed), deliberately separate from Custom Fields (no pre-defined schema).
+  scope?: 'tenant' | 'client' | 'campaign'
+  keyName?: string
+  retention?: 'forever' | '1_hour' | '24_hours' | '1_week' | '1_month'
   // end
   status?: string
 }
@@ -137,6 +144,9 @@ export interface ContactConnectionNodeDef {
   definitionDisplayLabel?: string
   definitionDataTypeName?: string
   value?: string
+  scope?: 'tenant' | 'client' | 'campaign'
+  keyName?: string
+  retention?: 'forever' | '1_hour' | '24_hours' | '1_week' | '1_month'
   status?: string
   _pos?: { x: number; y: number }
   transitions: Record<string, string>
@@ -244,6 +254,18 @@ export const NODE_META: Record<
     description: 'Read a defined custom field’s value into a flow variable',
     handles: 'single',
   },
+  store_value: {
+    label: 'Store Value',
+    color: '#0e7490',
+    description: 'Save a free-form value scoped to the tenant, client, or campaign',
+    handles: 'single',
+  },
+  get_value: {
+    label: 'Get Value',
+    color: '#155e75',
+    description: 'Read a stored value back into a flow variable',
+    handles: 'single',
+  },
   end: {
     label: 'End',
     color: '#ef4444',
@@ -290,6 +312,10 @@ export function defaultNodeData(type: ContactConnectionNodeType): NodeData {
       return { label: 'Set Call Record Value', definitionId: '', definitionFieldName: '', definitionDisplayLabel: '', definitionDataTypeName: '', value: '' }
     case 'get_custom_field':
       return { label: 'Get Call Record Value', definitionId: '', definitionFieldName: '', definitionDisplayLabel: '', definitionDataTypeName: '', outputVariable: '' }
+    case 'store_value':
+      return { label: 'Store Value', scope: 'campaign', keyName: '', value: '', retention: 'forever' }
+    case 'get_value':
+      return { label: 'Get Value', scope: 'campaign', keyName: '', outputVariable: '' }
     case 'end':
       return { label: 'End', status: 'complete' }
   }

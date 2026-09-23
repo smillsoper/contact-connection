@@ -5,7 +5,7 @@ namespace ContactConnection.Infrastructure.Telephony.NodeHandlers;
 
 /// <summary>
 /// Sets one or more named variables in the flow context.
-/// Values support {{caller.ani}}, {{call.did}}, {{shared.*}}, or {{varName}} references.
+/// Values support {{caller.ani}}, {{call.id}}, {{call.did}}, {{shared.*}}, or {{varName}} references.
 /// Node data: { "assignments": [{ "key": "myVar", "value": "{{caller.ani}}" }] }
 /// A "shared." key prefix (e.g. "shared.CC_Capture_Success") writes to the call-wide
 /// ISharedCallVariableStore instead of this telephony call's own ctx.Vars — visible to the CRM
@@ -66,6 +66,7 @@ public class TelSetVariableNodeHandler(ISharedCallVariableStore sharedVars) : IT
     {
         // Well-known namespaces
         if (key == "caller.ani")  return ctx.CallerNumber;
+        if (key == "call.id")     return ctx.CallRecordId.ToString();
         if (key == "call.did")    return ctx.DestinationNumber;
         if (key == "call.dnis")   return ctx.DestinationNumber;    // alias
 

@@ -2239,6 +2239,17 @@ public sealed class EslBackgroundService : BackgroundService
             return;
         }
 
+        // ── Stale-stop guard — a hot-digit redirect's uuid_break generates its own PLAYBACK_STOP
+        //    for the interrupted audio, which can arrive after a NEW tf_play has already
+        //    overwritten these same flat _play_* vars (Session 154 — see IsStaleFileStop).
+        if (IsStaleFileStop(audioSource, stoppedFilePath, mediaArg))
+        {
+            _logger.LogDebug(
+                "PlaybackStop [{Uuid}]: stopped file '{Stopped}' doesn't match the currently-tracked media '{Media}' — stale event from a superseded play, ignoring",
+                uuid, stoppedFilePath, mediaArg);
+            return;
+        }
+
         // ── Main media finished — loop it, or end. (Periodic-announcement timing is driven by
         //    PlayAnnouncementService, not this boundary — a looping MOH source may never reach it.)
         if (isLoop)
@@ -2559,6 +2570,32 @@ public sealed class EslBackgroundService : BackgroundService
     internal static bool IsRtpPrimeSilenceStop(string playState, string stoppedFilePath, string mainMediaArg) =>
         playState != "announcement"
         && stoppedFilePath.StartsWith("silence_stream://", StringComparison.OrdinalIgnoreCase)
+        && !PlayFilePathsMatch(mainMediaArg, stoppedFilePath);
+
+    /// <summary>
+    /// True when a PLAYBACK_STOP is stale — from a DIFFERENT, already-superseded play — rather
+    /// than genuine completion of the currently-tracked main media. A hot-digit redirect
+    /// (HandleDtmfAsync) uuid_breaks whatever hold-style playback was running before jumping to a
+    /// new node; that break generates its own PLAYBACK_STOP for the audio it just interrupted,
+    /// which can arrive asynchronously AFTER the new node's own tf_play has already overwritten
+    /// these same flat _play_* session vars. Without this check, that stale stop for the OLD media
+    /// is misread as "the NEW tf_play just finished" and fires its end transition before the real
+    /// audio ever plays (Session 154 — a queue-callback confirmation message never played; the call
+    /// hung up ~100ms after a hot-digit redirect).
+    ///
+    /// Scoped to audioSource == "file" only: for a real file, mainMediaArg IS the literal path
+    /// FreeSWITCH reports back, so a mismatch is unambiguous. The flite-TTS path's mainMediaArg is
+    /// the synthetic "tts://flite|voice|..." string, which FreeSWITCH does not echo back verbatim
+    /// in Playback-File-Path — comparing there would risk false-rejecting genuine flite
+    /// completions, a worse regression than the bug being fixed. Streaming TTS never reaches this
+    /// check at all (HandlePlaybackStopAsync's _tts_in_progress guard returns before this point) —
+    /// its completion is contactconnection::tts_done, not PLAYBACK_STOP. A flite tf_play needing
+    /// the same protection is a follow-up; not addressed here.
+    /// Internal for EslBackgroundServicePlaybackStopTests (InternalsVisibleTo covers Api.Tests).
+    /// </summary>
+    internal static bool IsStaleFileStop(string audioSource, string stoppedFilePath, string mainMediaArg) =>
+        audioSource == "file"
+        && !string.IsNullOrEmpty(stoppedFilePath)
         && !PlayFilePathsMatch(mainMediaArg, stoppedFilePath);
 
     /// <summary>Whether a stored play arg and a PLAYBACK_STOP Playback-File-Path refer to the same

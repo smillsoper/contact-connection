@@ -19,6 +19,8 @@ export type TelephonyNodeType =
   | 'tf_general_api_call'
   | 'tf_set_custom_field'
   | 'tf_get_custom_field'
+  | 'tf_store_value'
+  | 'tf_get_value'
   // Signal / media actions
   | 'tf_dtmf'
   | 'tf_ivr_menu'
@@ -114,6 +116,12 @@ export interface TelNodeData extends Record<string, unknown> {
   definitionFieldName?: string
   definitionDisplayLabel?: string
   definitionDataTypeName?: string
+  // tf_store_value / tf_get_value — generic tenant/client/campaign key-value store, free-form key
+  // (variables allowed), deliberately separate from Custom Fields (no pre-defined schema). Shares
+  // `value` and `variableName` with the SIP header nodes above.
+  scope?: 'tenant' | 'client' | 'campaign'
+  keyName?: string
+  retention?: 'forever' | '1_hour' | '24_hours' | '1_week' | '1_month'
   // tf_dtmf
   digits?: string
   durationMs?: number
@@ -390,6 +398,18 @@ export const TELEPHONY_NODE_META: Record<
     description: "Read a defined custom field's value into a flow variable",
     handles: 'single',
   },
+  tf_store_value: {
+    label: 'Store Value',
+    color: '#0e7490',
+    description: 'Save a free-form value scoped to the tenant, client, or campaign',
+    handles: 'single',
+  },
+  tf_get_value: {
+    label: 'Get Value',
+    color: '#155e75',
+    description: 'Read a stored value back into a flow variable',
+    handles: 'single',
+  },
   tf_dtmf: {
     label: 'Send DTMF',
     color: '#ca8a04',
@@ -565,6 +585,10 @@ export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
       return { label: 'Set Call Record Value', definitionId: '', definitionFieldName: '', definitionDisplayLabel: '', definitionDataTypeName: '', value: '' }
     case 'tf_get_custom_field':
       return { label: 'Get Call Record Value', definitionId: '', definitionFieldName: '', definitionDisplayLabel: '', definitionDataTypeName: '', variableName: '' }
+    case 'tf_store_value':
+      return { label: 'Store Value', scope: 'campaign', keyName: '', value: '', retention: 'forever' }
+    case 'tf_get_value':
+      return { label: 'Get Value', scope: 'campaign', keyName: '', variableName: '' }
     case 'tf_dtmf':
       return { label: 'Send DTMF', digits: '', durationMs: 100, interDigitGapMs: 50, waitForCompletion: true }
     case 'tf_ivr_menu':

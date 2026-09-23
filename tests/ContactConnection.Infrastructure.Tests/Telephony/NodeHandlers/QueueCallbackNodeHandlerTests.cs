@@ -163,6 +163,22 @@ public class QueueCallbackNodeHandlerTests
     }
 
     [Fact]
+    public async Task CollectedNumberSource_CallIdNamespace_RoutesThroughResolveKey()
+    {
+        // Not a realistic real-world value for a callback number field — this just proves the
+        // dispatch list routes "call.id" through TelSetVariableNodeHandler.ResolveKey rather than
+        // falling through to the bare-name ctx.Vars/ChannelVars lookup, the same regression class
+        // this handler's dispatch list already guards for caller.ani/call.did/call.dnis/now.*.
+        var ctx = Ctx();
+        var node = Node(new JsonObject { ["numberSource"] = "collected", ["collectedVar"] = "{{call.id}}" });
+
+        var result = await NewHandler().ExecuteAsync(node, ctx);
+
+        Assert.Equal("queued", result.TransitionTaken);
+        Assert.Equal(ctx.CallRecordId.ToString(), ctx.Vars["_queue_callback_number"]);
+    }
+
+    [Fact]
     public async Task PersistsMarkersToSessionDirectly()
     {
         var session = new TelephonyCallSession

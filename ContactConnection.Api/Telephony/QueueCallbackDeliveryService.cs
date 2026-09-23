@@ -90,6 +90,13 @@ public sealed class QueueCallbackDeliveryService(
             $"cc_qcb_placeholder_uuid={placeholder.ChannelUuid}," +
             $"cc_tenant_id={tenantId},cc_tenant_schema={tenantSchema},cc_tenant_subdomain={tenantSubdomain}," +
             $"cc_campaign_id={placeholder.CampaignId}," +
+            // This leg re-keys the existing flow session directly onto ConnectAnsweredLegAsync's
+            // delivery hand-off (below) rather than re-running the flow from tf_answer, so
+            // AnswerNodeHandler never gets a chance to set this. Without it, mid-bridge
+            // tf_secure_collect pulling the agent to park_with_moh tears down the bridge and this
+            // leg — lacking park_after_bridge — falls straight out of park() and really hangs up
+            // instead of surviving for the follow-up uuid_transfer into secure_collect.
+            $"park_after_bridge=true," +
             $"ignore_early_media=true,originate_timeout=30}}" +
             $"sofia/gateway/{Gateway}/{digits} &park()";
 

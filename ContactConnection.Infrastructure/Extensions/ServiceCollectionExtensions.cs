@@ -17,6 +17,7 @@ using ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 using ContactConnection.Infrastructure.FlowEngine.Services;
 using ContactConnection.Infrastructure.Repositories;
 using ContactConnection.Infrastructure.Storage;
+using ContactConnection.Infrastructure.StoredValues;
 using ContactConnection.Infrastructure.Stt;
 using ContactConnection.Infrastructure.Telephony;
 using ContactConnection.Infrastructure.Telephony.NodeHandlers;
@@ -67,6 +68,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ISubscriptionRepository, SubscriptionRepository>();
         services.AddScoped<ICustomFieldDefinitionRepository, CustomFieldDefinitionRepository>();
         services.AddScoped<ICustomFieldValueRepository, CustomFieldValueRepository>();
+        services.AddScoped<IStoredValueRepository, StoredValueRepository>();
         services.AddScoped<IDataTypeRepository, DataTypeRepository>();
         services.AddScoped<IPortalApiDefinitionRepository, PortalApiDefinitionRepository>();
         services.AddScoped<ITenantApiDefinitionRepository, TenantApiDefinitionRepository>();
@@ -99,6 +101,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IOrderService, OrderService>();
         services.AddScoped<ISubscriptionOrderCreator, SubscriptionOrderCreator>();
         services.AddScoped<ICustomFieldService, CustomFieldService>();
+        services.AddScoped<IStoredValueService, StoredValueService>();
 
         // Tax providers — each ITaxProvider is enumerated by TaxProviderFactory to build its dispatch table.
         // Register FlatRateTaxProvider first (it is the default/fallback).
@@ -192,6 +195,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<INodeHandler, TriggerTelephonyEventNodeHandler>();
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.SetCustomFieldNodeHandler>();
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.GetCustomFieldNodeHandler>();
+        services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.StoreValueNodeHandler>();
+        services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.GetValueNodeHandler>();
 
         // Flow engine (scoped — uses scoped repositories and tenant context)
         services.AddScoped<IFlowEngine, FlowEngine.FlowEngine>();
@@ -234,6 +239,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ITelephonyNodeHandler, ClearHotDigitListenerNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, Telephony.NodeHandlers.SetCustomFieldNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, Telephony.NodeHandlers.GetCustomFieldNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, Telephony.NodeHandlers.StoreValueNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, Telephony.NodeHandlers.GetValueNodeHandler>();
 
         // Call session store (singleton — Redis operations are inherently stateless)
         services.AddSingleton<ITelephonyCallSessionStore, RedisCallSessionStore>();

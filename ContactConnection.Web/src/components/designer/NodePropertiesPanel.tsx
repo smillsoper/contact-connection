@@ -1089,6 +1089,57 @@ export default function NodePropertiesPanel({
         )
       }
 
+      case 'store_value':
+      case 'get_value': {
+        const scope = (data.scope as string) ?? 'campaign'
+        return (
+          <>
+            {field(
+              'scope',
+              'Scope',
+              <select
+                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-sky-500"
+                value={scope}
+                onChange={(e) => onUpdate(node.id, { scope: e.target.value as NodeData['scope'] })}
+              >
+                <option value="tenant">Tenant-wide</option>
+                <option value="client">This Client</option>
+                <option value="campaign">This Campaign</option>
+              </select>,
+            )}
+            {field('keyName', 'Key', input('keyName', '{{call_record.id}}_OriginalAni'))}
+            {type === 'store_value' ? (
+              <>
+                {field('value', 'Value', input('value', '{{api.node_005.orderId}}'))}
+                {field(
+                  'retention',
+                  'Retention',
+                  <select
+                    className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-sky-500"
+                    value={(data.retention as string) ?? 'forever'}
+                    onChange={(e) => onUpdate(node.id, { retention: e.target.value as NodeData['retention'] })}
+                  >
+                    <option value="forever">Forever</option>
+                    <option value="1_hour">1 Hour</option>
+                    <option value="24_hours">24 Hours</option>
+                    <option value="1_week">1 Week</option>
+                    <option value="1_month">1 Month</option>
+                  </select>,
+                )}
+              </>
+            ) : (
+              <>
+                {field('outputVariable', 'Store into variable', input('outputVariable', 'lastOrderId'))}
+                <p className="text-[10px] text-gray-500 leading-snug">
+                  Stored as {'{{flow.'}{(data.outputVariable as string) || 'variable'}{'}}'} — nothing
+                  stored yet (or expired) resolves to an empty string.
+                </p>
+              </>
+            )}
+          </>
+        )
+      }
+
       case 'end':
         return field('status', 'Status', input('status', 'complete'))
     }

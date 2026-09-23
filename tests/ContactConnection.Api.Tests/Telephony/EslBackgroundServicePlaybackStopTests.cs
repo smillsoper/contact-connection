@@ -56,3 +56,48 @@ public class EslBackgroundServicePlaybackStopTests
         Assert.False(EslBackgroundService.IsRtpPrimeSilenceStop("main", "/tmp/some-other-prompt.wav", Ogg));
     }
 }
+
+/// <summary>
+/// EslBackgroundService.IsStaleFileStop — the Session 154 guard for a hot-digit redirect's
+/// uuid_break generating its own PLAYBACK_STOP for the audio it just interrupted, which can arrive
+/// after a NEW tf_play has already overwritten the same flat _play_* vars and get misread as that
+/// new node's own completion.
+/// </summary>
+public class EslBackgroundServiceStaleFileStopTests
+{
+    private const string Ogg = "/usr/share/freeswitch/sounds/contactconnection/_platform/will/hold_all_agents_busy.ogg";
+    private const string OtherOgg = "/usr/share/freeswitch/sounds/contactconnection/_platform/will/callback_confirmation.ogg";
+
+    [Fact]
+    public void MismatchedFile_FromASupersededPlay_IsStale()
+    {
+        // The exact reproduction: the OLD (interrupted) hold announcement's late stop arrives after
+        // the NEW tf_play (a different file) has already taken over the same session vars.
+        Assert.True(EslBackgroundService.IsStaleFileStop("file", Ogg, OtherOgg));
+    }
+
+    [Fact]
+    public void MatchingFile_GenuineCompletion_IsNotStale() =>
+        Assert.False(EslBackgroundService.IsStaleFileStop("file", Ogg, Ogg));
+
+    [Fact]
+    public void MatchingFile_ReportedAsBareFilename_IsNotStale() =>
+        Assert.False(EslBackgroundService.IsStaleFileStop("file", "hold_all_agents_busy.ogg", Ogg));
+
+    [Fact]
+    public void EmptyStoppedPath_IsNotStale_KeepsPriorBehavior()
+    {
+        // Some media types don't report a Playback-File-Path at all — falls through unchanged
+        // rather than being (incorrectly) treated as either stale or confirmed.
+        Assert.False(EslBackgroundService.IsStaleFileStop("file", "", OtherOgg));
+    }
+
+    [Fact]
+    public void TtsAudioSource_NeverFlaggedStale_EvenOnMismatch()
+    {
+        // A flite tf_play's mediaArg is a synthetic "tts://flite|voice|..." string that FreeSWITCH
+        // will never echo back verbatim as Playback-File-Path — comparing here would false-reject
+        // genuine flite completions, so the check is scoped away from "tts" entirely.
+        Assert.False(EslBackgroundService.IsStaleFileStop("tts", "/tmp/flite-synth-12345.wav", "tts://flite|kal|hello"));
+    }
+}

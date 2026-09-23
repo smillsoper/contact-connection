@@ -6,7 +6,7 @@ namespace ContactConnection.Infrastructure.Telephony.NodeHandlers;
 /// <summary>
 /// Evaluates a simple condition against flow variables.
 /// Condition format: "{{flow.varName}} operator value" (or any tag TelSetVariableNodeHandler.Resolve
-/// supports: bare {{varName}}, {{caller.ani}}, {{call.did}}, {{now.*}}, {{shared.*}}).
+/// supports: bare {{varName}}, {{caller.ani}}, {{call.id}}, {{call.did}}, {{now.*}}, {{shared.*}}).
 /// Operators: ==, !=, >, <, >=, <=, contains
 /// </summary>
 public class TelBranchNodeHandler : ITelephonyNodeHandler

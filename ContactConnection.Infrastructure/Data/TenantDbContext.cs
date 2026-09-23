@@ -58,6 +58,7 @@ public class TenantDbContext : DbContext
     public DbSet<CredentialAuditEntry> CredentialAuditEntries => Set<CredentialAuditEntry>();
     public DbSet<WebhookEndpoint> WebhookEndpoints => Set<WebhookEndpoint>();
     public DbSet<WebhookEvent> WebhookEvents => Set<WebhookEvent>();
+    public DbSet<StoredValue> StoredValues => Set<StoredValue>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -104,6 +105,7 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new CredentialAuditEntryConfiguration());
         modelBuilder.ApplyConfiguration(new WebhookEndpointConfiguration());
         modelBuilder.ApplyConfiguration(new WebhookEventConfiguration());
+        modelBuilder.ApplyConfiguration(new StoredValueConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 

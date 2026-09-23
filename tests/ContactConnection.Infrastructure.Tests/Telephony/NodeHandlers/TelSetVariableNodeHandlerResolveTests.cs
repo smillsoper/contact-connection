@@ -45,6 +45,13 @@ public class TelSetVariableNodeHandlerResolveTests
     }
 
     [Fact]
+    public void CallId_ResolvesToTheCallRecordIdAsAString()
+    {
+        var ctx = Ctx();
+        Assert.Equal(ctx.CallRecordId.ToString(), TelSetVariableNodeHandler.Resolve("{{call.id}}", ctx));
+    }
+
+    [Fact]
     public void FlowPrefix_IsStripped_ThenLooksUpInVars()
     {
         var ctx = Ctx();

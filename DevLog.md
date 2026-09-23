@@ -163,6 +163,8 @@
 | 151 | 2026-09-21 | 3:46 PM PDT | 4:22 PM PDT | 36 min | ~15089 min |
 | 152 | 2026-09-21 | 4:27 PM PDT | 6:34 PM PDT | 127 min | ~15216 min |
 | 153 | 2026-09-22 | 9:21 AM PDT | 10:06 AM PDT | 45 min | ~15261 min |
+| 154 | 2026-09-22 | 10:27 AM PDT | 2:15 PM PDT | 228 min | ~15489 min |
+| 155 | 2026-09-22 | 2:24 PM PDT | 2:47 PM PDT | 23 min | ~15512 min |
 
 ---
 
@@ -9285,3 +9287,232 @@ Build order item 1 (**Set/Get Call Record Value**) is now fully done and live-ve
 **not yet committed** as of session end (14 modified files + 1 new test file) — user did not ask
 for a commit this session; do that first thing next session if it's still pending. Next up per the
 locked-in order: **Store/Get Scoped Value**, then **`tf_play` interrupt option**.
+
+## Session 154
+
+**Date:** 2026-09-22
+**Start:** 10:27 AM PDT
+**End:** 2:15 PM PDT
+**Duration:** 228 minutes
+**Total Duration:** ~15489 minutes
+
+### Focus
+
+Started in a fresh chat window with no memory of the Session 151/152 planning discussion — first
+confirmed the cross-session continuity (memory + DevLog) had actually worked (it had: Session 153,
+run in yet another window, found the plan and picked up cleanly). Then built build-order item 2
+(**Store/Get Scoped Value**), added a small directly-requested resolver feature
+(`{{call.id}}` on the telephony side), and spent the back half of the session live-testing —
+which surfaced a real, fully-diagnosed (not yet fixed) telephony bug unrelated to either of this
+session's own features.
+
+### 1. Store/Get Scoped Value — built via a formal plan
+
+Entered plan mode again (previous plan file was for item 1 — overwritten fresh per the "different
+task" guidance). Two Explore agents confirmed the retention-job precedent
+(`SensitiveDataRetentionService`) and the exact `TenantDbContext` migration pattern, and confirmed
+neither `CustomFieldValue` nor `FlowSession.VariableStore` could be repurposed — a new table was
+genuinely warranted.
+
+- **New table `stored_values`** (tenant schema only): `scope` (`tenant`/`client`/`campaign`),
+  `scope_id` — deliberately `Guid.Empty` rather than nullable for the tenant-scope case, since
+  Postgres treats `NULL <> NULL` in a unique index and a nullable `scope_id` would let a race
+  create duplicate "tenant scope, same key" rows; `key_name` (not bare `key`, to sidestep any
+  doubt about the SQL keyword), `value`, `expires_at` (null = forever). Unique index on
+  `(tenant_id, scope, scope_id, key_name)`; a second index on `(tenant_id, expires_at)` for the
+  cleanup sweep, mirroring `idx_block_list_tenant_expiry`. Migration `AddStoredValues` applied to
+  `tenant_test_tenant`.
+- **`IStoredValueService`/`IStoredValueRepository`** — call-record-centric like
+  `ICustomFieldService`: given just a `callRecordId`, loads the call record once to resolve
+  `TenantId`/`ClientId`/`CampaignId`, maps the requested scope to the right `scopeId`, then
+  reads/upserts. `GetAsync` treats an expired-but-not-yet-swept row as absent (the retention job is
+  a periodic sweep, not instant).
+- **`StoredValueRetentionService`** (new Worker `BackgroundService`) — same shape as
+  `SensitiveDataRetentionService` (per-tenant, batched, oldest-first), but a genuine row **delete**
+  rather than a null-out-wipe — no audit/reason requirement for a cache value the way there is for
+  PCI data.
+- **New nodes, both engines**: `store_value`/`get_value` (CRM), `tf_store_value`/`tf_get_value`
+  (telephony) — full designer wiring (scope dropdown, key/value/retention fields, no admin page
+  needed this time since the key is genuinely free-form). Telephony handlers prime
+  `TenantContext.Current` themselves, same reason as the Custom Field telephony nodes.
+- **40 new tests** (domain `IsExpired`/scope-guard cases, service-layer scope-resolution cases, 4
+  node-handler files). One test caught a real cross-engine difference along the way: the CRM
+  `VariableResolver.Resolve` falls back to the literal string `"[not captured]"` for an unresolved
+  `{{...}}` tag (deliberate — an agent-facing script box should show that instead of a blank field),
+  while the telephony resolver falls back to `""`. Full suite 1067/1067 passing.
+- User separately noted the `"[not captured]"` fallback is architecturally misplaced — it belongs
+  in whatever renders content for the agent's script box, not the shared `VariableResolver.Resolve`
+  every node handler calls (a `store_value` key/value, an `api_call` body, etc. would otherwise
+  silently get that literal string written into it instead of an empty string). Added as a second
+  item to `memory/project_unified_variable_resolution.md` rather than fixed ad hoc — same
+  "audit properly, don't patch piecemeal" instruction as that memory's first item.
+
+### 2. `{{call.id}}` — new telephony resolver namespace value, user-requested
+
+While live-testing, the user asked whether either engine exposes the current call's own identifier
+for use in a Store Value key (e.g. `{{call.id}}_OriginalAni`). Checked both resolvers directly
+rather than guess: **CRM already has it** (`{{call_record.id}}`, `FlowEngine.cs:385`) — **telephony
+did not**, despite `ctx.CallRecordId` already being available to every handler internally. Added
+`call.id` to `TelSetVariableNodeHandler.ResolveKey` (returns `ctx.CallRecordId.ToString()`), and —
+catching it before it became the same bug class as the Session 153 `collectedVar` fix — added it to
+the two OTHER hardcoded "is this a well-known tag" dispatch lists that mirror `ResolveKey`'s
+namespace set (`QueueCallbackNodeHandler`/`ScheduledCallbackNodeHandler`'s `ResolveCollectedNumber`
+guard), so a `{{call.id}}` typed into either of those fields routes correctly instead of falling
+through to a bare-name lookup. Updated the Store Value key-field placeholders in both designers to
+`{{call_record.id}}_OriginalAni` / `{{call.id}}_OriginalAni` to make the new capability
+discoverable. One new regression test (`TelSetVariableNodeHandlerResolveTests.CallId_...`) plus one
+proving the `QueueCallbackNodeHandler` dispatch-list fix. Applied live via hot-reload — confirmed
+via `dotnet watch`'s log (`Hot reload succeeded`, no restart) that it didn't disrupt the live call
+the user had queued at the time.
+
+### 3. Live testing — found and fully diagnosed a real, unrelated telephony bug (NOT FIXED)
+
+User built a telephony test flow exercising both new items (`tf_store_value`/`tf_get_value` plus
+the hot-digit callback-offer pattern from earlier sessions) and ran a real Telnyx call. The call
+hung up early with no audible confirmation message, even though the Call Trace UI showed the
+relevant `tf_play` node's exit as `playing`.
+
+Investigated end to end rather than guess:
+- **Confirmed a ~9 second clock drift between the FreeSWITCH container and the API/Postgres
+  clock** (despite `cc_timesync`/chronyd existing specifically to prevent this) — discovered while
+  correlating `call_trace_events` timestamps against the FreeSWITCH log's own timestamps for the
+  same channel/call. Noted as a separate, real infrastructure finding, not yet investigated further
+  (chronyd config, or the containers syncing against different sources) — see the new memory file.
+- **Root cause of the silent hangup, confirmed via `docker exec cc_freeswitch` log + the actual
+  `EslBackgroundService.cs` source, not speculation**: the caller pressed the hot-digit key
+  mid-hold-announcement (`tf_ivr_menu`'s `alwaysListen` mode, armed several nodes earlier).
+  `HandleDtmfAsync` correctly `uuid_break`s the looping hold announcement before jumping to the new
+  node chain (`tf_get_value` → `tf_queue_callback` → a second `tf_play`, the callback-confirmation
+  message) — but that `uuid_break` itself generates its own `PLAYBACK_STOP` event for the
+  *interrupted* audio, which arrives asynchronously, *after* the second `tf_play` has already
+  overwritten the same flat `_play_*` session vars with its own info. `HandlePlaybackStopAsync`
+  already guards against exactly this stale-event class in two places (`IsRtpPrimeSilenceStop` for
+  RTP-prime silence, and a `PlayFilePathsMatch` check in the periodic-announcement branch) — **but
+  the plain "main media finished" branch has no such check at all**, so the stale, late
+  `PLAYBACK_STOP` for the *old* interrupted hold announcement gets misread as "the new confirmation
+  message just finished" and fires `tf_hangup` before the real audio ever plays. Proposed fix:
+  apply the same `PlayFilePathsMatch` comparison the announcement branch already uses to the
+  general branch too, so a mismatched stopped-file is treated as stale rather than genuine
+  completion. **Diagnosis complete; fix not yet applied** — session ended (token limit) before
+  implementing it. Recorded in full in `memory/project_stale_playback_stop_hot_digit_bug.md`.
+
+### State
+
+Both dev-server processes (API `dotnet watch` on :5135, Vite on :5173) were **deliberately left
+running** at the user's explicit request — they want to complete the queued callback and run one
+more live test before next session, and report additional findings then. **Do not reflexively kill
+these as stale processes** the way `feedback_stale_dotnet_watch.md` would normally suggest — check
+with the user first. Session 154's own work (Store/Get Scoped Value + `{{call.id}}`) was NOT
+committed as of session end — commit it first thing next session (after confirming build/tests
+still pass, since the dev-server file lock may still be held).
+
+### Next session — pick up here
+
+Per the user, explicitly:
+1. Ask about the additional live-test findings from the one more test they said they'd run before
+   this session ended.
+2. Fix the stale-`PLAYBACK_STOP`-after-`uuid_break` bug — see
+   `memory/project_stale_playback_stop_hot_digit_bug.md` for the full diagnosis and proposed fix;
+   it's ready to implement, just wasn't reached this session.
+3. Commit Session 154's uncommitted work (Store/Get Scoped Value, `{{call.id}}`).
+4. Once both are done and re-verified, continue the locked-in build order with **`tf_play`
+   interrupt option** (the last item).
+
+## Session 155
+
+**Date:** 2026-09-22
+**Start:** 2:24 PM PDT
+**End:** 2:47 PM PDT
+**Duration:** 23 minutes
+**Total Duration:** ~15512 minutes
+
+### Focus
+
+Continuation of the same day's work (token refresh from Session 154, ~9 minutes apart). User opened
+by confirming Store/Get Scoped Value's live test succeeded between sessions, then asked to fix the
+stale-`PLAYBACK_STOP` bug diagnosed at the end of Session 154. Mid-session, a live re-test of the
+first fix surfaced a second, structurally distinct telephony bug, fully root-caused and fixed the
+same way — against the real FreeSWITCH container log and source, not speculation.
+
+### 1. Stale PLAYBACK_STOP / hot-digit bug — FIXED
+
+Implemented the fix scoped at the end of Session 154: new `internal static bool
+IsStaleFileStop(string audioSource, string stoppedFilePath, string mainMediaArg)` in
+`EslBackgroundService.cs`, next to the existing `IsRtpPrimeSilenceStop`. Wired into
+`HandlePlaybackStopAsync`'s general "main media finished" branch, right before the loop/end-
+transition decision — a mismatched stopped-file (when `audioSource == "file"`) is now treated as a
+stale event from a superseded play and ignored, the same pattern `IsRtpPrimeSilenceStop` already
+uses for the RTP-prime-silence case. Deliberately scoped to `audioSource == "file"` only — a flite
+TTS node's synthetic `tts://flite|...` mediaArg never matches FreeSWITCH's reported file path
+verbatim, so applying the same check there would false-reject genuine flite completions; streaming
+TTS never reaches this method at all. 5 new tests (`EslBackgroundServiceStaleFileStopTests`) —
+exact-reproduction mismatch, genuine-completion match, bare-filename match, empty-stopped-path
+(preserves prior behavior), and TTS-source-never-flagged. Full suite 1074/1074 passing (Release
+config, working around the Debug-folder file lock from the `dotnet watch` instance left running for
+live testing). Applied live via hot-reload. **Pending the user's live re-verification of the exact
+repro flow** (hot-digit → queue-callback → confirmation `tf_play` → `tf_hangup`) before considered
+fully closed.
+
+### 2. Queue callback + mid-bridge secure collect — a second, unrelated caller-drop bug found + fixed
+
+Before re-testing, the user reported a separate issue from an earlier live test: a mid-call
+secure-collect handoff (agent's script triggers a CC capture) disconnected the caller entirely
+instead of parking the agent on hold music and walking the caller through the capture prompts — and
+the agent's screen kept the call timer running as if nothing had happened.
+
+Investigated by pulling the actual `call_trace_events` row for that exact call
+(`2b529d66-2ce7-407e-be0d-361270c6eaea`) from Postgres, then cross-referencing the real FreeSWITCH
+container log (`docker exec cc_freeswitch`) for the exact channel UUIDs involved, rather than
+guessing from the trace alone:
+
+- The trace showed `tf_on_call_disconnected` firing *before* `tf_secure_collect` even reached its
+  `collecting` state — a strong signal the disconnect was real, not a misread stale event.
+- The FreeSWITCH log confirmed it: at the same instant `tf_secure_collect` transferred the agent's
+  leg to `park_with_moh` (succeeded), the caller's own leg logged `"has executed the last dialplan
+  instruction, hanging up"` and was destroyed — the exact FreeSWITCH behavior of a parked channel
+  whose bridge just tore down without `park_after_bridge=true` set.
+- Root cause: `park_after_bridge=true` is set exactly once, by `AnswerNodeHandler` at `tf_answer` —
+  it's what lets a channel survive being pulled out of a bridge instead of hanging up, which is
+  exactly what mid-bridge `tf_secure_collect` depends on. But this call reached the agent via
+  `tf_queue_callback` (virtual hold): the original leg had hung up, and
+  `QueueCallbackDeliveryService.ReserveAndDialAsync`/`ConnectAnsweredLegAsync` originates a
+  brand-new leg for the callback and re-keys the existing flow session directly onto it —
+  deliberately skipping node re-execution (including `tf_answer`) to avoid replaying the whole flow.
+  So this leg never got the flag, and fell straight out of `park()` for real the moment the bridge
+  to the agent tore down, before `SecureCollectNodeHandler`'s own follow-up transfer into the
+  `secure_collect` extension ever ran.
+- Confirmed scheduled callbacks are NOT affected — that delivery path runs a whole fresh designated
+  flow from its own start node on the answered leg, which normally begins with its own `tf_answer`.
+
+**Fixed** by adding `park_after_bridge=true` directly to the `originate` channel-variable list in
+`QueueCallbackDeliveryService.ReserveAndDialAsync`, set at origination time (mirroring
+`AnswerNodeHandler`'s "set once, persists for the life of the call" approach, since this leg has no
+`tf_answer` node of its own). Build verified clean (Release config). **No regression test added
+yet** — `ReserveAndDialAsync` constructs its own `EslClient` inline rather than taking one via DI,
+so asserting on the exact command string needs a small testability refactor first; flagged, not
+done as part of this hotfix. Recorded in full in
+`memory/project_queue_callback_park_after_bridge_bug.md`. **Pending the user's live re-verification**
+of the queue-callback → mid-bridge-secure-collect repro.
+
+### State
+
+Both dev-server processes (API `dotnet watch` on :5135, Vite on :5173) left running per the
+standing arrangement — user will live-verify both fixes at the start of next session. Neither this
+session's fixes NOR Session 154's Store/Get Scoped Value + `{{call.id}}` work have been committed
+yet — all of it is still sitting uncommitted, bundled for one commit once live-verification confirms
+everything works.
+
+### Next session — pick up here
+
+1. Live-verify both fixes: (a) the hot-digit → queue-callback → confirmation-play → hangup repro
+   (Session 154's original bug), and (b) the queue-callback → mid-bridge-secure-collect repro (this
+   session's second bug) — as two separate test calls per the plan discussed with the user.
+2. Once both are confirmed, commit everything: Session 154's Store/Get Scoped Value +
+   `{{call.id}}` resolver addition, plus this session's two bug fixes.
+3. Continue the locked-in build order with **`tf_play` interrupt option** (the last item) — see
+   `memory/project_telephony_node_review.md` §4 for the already-approved design (optional
+   `interruptDigits` + `onInterrupt` transition, arming a digit listener similar to the hot-digit
+   mechanism but interrupting the CURRENT node's playback via `uuid_break`).
+4. Consider the flagged-but-not-done regression test for the queue-callback fix (needs
+   `QueueCallbackDeliveryService`'s inline `EslClient` construction refactored to go through a
+   factory first, the way `SecureCollectNodeHandler` already does via `IEslCommanderFactory`).

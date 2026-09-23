@@ -17,6 +17,8 @@ const NODE_TYPES: ContactConnectionNodeType[] = [
   'api_call',
   'set_custom_field',
   'get_custom_field',
+  'store_value',
+  'get_value',
   'end',
 ]
 

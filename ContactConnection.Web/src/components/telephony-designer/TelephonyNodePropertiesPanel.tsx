@@ -822,6 +822,75 @@ export default function TelephonyNodePropertiesPanel({
         )
       })()}
 
+      {(type === 'tf_store_value' || type === 'tf_get_value') && (() => {
+        const scope = (data.scope as string) ?? 'campaign'
+        return (
+          <div className="flex flex-col gap-2">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Scope</label>
+              <select
+                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-blue-500"
+                value={scope}
+                onChange={(e) => set('scope', e.target.value)}
+              >
+                <option value="tenant">Tenant-wide</option>
+                <option value="client">This Client</option>
+                <option value="campaign">This Campaign</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Key</label>
+              <input
+                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-blue-500"
+                placeholder="{{call.id}}_OriginalAni"
+                value={(data.keyName as string) ?? ''}
+                onChange={(e) => set('keyName', e.target.value)}
+              />
+            </div>
+            {type === 'tf_store_value' ? (
+              <>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Value</label>
+                  <input
+                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-blue-500"
+                    placeholder="{{flow.entered_value}}"
+                    value={(data.value as string) ?? ''}
+                    onChange={(e) => set('value', e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Retention</label>
+                  <select
+                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-blue-500"
+                    value={(data.retention as string) ?? 'forever'}
+                    onChange={(e) => set('retention', e.target.value)}
+                  >
+                    <option value="forever">Forever</option>
+                    <option value="1_hour">1 Hour</option>
+                    <option value="24_hours">24 Hours</option>
+                    <option value="1_week">1 Week</option>
+                    <option value="1_month">1 Month</option>
+                  </select>
+                </div>
+              </>
+            ) : (
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Store into variable</label>
+                <input
+                  className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm font-mono focus:outline-none focus:border-blue-500"
+                  placeholder="last_order_id"
+                  value={(data.variableName as string) ?? ''}
+                  onChange={(e) => set('variableName', e.target.value)}
+                />
+                <p className="text-[10px] text-gray-500 mt-1">
+                  Nothing stored yet (or expired) resolves to an empty string.
+                </p>
+              </div>
+            )}
+          </div>
+        )
+      })()}
+
       {/* Entry / Delete footer */}
       <div className="flex gap-2 pt-2 border-t border-gray-700 mt-auto">
         {/* Event nodes are self-contained entry points — no "Set as Entry" needed */}

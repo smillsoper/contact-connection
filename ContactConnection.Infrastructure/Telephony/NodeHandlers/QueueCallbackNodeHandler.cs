@@ -144,7 +144,7 @@ public class QueueCallbackNodeHandler : ITelephonyNodeHandler
             key = key[2..^2].Trim();
 
         if (key.StartsWith("shared.", StringComparison.OrdinalIgnoreCase) ||
-            key is "caller.ani" or "call.did" or "call.dnis" ||
+            key is "caller.ani" or "call.id" or "call.did" or "call.dnis" ||
             key.StartsWith("now.", StringComparison.OrdinalIgnoreCase))
             return TelSetVariableNodeHandler.ResolveKey(key, ctx);
 

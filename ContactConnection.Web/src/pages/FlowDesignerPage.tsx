@@ -35,6 +35,8 @@ import ApiCallNode from '../components/designer/nodes/ApiCallNode'
 import ScheduledCallbackNode from '../components/designer/nodes/ScheduledCallbackNode'
 import SetCustomFieldNode from '../components/designer/nodes/SetCustomFieldNode'
 import GetCustomFieldNode from '../components/designer/nodes/GetCustomFieldNode'
+import StoreValueNode from '../components/designer/nodes/StoreValueNode'
+import GetValueNode from '../components/designer/nodes/GetValueNode'
 import EndNode from '../components/designer/nodes/EndNode'
 
 import type { NodeData, ContactConnectionNodeType, ContactConnectionFlowDefinition, FlowOption } from '../types/designer'
@@ -57,6 +59,8 @@ const nodeTypes = {
   scheduled_callback: ScheduledCallbackNode,
   set_custom_field: SetCustomFieldNode,
   get_custom_field: GetCustomFieldNode,
+  store_value: StoreValueNode,
+  get_value: GetValueNode,
   end: EndNode,
 }
 
