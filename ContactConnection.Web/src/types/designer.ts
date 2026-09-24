@@ -162,7 +162,7 @@ export interface ContactConnectionFlowDefinition {
 
 export const NODE_META: Record<
   ContactConnectionNodeType,
-  { label: string; color: string; description: string; handles: 'single' | 'dual' | 'none' | 'custom' }
+  { label: string; color: string; description: string; handles: 'single' | 'none' | 'custom' }
 > = {
   script: {
     label: 'Script',
@@ -222,7 +222,7 @@ export const NODE_META: Record<
     label: 'Branch',
     color: '#f59e0b',
     description: 'Conditional split on a variable',
-    handles: 'dual',
+    handles: 'single',
   },
   set_variable: {
     label: 'Set Variable',

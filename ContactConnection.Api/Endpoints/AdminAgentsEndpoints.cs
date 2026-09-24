@@ -71,8 +71,9 @@ public static class AdminAgentsEndpoints
 
             try
             {
-                var acceptUrl = $"{baseUrl}/admin-invite/{invite.Token}";
-                var loginUrl = $"https://{tenant.Subdomain}.{new Uri(baseUrl).Host}/login";
+                var tenantHost = $"https://{tenant.Subdomain}.{new Uri(baseUrl).Host}";
+                var acceptUrl = $"{tenantHost}/admin-invite/{invite.Token}";
+                var loginUrl = $"{tenantHost}/login";
                 await email.SendAsync(
                     invite.Email,
                     TenantAdminInviteEmail.Subject(tenant.Name, roleName),

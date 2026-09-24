@@ -1,12 +1,13 @@
-import { Handle, Position, type NodeProps } from '@xyflow/react'
+import { type NodeProps } from '@xyflow/react'
 import TelNodeShell from '../TelNodeShell'
 import type { TelNodeData } from '../../../types/telephony-designer'
 
-const HANDLE_COLOR = '#0f766e'
+export interface PlayHandle { id: string; label: string }
 
-interface PlayHandle { id: string; label: string }
-
-function getPlayHandles(data: TelNodeData): PlayHandle[] {
+// The set of exit options for a tf_play node depends on its own configuration — exported so
+// TelephonyDesignerPage.tsx's computePickerOptions() can derive the live option list for the
+// connection modal without re-deriving this logic.
+export function getPlayHandles(data: TelNodeData): PlayHandle[] {
   const handles: PlayHandle[] = []
   const audioSource = (data.audioSource as string) ?? 'file'
   const autoRestart = data.autoRestart as boolean | undefined
@@ -28,31 +29,8 @@ function getPlayHandles(data: TelNodeData): PlayHandle[] {
 }
 
 export default function PlayNode({ data, selected }: NodeProps & { data: TelNodeData }) {
-  const handles = getPlayHandles(data)
   const audioSource = (data.audioSource as string) ?? 'file'
   const autoRestart = data.autoRestart as boolean | undefined
-
-  // Always provide extraHandles so TelNodeShell's built-in single/dual logic is bypassed
-  const extraHandles =
-    handles.length > 0 ? (
-      <>
-        {handles.map((h, i) => (
-          <Handle
-            key={h.id}
-            type="source"
-            position={Position.Bottom}
-            id={h.id}
-            style={{
-              left: `${((i + 1) / (handles.length + 1)) * 100}%`,
-              background: HANDLE_COLOR,
-            }}
-          />
-        ))}
-      </>
-    ) : (
-      // No dynamic handles (looping file with no duration) — single pass-through handle
-      <Handle type="source" position={Position.Bottom} id="default" style={{ background: '#9ca3af' }} />
-    )
 
   const sourceSummary =
     audioSource === 'tts'
@@ -67,7 +45,6 @@ export default function PlayNode({ data, selected }: NodeProps & { data: TelNode
       label={data.label as string}
       isEntry={data.isEntry as boolean}
       selected={selected}
-      extraHandles={extraHandles}
     >
       <p className="text-xs text-gray-400 mt-1 truncate">{sourceSummary}</p>
     </TelNodeShell>

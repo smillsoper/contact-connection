@@ -20,6 +20,10 @@ import { flowsApi } from '../api/flows'
 import NodePalette from '../components/designer/NodePalette'
 import NodePropertiesPanel from '../components/designer/NodePropertiesPanel'
 import EditableEdge from '../components/designer/EditableEdge'
+import CanvasSelectionToggle from '../components/designer/CanvasSelectionToggle'
+import { useCanvasClipboard } from '../components/designer/useCanvasClipboard'
+import { useNodesChangeWithWaypoints } from '../components/designer/useNodesChangeWithWaypoints'
+import OptionPickerModal from '../components/designer/OptionPickerModal'
 import ScriptNode from '../components/designer/nodes/ScriptNode'
 import InputNode from '../components/designer/nodes/InputNode'
 import EmailNode from '../components/designer/nodes/EmailNode'
@@ -74,6 +78,7 @@ const FIXED_EXIT_OPTIONS: Partial<Record<ContactConnectionNodeType, string[]>> =
   api_call: ['success', 'error', 'timeout'],
   scheduled_callback: ['scheduled', 'invalid_time', 'failed'],
   set_custom_field: ['success', 'invalid_value', 'error'],
+  branch: ['true', 'false'],
 }
 
 // Options for a node that uses the fixed-handle picker (select-type input, or a
@@ -206,7 +211,7 @@ function DesignerCanvas({
   const { screenToFlowPosition } = useReactFlow()
   const wrapperRef = useRef<HTMLDivElement>(null)
 
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node<NodeData>>([])
+  const [nodes, setNodes, onNodesChangeRaw] = useNodesState<Node<NodeData>>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [flowName, setFlowName] = useState(initialFlowName)
   const [flowId, setFlowId] = useState<string | null>(initialFlowId)
@@ -219,70 +224,24 @@ function DesignerCanvas({
   const [publishing, setPublishing] = useState(false)
   const [statusMsg, setStatusMsg] = useState('')
   const [showHistory, setShowHistory] = useState(false)
+  const [selectionModeOn, setSelectionModeOn] = useState(false)
 
   // Option-picker modal for select-type input nodes
   const [pendingConn, setPendingConn] = useState<Connection | null>(null)
 
-  // Use refs so the keydown handler always sees current state without re-registering
-  const nodesRef = useRef(nodes)
-  const edgesRef = useRef(edges)
-  const clipboardRef = useRef<{ nodes: Node<NodeData>[]; edges: Edge[] } | null>(null)
-  useEffect(() => { nodesRef.current = nodes }, [nodes])
-  useEffect(() => { edgesRef.current = edges }, [edges])
-
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      // Skip when typing in any input/textarea/contenteditable
-      const tag = (e.target as HTMLElement).tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable) return
-
-      const meta = e.metaKey || e.ctrlKey
-      if (!meta) return
-
-      if (e.key === 'c') {
-        const selected = nodesRef.current.filter((n) => n.selected)
-        if (selected.length === 0) return
-        e.preventDefault()
-        const selectedIds = new Set(selected.map((n) => n.id))
-        clipboardRef.current = {
-          nodes: selected,
-          edges: edgesRef.current.filter(
-            (ed) => selectedIds.has(ed.source) && selectedIds.has(ed.target),
-          ),
-        }
-      }
-
-      if (e.key === 'v') {
-        const cb = clipboardRef.current
-        if (!cb) return
-        e.preventDefault()
-        const ts = Date.now()
-        const idMap = new Map<string, string>()
-        cb.nodes.forEach((n, i) => idMap.set(n.id, `node_${ts}_${i}`))
-
-        const newNodes: Node<NodeData>[] = cb.nodes.map((n) => ({
-          ...n,
-          id: idMap.get(n.id)!,
-          position: { x: n.position.x + 40, y: n.position.y + 40 },
-          selected: true,
-          data: { ...n.data, isEntry: false },
-        }))
-
-        const newEdges: Edge[] = cb.edges.map((ed) => {
-          const newSrc = idMap.get(ed.source)!
-          const newTgt = idMap.get(ed.target)!
-          const key = (ed.data?.transition as string | undefined) ?? ed.sourceHandle ?? 'default'
-          return { ...ed, id: `${newSrc}-${key}-${newTgt}`, source: newSrc, target: newTgt }
-        })
-
-        setNodes((nds) => [...nds.map((n) => ({ ...n, selected: false })), ...newNodes])
-        setEdges((eds) => [...eds, ...newEdges])
-      }
-    }
-
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [setNodes, setEdges])  // stable setters — refs handle current values
+  const makeEdgeId = useCallback(
+    (newSource: string, newTarget: string, key: string) => `${newSource}-${key}-${newTarget}`,
+    [],
+  )
+  const onNodesRemoved = useCallback(
+    (removedIds: string[]) => {
+      setSelectedNodeId((cur) => (cur && removedIds.includes(cur) ? null : cur))
+      setEntryNodeId((cur) => (cur && removedIds.includes(cur) ? null : cur))
+    },
+    [],
+  )
+  useCanvasClipboard<NodeData>({ nodes, edges, setNodes, setEdges, makeEdgeId, onNodesRemoved })
+  const onNodesChange = useNodesChangeWithWaypoints(nodes, onNodesChangeRaw, setEdges)
 
   // Load an existing flow's current definition into the canvas — used on mount and again after
   // a version-history revert (the revert response carries the newly-active definition).
@@ -311,31 +270,32 @@ function DesignerCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialFlowId])
 
-  // When an option is picked in the modal, complete the pending edge.
-  // Removes any existing edge for this option first (re-wire case).
+  // When one or more options are confirmed in the picker modal, wire each selected option to the
+  // pending target in one update — removing any existing edge for that option first (re-wire case).
   // NOTE: bypasses addEdge() intentionally — all option edges use sourceHandle=null for rendering,
   // so addEdge()'s duplicate check (source+sourceHandle+target+targetHandle) would reject any
   // option beyond the first one that connects to the same target node.
-  const onOptionPicked = useCallback((optionValue: string) => {
+  const onOptionsConfirmed = useCallback((optionValues: string[]) => {
     if (!pendingConn) return
     const conn = pendingConn
     setPendingConn(null)
+    const optionSet = new Set(optionValues)
     setEdges((eds) => {
-      // Remove existing edge for this option (both old sourceHandle format and new data.transition format)
+      // Remove existing edges for every selected option (both old sourceHandle format and new data.transition format)
       const withoutOld = eds.filter((e) => {
         if (e.source !== conn.source) return true
         const key = (e.data?.transition as string | undefined) ?? e.sourceHandle
-        return key !== optionValue
+        return !key || !optionSet.has(key)
       })
-      const newEdge: Edge = {
+      const newEdges: Edge[] = optionValues.map((optionValue) => ({
         ...conn,
         id: `${conn.source}-${optionValue}-${conn.target}`,
         sourceHandle: null,          // visual: renders from the single default handle
         type: 'editable',
         label: optionValue,
         data: { waypoints: [], transition: optionValue },  // semantic: carries the option name
-      }
-      return [...withoutOld, newEdge]
+      }))
+      return [...withoutOld, ...newEdges]
     })
   }, [pendingConn, setEdges])
 
@@ -598,13 +558,18 @@ function DesignerCanvas({
             onPaneClick={onPaneClick}
             onDragOver={onDragOver}
             onDrop={onDrop}
+            onNodesDelete={(deleted) => onNodesRemoved(deleted.map((n) => n.id))}
             fitView
             deleteKeyCode="Delete"
             multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
             colorMode="dark"
+            selectionOnDrag={selectionModeOn}
+            panOnDrag={selectionModeOn ? [2] : true}
           >
             <Background />
-            <Controls />
+            <Controls>
+              <CanvasSelectionToggle active={selectionModeOn} onToggle={() => setSelectionModeOn((v) => !v)} />
+            </Controls>
             <MiniMap nodeColor={(n) => {
               const meta: Record<string, string> = {
                 script: '#3b82f6',
@@ -646,7 +611,7 @@ function DesignerCanvas({
         )}
       </div>
 
-      {/* Option picker modal — shown when connecting from a select-type input node */}
+      {/* Option picker modal — shown when connecting from a node whose branches funnel through one handle */}
       {pendingConn && (() => {
         const srcNode = (nodes as Node<NodeData>[]).find((n) => n.id === pendingConn.source)
         const options = pickerOptions(srcNode) ?? []
@@ -661,48 +626,13 @@ function DesignerCanvas({
             .filter((x): x is [string, string] => x !== null),
         )
         return (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm cursor-default"
-            style={{ pointerEvents: 'all' }}
-          >
-            <div className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl w-80 p-5 flex flex-col gap-4">
-              <div>
-                <p className="text-sm font-semibold text-white">Which option leads here?</p>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  Picking an already-wired option replaces its existing connection.
-                </p>
-              </div>
-              <div className="flex flex-col gap-1.5">
-                {options.map((opt) => {
-                  const isWired = wiredMap.has(opt)
-                  return (
-                    <button
-                      key={opt}
-                      type="button"
-                      onClick={() => onOptionPicked(opt)}
-                      className={`w-full text-left px-3 py-2 rounded-lg text-sm border transition-colors cursor-pointer
-                        ${isWired
-                          ? 'text-amber-300 bg-amber-950/30 border-amber-800/50 hover:bg-amber-900/40'
-                          : 'text-white bg-gray-800 border-gray-700 hover:bg-emerald-900/50 hover:border-emerald-600'
-                        }`}
-                    >
-                      <span>{isFixedOptions ? opt.charAt(0).toUpperCase() + opt.slice(1) : opt}</span>
-                      {isWired && (
-                        <span className="ml-2 text-[10px] text-amber-500 font-medium">↺ re-wire</span>
-                      )}
-                    </button>
-                  )
-                })}
-              </div>
-              <button
-                type="button"
-                onClick={() => setPendingConn(null)}
-                className="text-xs text-gray-500 hover:text-gray-300 self-center transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
+          <OptionPickerModal
+            options={options}
+            wiredMap={wiredMap}
+            formatLabel={isFixedOptions ? (opt) => opt.charAt(0).toUpperCase() + opt.slice(1) : undefined}
+            onConfirm={onOptionsConfirmed}
+            onCancel={() => setPendingConn(null)}
+          />
         )
       })()}
 

@@ -20,6 +20,10 @@ import { flowsApi } from '../api/flows'
 import TelephonyNodePalette from '../components/telephony-designer/TelephonyNodePalette'
 import TelephonyNodePropertiesPanel from '../components/telephony-designer/TelephonyNodePropertiesPanel'
 import EditableEdge from '../components/designer/EditableEdge'
+import CanvasSelectionToggle from '../components/designer/CanvasSelectionToggle'
+import { useCanvasClipboard } from '../components/designer/useCanvasClipboard'
+import { useNodesChangeWithWaypoints } from '../components/designer/useNodesChangeWithWaypoints'
+import OptionPickerModal from '../components/designer/OptionPickerModal'
 import CheckBlockListNode from '../components/telephony-designer/nodes/CheckBlockListNode'
 import CheckAgentAvailabilityNode from '../components/telephony-designer/nodes/CheckAgentAvailabilityNode'
 import RejectNode from '../components/telephony-designer/nodes/RejectNode'
@@ -27,7 +31,7 @@ import AnswerNode from '../components/telephony-designer/nodes/AnswerNode'
 import HangupNode from '../components/telephony-designer/nodes/HangupNode'
 import RouteToQueueNode from '../components/telephony-designer/nodes/RouteToQueueNode'
 import TransferNode from '../components/telephony-designer/nodes/TransferNode'
-import PlayNode from '../components/telephony-designer/nodes/PlayNode'
+import PlayNode, { getPlayHandles } from '../components/telephony-designer/nodes/PlayNode'
 import TimeOfDayNode from '../components/telephony-designer/nodes/TimeOfDayNode'
 import TelBranchNode from '../components/telephony-designer/nodes/TelBranchNode'
 import TelEndNode from '../components/telephony-designer/nodes/TelEndNode'
@@ -59,7 +63,7 @@ import GetCustomFieldNode from '../components/telephony-designer/nodes/GetCustom
 import StoreValueNode from '../components/telephony-designer/nodes/StoreValueNode'
 import GetValueNode from '../components/telephony-designer/nodes/GetValueNode'
 
-import type { TelNodeData, TelephonyNodeType, TelephonyFlowDefinition, TelephonyNodeDef } from '../types/telephony-designer'
+import type { TelNodeData, TelephonyNodeType, TelephonyFlowDefinition, TelephonyNodeDef, TimeWindow } from '../types/telephony-designer'
 import { defaultTelNodeData, TELEPHONY_NODE_META } from '../types/telephony-designer'
 import VersionHistoryPanel from '../components/versioning/VersionHistoryPanel'
 
@@ -70,7 +74,7 @@ const EVENT_LISTENER_TYPES: TelephonyNodeType[] = [
   'tf_on_custom_event',
 ]
 
-// Maps internal handle IDs to display labels shown on edges in the canvas
+// Maps internal handle/option IDs to display labels shown in the picker modal and on edges
 const HANDLE_DISPLAY_LABELS: Record<string, string> = {
   end_of_stream: 'End Of Play Stream',
   duration_reached: 'Duration Reached',
@@ -78,15 +82,58 @@ const HANDLE_DISPLAY_LABELS: Record<string, string> = {
   interrupted: 'Interrupted',
   available: 'Available',
   unavailable: 'Not Available',
+  not_blocked: 'Not Blocked',
+  no_match: 'No Match',
+  invalid_time: 'Invalid Time',
+  no_message: 'No Message',
 }
 
-// Node types with a fixed (non-user-editable) exit-option list — wired via a single physical
-// handle + option-picker modal, same UX as the CRM designer's select-input node, rather than the
-// telephony designer's usual fixed-physical-handle-per-transition approach (this node only has
-// one physical handle, so a direct handle-id-as-transition connect won't work).
+function formatOptionLabel(opt: string): string {
+  return HANDLE_DISPLAY_LABELS[opt] ?? (opt.charAt(0).toUpperCase() + opt.slice(1))
+}
+
+// Every telephony node type now funnels its exit(s) through a single physical handle — a plain
+// pass-through connect for a single-transition node, or (for a node with named branches) the
+// same option-picker modal UX as the CRM designer's select-input node. Static option lists live
+// here; a handful of node types compute their live option list from their own data instead (see
+// computePickerOptions below) because the branch set is user-configured per node instance.
 const FIXED_EXIT_OPTIONS: Partial<Record<TelephonyNodeType, string[]>> = {
   tf_general_api_call: ['success', 'error', 'timeout'],
   tf_set_custom_field: ['success', 'invalid_value', 'error'],
+  tf_check_block_list: ['blocked', 'not_blocked'],
+  tf_check_agent_availability: ['available', 'unavailable'],
+  tf_branch: ['true', 'false'],
+  tf_route_to_queue: ['default', 'on_timeout'],
+  tf_transfer: ['transferred', 'failed'],
+  tf_secure_collect: ['collected', 'failed', 'timeout'],
+  tf_data_collect: ['collected', 'timeout'],
+  tf_repeat: ['repeat', 'finished'],
+  tf_voicemail: ['recorded', 'no_message'],
+  tf_scheduled_callback: ['scheduled', 'invalid_time', 'failed'],
+  tf_queue_callback: ['queued', 'failed'],
+}
+
+// Live exit-option list for a node instance: static lookup first, then per-type dynamic
+// derivation for the three node types whose branch set depends on their own configuration.
+// Returns null for a node with no picker at all (plain single-handle pass-through connect).
+function computePickerOptions(type: TelephonyNodeType, data: TelNodeData): string[] | null {
+  const fixed = FIXED_EXIT_OPTIONS[type]
+  if (fixed) return fixed
+  if (type === 'tf_time_of_day') {
+    const windows = (data.windows as TimeWindow[] | undefined) ?? []
+    return [...windows.map((w) => w.name), 'no_match']
+  }
+  if (type === 'tf_ivr_menu') {
+    const options = (data.options as { transition: string }[] | undefined) ?? []
+    const trailing = (data.alwaysListen as boolean) ? 'default' : 'no_match'
+    return [...options.map((o) => o.transition), trailing]
+  }
+  if (type === 'tf_play') {
+    const handles = getPlayHandles(data)
+    // A looping file with no duration/interrupt gate has no named branches at all — plain handle.
+    return handles.length > 0 ? handles.map((h) => h.id) : null
+  }
+  return null
 }
 
 const nodeTypes = {
@@ -173,18 +220,20 @@ function toTelDef(
   }
 }
 
-// For a node with a single physical source handle (or none), "default" is the implicit/only
-// handle — collapsed to null so React Flow matches it against that one unlabeled handle and no
-// redundant "default" label shows on the wire. For 'multi'-handle nodes, "default" can instead be
-// ONE OF SEVERAL real, explicitly-id'd handles (tf_route_to_queue's default+on_timeout;
-// tf_ivr_menu's per-digit options + default in async/hot-digit mode) — collapsing it to null
-// there is wrong: React Flow has no unlabeled handle to fall back to on a multi-handle node, so
-// the edge ends up mis-attached to whichever handle happens to resolve first (found live, S141 —
-// an async tf_ivr_menu's "default" edge reattached itself onto the digit-option handle on reload).
-// Keep the literal id for those so it matches its own real handle.
-function normHandle(h: string | null | undefined, collapseDefault: boolean): string | null {
-  if (!h) return null
-  return h === 'default' && collapseDefault ? null : h
+// Every node type has at most one physical source handle now, so "default" is always the
+// implicit/only handle — collapsed to null so React Flow matches it against that one unlabeled
+// handle and no redundant "default" label shows on the wire.
+//
+// (Historical note: this used to take a `collapseDefault` flag, because some node types rendered
+// several REAL positioned handles where "default" was one of several genuine handle ids
+// (tf_route_to_queue's default+on_timeout; tf_ivr_menu's per-digit options + default in
+// async/hot-digit mode) — collapsing it there was wrong and caused a real mis-attachment bug
+// (S141). Those node types are now on the single-handle option-picker pattern instead — see
+// FIXED_EXIT_OPTIONS / computePickerOptions — so there is no longer a case where "default" is a
+// real handle id rather than the implicit one; picker-node transitions bypass normHandle entirely
+// below, for the same reason.)
+function normHandle(h: string | null | undefined): string | null {
+  return !h || h === 'default' ? null : h
 }
 
 function fromTelDef(def: TelephonyFlowDefinition): {
@@ -211,31 +260,37 @@ function fromTelDef(def: TelephonyFlowDefinition): {
   }
 
   for (const [id, nodeDef] of Object.entries(def.nodes)) {
-    // Fixed-exit-option nodes (e.g. tf_general_api_call) render one physical "default" handle —
-    // the option name travels as edge data, not as a distinct handle id.
-    const isFixedOptionNode = FIXED_EXIT_OPTIONS[nodeDef.type] !== undefined
-    // 'multi'-handle nodes can have "default" as one of several REAL positioned handles
-    // (tf_route_to_queue, async tf_ivr_menu) — don't collapse it to null for those (see normHandle).
-    const collapseDefault = isFixedOptionNode || TELEPHONY_NODE_META[nodeDef.type]?.handles !== 'multi'
+    // Picker-pattern nodes (single physical handle; the branch name travels as edge data, never
+    // as a distinct handle id) use their RAW transition key for the label/transition, bypassing
+    // normHandle's "default" collapse — some of these legitimately use the literal string
+    // "default" as one real, named branch (tf_route_to_queue's default queue-chain exit; async
+    // tf_ivr_menu's default continuation), and collapsing it here would blank that branch's label.
+    const isPickerNode = computePickerOptions(nodeDef.type, nodeDef as unknown as TelNodeData) !== null
     for (const [handle, target] of Object.entries(nodeDef.transitions)) {
       const edgeId = `e-${id}-${target}-${handle}`
       const edgeDef = def._waypoints?.[edgeId]
-      const normalizedHandle = normHandle(handle, collapseDefault)
-      const visualHandle = isFixedOptionNode ? null : normalizedHandle
-      const seen = edges.filter(
-        (e) => e.source === id && normHandle(e.sourceHandle, collapseDefault) === normalizedHandle && e.target === target
+      const normalizedHandle = normHandle(handle)
+      const visualHandle = isPickerNode ? null : normalizedHandle
+      // Dedup on the visual handle only makes sense for a real positioned handle. Every picker-node
+      // edge shares the same null visual handle by design, so this check must be skipped for them —
+      // otherwise two genuinely different branches that happen to both point at the same target
+      // (e.g. tf_route_to_queue's "default" and "on_timeout" both wired to the same next node, which
+      // the multi-select picker modal makes easy to create in one action) would collide here and one
+      // would silently vanish on the next reload.
+      const seen = !isPickerNode && edges.some(
+        (e) => e.source === id && normHandle(e.sourceHandle) === normalizedHandle && e.target === target
       )
-      if (seen.length > 0) continue
+      if (seen) continue
       edges.push({
         id: edgeId,
         source: id,
         target,
         sourceHandle: visualHandle,
-        label: normalizedHandle
-          ? (HANDLE_DISPLAY_LABELS[normalizedHandle] ?? normalizedHandle)
-          : undefined,
+        label: isPickerNode
+          ? formatOptionLabel(handle)
+          : (normalizedHandle ? (HANDLE_DISPLAY_LABELS[normalizedHandle] ?? normalizedHandle) : undefined),
         type: 'editable',
-        data: { waypoints: edgeDef ?? [], transition: normalizedHandle ?? 'default' },
+        data: { waypoints: edgeDef ?? [], transition: isPickerNode ? handle : (normalizedHandle ?? 'default') },
       })
     }
   }
@@ -250,7 +305,7 @@ function DesignerCanvas() {
   const navigate = useNavigate()
   const { screenToFlowPosition } = useReactFlow()
 
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node<TelNodeData>>([])
+  const [nodes, setNodes, onNodesChangeRaw] = useNodesState<Node<TelNodeData>>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [entryNodeId, setEntryNodeId] = useState<string | null>(null)
   const [flowId, setFlowId] = useState<string | null>(routeId ?? null)
@@ -260,9 +315,24 @@ function DesignerCanvas() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [status, setStatus] = useState('')
   const [showHistory, setShowHistory] = useState(false)
+  const [selectionModeOn, setSelectionModeOn] = useState(false)
 
   // Option-picker modal for fixed-exit-option nodes (e.g. tf_general_api_call)
   const [pendingConn, setPendingConn] = useState<Connection | null>(null)
+
+  const makeEdgeId = useCallback(
+    (newSource: string, newTarget: string, key: string) => `e-${newSource}-${newTarget}-${key}`,
+    [],
+  )
+  const onNodesRemoved = useCallback(
+    (removedIds: string[]) => {
+      setSelectedNodeId((cur) => (cur && removedIds.includes(cur) ? null : cur))
+      setEntryNodeId((cur) => (cur && removedIds.includes(cur) ? null : cur))
+    },
+    [],
+  )
+  useCanvasClipboard<TelNodeData>({ nodes, edges, setNodes, setEdges, makeEdgeId, onNodesRemoved })
+  const onNodesChange = useNodesChangeWithWaypoints(nodes, onNodesChangeRaw, setEdges)
 
   // Load an existing flow's current definition into the canvas — used on mount and again after
   // a version-history revert (the revert response carries the newly-active definition).
@@ -288,42 +358,50 @@ function DesignerCanvas() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeId])
 
-  // When an option is picked in the modal, complete the pending edge (single physical "default"
-  // handle; the chosen option travels as edge data, not as a distinct handle id).
-  const onOptionPicked = useCallback((optionValue: string) => {
+  // When one or more options are confirmed in the modal, wire each to the pending target in one
+  // update (single physical "default" handle; each chosen option travels as edge data, not as a
+  // distinct handle id) — re-wiring any that were already wired elsewhere.
+  const onOptionsConfirmed = useCallback((optionValues: string[]) => {
     if (!pendingConn) return
     const conn = pendingConn
     setPendingConn(null)
+    const optionSet = new Set(optionValues)
     setEdges((eds) => {
       const withoutOld = eds.filter((e) => {
         if (e.source !== conn.source) return true
         const key = (e.data?.transition as string | undefined) ?? e.sourceHandle
-        return key !== optionValue
+        return !key || !optionSet.has(key)
       })
-      const newEdge: Edge = {
+      const newEdges: Edge[] = optionValues.map((optionValue) => ({
         ...conn,
         id: `e-${conn.source}-${conn.target}-${optionValue}`,
         sourceHandle: null,
         type: 'editable',
-        label: optionValue.charAt(0).toUpperCase() + optionValue.slice(1),
+        label: formatOptionLabel(optionValue),
         data: { waypoints: [], transition: optionValue },
-      }
-      return [...withoutOld, newEdge]
+      }))
+      return [...withoutOld, ...newEdges]
     })
   }, [pendingConn, setEdges])
 
   const onConnect = useCallback(
     (connection: Connection) => {
       const sourceNode = nodes.find((n) => n.id === connection.source)
-      const fixedOptions = sourceNode ? FIXED_EXIT_OPTIONS[sourceNode.type as TelephonyNodeType] : undefined
-      if (fixedOptions) {
+      const options = sourceNode ? computePickerOptions(sourceNode.type as TelephonyNodeType, sourceNode.data) : null
+      if (options !== null) {
         setPendingConn(connection)
         return
       }
+      // Every remaining node type has exactly one physical handle, so normalize both sides the
+      // same way normHandle() does when loading saved flows before comparing. Without this, a live
+      // drag off a handle whose JSX id="default" reports sourceHandle="default" while an
+      // already-loaded edge from that same handle was normalized to null on load — the raw `===`
+      // check would then miss the old edge and leave it dangling alongside the new one.
       setEdges((eds) => {
         // Enforce one outgoing edge per source handle
         const filtered = eds.filter(
-          (e) => !(e.source === connection.source && e.sourceHandle === connection.sourceHandle),
+          (e) => !(e.source === connection.source
+            && normHandle(e.sourceHandle) === normHandle(connection.sourceHandle)),
         )
         const transition = connection.sourceHandle && connection.sourceHandle !== 'default'
           ? connection.sourceHandle
@@ -499,16 +577,17 @@ function DesignerCanvas() {
             onDragOver={onDragOver}
             onNodeClick={(_, n) => setSelectedNodeId(n.id)}
             onPaneClick={() => setSelectedNodeId(null)}
-            onKeyDown={(e) => {
-              if (e.key === 'Delete') {
-                if (selectedNodeId) onDeleteNode(selectedNodeId)
-                setEdges((eds) => eds.filter((ed) => !ed.selected))
-              }
-            }}
+            onNodesDelete={(deleted) => onNodesRemoved(deleted.map((n) => n.id))}
             fitView
+            deleteKeyCode="Delete"
+            colorMode="dark"
+            selectionOnDrag={selectionModeOn}
+            panOnDrag={selectionModeOn ? [2] : true}
           >
             <Background color="#374151" gap={20} />
-            <Controls />
+            <Controls>
+              <CanvasSelectionToggle active={selectionModeOn} onToggle={() => setSelectionModeOn((v) => !v)} />
+            </Controls>
             <MiniMap
               nodeColor={(n) => TELEPHONY_NODE_META[n.type as TelephonyNodeType]?.color ?? '#374151'}
               style={{ background: '#1f2937' }}
@@ -531,10 +610,10 @@ function DesignerCanvas() {
         )}
       </div>
 
-      {/* Option picker modal — shown when connecting from a fixed-exit-option node */}
+      {/* Option picker modal — shown when connecting from a node whose branches funnel through one handle */}
       {pendingConn && (() => {
         const srcNode = nodes.find((n) => n.id === pendingConn.source)
-        const options = (srcNode ? FIXED_EXIT_OPTIONS[srcNode.type as TelephonyNodeType] : undefined) ?? []
+        const options = (srcNode ? computePickerOptions(srcNode.type as TelephonyNodeType, srcNode.data) : null) ?? []
         const wiredMap = new Map(
           edges
             .filter((e) => e.source === pendingConn.source)
@@ -545,48 +624,13 @@ function DesignerCanvas() {
             .filter((x): x is [string, string] => x !== null),
         )
         return (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm cursor-default"
-            style={{ pointerEvents: 'all' }}
-          >
-            <div className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl w-80 p-5 flex flex-col gap-4">
-              <div>
-                <p className="text-sm font-semibold text-white">Which option leads here?</p>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  Picking an already-wired option replaces its existing connection.
-                </p>
-              </div>
-              <div className="flex flex-col gap-1.5">
-                {options.map((opt) => {
-                  const isWired = wiredMap.has(opt)
-                  return (
-                    <button
-                      key={opt}
-                      type="button"
-                      onClick={() => onOptionPicked(opt)}
-                      className={`w-full text-left px-3 py-2 rounded-lg text-sm border transition-colors cursor-pointer
-                        ${isWired
-                          ? 'text-amber-300 bg-amber-950/30 border-amber-800/50 hover:bg-amber-900/40'
-                          : 'text-white bg-gray-800 border-gray-700 hover:bg-emerald-900/50 hover:border-emerald-600'
-                        }`}
-                    >
-                      <span>{opt.charAt(0).toUpperCase() + opt.slice(1)}</span>
-                      {isWired && (
-                        <span className="ml-2 text-[10px] text-amber-500 font-medium">↺ re-wire</span>
-                      )}
-                    </button>
-                  )
-                })}
-              </div>
-              <button
-                type="button"
-                onClick={() => setPendingConn(null)}
-                className="text-xs text-gray-500 hover:text-gray-300 self-center transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
+          <OptionPickerModal
+            options={options}
+            wiredMap={wiredMap}
+            formatLabel={formatOptionLabel}
+            onConfirm={onOptionsConfirmed}
+            onCancel={() => setPendingConn(null)}
+          />
         )
       })()}
 

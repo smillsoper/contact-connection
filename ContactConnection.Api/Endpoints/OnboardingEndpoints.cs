@@ -119,7 +119,7 @@ public static class OnboardingEndpoints
             try
             {
                 var baseUrl = configuration["App:BaseUrl"] ?? "https://contactconnection.io";
-                var acceptUrl = $"{baseUrl}/admin-invite/{agentInvite.Token}";
+                var acceptUrl = $"https://{tenant.Subdomain}.{new Uri(baseUrl).Host}/admin-invite/{agentInvite.Token}";
                 await email.SendAsync(
                     adminEmail,
                     TenantAdminInviteEmail.Subject(tenant.Name, "Administrator"),

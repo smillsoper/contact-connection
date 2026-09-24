@@ -8,21 +8,12 @@ interface TelNodeShellProps {
   isEntry?: boolean
   selected?: boolean
   children?: React.ReactNode
-  extraHandles?: React.ReactNode
 }
 
-export default function TelNodeShell({ type, label, isEntry, selected, children, extraHandles }: TelNodeShellProps) {
+export default function TelNodeShell({ type, label, isEntry, selected, children }: TelNodeShellProps) {
   const meta = TELEPHONY_NODE_META[type]
   const hasSingle    = meta.handles === 'single'
-  const hasDual      = meta.handles === 'dual'
   const isEventNode  = meta.handles === 'source-only'
-
-  // tf_check_agent_availability deliberately does NOT share tf_check_block_list's
-  // blocked(red)/not_blocked(green) scheme — it gets its own available(green)/unavailable(red)
-  // pair below (fixed S138; it previously rode along with the block-list node's labels/colors,
-  // which read backwards for an availability check).
-  const isDualCheck      = type === 'tf_check_block_list'
-  const isGenericBranch  = type === 'tf_branch'
 
   return (
     <div
@@ -66,30 +57,12 @@ export default function TelNodeShell({ type, label, isEntry, selected, children,
         {children}
       </div>
 
-      {/* Extra handles (e.g. time-of-day multiple transitions) */}
-      {extraHandles}
-
-      {/* Single source handle — regular nodes and event listener nodes */}
-      {!extraHandles && (hasSingle || isEventNode) && (
+      {/* Single source handle — regular nodes and event listener nodes. Every telephony node type
+          now funnels its exit(s) through this one physical handle: a plain pass-through connect
+          for single-transition nodes, or the option-picker modal (see FIXED_EXIT_OPTIONS /
+          computePickerOptions in TelephonyDesignerPage.tsx) for nodes with named branches. */}
+      {(hasSingle || isEventNode) && (
         <Handle type="source" position={Position.Bottom} id="default" style={{ background: '#9ca3af' }} />
-      )}
-
-      {/* Dual handles for branch / check nodes */}
-      {!extraHandles && hasDual && (
-        <>
-          <Handle
-            type="source"
-            position={Position.Bottom}
-            id={isDualCheck ? 'blocked' : isGenericBranch ? 'true' : 'available'}
-            style={{ left: '30%', background: isDualCheck ? '#ef4444' : '#22c55e' }}
-          />
-          <Handle
-            type="source"
-            position={Position.Bottom}
-            id={isDualCheck ? 'not_blocked' : isGenericBranch ? 'false' : 'unavailable'}
-            style={{ left: '70%', background: isDualCheck ? '#22c55e' : '#ef4444' }}
-          />
-        </>
       )}
     </div>
   )

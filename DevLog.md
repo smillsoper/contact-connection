@@ -167,6 +167,8 @@
 | 155 | 2026-09-22 | 2:24 PM PDT | 2:47 PM PDT | 23 min | ~15512 min |
 | 156 | 2026-09-22 | 5:06 PM PDT | 5:55 PM PDT | 49 min | ~15561 min |
 | 157 | 2026-09-22 | 5:57 PM PDT | 6:10 PM PDT | 13 min | ~15574 min |
+| 158 | 2026-09-22 | 6:10 PM PDT | 7:20 PM PDT | 70 min | ~15644 min |
+| 159 | 2026-09-23 | 10:08 AM PDT | 11:41 AM PDT | 93 min | ~15737 min |
 
 ---
 
@@ -9725,3 +9727,237 @@ first item. Full suite: **1086/1086 passing** (Release). `tsc --noEmit` clean on
 - Did not touch the CRM designer's variable-tag reference popup to call out that telephony's
   `{{flow.*}}` and CRM's `{{flow.*}}` are different namespaces — judged documentation-only, not a
   bug; flag if a user actually gets confused by it in practice.
+
+## Session 158
+
+**Date:** 2026-09-22
+**Start:** 6:10 PM PDT
+**End:** 7:20 PM PDT
+**Duration:** 70 minutes
+**Total Duration:** ~15644 minutes
+
+### Focus
+
+Continuation of Session 157 — attempted live verification of the `CheckBlockListNodeHandler`/
+`DtmfNodeHandler` fixes, which surfaced an unrelated but serious external blocker: the project's
+Telnyx account was deactivated for suspected fraud. Spent the rest of the session helping the user
+investigate and respond, not on further code changes.
+
+### 1. Spun up the local stack for live testing
+
+Started `dotnet watch run --project ContactConnection.Api` (docker compose services — Postgres,
+Redis, nginx, FreeSWITCH, cloudflared — were already up from a prior session) and armed a log watch
+for the two handlers under test plus general error patterns.
+
+### 2. Live test call never reached the stack
+
+User built a scratch telephony flow (Check Block List → Answer → Set Variable → Repeat → Send
+DTMF → Delay, looping 3x) specifically to exercise both fixes — `{{caller.ani}}` in `checkVariable`
+and `{{flow.repeat_digit}}` in the DTMF digits field (the latter a strong differentiator: the old
+hand-rolled substitution loop couldn't resolve a `flow.`-prefixed tag at all). User reported a busy
+signal and initially suspected a Hang Up vs. Reject node issue in the scratch flow.
+
+Investigation (queried `call_records`/`call_trace_events` in both dev tenant schemas, then the
+FreeSWITCH container's own `/var/log/freeswitch/freeswitch.log` directly) showed no new call record
+and zero inbound SIP INVITEs reaching FreeSWITCH in the relevant window, even though the
+`external::telnyx` gateway was `REGED` (healthy) the whole time. The call never got past the
+carrier — so the busy signal had nothing to do with the flow's Hang Up node.
+
+### 3. Root cause: Telnyx account blocked, then permanently deactivated
+
+User tried to log into the Telnyx portal to check call logs and found the account blocked; emailed
+support, then fraud department. Fraud team's reply: account permanently deactivated for
+"fraudulent inbound/outbound traffic... impersonating a particular company," no further detail
+offered.
+
+Audited every caller-ID-capable mechanism in the codebase to rule out a self-inflicted cause before
+the user replied:
+- The only `tf_set_caller_id` node anywhere in the test tenant's flows passes through
+  `{{caller.ani}}` (the real caller's own number) — no spoofed identity.
+- No `tf_set_sip_header`/`tf_get_sip_header` nodes exist in any flow (nothing rewriting
+  `P-Asserted-Identity`/`Remote-Party-ID`).
+- Campaign caller ID is the user's own Telnyx-verified test number.
+- `vars.xml`'s `outbound_caller_id=ContactConnection` is dead config — grepped the whole
+  FreeSWITCH tree, nothing references it.
+- Telnyx gateway config (`external.xml`) has no caller-name override; `caller-id-in-from=true`
+  just passes through whatever was already set.
+
+Found nothing in the codebase capable of presenting a spoofed/third-party identity. Helped draft a
+reply to Telnyx pushing back on the vague accusation and asking for specific call timestamps/the
+company allegedly impersonated.
+
+### 4. Compiled supporting evidence for the fraud-department reply
+
+Queried the DB for all 46 call records across both dev tenant schemas from the last 7 days, cross-
+referenced against FreeSWITCH's own SIP channel log (independent of the application layer). Key
+finding: **every single call, in either direction, over the last 7 days involved only 3 phone
+numbers** — the account's 2 owned Telnyx DIDs and the developer's own personal cell phone — and
+every inbound INVITE's source IP fell within Telnyx's own published signaling ranges. No third
+party was ever a party to any call in the retained history, so there's no company whose identity
+this traffic could have impersonated.
+
+Produced 3 files (in this session's scratchpad, not committed to the repo):
+- `telnyx_traffic_review.txt` — narrative summary of the above for the fraud team
+- `call_summary.csv` — all 46 call records with ANI/DNIS/timestamps/duration
+- `freeswitch_channel_events.log` — raw New-Channel/Hangup lines straight from FreeSWITCH's log
+
+User attached all three to the reply email and sent it.
+
+### 5. Side question: agent softphone manual-dial field
+
+User asked whether an earlier test of the (known-incomplete) agent softphone's manual dial-pad
+entry could have placed an unexpected outbound call with an unknown caller ID. Traced the code
+(`SoftphonePanel.tsx`'s `handleDial` → a `JsSIP.UA` WebRTC session registered on FreeSWITCH's
+**internal** profile, which has `<gateways/>` — empty, by design) and cross-checked against
+FreeSWITCH's own log from earlier today (three `sofia/internal/1002@test-tenant` sessions,
+each `park()` then hangup `[ORIGINATOR_CANCEL]`, none ever touching `sofia/external/...`). Confirmed
+the feature is wired to a real SIP session but the internal profile has no route to the Telnyx
+gateway — the dial silently parks with no caller ID ever transmitted externally. Ruled out as a
+contributing factor.
+
+### Not done / follow-up
+
+- `CheckBlockListNodeHandler`/`DtmfNodeHandler` still not live-verified — blocked on Telnyx's fraud
+  department response. See `project_telnyx_account_blocked_s157.md` (memory) for full detail; the
+  account is now reported *permanently deactivated*, not just blocked, so this may need a new
+  Telnyx account or an escalated appeal before verification can resume.
+- Dev stack (docker compose + `dotnet watch run` API) left running for whenever this clears.
+- DevLog.md this entry is drafted locally, not yet committed — no code changed this session, only
+  investigation and external correspondence; ask before committing a docs-only change like this.
+
+## Session 159
+
+**Date:** 2026-09-23
+**Start:** 10:08 AM PDT
+**End:** 11:41 AM PDT
+**Duration:** 93 minutes
+**Total Duration:** ~15737 minutes
+
+### Focus
+
+Telnyx account still blocked, so the session avoided anything needing a live test call. Two threads:
+fixing the tenant-admin invite email so a former coworker (Clint, from Life Seasons, evaluating the
+platform as an informal outside tester) could actually get in, then a full UI/UX pass on both flow
+designers (multi-select, cut/copy/paste, a dangling-edge bug, and normalizing every multi-exit node
+type onto one connection pattern) per the plan at `federated-sparking-sphinx.md`.
+
+### 1. Tenant-admin invite email — two real bugs found and fixed
+
+Clint's invite link came back "unreachable." Root causes, both in how invite/onboarding emails
+build their links from `App:BaseUrl`:
+
+- `appsettings.Development.json`'s `App:BaseUrl` was `http://localhost:5173` — only reachable on
+  Stephen's own machine, even though the Cloudflare tunnel already makes `*.contactconnection.io`
+  reachable externally during local dev. Changed to `https://contactconnection.io` to match prod.
+- Bigger bug: `AdminAgentsEndpoints.cs`, `OnboardingEndpoints.cs`, and `PortalTenantsEndpoints.cs`
+  (×3 call sites) built the clickable accept/onboarding link from the bare apex `baseUrl`, while the
+  neighboring `loginUrl` in the same function correctly prefixed the tenant subdomain — only the
+  wildcard `*.contactconnection.io` route has a working tunnel/DNS entry, the bare apex doesn't. Fixed
+  all 5 call sites to build the link from `https://{tenant.Subdomain}.{host}` consistently. Clint's
+  re-sent invite worked; he's now poking at the Flow Designer and setup screens on the test tenant.
+
+### 2. Flow Designer UI/UX — Phase A (theming, clipboard, dangling edge, multi-select modal)
+
+Three issues Stephen flagged from a screenshot of the Telephony Designer's barely-visible Controls
+panel, plus his own testing:
+
+- **Theme bug**: `TelephonyDesignerPage.tsx`'s `<ReactFlow>` never set `colorMode="dark"` (the CRM
+  designer already did), so its built-in Controls/MiniMap chrome rendered in React Flow's default
+  light skin — invisible against the dark shell. One-line fix.
+- **New `CanvasSelectionToggle`** (`components/designer/`) — a custom button inside `<Controls>` on
+  both designers toggling box-select-on-drag vs. pan-on-drag, so multi-selecting nodes doesn't
+  require a keyboard modifier.
+- **New shared `useCanvasClipboard` hook** — extracted the CRM designer's existing Ctrl+C/Ctrl+V
+  logic (Telephony had none) into one hook used by both designers, and added Ctrl+X (cut), which
+  neither designer had before.
+- **Dangling-edge bug**: `TelephonyDesignerPage.tsx`'s `onConnect` compared raw `sourceHandle`
+  strings; a single-handle node whose JSX literally sets `id="default"` (e.g. `PlayNode`) reports
+  `"default"` on a fresh drag but `null` after a saved flow reloads (normalized on the way in) — the
+  old edge from that handle never matched and stuck around. Fixed by normalizing both sides through
+  the same convention the loader already used (the CRM designer's `onConnect` already did this
+  correctly, so it never had the bug).
+- **New shared `OptionPickerModal`** — replaced the near-duplicate "which option leads here?" modal
+  inline in both designer pages with one component, upgraded to multi-select: check several branches,
+  hit "Connect N branches," and each gets wired (or re-wired, if already connected elsewhere) to the
+  same target in one action.
+- Converted the CRM `branch` node from a positioned dual-handle (`true`/`false`) to the same
+  single-handle + modal pattern already used by `api_call`/`scheduled_callback`/`set_custom_field` —
+  removed the now-dead `hasDual` block from `NodeShell.tsx`.
+- **New shared `useNodesChangeWithWaypoints` hook** — Stephen reported that dragging a group of
+  connected nodes together left `EditableEdge`'s curve pivot points behind (they're stored as
+  absolute canvas coordinates in `edge.data.waypoints`, untouched by node drags). The hook diffs each
+  node's per-frame drag delta and, for any edge whose *both* endpoints moved by the same delta in
+  that frame (a rigid group move), translates its waypoints by the same amount. Deliberately scoped
+  to "both endpoints moved together" — a free-floating waypoint has no single correct way to follow
+  when only one end of its edge is being dragged.
+
+### 3. Flow Designer UI/UX — Phase B (normalize every Telephony node onto the picker pattern)
+
+Originally planned as a follow-up session, but small enough once Phase A's infrastructure was in
+place that it finished the same day. Converted all 13 remaining Telephony node types with more than
+one exit branch onto the single-handle + `OptionPickerModal` pattern, matching what Phase A did for
+CRM's `branch` node:
+
+- **3 shell-driven, static** (`tf_check_block_list`, `tf_check_agent_availability`, `tf_branch`) —
+  deleted the `hasDual` block from `TelNodeShell.tsx` entirely (no longer used by any node type).
+- **8 per-node, static** (`tf_route_to_queue`, `tf_transfer`, `tf_secure_collect`, `tf_data_collect`,
+  `tf_repeat`, `tf_voicemail`, `tf_scheduled_callback`, `tf_queue_callback`) — removed each node
+  component's own positioned-`<Handle>` JSX, added their fixed option lists to `FIXED_EXIT_OPTIONS`.
+- **3 dynamic** (`tf_play`, `tf_time_of_day`, `tf_ivr_menu`) — branch set depends on the node's own
+  configuration (audio settings, configured time windows, configured IVR digits), so added a
+  `computePickerOptions()` function in `TelephonyDesignerPage.tsx` that derives the live option list
+  per node instance, mirroring the CRM designer's existing `pickerOptions()` for select-input nodes.
+  Exported `getPlayHandles()` from `PlayNode.tsx` so `computePickerOptions` can reuse its logic
+  instead of re-deriving it.
+- `TELEPHONY_NODE_META`'s `handles` union simplified from `'single' | 'dual' | 'none' | 'multi' |
+  'source-only'` down to `'single' | 'none' | 'source-only'` — every node type now has at most one
+  physical handle, so `'dual'`/`'multi'` became fully dead.
+
+Two real correctness bugs surfaced by this conversion, caught before they could bite:
+1. Some branches are legitimately named the literal string `"default"` (`tf_route_to_queue`'s
+   default queue-chain exit; async `tf_ivr_menu`'s default continuation) — the existing reload logic
+   (`normHandle`'s collapse-to-null) would have blanked that branch's label. Fixed by having
+   picker-node edges use their raw transition key for the label, bypassing the collapse.
+2. Since every picker-node edge now shares one physical (null) visual handle, the pre-existing
+   duplicate-edge guard in `fromTelDef` would treat two *different* branches pointing at the *same*
+   target as duplicates and silently drop one on the next reload — a real risk given the new
+   multi-select modal makes exactly that a one-click action. Fixed by skipping that dedup check for
+   picker nodes, where comparing on the (always-identical) visual handle was never meaningful anyway.
+
+Also simplified `normHandle()` from a two-argument function (`collapseDefault` flag, needed only
+because some node types used to have "default" as one of several real positioned handles — the S141
+bug this guarded against) down to one argument, since no node type has more than one real handle
+left.
+
+### 4. Multi-node keyboard delete only removed one node (Telephony designer)
+
+Stephen reported that deleting a multi-node selection only removed the last-selected node. Root
+cause: `TelephonyDesignerPage.tsx` had a hand-rolled `onKeyDown` for the Delete key that only removed
+the single `selectedNodeId` (the node whose properties panel was open), never React Flow's actual
+multi-node selection. The CRM designer never had this bug — it already used React Flow's native
+`deleteKeyCode="Delete"`, which deletes the whole selection at once. Replaced Telephony's custom
+handler with the same native `deleteKeyCode` approach, plus an `onNodesDelete` callback (reusing the
+cleanup function already built for cut) to keep `selectedNodeId`/`entryNodeId` in sync.
+
+While fixing this, caught the same underlying issue in quieter form in the CRM designer: bulk-deleting
+the entry node via keyboard correctly removed it from the canvas but never cleared `entryNodeId`,
+so a subsequent Save could write an `entry_node` reference to a node that no longer exists. Added the
+same `onNodesDelete` cleanup there too.
+
+### Verification
+
+`ContactConnection.Web`: `npm run build` (tsc -b + vite build) clean, 0 errors, after every
+incremental change. Both designers manually exercised in the running dev server (API + Vite already
+up throughout — kept alive per this session's priority in case Clint logged in): Controls panel
+visible in dark mode, selection-mode toggle, cut/copy/paste in both designers, waypoints following a
+group drag, multi-node keyboard delete, and the CRM `branch`/Telephony `route_to_queue`/etc. modal
+conversions all confirmed working by Stephen directly.
+
+### Not done / follow-up
+
+- No live telephony verification possible this session (Telnyx account still deactivated, appeal
+  pending — see `project_telnyx_account_blocked_s157.md`).
+- Existing saved flow JSON is unaffected by the Phase B handle-normalization changes (transition
+  keys unchanged), but only Stephen's own manual check confirmed the specific "Test Campaign 1"
+  flow from the screenshot still loads correctly — worth a broader spot-check across other saved
+  flows before assuming every edge case is covered.

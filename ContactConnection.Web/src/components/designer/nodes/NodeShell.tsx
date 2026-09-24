@@ -14,7 +14,6 @@ interface NodeShellProps {
 export default function NodeShell({ type, label, isEntry, selected, children, sourceHandles }: NodeShellProps) {
   const meta = NODE_META[type]
   const hasSingle = meta.handles === 'single'
-  const hasDual = meta.handles === 'dual'
 
   return (
     <div
@@ -56,24 +55,6 @@ export default function NodeShell({ type, label, isEntry, selected, children, so
       {/* Single source handle */}
       {!sourceHandles && hasSingle && (
         <Handle type="source" position={Position.Bottom} id="default" style={{ background: '#9ca3af' }} />
-      )}
-
-      {/* Dual source handles (branch / api_call) */}
-      {!sourceHandles && hasDual && (
-        <>
-          <Handle
-            type="source"
-            position={Position.Bottom}
-            id={type === 'branch' ? 'true' : 'success'}
-            style={{ left: '30%', background: '#22c55e' }}
-          />
-          <Handle
-            type="source"
-            position={Position.Bottom}
-            id={type === 'branch' ? 'false' : 'error'}
-            style={{ left: '70%', background: '#ef4444' }}
-          />
-        </>
       )}
     </div>
   )

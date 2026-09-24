@@ -278,19 +278,19 @@ export interface TelephonyFlowDefinition {
 
 export const TELEPHONY_NODE_META: Record<
   TelephonyNodeType,
-  { label: string; color: string; description: string; handles: 'single' | 'dual' | 'none' | 'multi' | 'source-only' }
+  { label: string; color: string; description: string; handles: 'single' | 'none' | 'source-only' }
 > = {
   tf_check_block_list: {
     label: 'Block List',
     color: '#dc2626',
     description: 'Check if the caller is on the block list',
-    handles: 'dual',
+    handles: 'single',
   },
   tf_check_agent_availability: {
     label: 'Agent Availability',
     color: '#0369a1',
     description: 'Check if agents are available for this campaign',
-    handles: 'dual',
+    handles: 'single',
   },
   tf_reject: {
     label: 'Reject',
@@ -314,35 +314,38 @@ export const TELEPHONY_NODE_META: Record<
     label: 'Route to Queue',
     color: '#1d4ed8',
     description: 'Push the call to the agent queue',
-    // 'default' (chain into e.g. hold music) always renders, same as before; 'on_timeout' is a
-    // second, optional-to-wire handle for MaxQueueSize/QueueTimeoutSeconds overflow — see
-    // RouteToQueueNode.tsx.
-    handles: 'multi',
+    // 'default' (chain into e.g. hold music) + 'on_timeout' (MaxQueueSize/QueueTimeoutSeconds
+    // overflow) — both wired via the single-handle option picker, see FIXED_EXIT_OPTIONS.
+    handles: 'single',
   },
   tf_transfer: {
     label: 'Transfer',
     color: '#4338ca',
     description: 'Hand the caller to another queue, agent, flow, or external number',
-    // 'transferred' (usually terminal) + 'failed' (handoff could not be set up) source handles.
-    handles: 'multi',
+    // 'transferred' (usually terminal) + 'failed' (handoff could not be set up) — option picker.
+    handles: 'single',
   },
   tf_play: {
     label: 'Play',
     color: '#0f766e',
     description: 'Play an audio file or TTS on the call channel',
-    handles: 'multi',
+    // Exit options depend on audioSource/durationSeconds/interruptDigits — computed dynamically
+    // by computePickerOptions() in TelephonyDesignerPage.tsx (see PlayNode.tsx's getPlayHandles).
+    handles: 'single',
   },
   tf_time_of_day: {
     label: 'Time of Day',
     color: '#92400e',
     description: 'Branch based on day/time schedule',
-    handles: 'multi',
+    // One option per configured window + trailing 'no_match' — computed dynamically by
+    // computePickerOptions() in TelephonyDesignerPage.tsx.
+    handles: 'single',
   },
   tf_branch: {
     label: 'Branch',
     color: '#b45309',
     description: 'Conditional split on a variable',
-    handles: 'dual',
+    handles: 'single',
   },
   tf_end: {
     label: 'End',
@@ -426,7 +429,9 @@ export const TELEPHONY_NODE_META: Record<
     label: 'IVR Menu',
     color: '#0d9488',
     description: 'Play a prompt, collect DTMF, branch per option — or, in hot-digit mode, silently listen in the background',
-    handles: 'multi',
+    // One option per configured digit + trailing 'no_match'/'default' — computed dynamically by
+    // computePickerOptions() in TelephonyDesignerPage.tsx.
+    handles: 'single',
   },
   tf_clear_hot_digit: {
     label: 'Clear DTMF Listener',
@@ -440,14 +445,14 @@ export const TELEPHONY_NODE_META: Record<
     description: 'PCI guided DTMF capture (card / CVV / SSN) — masks the recording during entry',
     // 'collected' (all fields captured + encrypted) + 'failed' (bad config / validation / retries)
     // + 'timeout' (no entry).
-    handles: 'multi',
+    handles: 'single',
   },
   tf_data_collect: {
     label: 'Data Collect',
     color: '#0d9488',
     description: 'Play a prompt, collect a value (DTMF and/or voice), and store it in a variable',
     // 'collected' (non-empty value captured) + 'timeout' (nothing captured).
-    handles: 'multi',
+    handles: 'single',
   },
   tf_delay: {
     label: 'Delay',
@@ -460,7 +465,7 @@ export const TELEPHONY_NODE_META: Record<
     color: '#a16207',
     description: 'Loop back to this node up to N times, then fall through',
     // 'repeat' (loop body) + 'finished' (count reached).
-    handles: 'multi',
+    handles: 'single',
   },
   tf_record: {
     label: 'Record',
@@ -472,7 +477,7 @@ export const TELEPHONY_NODE_META: Record<
     label: 'Voicemail',
     color: '#9333ea',
     description: 'Play a greeting, record the caller’s message, optionally email it',
-    handles: 'multi',
+    handles: 'single',
   },
   tf_scheduled_callback: {
     label: 'Scheduled Callback',
@@ -480,14 +485,14 @@ export const TELEPHONY_NODE_META: Record<
     description: 'Book a callback for a specific future date/time',
     // 'scheduled' (booked → Play confirmation → Hangup) + 'invalid_time' (parsed but past /
     // outside allowed window) + 'failed' (no number / unparseable date).
-    handles: 'multi',
+    handles: 'single',
   },
   tf_queue_callback: {
     label: 'Queue Callback',
     color: '#0e7490',
     description: 'Virtual hold — keep queue position, call the caller back when an agent is free',
     // 'queued' (opted in → Play "we'll call you back" → Hangup) + 'failed' (no usable number).
-    handles: 'multi',
+    handles: 'single',
   },
   tf_whisper: {
     label: 'Whisper',

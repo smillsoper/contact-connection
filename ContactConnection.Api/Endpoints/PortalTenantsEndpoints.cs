@@ -71,8 +71,9 @@ public static class PortalTenantsEndpoints
                 try
                 {
                     var baseUrl = configuration["App:BaseUrl"] ?? "https://contactconnection.io";
-                    var onboardingUrl = $"{baseUrl}/onboarding/{inviteToken}";
-                    var loginUrl = $"https://{tenant.Subdomain}.{new Uri(baseUrl).Host}/login";
+                    var tenantHost = $"https://{tenant.Subdomain}.{new Uri(baseUrl).Host}";
+                    var onboardingUrl = $"{tenantHost}/onboarding/{inviteToken}";
+                    var loginUrl = $"{tenantHost}/login";
                     await email.SendAsync(
                         tenant.InviteEmail,
                         TenantInviteEmail.Subject(tenant.Name),
@@ -182,8 +183,9 @@ public static class PortalTenantsEndpoints
         try
         {
             var baseUrl = configuration["App:BaseUrl"] ?? "https://contactconnection.io";
-            var onboardingUrl = $"{baseUrl}/onboarding/{invite.Token}";
-            var loginUrl = $"https://{tenant.Subdomain}.{new Uri(baseUrl).Host}/login";
+            var tenantHost = $"https://{tenant.Subdomain}.{new Uri(baseUrl).Host}";
+            var onboardingUrl = $"{tenantHost}/onboarding/{invite.Token}";
+            var loginUrl = $"{tenantHost}/login";
             await email.SendAsync(
                 tenant.InviteEmail,
                 TenantInviteEmail.Subject(tenant.Name),
@@ -256,8 +258,9 @@ public static class PortalTenantsEndpoints
         try
         {
             var baseUrl = configuration["App:BaseUrl"] ?? "https://contactconnection.io";
-            var acceptUrl = $"{baseUrl}/admin-invite/{invite.Token}";
-            var loginUrl = $"https://{tenant.Subdomain}.{new Uri(baseUrl).Host}/login";
+            var tenantHost = $"https://{tenant.Subdomain}.{new Uri(baseUrl).Host}";
+            var acceptUrl = $"{tenantHost}/admin-invite/{invite.Token}";
+            var loginUrl = $"{tenantHost}/login";
             await email.SendAsync(
                 invite.Email,
                 TenantAdminInviteEmail.Subject(tenant.Name, "Administrator"),
