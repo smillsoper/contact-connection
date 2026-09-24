@@ -52,6 +52,16 @@ Nothing else matters if an agent can't take an order and get paid on a call.
       - Product management UI (create/edit products, presumably already partially covered by
         existing Product/Offer admin surfaces — verify what exists vs. what's missing for this
         client's catalog size).
+      - **Client/campaign-scoped offer management (found missing — Session 160, 2026-09-24):**
+        neither `Offer` nor `Product` has a `ClientId`/`CampaignId` field today — both are
+        tenant-wide only. `Offer`'s own doc comment describes "TV Special"/"Web Offer"/"Retention
+        Offer" as offers "for different campaigns, channels, or price points," but that's a naming
+        convention, not an enforced relationship — there's no way to query "offers for Campaign Y"
+        or restrict an offer to a specific client. **Decision: add real scoping**, not just a naming
+        convention. Add optional `ClientId`/`CampaignId` to `Offer` (nullable = tenant-wide,
+        matching the same campaign > client > tenant precedence `CustomFieldService` already uses
+        for scope resolution — see ARCHITECTURE.md §20), migration required. Then an admin view to
+        list/assign/filter offers by client/campaign, not just by product.
       - Out-of-stock handling — client sometimes runs out of stock on specific items. Not yet known
         whether we'll get direct access to their live stock levels (Shopify/WooCommerce API) or
         need to rely on manually-maintained inventory in our own system. Needs a decision/spike
@@ -78,15 +88,43 @@ Nothing else matters if an agent can't take an order and get paid on a call.
           fixed via new `CallRecord.CreateManual()` / `POST /call-records/manual`, called
           automatically by `FlowPanel.tsx` when previewing a flow with no real call in progress.
           User confirmed working on-screen.
-        - **Not started yet:** the `add_to_cart` CRM flow node type (script-driven automatic
-          add/replace based on agent input selection) — the upsell/replace design (using a node
-          reference + a `FlowVars` breadcrumb, distinct from `Offer.MixMatchCode`'s group-pricing
-          case) is planned but not built. Product management UI (create/edit products from the
-          admin/portal) also not yet verified as existing or missing.
         - **Also found and fixed along the way (infra, not scope):** the dev API process had drifted
           into two redundant, non-file-watching `dotnet watch` trees fighting over the same output
           files — nothing being edited was actually taking effect. Killed both, one clean instance
           now running.
+        - **Client/campaign-scoped offer management shipped and live-verified (same session,
+          continued).** `Offer.ClientId`/`CampaignId` (nullable = tenant-wide) + `SetScope()`
+          (campaign requires client, mirroring `CustomFieldDefinition`), migration
+          `AddOfferClientCampaignScope` applied. New `PUT /offers/{id}` and `PUT /products/{id}` —
+          neither existed before. **Two more real bugs caught and fixed while building this:** (1)
+          an offer created with just a price and no explicit payment schedule priced every cart
+          line at $0 (`PricingService` sums `Payments`, never `FullPrice`) — both Create and Update
+          now default to a single full-payment installment when none is given; (2) product search
+          always filtered to `Searchable=true`, so toggling a product non-searchable in the new
+          admin UI would make it invisible to the admin who just edited it — added an `includeAll`
+          flag used by the admin list only. New admin UI: **Admin → Commerce → Products & Offers**
+          (`/admin/products`, `/admin/products/:id/offers`) — create/edit products and their
+          offers, including the client/campaign scope picker. User confirmed working on-screen with
+          real test data (multiple Widget Mobile products/offers, one scoped to a real
+          client+campaign).
+        - **Explicit scope decision on the new admin UI (user call, same session):** it intentionally
+          only covers the "base" Offer/Product fields (name, price, shipping, tax/shipping exempt,
+          inventory status, scope). **Not exposed yet, staying API-only**: Offer — Quantity Price
+          Breaks, MixMatch, multi-payment schedules, AutoShip, upsell fields, ship-to/delivery-message
+          options, campaign window (ValidFrom/ValidTo), personalization prompts, flags. Product —
+          Keywords/AliasSKUs, geographic surcharges, Kits, category/attribute assignment, advanced
+          inventory (qty limits, restock date, backorder/discontinued messaging). **Decision: expand
+          incrementally as the feature that needs each one gets built** (e.g. QPB/MixMatch/Upsell
+          UI when the `add_to_cart` flow node's upsell/replace design gets built, AutoShip UI when
+          subscriptions get tested) — not a round-out-everything-now pass. Don't re-ask this; a
+          future session should just build the specific field(s) a concrete task needs.
+        - **Still not started:** the `add_to_cart` CRM flow node type itself (script-driven
+          automatic add/replace based on agent input selection) — the upsell/replace design (node
+          reference + a `FlowVars` breadcrumb, distinct from `Offer.MixMatchCode`'s group-pricing
+          case) is planned but not built. Also still open: wiring the agent-facing cart's offer
+          picker (`CartModal`) to actually filter by the call's client/campaign scope via
+          `IOfferRepository.GetAvailableForContextAsync` (built, not called from anywhere yet) —
+          right now scoping is admin-visible metadata only.
 - [ ] **Payment Gateway: Authorize.Net.** Workflow from the user's own prior experience running this
       account at the call center: **Auth-only transaction** against Authorize.Net at the point of
       sale, then **separately submit the order via Life Seasons' own Order API** (their backend,
@@ -257,10 +295,12 @@ everything above it, but genuinely important given Life Seasons' media-driven bu
 
 ---
 
-**Status:** No items fully closed yet. Tier 1's CRM cart/product handling item is partially done —
-see its **Progress — Session 160** note above (out-of-stock status flag + a full manual/searchable
-cart, live-verified; script-driven auto-add still pending).
+**Status:** No items fully closed yet. Tier 1's CRM cart/product handling item is well underway —
+see its **Progress — Session 160** notes above: out-of-stock status flag, a full manual/searchable
+cart, and client/campaign-scoped offer management with an admin Products/Offers UI, all
+live-verified. Script-driven auto-add (the `add_to_cart` flow node) is the one piece not started.
 
 **Next up:** the `add_to_cart` CRM flow node type (Tier 1, same item) — script-driven automatic
-add/replace-on-upsell, per the design noted inline. After that: verify what Product/Offer
-management UI already exists vs. is missing, then move to Tier 1's Payment Gateway item.
+add/replace-on-upsell, per the design noted inline. After that: Tier 1's Payment Gateway item.
+Remember the incremental-expansion decision above before building out more Offer/Product admin
+fields speculatively — only add what a concrete task actually needs.

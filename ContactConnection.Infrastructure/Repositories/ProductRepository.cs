@@ -37,12 +37,16 @@ public class ProductRepository : IProductRepository
         Guid? categoryId,
         IReadOnlyList<Guid>? attributeValueIds,
         int page, int pageSize,
+        bool includeAll = false,
         CancellationToken ct = default)
     {
         var q = Ctx.Products
             .Include(p => p.Categories)
             .Include(p => p.AttributeValues)
-            .Where(p => p.Searchable && !p.ReportingOnly);
+            .AsQueryable();
+
+        if (!includeAll)
+            q = q.Where(p => p.Searchable && !p.ReportingOnly);
 
         // Keywords/AliasSKUs are stored as jsonb via a value converter (opaque scalar to EF/SQL
         // translation), so they can't be matched here without a raw-SQL fragment — left as a

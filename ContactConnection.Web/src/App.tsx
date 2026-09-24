@@ -20,6 +20,8 @@ import TenantAdminPage from './pages/admin/TenantAdminPage'
 import AdminAgentsPage from './pages/admin/AdminAgentsPage'
 import AdminRolesPage from './pages/admin/AdminRolesPage'
 import AdminCustomFieldDefinitionsPage from './pages/admin/AdminCustomFieldDefinitionsPage'
+import AdminProductsPage from './pages/admin/AdminProductsPage'
+import AdminProductOffersPage from './pages/admin/AdminProductOffersPage'
 import AdminApiDefinitionsPage from './pages/admin/AdminApiDefinitionsPage'
 import AdminApiDefinitionDetailPage from './pages/admin/AdminApiDefinitionDetailPage'
 import AdminApiPreferencesPage from './pages/admin/AdminApiPreferencesPage'
@@ -232,6 +234,22 @@ export default function App() {
           element={
             <RequireAdminAuth>
               <AdminCustomFieldDefinitionsPage />
+            </RequireAdminAuth>
+          }
+        />
+        <Route
+          path="/admin/products"
+          element={
+            <RequireAdminAuth>
+              <AdminProductsPage />
+            </RequireAdminAuth>
+          }
+        />
+        <Route
+          path="/admin/products/:id/offers"
+          element={
+            <RequireAdminAuth>
+              <AdminProductOffersPage />
             </RequireAdminAuth>
           }
         />

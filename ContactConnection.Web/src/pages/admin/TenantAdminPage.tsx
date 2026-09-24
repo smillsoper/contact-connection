@@ -46,6 +46,12 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    heading: 'Commerce',
+    cards: [
+      { title: 'Products & Offers', desc: 'Manage the product catalog, pricing, and client/campaign-scoped offers.', path: '/admin/products', live: true },
+    ],
+  },
+  {
     heading: 'Integrations',
     cards: [
       { title: 'API Definitions', desc: 'Connect external services and configure API endpoints.', path: '/admin/api-definitions', live: true },
@@ -63,7 +69,6 @@ const NAV_SECTIONS: NavSection[] = [
   {
     heading: 'Coming Soon',
     cards: [
-      { title: 'Commerce', desc: 'Products, offers, orders, and subscriptions.', path: '/admin/commerce', live: false },
       { title: 'Reports', desc: 'Call analytics, agent performance, and scheduled/exported reporting.', path: '/admin/reports', live: false },
       { title: 'Chat', desc: 'Internal team messaging and channel management.', path: '/admin/chat', live: false },
       { title: 'Settings', desc: 'Workspace settings, branding, and security policy.', path: '/admin/settings', live: false },

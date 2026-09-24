@@ -13,6 +13,7 @@ public static class ProductsEndpoints
         group.MapPost("", Create);
         group.MapGet("", Search);
         group.MapGet("{id:guid}", GetById);
+        group.MapPut("{id:guid}", Update);
         group.MapGet("sku/{sku}", GetBySku);
 
         return app;
@@ -61,11 +62,11 @@ public static class ProductsEndpoints
     // ── GET /api/v1/products ─────────────────────────────────────────────────
 
     private static async Task<IResult> Search(
-        string? query, Guid? categoryId, Guid[]? attributeValueIds,
-        int page, int pageSize,
         IProductRepository products,
         TenantContext tenantContext,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? query = null, Guid? categoryId = null, Guid[]? attributeValueIds = null,
+        int page = 1, int pageSize = 20, bool includeAll = false)
     {
         if (!tenantContext.HasTenant)
             return Results.Unauthorized();
@@ -73,7 +74,7 @@ public static class ProductsEndpoints
         page     = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 100);
 
-        var list = await products.SearchAsync(query, categoryId, attributeValueIds, page, pageSize, ct);
+        var list = await products.SearchAsync(query, categoryId, attributeValueIds, page, pageSize, includeAll, ct);
         return Results.Ok(list.Select(ToResponse));
     }
 
@@ -90,6 +91,30 @@ public static class ProductsEndpoints
 
         var product = await products.GetByIdAsync(id, ct);
         return product is null ? Results.NotFound() : Results.Ok(ToResponse(product));
+    }
+
+    // ── PUT /api/v1/products/{id} ────────────────────────────────────────────
+    // Sku/Description are immutable by design (Product has no setter for either) — shown
+    // read-only in the admin editor rather than adding new mutation surface for this.
+
+    private static async Task<IResult> Update(
+        Guid id,
+        UpdateProductRequest req,
+        IProductRepository products,
+        TenantContext tenantContext,
+        CancellationToken ct)
+    {
+        if (!tenantContext.HasTenant) return Results.Unauthorized();
+
+        var product = await products.GetByIdAsync(id, ct);
+        if (product is null) return Results.NotFound();
+
+        product.SetPhysical(req.Weight);
+        product.SetInventory(req.InventoryStatus, req.QtyAvailable, req.DecrementOnOrder, req.MinimumQty);
+        product.SetCatalog(req.Searchable, product.ReportingOnly, product.Keywords, product.AliasSKUs);
+
+        await products.SaveChangesAsync(ct);
+        return Results.Ok(ToResponse(product));
     }
 
     // ── GET /api/v1/products/sku/{sku} ───────────────────────────────────────
@@ -178,3 +203,11 @@ public record CreateProductRequest(
     int? QtyAvailable = null,
     bool? DecrementOnOrder = null,
     GeographicSurchargeRequest? GeographicSurcharges = null);
+
+public record UpdateProductRequest(
+    decimal Weight,
+    ProductInventoryStatus InventoryStatus,
+    int QtyAvailable,
+    bool DecrementOnOrder,
+    int MinimumQty,
+    bool Searchable);

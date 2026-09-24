@@ -21,6 +21,10 @@ public class OfferConfiguration : IEntityTypeConfiguration<Offer>
         builder.Property(o => o.ProductId).HasColumnName("product_id");
         builder.Property(o => o.Name).HasColumnName("name").HasMaxLength(200).IsRequired();
 
+        // Scope — null = tenant-wide
+        builder.Property(o => o.ClientId).HasColumnName("client_id");
+        builder.Property(o => o.CampaignId).HasColumnName("campaign_id");
+
         // Pricing
         builder.Property(o => o.FullPrice).HasColumnName("full_price").HasColumnType("numeric(18,2)");
         builder.Property(o => o.AllowPriceOverride).HasColumnName("allow_price_override");
@@ -113,6 +117,7 @@ public class OfferConfiguration : IEntityTypeConfiguration<Offer>
         builder.HasIndex(o => o.ProductId).HasDatabaseName("ix_offers_product_id");
         builder.HasIndex(o => o.MixMatchCode).HasDatabaseName("ix_offers_mix_match_code");
         builder.HasIndex(o => new { o.TenantId, o.IsActive }).HasDatabaseName("ix_offers_tenant_active");
+        builder.HasIndex(o => new { o.TenantId, o.ProductId, o.ClientId, o.CampaignId }).HasDatabaseName("ix_offers_scope");
 
         // FK — Product is configured from ProductConfiguration (cascade delete)
     }

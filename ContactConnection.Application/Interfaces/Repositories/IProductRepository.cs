@@ -9,7 +9,9 @@ public interface IProductRepository
 
     /// <summary>
     /// Full-text search with optional category + attribute-value facets.
-    /// Returns searchable, non-reporting-only products ordered by description.
+    /// Returns searchable, non-reporting-only products ordered by description, unless
+    /// <paramref name="includeAll"/> is set (the admin product list needs to see a product even
+    /// after it's been toggled non-searchable, or it becomes invisible to manage).
     /// Multiple attributeValueIds are ANDed — product must have ALL specified values assigned.
     /// </summary>
     Task<List<Product>> SearchAsync(
@@ -17,6 +19,7 @@ public interface IProductRepository
         Guid? categoryId,
         IReadOnlyList<Guid>? attributeValueIds,
         int page, int pageSize,
+        bool includeAll = false,
         CancellationToken ct = default);
 
     /// <summary>

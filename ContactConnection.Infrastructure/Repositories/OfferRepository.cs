@@ -27,6 +27,14 @@ public class OfferRepository : IOfferRepository
             .OrderBy(o => o.Name)
             .ToListAsync(ct);
 
+    public Task<List<Offer>> GetAvailableForContextAsync(Guid productId, Guid? clientId, Guid? campaignId, CancellationToken ct = default)
+        => Ctx.Offers
+            .Where(o => o.ProductId == productId
+                && (o.ClientId == null || o.ClientId == clientId)
+                && (o.CampaignId == null || o.CampaignId == campaignId))
+            .OrderBy(o => o.Name)
+            .ToListAsync(ct);
+
     public Task<List<Offer>> GetActiveAsync(CancellationToken ct = default)
         => Ctx.Offers
             .Include(o => o.Product)

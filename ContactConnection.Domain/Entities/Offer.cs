@@ -23,6 +23,13 @@ public class Offer
     public Guid TenantId { get; private set; }
     public Guid ProductId { get; private set; }
 
+    // Scope — null/null = tenant-wide (the default, matching every offer created before this
+    // existed). A campaign-scoped offer must also carry its client. Mirrors CustomFieldDefinition's
+    // scope model, minus its "most specific wins" collapse — offers are meant to coexist (TV
+    // Special, Web Offer, Retention Offer can all be simultaneously valid), not resolve to one.
+    public Guid? ClientId { get; private set; }
+    public Guid? CampaignId { get; private set; }
+
     // Display
     public string Name { get; private set; } = "";  // e.g. "TV Special", "Web Offer", "Upsell"
 
@@ -162,6 +169,22 @@ public class Offer
         AutoShipOptional  = optional;
         AutoShipIntervals = intervals;
         UpdatedAt         = DateTimeOffset.UtcNow;
+    }
+
+    public void Rename(string name)
+    {
+        Name      = name;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void SetScope(Guid? clientId, Guid? campaignId)
+    {
+        if (campaignId.HasValue && !clientId.HasValue)
+            throw new ArgumentException("A campaign-scoped offer must also specify its client.", nameof(clientId));
+
+        ClientId   = clientId;
+        CampaignId = campaignId;
+        UpdatedAt  = DateTimeOffset.UtcNow;
     }
 
     public void SetMixMatch(string? code, List<QuantityPriceBreak>? priceBreaks = null)

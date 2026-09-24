@@ -14,6 +14,7 @@ public static class OffersEndpoints
         group.MapPost("", Create);
         group.MapGet("", GetActive);
         group.MapGet("{id:guid}", GetById);
+        group.MapPut("{id:guid}", Update);
         group.MapPost("{id:guid}/activate", Activate);
         group.MapPost("{id:guid}/deactivate", Deactivate);
         group.MapGet("product/{productId:guid}", GetByProduct);
@@ -44,13 +45,21 @@ public static class OffersEndpoints
             req.FullPrice,
             req.Shipping);
 
-        if (req.Payments is { Count: > 0 })
-            offer.SetPricing(
-                req.FullPrice,
-                req.Payments,
-                req.QuantityPriceBreaks,
-                req.MixMatchPriceBreaks,
-                req.AllowPriceOverride);
+        // No payment schedule given (the common case for a simple admin-created offer) — default
+        // to a single full-payment installment so the offer actually prices at FullPrice instead of
+        // $0. PricingService sums Payments, never FullPrice, to compute what a cart item charges.
+        var payments = req.Payments is { Count: > 0 }
+            ? req.Payments
+            : [new PaymentInstallment(1, "Full payment", req.FullPrice, 0)];
+        offer.SetPricing(
+            req.FullPrice,
+            payments,
+            req.QuantityPriceBreaks,
+            req.MixMatchPriceBreaks,
+            req.AllowPriceOverride);
+
+        if (req.ClientId.HasValue || req.CampaignId.HasValue)
+            offer.SetScope(req.ClientId, req.CampaignId);
 
         if (req.MixMatchCode is not null)
             offer.SetMixMatch(req.MixMatchCode, req.MixMatchPriceBreaks);
@@ -117,6 +126,48 @@ public static class OffersEndpoints
         return offer is null ? Results.NotFound() : Results.Ok(ToResponse(offer));
     }
 
+    // ── PUT /api/v1/offers/{id} ──────────────────────────────────────────────
+    // Covers the fields the admin Offer editor actually exposes: name, price/shipping, tax/
+    // shipping exemption, and scope. Advanced fields (QPB, MixMatch, AutoShip, personalization,
+    // upsell) are left untouched here — API-only for now, matching the create form's own scope.
+
+    private static async Task<IResult> Update(
+        Guid id,
+        UpdateOfferRequest req,
+        IOfferRepository offers,
+        TenantContext tenantContext,
+        CancellationToken ct)
+    {
+        if (!tenantContext.HasTenant) return Results.Unauthorized();
+
+        var offer = await offers.GetByIdAsync(id, ct);
+        if (offer is null) return Results.NotFound();
+
+        offer.Rename(req.Name);
+
+        // A real multi-payment plan (2+ installments) was configured through the full API and
+        // isn't something this simple form understands — leave it untouched rather than silently
+        // collapsing it back to a single payment. 0 or 1 installments (the common case for an
+        // offer created through this same admin UI) gets kept in sync with the edited price.
+        if (offer.Payments.Count <= 1)
+            offer.SetPricing(req.FullPrice, [new PaymentInstallment(1, "Full payment", req.FullPrice, 0)], offer.QuantityPriceBreaks, offer.MixMatchPriceBreaks, offer.AllowPriceOverride);
+
+        offer.SetShipping(
+            req.Shipping,
+            req.ShippingExempt,
+            req.TaxExempt,
+            offer.ShipMethodPerItem,
+            offer.AllowShipTo,
+            offer.ShipToRequired,
+            offer.AllowDeliveryMessage,
+            offer.ShipMethods);
+
+        offer.SetScope(req.ClientId, req.CampaignId);
+
+        await offers.SaveChangesAsync(ct);
+        return Results.Ok(ToResponse(offer));
+    }
+
     // ── POST /api/v1/offers/{id}/activate ────────────────────────────────────
 
     private static async Task<IResult> Activate(
@@ -177,6 +228,8 @@ public static class OffersEndpoints
         o.Id,
         o.ProductId,
         o.Name,
+        o.ClientId,
+        o.CampaignId,
         o.FullPrice,
         o.Shipping,
         o.TaxExempt,
@@ -231,6 +284,8 @@ public record CreateOfferRequest(
     bool TaxExempt = false,
     bool ShippingExempt = false,
     bool AllowPriceOverride = false,
+    Guid? ClientId = null,
+    Guid? CampaignId = null,
     string? MixMatchCode = null,
     bool IsUpsell = false,
     int UpsellQty = 0,
@@ -251,3 +306,12 @@ public record CreateOfferRequest(
     List<AutoShipInterval>? AutoShipIntervals = null,
     List<ProductShipMethod>? ShipMethods = null,
     List<PersonalizationPrompt>? Personalization = null);
+
+public record UpdateOfferRequest(
+    string Name,
+    decimal FullPrice,
+    decimal Shipping,
+    bool TaxExempt,
+    bool ShippingExempt,
+    Guid? ClientId,
+    Guid? CampaignId);
