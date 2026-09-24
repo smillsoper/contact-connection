@@ -184,15 +184,16 @@ public class Product
 
     /// <summary>
     /// Whether the given quantity can be added to a cart.
-    /// Discontinued products are never orderable. NoBackorder products require sufficient
-    /// stock net of already-reserved units.
+    /// Discontinued and OutOfStock products are never orderable. NoBackorder products require
+    /// sufficient stock net of already-reserved units.
     /// </summary>
     public bool CanAddToCart(int qty) =>
         InventoryStatus switch
         {
             ProductInventoryStatus.Discontinued => false,
-            ProductInventoryStatus.NoBackorder  => QtyAvailable - QtyReserved - qty >= MinimumQty,
-            _                                   => true
+            ProductInventoryStatus.OutOfStock    => false,
+            ProductInventoryStatus.NoBackorder   => QtyAvailable - QtyReserved - qty >= MinimumQty,
+            _                                    => true
         };
 
     /// <summary>
@@ -243,5 +244,8 @@ public enum ProductInventoryStatus
     Available    = 0,
     CanBackorder = 1,
     NoBackorder  = 2,
-    Discontinued = 3
+    Discontinued = 3,
+    // Temporarily unavailable (expected to return) — distinct from Discontinued (gone for good).
+    // Same CanAddToCart behavior as Discontinued today; kept separate for reporting/messaging.
+    OutOfStock   = 4
 }

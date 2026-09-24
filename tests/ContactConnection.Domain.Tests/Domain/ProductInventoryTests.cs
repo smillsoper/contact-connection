@@ -44,6 +44,13 @@ public class ProductInventoryTests
     }
 
     [Fact]
+    public void CanAddToCart_OutOfStock_AlwaysFalse()
+    {
+        var p = MakeProduct(ProductInventoryStatus.OutOfStock, qtyAvailable: 999);
+        Assert.False(p.CanAddToCart(1));
+    }
+
+    [Fact]
     public void CanAddToCart_NoBackorder_SufficientNetStock_ReturnsTrue()
     {
         // QtyAvailable=10, QtyReserved=3 → net=7; requesting 5 → 7-5=2 >= minimumQty(0) → true
@@ -83,6 +90,15 @@ public class ProductInventoryTests
     public void Reserve_Discontinued_ReturnsFalseNoChange()
     {
         var p = MakeProduct(ProductInventoryStatus.Discontinued, qtyAvailable: 100);
+        var result = p.Reserve(1);
+        Assert.False(result);
+        Assert.Equal(0, p.QtyReserved);
+    }
+
+    [Fact]
+    public void Reserve_OutOfStock_ReturnsFalseNoChange()
+    {
+        var p = MakeProduct(ProductInventoryStatus.OutOfStock, qtyAvailable: 100);
         var result = p.Reserve(1);
         Assert.False(result);
         Assert.Equal(0, p.QtyReserved);

@@ -98,6 +98,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ITokenService, JwtTokenService>();
         services.AddScoped<IPricingService, PricingService>();
         services.AddScoped<IInventoryService, InventoryService>();
+        services.AddScoped<ICartService, CartService>();
         services.AddScoped<IOrderService, OrderService>();
         services.AddScoped<ISubscriptionOrderCreator, SubscriptionOrderCreator>();
         services.AddScoped<ICustomFieldService, CustomFieldService>();

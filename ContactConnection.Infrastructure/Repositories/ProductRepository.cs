@@ -44,8 +44,14 @@ public class ProductRepository : IProductRepository
             .Include(p => p.AttributeValues)
             .Where(p => p.Searchable && !p.ReportingOnly);
 
+        // Keywords/AliasSKUs are stored as jsonb via a value converter (opaque scalar to EF/SQL
+        // translation), so they can't be matched here without a raw-SQL fragment — left as a
+        // documented gap rather than risking an untranslatable-query exception. Description and
+        // Sku are plain scalar columns and match cleanly.
         if (!string.IsNullOrWhiteSpace(query))
-            q = q.Where(p => EF.Functions.ILike(p.Description, $"%{query}%"));
+            q = q.Where(p =>
+                EF.Functions.ILike(p.Description, $"%{query}%") ||
+                EF.Functions.ILike(p.Sku, $"%{query}%"));
 
         if (categoryId.HasValue)
             q = q.Where(p => p.Categories.Any(c => c.Id == categoryId.Value));

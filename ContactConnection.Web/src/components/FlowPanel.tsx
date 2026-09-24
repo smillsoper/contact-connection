@@ -5,6 +5,7 @@ import { useCallStore } from '../stores/callStore'
 import { useFlowSessionsStore, type FlowSessionEntry } from '../stores/flowSessionsStore'
 import { useAgentStateStore } from '../stores/agentStateStore'
 import { flowsApi, type AddressValidationResult, type ZipLookupResult, type AutocompleteSuggestion, type AutocompleteSelectionResult } from '../api/flows'
+import { api } from '../api/client'
 import type { FlowNodeState } from '../types/flow'
 import NodeDisplay from './NodeDisplay'
 import AddressValidationModal from './AddressValidationModal'
@@ -284,7 +285,7 @@ function TabBar({ sessions, activeSessionId, onSelect }: TabBarProps) {
 
 export default function FlowPanel() {
   const { token, tenantSubdomain } = useAuthStore()
-  const { setQueued, setAutoConnecting, reset: resetCall, callRecordId } = useCallStore()
+  const { setQueued, setAutoConnecting, reset: resetCall, callRecordId, setCallRecordId } = useCallStore()
   const { sessions, activeSessionId, addSession, removeSession, setActiveSession } = useFlowSessionsStore()
   const setAgentStateCode = useAgentStateStore((s) => s.setAgentStateCode)
   const [hub, setHub] = useState<signalR.HubConnection | null>(null)
@@ -407,9 +408,19 @@ export default function FlowPanel() {
     if (!selectedFlowId || starting) return
     setStarting(true)
     try {
+      // No real call in progress (testing/previewing a script from this toolbar) — mint a stub
+      // call record first so call-record-scoped features (cart, custom fields, etc.) have
+      // something to attach to, same as a real inbound/outbound call would provide.
+      let recordId = callRecordId
+      if (!recordId) {
+        const stub = await api.post<{ id: string }>('/api/v1/call-records/manual', {})
+        recordId = stub.id
+        setCallRecordId(recordId)
+      }
+
       const node = await flowsApi.startSession({
         flowId: selectedFlowId,
-        callRecordId: callRecordId ?? undefined,
+        callRecordId: recordId,
       })
       const flow = flows.find((f) => f.id === selectedFlowId)
       addSession({

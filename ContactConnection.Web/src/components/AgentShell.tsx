@@ -9,6 +9,7 @@ import SessionTimeoutModal from './SessionTimeoutModal'
 import SoftphonePanel from './SoftphonePanel'
 import FlowPanel from './FlowPanel'
 import ChatPanel from './ChatPanel'
+import CartPanel from './cart/CartPanel'
 
 export default function AgentShell() {
   const clearAuth = useAuthStore((s) => s.clearAuth)
@@ -80,8 +81,11 @@ export default function AgentShell() {
         </div>
 
         {/* Center — Flow/Script (flex grow) */}
-        <div className="flex-1 overflow-y-auto">
-          <FlowPanel />
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <CartPanel />
+          <div className="flex-1 overflow-y-auto">
+            <FlowPanel />
+          </div>
         </div>
 
         {/* Right — Chat (~300px) */}

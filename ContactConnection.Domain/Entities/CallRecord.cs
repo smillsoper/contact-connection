@@ -142,6 +142,29 @@ public class CallRecord
     /// Creates a call record for an agent-initiated outbound call before a client/campaign is known.
     /// dialedNumber is stored as CallerId (the number being called); resolved during the call.
     /// </summary>
+    /// <summary>
+    /// A stub record backing a manually-started script preview (no real call) — gives call-record-
+    /// scoped features (cart, custom fields, etc.) something to attach to while testing a flow.
+    /// </summary>
+    public static CallRecord CreateManual(Guid tenantId, Guid agentId)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return new CallRecord
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ClientId = Guid.Empty,
+            CampaignId = Guid.Empty,
+            Source = CallSource.Manual,
+            RecordType = CallRecordType.Full,
+            OverallStatus = CallRecordStatus.Active,
+            AgentId = agentId,
+            CallStartAt = now,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+    }
+
     public static CallRecord CreateOutbound(
         Guid tenantId,
         string? dialedNumber,
@@ -439,6 +462,9 @@ public static class CallSource
     public const string Inbound = "inbound";
     public const string Outbound = "outbound";
     public const string Callback = "callback";
+    // Agent-initiated script preview/test via the CRM Flow Designer's "Select flow → Start"
+    // toolbar — a full agent session with no real telephony call behind it.
+    public const string Manual = "manual";
 }
 
 public static class CallRecordType

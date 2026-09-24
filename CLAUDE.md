@@ -6,6 +6,8 @@ DevLog.md needs to be updated every session with the session start date and time
 
 **API_HARDENING_CHECKLIST.md** — managed, multi-session checklist of gaps in the API Definitions/Endpoints/Preferences/execution system (circuit breaking, retries, definition versioning, audit trail, test coverage, rate limiting, etc.), tiered by priority. Check it at the start of any session touching that system and work top-to-bottom unless redirected; update checkboxes with the closing session number and a summary.
 
+**CLIENT_READINESS_CHECKLIST.md** — managed, multi-session roadmap of everything needed to get the Life Seasons client live (CRM cart/commerce, Authorize.Net payment, commissions, media-agency call attribution + Cannella reporting, a general scheduled data-export engine, dashboard/supervisor tooling, agent helpdesk CMS, team chat), tiered by priority. Check it at the start of any session doing feature work (not a pure bugfix/infra session) and work top-to-bottom unless redirected; update checkboxes with the closing session number and a summary, same convention as the API hardening checklist.
+
 ---
 
 ## Current Project Status

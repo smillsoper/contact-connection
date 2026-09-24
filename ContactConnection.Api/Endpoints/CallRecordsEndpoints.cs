@@ -15,9 +15,13 @@ public static class CallRecordsEndpoints
 
         group.MapPost("inbound", CreateInbound);
         group.MapPost("outbound", CreateOutbound);
+        group.MapPost("manual", CreateManual);
         group.MapGet("{id:guid}", GetById);
         group.MapGet("{id:guid}/cart", GetCart);
         group.MapPut("{id:guid}/cart", SetCart);
+        group.MapPost("{id:guid}/cart/items", AddCartItem);
+        group.MapPatch("{id:guid}/cart/items/{itemIndex:int}", UpdateCartItemQuantity);
+        group.MapDelete("{id:guid}/cart/items/{itemIndex:int}", RemoveCartItem);
 
         return app;
     }
@@ -85,6 +89,30 @@ public static class CallRecordsEndpoints
         return Results.Created($"/api/v1/call-records/{record.Id}", new { id = record.Id });
     }
 
+    // ── POST /api/v1/call-records/manual ────────────────────────────────────
+    // Backs the CRM Flow Designer's "Select flow → Start" manual test toolbar — no real call,
+    // just a stub record so call-record-scoped features (cart, custom fields, etc.) have
+    // something to attach to while previewing a flow.
+
+    private static async Task<IResult> CreateManual(
+        System.Security.Claims.ClaimsPrincipal user,
+        ICallRecordRepository callRecords,
+        TenantContext tenantContext,
+        CancellationToken ct)
+    {
+        if (tenantContext.Current is null) return Results.Unauthorized();
+
+        var agentIdClaim = user.FindFirst("sub")?.Value;
+        if (!Guid.TryParse(agentIdClaim, out var agentId)) return Results.Unauthorized();
+
+        var record = CallRecord.CreateManual(tenantContext.Current.Id, agentId);
+
+        await callRecords.AddAsync(record, ct);
+        await callRecords.SaveChangesAsync(ct);
+
+        return Results.Created($"/api/v1/call-records/{record.Id}", new { id = record.Id });
+    }
+
     private static async Task<IResult> GetById(
         Guid id,
         ICallRecordRepository callRecords,
@@ -117,44 +145,112 @@ public static class CallRecordsEndpoints
     }
 
     // ── PUT /api/v1/call-records/{id}/cart ──────────────────────────────────
-    // Accepts a CartDocument, re-calculates totals, then swaps inventory reservations.
-    // Returns 409 Conflict with a list of SKUs if any item cannot be reserved.
+    // Replaces the whole cart document. Returns 409 Conflict with a list of SKUs if any item
+    // cannot be reserved.
 
     private static async Task<IResult> SetCart(
         Guid id,
         CartDocument cartRequest,
-        ICallRecordRepository callRecords,
-        IPricingService pricing,
-        IInventoryService inventory,
+        ICartService cart,
         TenantContext tenantContext,
         CancellationToken ct)
     {
         if (!tenantContext.HasTenant)
             return Results.Unauthorized();
 
-        var record = await callRecords.GetByIdWithInteractionsAsync(id, ct);
-        if (record is null) return Results.NotFound();
-
-        // Release reservations held by the existing cart (if any) before applying the new one.
-        await inventory.ReleaseCartAsync(record.Cart, ct);
-
-        // Attempt to reserve inventory for the incoming cart.
-        var unavailable = await inventory.ReserveCartAsync(cartRequest, ct);
-        if (unavailable.Count > 0)
+        try
         {
-            // Restore the old cart's reservations so the call record is consistent.
-            if (record.Cart is not null)
-                await inventory.ReserveCartAsync(record.Cart, ct);
-
-            return Results.Conflict(new { Message = "Insufficient inventory.", UnavailableSkus = unavailable });
+            var result = await cart.ReplaceCartAsync(id, cartRequest, ct);
+            return CartResult(result);
         }
-
-        var calculated = await pricing.CalculateTotalsAsync(cartRequest, ct);
-        record.SetCart(calculated);
-        await callRecords.SaveChangesAsync(ct);
-
-        return Results.Ok(calculated);
+        catch (InvalidOperationException ex)
+        {
+            return Results.NotFound(new { error = ex.Message });
+        }
     }
+
+    // ── POST /api/v1/call-records/{id}/cart/items ───────────────────────────
+    // Adds one line item for the given offer/quantity. Returns 409 Conflict with a list of SKUs
+    // if the item cannot be reserved (e.g. OutOfStock/Discontinued or insufficient NoBackorder stock).
+
+    private static async Task<IResult> AddCartItem(
+        Guid id,
+        AddCartItemRequest request,
+        ICartService cart,
+        TenantContext tenantContext,
+        CancellationToken ct)
+    {
+        if (!tenantContext.HasTenant) return Results.Unauthorized();
+
+        try
+        {
+            var result = await cart.AddItemAsync(id, request.OfferId, request.Quantity, ct);
+            return CartResult(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.NotFound(new { error = ex.Message });
+        }
+    }
+
+    // ── PATCH /api/v1/call-records/{id}/cart/items/{itemIndex} ──────────────
+    // Updates a line item's quantity, re-resolving its payment schedule (QPB/MixMatch thresholds
+    // can shift). Returns 409 Conflict with a list of SKUs on an inventory conflict.
+
+    private static async Task<IResult> UpdateCartItemQuantity(
+        Guid id,
+        int itemIndex,
+        UpdateCartItemQuantityRequest request,
+        ICartService cart,
+        TenantContext tenantContext,
+        CancellationToken ct)
+    {
+        if (!tenantContext.HasTenant) return Results.Unauthorized();
+
+        try
+        {
+            var result = await cart.UpdateQuantityAsync(id, itemIndex, request.Quantity, ct);
+            return CartResult(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.NotFound(new { error = ex.Message });
+        }
+    }
+
+    // ── DELETE /api/v1/call-records/{id}/cart/items/{itemIndex} ─────────────
+
+    private static async Task<IResult> RemoveCartItem(
+        Guid id,
+        int itemIndex,
+        ICartService cart,
+        TenantContext tenantContext,
+        CancellationToken ct)
+    {
+        if (!tenantContext.HasTenant) return Results.Unauthorized();
+
+        try
+        {
+            var result = await cart.RemoveItemAsync(id, itemIndex, ct);
+            return CartResult(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.NotFound(new { error = ex.Message });
+        }
+    }
+
+    // The shared frontend fetch wrapper (api/client.ts) only surfaces a `{error}` field from a
+    // non-2xx body as its thrown Error's message — compose the SKU list directly into that string
+    // so a 409 shows something a caller can render as-is, not raw JSON.
+    private static IResult CartResult(CartOperationResult result) =>
+        result.Succeeded
+            ? Results.Ok(result.Cart)
+            : Results.Conflict(new
+            {
+                error = $"Insufficient inventory for: {string.Join(", ", result.UnavailableSkus)}.",
+                unavailableSkus = result.UnavailableSkus,
+            });
 
     private static object ToResponse(CallRecord r) => new
     {
@@ -218,3 +314,5 @@ public static class CallRecordsEndpoints
 
 public record InboundCallRequest(string? CallerNumber, string? CallerName, string? ChannelUuid, string? CalledNumber);
 public record OutboundCallRequest(string? DialedNumber);
+public record AddCartItemRequest(Guid OfferId, int Quantity);
+public record UpdateCartItemQuantityRequest(int Quantity);
