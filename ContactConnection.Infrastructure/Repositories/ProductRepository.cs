@@ -50,12 +50,18 @@ public class ProductRepository : IProductRepository
 
         // Keywords/AliasSKUs are stored as jsonb via a value converter (opaque scalar to EF/SQL
         // translation), so they can't be matched here without a raw-SQL fragment — left as a
-        // documented gap rather than risking an untranslatable-query exception. Description and
-        // Sku are plain scalar columns and match cleanly.
+        // documented gap rather than risking an untranslatable-query exception. Description, Sku,
+        // and Offer.Name are plain scalar columns and match cleanly. Offer.Name is included because
+        // a flow-designer/agent typically remembers the promo name ("Buy 2 Get 1 Free"), not the
+        // underlying product's description or SKU — without this a correct search silently returns
+        // nothing (found live, Session 161: a tenant searching "buy" for their own "TV Special - Buy
+        // 2 Get 1 Free" offer got no results because that word only exists on the Offer, not the
+        // Product).
         if (!string.IsNullOrWhiteSpace(query))
             q = q.Where(p =>
                 EF.Functions.ILike(p.Description, $"%{query}%") ||
-                EF.Functions.ILike(p.Sku, $"%{query}%"));
+                EF.Functions.ILike(p.Sku, $"%{query}%") ||
+                p.Offers.Any(o => EF.Functions.ILike(o.Name, $"%{query}%")));
 
         if (categoryId.HasValue)
             q = q.Where(p => p.Categories.Any(c => c.Id == categoryId.Value));

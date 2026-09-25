@@ -19,6 +19,9 @@ const NODE_TYPES: ContactConnectionNodeType[] = [
   'get_custom_field',
   'store_value',
   'get_value',
+  'add_to_cart',
+  'remove_cart_item',
+  'reset_cart',
   'end',
 ]
 

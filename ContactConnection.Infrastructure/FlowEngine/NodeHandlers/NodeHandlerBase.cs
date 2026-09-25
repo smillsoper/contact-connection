@@ -18,6 +18,19 @@ public abstract class NodeHandlerBase
     protected static string? Str(JsonObject node, string key) =>
         node[key]?.GetValue<string>();
 
+    /// <summary>Parses a JSON array of GUID strings (e.g. add_to_cart/remove_cart_item's
+    /// replacesOfferIds/removeOfferIds) — malformed or non-GUID entries are silently skipped.</summary>
+    protected static List<Guid> GuidList(JsonObject node, string key)
+    {
+        if (node[key] is not JsonArray array) return [];
+        return [.. array
+            .Select(v => v?.GetValue<string>())
+            .Where(s => !string.IsNullOrEmpty(s))
+            .Select(s => Guid.TryParse(s, out var id) ? id : (Guid?)null)
+            .Where(id => id.HasValue)
+            .Select(id => id!.Value)];
+    }
+
     protected static string StrReq(JsonObject node, string key) =>
         node[key]?.GetValue<string>()
         ?? throw new InvalidOperationException($"Node is missing required property '{key}'.");

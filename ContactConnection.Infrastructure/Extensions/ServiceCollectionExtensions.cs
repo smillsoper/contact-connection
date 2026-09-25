@@ -198,6 +198,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.GetCustomFieldNodeHandler>();
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.StoreValueNodeHandler>();
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.GetValueNodeHandler>();
+        services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.AddToCartNodeHandler>();
+        services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.RemoveCartItemNodeHandler>();
+        services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.ResetCartNodeHandler>();
 
         // Flow engine (scoped — uses scoped repositories and tenant context)
         services.AddScoped<IFlowEngine, FlowEngine.FlowEngine>();

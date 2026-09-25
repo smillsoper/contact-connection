@@ -45,6 +45,15 @@ interface CallState {
   // rather than speak before the caller has actually been greeted. Pushed via receivePlayingGreeting.
   playingGreeting: boolean
 
+  // Bumped after every flow advance/jump/start round-trip so CartPanel knows to refetch. The cart
+  // itself lives server-side (call_records.cart) — CRM nodes like add_to_cart/remove_cart_item/
+  // reset_cart mutate it silently as a side effect of a node transition, with no independent event
+  // of their own, so there's nothing else for the agent UI to react to. CartPanel fetches once per
+  // callRecordId and never polls (see feedback_dashboard_realtime_push convention: push, not poll) —
+  // this counter is the cheapest correct signal, since every mutating node is reached only via an
+  // advance()/jump()/startSession() call already happening in this same browser tab.
+  cartVersion: number
+
   setQueued: (callerNumber: string, callerName: string, callRecordId: string, destinationNumber?: string, campaignId?: string) => void
   // RingStrategy.AutoAnswerBestAgent — server picked this agent, no click required. Pushed via
   // receiveAutoConnecting before the whisper/bridge INVITE arrives, so SoftphonePanel can arm
@@ -66,6 +75,7 @@ interface CallState {
   setSecureCollectEnded: (outcome: SecureCollectState['endedOutcome']) => void
   clearSecureCollect: () => void
   setTelephonyEventEnded: (callRecordId: string, eventName: string, outcome: string) => void
+  bumpCartVersion: () => void
   reset: () => void
 }
 
@@ -92,6 +102,7 @@ export const useCallStore = create<CallState>((set) => ({
   secureCollect: null,
   lastTelephonyEventEnded: null,
   playingGreeting: false,
+  cartVersion: 0,
 
   setQueued: (callerNumber, callerName, callRecordId, destinationNumber, campaignId) =>
     set({ callStatus: 'queued', callerNumber, callerName, destinationNumber: destinationNumber ?? null, callRecordId, isMuted: false, callStartedAt: null, campaignId: campaignId || null, secureCollect: null, lastTelephonyEventEnded: null, playingGreeting: false, ...TRANSFER_RESET }),
@@ -160,6 +171,8 @@ export const useCallStore = create<CallState>((set) => ({
 
   setTelephonyEventEnded: (callRecordId, eventName, outcome) =>
     set({ lastTelephonyEventEnded: { callRecordId, eventName, outcome, at: Date.now() } }),
+
+  bumpCartVersion: () => set((state) => ({ cartVersion: state.cartVersion + 1 })),
 
   reset: () =>
     set({ callStatus: 'idle', callerNumber: null, callerName: null, destinationNumber: null, isMuted: false, callStartedAt: null, callRecordId: null, campaignId: null, secureCollect: null, lastTelephonyEventEnded: null, playingGreeting: false, ...TRANSFER_RESET }),

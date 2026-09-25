@@ -41,6 +41,9 @@ import SetCustomFieldNode from '../components/designer/nodes/SetCustomFieldNode'
 import GetCustomFieldNode from '../components/designer/nodes/GetCustomFieldNode'
 import StoreValueNode from '../components/designer/nodes/StoreValueNode'
 import GetValueNode from '../components/designer/nodes/GetValueNode'
+import AddToCartNode from '../components/designer/nodes/AddToCartNode'
+import RemoveCartItemNode from '../components/designer/nodes/RemoveCartItemNode'
+import ResetCartNode from '../components/designer/nodes/ResetCartNode'
 import EndNode from '../components/designer/nodes/EndNode'
 
 import type { NodeData, ContactConnectionNodeType, ContactConnectionFlowDefinition, FlowOption } from '../types/designer'
@@ -65,6 +68,9 @@ const nodeTypes = {
   get_custom_field: GetCustomFieldNode,
   store_value: StoreValueNode,
   get_value: GetValueNode,
+  add_to_cart: AddToCartNode,
+  remove_cart_item: RemoveCartItemNode,
+  reset_cart: ResetCartNode,
   end: EndNode,
 }
 
@@ -79,6 +85,8 @@ const FIXED_EXIT_OPTIONS: Partial<Record<ContactConnectionNodeType, string[]>> =
   scheduled_callback: ['scheduled', 'invalid_time', 'failed'],
   set_custom_field: ['success', 'invalid_value', 'error'],
   branch: ['true', 'false'],
+  add_to_cart: ['added', 'failed'],
+  remove_cart_item: ['removed', 'failed'],
 }
 
 // Options for a node that uses the fixed-handle picker (select-type input, or a
@@ -585,6 +593,7 @@ function DesignerCanvas({
                 trigger_telephony_event: '#be123c',
                 api_call: '#6366f1',
                 scheduled_callback: '#0891b2',
+                add_to_cart: '#059669',
                 end: '#ef4444',
               }
               return meta[n.type ?? ''] ?? '#9ca3af'

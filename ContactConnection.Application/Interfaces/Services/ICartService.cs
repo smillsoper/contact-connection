@@ -42,6 +42,29 @@ public interface ICartService
     Task<CartOperationResult> AddItemAsync(Guid callRecordId, Guid offerId, int quantity, CancellationToken ct = default);
 
     /// <summary>
+    /// Removes every existing line whose OfferId is in <paramref name="removeOfferIds"/> (0, 1, or
+    /// many matches — all removed), then adds one new line for <paramref name="addOfferId"/>, all
+    /// in a single release→reserve→price→save pass. Backs a script's "upsell replaces the
+    /// previously-added item(s)" case — e.g. a bundle offer superseding a base item plus an add-on
+    /// added by earlier nodes — as distinct from an Offer's MixMatchCode, which prices existing and
+    /// new items together as a group rather than removing anything.
+    ///
+    /// Throws <see cref="InvalidOperationException"/> if the call record or the offer being added
+    /// doesn't exist. An empty or not-found <paramref name="removeOfferIds"/> entry is a no-op for
+    /// that id, not an error — there's nothing wrong with "replacing" an item that was never added.
+    /// </summary>
+    Task<CartOperationResult> ReplaceItemsAsync(Guid callRecordId, IReadOnlyList<Guid> removeOfferIds, Guid addOfferId, int quantity, CancellationToken ct = default);
+
+    /// <summary>
+    /// Removes every existing line whose OfferId is in <paramref name="offerIds"/> — no add step,
+    /// unlike <see cref="ReplaceItemsAsync"/>. Backs a script's "remove this item" node. A
+    /// not-found id is a no-op for that id, not an error.
+    ///
+    /// Throws <see cref="InvalidOperationException"/> if the call record doesn't exist.
+    /// </summary>
+    Task<CartOperationResult> RemoveOffersAsync(Guid callRecordId, IReadOnlyList<Guid> offerIds, CancellationToken ct = default);
+
+    /// <summary>
     /// Removes the item at <paramref name="itemIndex"/> (0-based, into <c>CartDocument.Items</c>).
     /// Throws <see cref="InvalidOperationException"/> if the call record doesn't exist or the
     /// index is out of range.

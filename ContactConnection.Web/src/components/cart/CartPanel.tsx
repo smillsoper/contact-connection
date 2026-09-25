@@ -7,6 +7,7 @@ import CartModal from './CartModal'
 // opens the full CartModal. Renders nothing when there's no active call record (no cart context).
 export default function CartPanel() {
   const callRecordId = useCallStore((s) => s.callRecordId)
+  const cartVersion = useCallStore((s) => s.cartVersion)
   const [cart, setCart] = useState<CartDocument | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
 
@@ -15,7 +16,10 @@ export default function CartPanel() {
     cartApi.get(callRecordId).then((c) => setCart(c ?? null)).catch(() => setCart(null))
   }, [callRecordId])
 
-  useEffect(() => { refresh() }, [refresh])
+  // Refetch on every flow advance/jump/start too (cartVersion), not just when callRecordId first
+  // appears — cart-mutating CRM nodes (add_to_cart/remove_cart_item/reset_cart) have no display or
+  // event of their own, so a node transition is the only signal that the cart might have changed.
+  useEffect(() => { refresh() }, [refresh, cartVersion])
 
   if (!callRecordId) return null
 

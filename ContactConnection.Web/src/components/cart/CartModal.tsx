@@ -194,7 +194,7 @@ export default function CartModal({ callRecordId, cart, onChanged, onClose }: Ca
                   autoFocus
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search by name or SKU…"
+                  placeholder="Search by product name, SKU, or offer name…"
                   className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500"
                 />
                 <button

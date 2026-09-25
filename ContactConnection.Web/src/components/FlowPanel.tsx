@@ -49,6 +49,7 @@ function FlowSessionView({ entry, hub, onEnd }: FlowSessionViewProps) {
   // reaches its own tf_end, via receiveTelephonyEventEnded (pushed correctly-timed, unlike
   // receiveSecureCollectEnded which fires before downstream set_variable/play nodes run).
   const lastTelephonyEventEnded = useCallStore((s) => s.lastTelephonyEventEnded)
+  const bumpCartVersion = useCallStore((s) => s.bumpCartVersion)
   const autoAdvancedForRef = useRef<string | null>(null)
 
   // Join SignalR session room for live updates
@@ -79,13 +80,14 @@ function FlowSessionView({ entry, hub, onEnd }: FlowSessionViewProps) {
       try {
         const next = await flowsApi.advance(entry.sessionId, { inputValue: input })
         setState({ phase: 'running', node: next })
+        bumpCartVersion()
       } catch (e) {
         setState({ phase: 'error', message: String(e) })
       } finally {
         setAdvancing(false)
       }
     },
-    [state, entry.sessionId],
+    [state, entry.sessionId, bumpCartVersion],
   )
 
   useEffect(() => {
@@ -106,13 +108,14 @@ function FlowSessionView({ entry, hub, onEnd }: FlowSessionViewProps) {
       try {
         const next = await flowsApi.advance(entry.sessionId, { jumpToSectionNodeId: sectionNodeId })
         setState({ phase: 'running', node: next })
+        bumpCartVersion()
       } catch (e) {
         setState({ phase: 'error', message: String(e) })
       } finally {
         setAdvancing(false)
       }
     },
-    [state, entry.sessionId],
+    [state, entry.sessionId, bumpCartVersion],
   )
 
   const validateAddress = useCallback(
@@ -285,7 +288,7 @@ function TabBar({ sessions, activeSessionId, onSelect }: TabBarProps) {
 
 export default function FlowPanel() {
   const { token, tenantSubdomain } = useAuthStore()
-  const { setQueued, setAutoConnecting, reset: resetCall, callRecordId, setCallRecordId } = useCallStore()
+  const { setQueued, setAutoConnecting, reset: resetCall, callRecordId, setCallRecordId, bumpCartVersion } = useCallStore()
   const { sessions, activeSessionId, addSession, removeSession, setActiveSession } = useFlowSessionsStore()
   const setAgentStateCode = useAgentStateStore((s) => s.setAgentStateCode)
   const [hub, setHub] = useState<signalR.HubConnection | null>(null)
@@ -429,6 +432,7 @@ export default function FlowPanel() {
         sessionId: node.sessionId,
         initialNode: node,
       })
+      bumpCartVersion()
       setSelectedFlowId('')
     } catch (e) {
       console.error('Failed to start session', e)

@@ -47,7 +47,8 @@ public class FlowEngine : IFlowEngine
     // interactive content, so without this it stops and renders as a dead node with no controls.
     private static readonly HashSet<string> AutoAdvanceTypes =
         ["branch", "set_variable", "section", "execute_flow", "transition_to_flow", "api_call", "scheduled_callback",
-         "set_custom_field", "get_custom_field", "store_value", "get_value"];
+         "set_custom_field", "get_custom_field", "store_value", "get_value",
+         "add_to_cart", "remove_cart_item", "reset_cart"];
 
     private static readonly TimeSpan SessionTtl = TimeSpan.FromHours(12);
 

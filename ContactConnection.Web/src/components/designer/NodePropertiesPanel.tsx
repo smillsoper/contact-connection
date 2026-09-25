@@ -3,6 +3,8 @@ import type { Node, Edge } from '@xyflow/react'
 import type { NodeData, ContactConnectionNodeType } from '../../types/designer'
 import ScriptContentEditor from './ScriptContentEditor'
 import VariablePanel from './VariablePanel'
+import OfferPickerField from './OfferPickerField'
+import OfferListManagerField from './OfferListManagerField'
 import { computeAncestorVars } from '../../utils/flowGraph'
 import { flowsApi } from '../../api/flows'
 import type { FlowSummary, GeneralApiSummary, CustomFieldDefinitionSummary } from '../../api/flows'
@@ -51,6 +53,10 @@ export default function NodePropertiesPanel({
 
   // Variable panel toggle for set_variable node
   const [varPanelOpen, setVarPanelOpen] = useState(false)
+
+  // Whether the "offer to add" picker is open for add_to_cart (the replace-list's own picker is
+  // self-contained inside OfferListManagerField).
+  const [pickingOfferToAdd, setPickingOfferToAdd] = useState(false)
 
   // Tenant timezone — shown next to the scheduled_callback date/time, which is parsed in it
   // server-side. Same label format as onboarding (utils/timezones).
@@ -1139,6 +1145,132 @@ export default function NodePropertiesPanel({
           </>
         )
       }
+
+      case 'add_to_cart': {
+        const offerDisplayName = (data.offerDisplayName as string) ?? ''
+        const mode = (data.mode as string) ?? 'add'
+        const replacesIds = (data.replacesOfferIds as string[] | undefined) ?? []
+        const replacesNames = (data.replacesOfferNames as string[] | undefined) ?? []
+
+        return (
+          <>
+            {field(
+              'offerId',
+              'Offer to Add',
+              <div className="flex flex-col gap-1.5">
+                {offerDisplayName && (
+                  <div className="flex items-center justify-between bg-gray-800 border border-gray-700 rounded px-2 py-1.5">
+                    <span className="text-xs text-white truncate">{offerDisplayName}</span>
+                    <button
+                      type="button"
+                      onClick={() => setPickingOfferToAdd(true)}
+                      className="text-[10px] text-sky-400 hover:text-sky-300 shrink-0 ml-2"
+                    >
+                      Change
+                    </button>
+                  </div>
+                )}
+                {pickingOfferToAdd ? (
+                  <OfferPickerField
+                    onPick={(id, name) => {
+                      onUpdate(node.id, { offerId: id, offerDisplayName: name })
+                      setPickingOfferToAdd(false)
+                    }}
+                    onCancel={() => setPickingOfferToAdd(false)}
+                  />
+                ) : !offerDisplayName && (
+                  <button
+                    type="button"
+                    onClick={() => setPickingOfferToAdd(true)}
+                    className="text-xs px-2 py-1.5 rounded bg-gray-700 hover:bg-gray-600 text-white self-start"
+                  >
+                    Pick an offer…
+                  </button>
+                )}
+              </div>,
+            )}
+
+            {field(
+              'quantity',
+              'Quantity',
+              <input
+                type="number"
+                min={1}
+                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-sky-500"
+                value={(data.quantity as number) ?? 1}
+                onChange={(e) => onUpdate(node.id, { quantity: Math.max(1, Number(e.target.value) || 1) })}
+              />,
+            )}
+
+            {field(
+              'mode',
+              'Mode',
+              <div className="flex rounded-lg overflow-hidden border border-gray-700 text-xs w-fit">
+                <button
+                  type="button"
+                  onClick={() => onUpdate(node.id, { mode: 'add' })}
+                  className={`px-3 py-1 transition-colors ${mode === 'add' ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}`}
+                >
+                  Add
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onUpdate(node.id, { mode: 'replace' })}
+                  className={`px-3 py-1 transition-colors ${mode === 'replace' ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}`}
+                >
+                  Replace
+                </button>
+              </div>,
+            )}
+
+            {mode === 'replace' && field(
+              'replacesOfferIds',
+              'Offers to Remove',
+              <OfferListManagerField
+                offerIds={replacesIds}
+                offerNames={replacesNames}
+                onChange={(ids, names) => onUpdate(node.id, { replacesOfferIds: ids, replacesOfferNames: names })}
+                emptyMessage="No offers selected to replace yet."
+                addButtonLabel="+ Add offer to replace"
+              />,
+            )}
+
+            <p className="text-[10px] text-gray-500 leading-snug">
+              Connect the exit handle to wire up Added / Failed (e.g. sold out) — same picker
+              pattern as API Call.
+            </p>
+          </>
+        )
+      }
+
+      case 'remove_cart_item': {
+        const removeIds = (data.removeOfferIds as string[] | undefined) ?? []
+        const removeNames = (data.removeOfferNames as string[] | undefined) ?? []
+        return (
+          <>
+            {field(
+              'removeOfferIds',
+              'Offers to Remove',
+              <OfferListManagerField
+                offerIds={removeIds}
+                offerNames={removeNames}
+                onChange={(ids, names) => onUpdate(node.id, { removeOfferIds: ids, removeOfferNames: names })}
+              />,
+            )}
+            <p className="text-[10px] text-gray-500 leading-snug">
+              Connect the exit handle to wire up Removed / Failed.
+            </p>
+          </>
+        )
+      }
+
+      case 'reset_cart':
+        return (
+          <p className="text-[10px] text-gray-500 leading-snug">
+            Clears every item from the current call's cart. No configuration needed — connect the
+            single exit handle to wherever the flow should continue.
+          </p>
+        )
 
       case 'end':
         return field('status', 'Status', input('status', 'complete'))

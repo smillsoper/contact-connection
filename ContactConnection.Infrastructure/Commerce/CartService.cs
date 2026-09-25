@@ -51,6 +51,32 @@ public class CartService : ICartService
         return await ApplyAsync(record, newCart, ct);
     }
 
+    public async Task<CartOperationResult> ReplaceItemsAsync(Guid callRecordId, IReadOnlyList<Guid> removeOfferIds, Guid addOfferId, int quantity, CancellationToken ct = default)
+    {
+        if (quantity < 1) throw new InvalidOperationException("Quantity must be at least 1.");
+
+        var record = await LoadRecordAsync(callRecordId, ct);
+        var offer = await _offers.GetByIdAsync(addOfferId, ct)
+            ?? throw new InvalidOperationException($"Offer {addOfferId} not found");
+
+        var removeSet = removeOfferIds.ToHashSet();
+        var survivingItems = (record.Cart?.Items ?? []).Where(i => !removeSet.Contains(i.OfferId)).ToList();
+        var newItem = BuildPricedItem(offer, quantity, survivingItems);
+
+        var newCart = (record.Cart ?? CartDocument.Empty()) with { Items = [.. survivingItems, newItem] };
+        return await ApplyAsync(record, newCart, ct);
+    }
+
+    public async Task<CartOperationResult> RemoveOffersAsync(Guid callRecordId, IReadOnlyList<Guid> offerIds, CancellationToken ct = default)
+    {
+        var record = await LoadRecordAsync(callRecordId, ct);
+        var removeSet = offerIds.ToHashSet();
+        var newItems = (record.Cart?.Items ?? []).Where(i => !removeSet.Contains(i.OfferId)).ToList();
+
+        var newCart = (record.Cart ?? CartDocument.Empty()) with { Items = newItems };
+        return await ApplyAsync(record, newCart, ct);
+    }
+
     public async Task<CartOperationResult> RemoveItemAsync(Guid callRecordId, int itemIndex, CancellationToken ct = default)
     {
         var record = await LoadRecordAsync(callRecordId, ct);

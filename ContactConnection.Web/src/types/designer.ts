@@ -16,6 +16,9 @@ export type ContactConnectionNodeType =
   | 'get_custom_field'
   | 'store_value'
   | 'get_value'
+  | 'add_to_cart'
+  | 'remove_cart_item'
+  | 'reset_cart'
   | 'end'
 
 export interface NodeData extends Record<string, unknown> {
@@ -94,6 +97,17 @@ export interface NodeData extends Record<string, unknown> {
   scope?: 'tenant' | 'client' | 'campaign'
   keyName?: string
   retention?: 'forever' | '1_hour' | '24_hours' | '1_week' | '1_month'
+  // add_to_cart — offerId/replacesOfferIds are what the backend reads; the *Name/*Names fields are
+  // denormalized display-only, same convention as apiDefinitionName/definitionDisplayLabel above.
+  offerId?: string
+  offerDisplayName?: string
+  quantity?: number
+  mode?: 'add' | 'replace'
+  replacesOfferIds?: string[]
+  replacesOfferNames?: string[]
+  // remove_cart_item — same "raw ids for backend, parallel *Names for display" convention
+  removeOfferIds?: string[]
+  removeOfferNames?: string[]
   // end
   status?: string
 }
@@ -147,6 +161,14 @@ export interface ContactConnectionNodeDef {
   scope?: 'tenant' | 'client' | 'campaign'
   keyName?: string
   retention?: 'forever' | '1_hour' | '24_hours' | '1_week' | '1_month'
+  offerId?: string
+  offerDisplayName?: string
+  quantity?: number
+  mode?: 'add' | 'replace'
+  replacesOfferIds?: string[]
+  replacesOfferNames?: string[]
+  removeOfferIds?: string[]
+  removeOfferNames?: string[]
   status?: string
   _pos?: { x: number; y: number }
   transitions: Record<string, string>
@@ -266,6 +288,24 @@ export const NODE_META: Record<
     description: 'Read a stored value back into a flow variable',
     handles: 'single',
   },
+  add_to_cart: {
+    label: 'Add to Cart',
+    color: '#059669',
+    description: 'Add (or replace) a specific offer on the current call’s cart',
+    handles: 'single',
+  },
+  remove_cart_item: {
+    label: 'Remove Cart Item',
+    color: '#b45309',
+    description: 'Remove one or more specific offers from the current call’s cart',
+    handles: 'single',
+  },
+  reset_cart: {
+    label: 'Reset Cart',
+    color: '#dc2626',
+    description: 'Clear every item from the current call’s cart',
+    handles: 'single',
+  },
   end: {
     label: 'End',
     color: '#ef4444',
@@ -316,6 +356,12 @@ export function defaultNodeData(type: ContactConnectionNodeType): NodeData {
       return { label: 'Store Value', scope: 'campaign', keyName: '', value: '', retention: 'forever' }
     case 'get_value':
       return { label: 'Get Value', scope: 'campaign', keyName: '', outputVariable: '' }
+    case 'add_to_cart':
+      return { label: 'Add to Cart', offerId: '', offerDisplayName: '', quantity: 1, mode: 'add', replacesOfferIds: [], replacesOfferNames: [] }
+    case 'remove_cart_item':
+      return { label: 'Remove Cart Item', removeOfferIds: [], removeOfferNames: [] }
+    case 'reset_cart':
+      return { label: 'Reset Cart' }
     case 'end':
       return { label: 'End', status: 'complete' }
   }

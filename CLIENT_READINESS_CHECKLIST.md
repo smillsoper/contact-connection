@@ -118,13 +118,72 @@ Nothing else matters if an agent can't take an order and get paid on a call.
           UI when the `add_to_cart` flow node's upsell/replace design gets built, AutoShip UI when
           subscriptions get tested) — not a round-out-everything-now pass. Don't re-ask this; a
           future session should just build the specific field(s) a concrete task needs.
-        - **Still not started:** the `add_to_cart` CRM flow node type itself (script-driven
-          automatic add/replace based on agent input selection) — the upsell/replace design (node
-          reference + a `FlowVars` breadcrumb, distinct from `Offer.MixMatchCode`'s group-pricing
-          case) is planned but not built. Also still open: wiring the agent-facing cart's offer
-          picker (`CartModal`) to actually filter by the call's client/campaign scope via
-          `IOfferRepository.GetAvailableForContextAsync` (built, not called from anywhere yet) —
-          right now scoping is admin-visible metadata only.
+        - **`add_to_cart` / `remove_cart_item` / `reset_cart` CRM flow nodes shipped and
+          live-verified (same session, continued).** Design revised from the original sketch during
+          planning: dropped the node-reference + `FlowVars`-breadcrumb idea for "replace on upsell"
+          in favor of the replace node picking its own offer(s) to remove directly via the same
+          search UI as the offer being added — self-contained, no `FlowExecutionContext` changes.
+          Per explicit user direction, "replace" is **multi-select**
+          (`replacesOfferIds: Guid[]`, not a single id) since one upsell can need to supersede
+          several previously-added lines at once. User also asked mid-build for two companion node
+          types using the same infrastructure: `remove_cart_item` (removes specific offer(s), no
+          add) and `reset_cart` (clears the whole cart, no config). New
+          `ICartService.ReplaceItemsAsync`/`RemoveOffersAsync`; three new `INodeHandler`s; new
+          shared `OfferPickerField`/`OfferListManagerField` frontend components (search-a-product →
+          pick-an-offer, wrapped in an add/remove list manager) reused across both `add_to_cart`
+          replace mode and `remove_cart_item`; five backend node-type registration points and the
+          designer's own five frontend registration points (`types/designer.ts`'s node-type union +
+          `NodeData` + the near-duplicate `ContactConnectionNodeDef` + `NODE_META` + palette, plus a
+          *sixth*, separate `types/flow.ts` union used only for agent-facing runtime display — easy
+          to miss, caused a TS compile error) all updated.
+          **Real bug found and fixed via live verification, not by inspection:** these three new
+          node types were never added to `FlowEngine.cs`'s `AutoAdvanceTypes` set, so when reached
+          as a flow's entry node the engine executed the handler once, then stopped to "display" the
+          node exactly like a `script` node waiting for a Continue click — the next `advance()` call
+          re-executed the *same* node's handler a second time before finally moving on, silently
+          double-adding (or double-removing) the cart line. This is precisely the failure mode an
+          existing code comment on `api_call` already warned about for any node with real side
+          effects and no natural "waiting for input" signal; the fix is the one-line addition of all
+          three new types to `AutoAdvanceTypes`, making them properly transparent/no-agent-wait like
+          `api_call`/`set_variable`. Live-verified after the fix: add (qty+price correct, single
+          line), remove (correct offer removed, other left untouched), reset (cart emptied),
+          multi-offer replace (both original lines replaced by one new bundle line, no doubling),
+          and the OutOfStock failure path (correctly routes to `failed`, no line added). All test
+          flows/offers/cart state cleaned up afterward.
+        - **Product/offer search bug found and fixed (same session, user-reported live).** User hit
+          this immediately while trying `OfferPickerField` for real: searching "buy" for their own
+          "TV Special - Buy 2 Get 1 Free" offer returned nothing, because `ProductRepository.SearchAsync`
+          only ever matched `Product.Description`/`Sku` — a promo/offer name living only on `Offer.Name`
+          was invisible to search. User's own framing: "not obvious to tenants designing the flow."
+          Fixed by adding `p.Offers.Any(o => EF.Functions.ILike(o.Name, ...))` to the same OR chain
+          (translates to a correlated EXISTS, no `Include` needed) — this is the one shared
+          `SearchAsync` method behind both `OfferPickerField` (flow designer) and `CartModal`'s manual
+          agent search, so both benefit identically. Placeholder text in both updated from "Search by
+          name or SKU…" to "Search by product name, SKU, or offer name…". Live-verified: searching
+          "buy" (a word appearing only in the offer name, not on either Widget Mobile product) now
+          correctly returns the WIDGET-002 product.
+        - **Cart-display staleness bug found and fixed (same session, user-reported live).** User
+          built a real flow (`Section → Reset Cart → Execute Flow → Branch → Add to Cart → Section →
+          Address`), ran it end-to-end, confirmed the flow correctly took the `added` transition off
+          `add_to_cart` — but the cart strip and its modal both showed empty. Root cause was purely
+          frontend, not the node/handler: `CartPanel.tsx` fetches `GET .../cart` exactly **once**, in
+          a `useEffect` keyed only on `callRecordId` (set once when the flow-preview toolbar mints its
+          stub call record) — it never refetches again, and `CartModal` only ever receives `cart` as a
+          prop from `CartPanel`, with no independent fetch of its own. A cart-mutating node like
+          `add_to_cart`/`remove_cart_item`/`reset_cart` has no display and no event of its own (by
+          design — it's meant to be silent/transparent), so nothing ever told the cart display to look
+          again. Fixed with a `cartVersion` counter on `useCallStore`, bumped by `FlowPanel.tsx` after
+          every `advance()`/`jump()`/`startSession()` HTTP round-trip (every point a node — including
+          any silent cart mutation reached via auto-advance — could have run); `CartPanel`'s refetch
+          effect now also depends on `cartVersion`. Deliberately not a SignalR push: the agent's own
+          browser tab already learns of every node transition via the direct HTTP response to its own
+          `advance()` call (the existing `FlowHub`/`ReceiveNodeState` push turned out to be unused by
+          the agent's own tab at all — nothing in the frontend even listens for it currently; it
+          would only matter for a future supervisor-watching-live-call view), so reusing that
+          request/response cycle is simpler and sufficient here. `npm run build` clean.
+        - **Still open:** wiring the agent-facing cart's offer picker (`CartModal`) to actually
+          filter by the call's client/campaign scope via `IOfferRepository.GetAvailableForContextAsync`
+          (built, not called from anywhere yet) — right now scoping is admin-visible metadata only.
 - [ ] **Payment Gateway: Authorize.Net.** Workflow from the user's own prior experience running this
       account at the call center: **Auth-only transaction** against Authorize.Net at the point of
       sale, then **separately submit the order via Life Seasons' own Order API** (their backend,
@@ -297,10 +356,14 @@ everything above it, but genuinely important given Life Seasons' media-driven bu
 
 **Status:** No items fully closed yet. Tier 1's CRM cart/product handling item is well underway —
 see its **Progress — Session 160** notes above: out-of-stock status flag, a full manual/searchable
-cart, and client/campaign-scoped offer management with an admin Products/Offers UI, all
-live-verified. Script-driven auto-add (the `add_to_cart` flow node) is the one piece not started.
+cart, client/campaign-scoped offer management with an admin Products/Offers UI, and now the
+script-driven `add_to_cart`/`remove_cart_item`/`reset_cart` flow node types, all live-verified.
+Remaining gap on this item: wiring `IOfferRepository.GetAvailableForContextAsync` into the
+agent-facing `CartModal` so client/campaign scoping actually filters what an agent can pick (built,
+unused).
 
-**Next up:** the `add_to_cart` CRM flow node type (Tier 1, same item) — script-driven automatic
-add/replace-on-upsell, per the design noted inline. After that: Tier 1's Payment Gateway item.
+**Next up:** Tier 1's Payment Gateway item (Authorize.Net auth-only + Life Seasons' own Order API
+submission) — the next item down once the cart/product item above is considered fully closed, or
+the `GetAvailableForContextAsync` wiring first if closing that gap is preferred before moving on.
 Remember the incremental-expansion decision above before building out more Offer/Product admin
 fields speculatively — only add what a concrete task actually needs.
