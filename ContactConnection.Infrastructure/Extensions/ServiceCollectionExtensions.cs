@@ -15,6 +15,7 @@ using ContactConnection.Infrastructure.Email;
 using ContactConnection.Infrastructure.FlowEngine;
 using ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 using ContactConnection.Infrastructure.FlowEngine.Services;
+using ContactConnection.Infrastructure.Payments;
 using ContactConnection.Infrastructure.Repositories;
 using ContactConnection.Infrastructure.Storage;
 using ContactConnection.Infrastructure.StoredValues;
@@ -110,6 +111,17 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITaxProvider, FlatRateTaxProvider>();
         services.AddSingleton<ITaxProviderFactory, TaxProviderFactory>();
 
+        // Payment gateway clients — each IPaymentGatewayClient is enumerated by
+        // PaymentGatewayClientFactory to build its dispatch table (mirrors TaxProviderFactory above,
+        // except it throws on an unrecognized/unconfigured provider key rather than silently
+        // defaulting — a wrong gateway on a real charge is a much worse failure than tax defaulting
+        // to flat-rate). Scoped, not singleton like the tax providers, because it depends on the
+        // scoped ITenantCredentialStore.
+        services.AddScoped<IPaymentGatewayClient, AuthorizeNetGatewayClient>();
+        services.AddScoped<IPaymentGatewayClientFactory, PaymentGatewayClientFactory>();
+        services.AddScoped<IPaymentService, PaymentService>();
+        services.AddScoped<IPaymentTransactionRepository, PaymentTransactionRepository>();
+
         // TTS streaming providers — each ITtsStreamProvider is enumerated by
         // TtsStreamProviderFactory to build its dispatch table. No default/fallback here
         // (unlike tax): a tenant with no TtsStreaming preference uses PlayNodeHandler's
@@ -201,6 +213,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.AddToCartNodeHandler>();
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.RemoveCartItemNodeHandler>();
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.ResetCartNodeHandler>();
+        services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.AuthorizePaymentNodeHandler>();
+        services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.VoidPaymentNodeHandler>();
 
         // Flow engine (scoped — uses scoped repositories and tenant context)
         services.AddScoped<IFlowEngine, FlowEngine.FlowEngine>();
@@ -325,6 +339,9 @@ public static class ServiceCollectionExtensions
 
         // HTTP client for ApiCallNodeHandler
         services.AddHttpClient("FlowEngine");
+
+        // HTTP client for AuthorizeNetGatewayClient
+        services.AddHttpClient("AuthorizeNet");
 
         // Redis — singleton connection multiplexer shared across all requests
         var redisConnection = configuration.GetConnectionString("Redis")

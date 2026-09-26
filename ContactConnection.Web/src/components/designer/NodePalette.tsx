@@ -22,6 +22,8 @@ const NODE_TYPES: ContactConnectionNodeType[] = [
   'add_to_cart',
   'remove_cart_item',
   'reset_cart',
+  'authorize_payment',
+  'void_payment',
   'end',
 ]
 

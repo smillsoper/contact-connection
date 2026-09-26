@@ -1161,7 +1161,7 @@ export default function NodeDisplay({ node, onAdvance, onJump, advancing, valida
       )}
 
       {/* Script node — just a Next button */}
-      {(node.nodeType === 'script' || node.nodeType === 'branch' || node.nodeType === 'set_variable' || node.nodeType === 'api_call' || node.nodeType === 'set_custom_field' || node.nodeType === 'get_custom_field' || node.nodeType === 'store_value' || node.nodeType === 'get_value' || node.nodeType === 'add_to_cart' || node.nodeType === 'remove_cart_item' || node.nodeType === 'reset_cart') && (
+      {(node.nodeType === 'script' || node.nodeType === 'branch' || node.nodeType === 'set_variable' || node.nodeType === 'api_call' || node.nodeType === 'set_custom_field' || node.nodeType === 'get_custom_field' || node.nodeType === 'store_value' || node.nodeType === 'get_value' || node.nodeType === 'add_to_cart' || node.nodeType === 'remove_cart_item' || node.nodeType === 'reset_cart' || node.nodeType === 'authorize_payment' || node.nodeType === 'void_payment') && (
         <div className="flex flex-col items-start gap-1.5">
           <button
             onClick={() => onAdvance()}
@@ -1176,6 +1176,7 @@ export default function NodeDisplay({ node, onAdvance, onJump, advancing, valida
               advance automatically.
             </p>
           )}
+          {jumpDropdown}
         </div>
       )}
     </div>

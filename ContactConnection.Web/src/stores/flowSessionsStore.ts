@@ -5,6 +5,10 @@ export interface FlowSessionEntry {
   id: string
   label: string
   sessionId: string
+  // Which call this tab's flow session belongs to — lets switching tabs also switch the agent UI's
+  // call-scoped state (the cart) to match, instead of leaving it on whichever call last touched the
+  // single global useCallStore.callRecordId. See FlowPanel.tsx's activeSessionId-sync effect.
+  callRecordId: string
   initialNode: FlowNodeState
 }
 

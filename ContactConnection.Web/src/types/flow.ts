@@ -13,8 +13,9 @@ export interface JumpTarget {
 
 export interface FlowNodeState {
   sessionId: string
+  callRecordId: string
   nodeId: string
-  nodeType: 'script' | 'input' | 'email' | 'phone' | 'address' | 'branch' | 'set_variable' | 'api_call' | 'end' | 'section' | 'execute_flow' | 'transition_to_flow' | 'set_custom_field' | 'get_custom_field' | 'store_value' | 'get_value' | 'add_to_cart' | 'remove_cart_item' | 'reset_cart'
+  nodeType: 'script' | 'input' | 'email' | 'phone' | 'address' | 'branch' | 'set_variable' | 'api_call' | 'end' | 'section' | 'execute_flow' | 'transition_to_flow' | 'set_custom_field' | 'get_custom_field' | 'store_value' | 'get_value' | 'add_to_cart' | 'remove_cart_item' | 'reset_cart' | 'authorize_payment' | 'void_payment'
   label: string
   flowName?: string
   content?: string

@@ -20,6 +20,15 @@ public partial class VariableResolver : IVariableResolver
     [GeneratedRegex(@"\{\{([^}]+)\}\}", RegexOptions.Compiled)]
     private static partial Regex TagPattern();
 
+    // Matches a single arithmetic op applied to a variable reference INSIDE one tag, e.g.
+    // "flow.auth_attempts + 1" — deliberately requires whitespace around the operator so a
+    // legitimately hyphenated variable/key name (unlikely, but possible) doesn't false-positive as
+    // subtraction. See ResolveTag's doc comment for why this lives inside the tag braces rather than
+    // being detected from the resolved *value* (which would collide with ordinary data like
+    // hyphenated phone numbers or dates).
+    [GeneratedRegex(@"^(.+?)\s+([+\-*/])\s+(-?\d+(?:\.\d+)?)$", RegexOptions.Compiled)]
+    private static partial Regex ArithmeticPattern();
+
     public string Resolve(string template, VariableContext context) =>
         ResolveInternal(template, context, missingFallback: string.Empty);
 
@@ -95,8 +104,36 @@ public partial class VariableResolver : IVariableResolver
         catch { return null; }
     }
 
+    /// <summary>
+    /// Resolves one {{...}} tag's content. Supports a single trailing arithmetic operation applied
+    /// to a variable reference — e.g. "flow.auth_attempts + 1" — so a counter can be incremented via
+    /// {{flow.auth_attempts + 1}} in a set_variable assignment. This is deliberately scoped to
+    /// "one operator, one numeric literal operand, written inside the same tag" rather than a general
+    /// expression language: the operator must be part of what the script author typed in the
+    /// template, never inferred from a resolved value (which could otherwise misfire on ordinary
+    /// hyphenated data like phone numbers or dates). A non-numeric or missing base value is treated
+    /// as 0, so a counter doesn't need an explicit initializer to start incrementing from zero.
+    /// </summary>
     private string? ResolveTag(string tag, VariableContext context)
     {
+        var arith = ArithmeticPattern().Match(tag);
+        if (arith.Success)
+        {
+            var baseValue = ResolveTag(arith.Groups[1].Value.Trim(), context);
+            var left = decimal.TryParse(baseValue, out var l) ? l : 0m;
+            var op = arith.Groups[2].Value;
+            var operand = decimal.Parse(arith.Groups[3].Value);
+            var result = op switch
+            {
+                "+" => left + operand,
+                "-" => left - operand,
+                "*" => left * operand,
+                "/" => operand != 0 ? left / operand : left,
+                _   => left,
+            };
+            return FormatNumber(result);
+        }
+
         // Split on first dot only for namespace extraction
         var dotIndex = tag.IndexOf('.');
         if (dotIndex < 0) return null;
@@ -148,6 +185,13 @@ public partial class VariableResolver : IVariableResolver
             return l.CompareTo(r);
         return string.Compare(left, right, StringComparison.OrdinalIgnoreCase);
     }
+
+    /// <summary>Formats an arithmetic result without a trailing ".0" for whole numbers (so a counter
+    /// reads "1", not "1.0", both for display and for numeric comparisons in EvaluateCondition).</summary>
+    private static string FormatNumber(decimal value) =>
+        value == Math.Truncate(value)
+            ? ((long)value).ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : value.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     private static string Unquote(string s) =>
         s.Length >= 2 && s[0] == '"' && s[^1] == '"' ? s[1..^1] : s;

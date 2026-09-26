@@ -49,6 +49,7 @@ public abstract class NodeHandlerBase
         bool required = false) => new()
     {
         SessionId    = ctx.SessionId,
+        CallRecordId = ctx.CallRecordId,
         NodeId       = ctx.CurrentNodeId,
         NodeType     = StrReq(node, "type"),
         Label        = Resolver.ResolveForDisplay(Str(node, "label") ?? string.Empty, ctx.ToVariableContext()),

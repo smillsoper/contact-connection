@@ -1272,6 +1272,95 @@ export default function NodePropertiesPanel({
           </p>
         )
 
+      case 'authorize_payment': {
+        const amountMode = (data.amountMode as string) ?? 'cart_total'
+        return (
+          <>
+            {field('provider', 'Provider', input('provider', 'authorize_net'))}
+
+            <p className="text-[10px] text-gray-500 leading-snug -mt-1">
+              Card/expiration/CVV field names below must match the keys used by the tf_secure_collect
+              node (telephony flow) that captured this call's card data — for PCI reasons these are
+              always read from that encrypted capture, never from an ordinary flow variable.
+            </p>
+            {field('cardNumberField', 'Card Number Field', input('cardNumberField', 'card_number'))}
+            {field('expField', 'Expiration Field (MMYY)', input('expField', 'exp'))}
+            {field('cvvField', 'CVV Field', input('cvvField', 'cvv'))}
+            {field(
+              'zipField',
+              'Zip (optional, for AVS)',
+              input('zipField', 'zip, or {{flow.billing_address.zip}}'),
+            )}
+            <p className="text-[10px] text-gray-500 leading-snug -mt-1">
+              Zip isn't sensitive, so unlike the fields above it can be either a tf_secure_collect
+              field key (if captured by DTMF) or a <span className="font-mono">{'{{...}}'}</span>{' '}
+              variable reference, e.g. an earlier address node's output.
+            </p>
+
+            {field(
+              'amountMode',
+              'Amount',
+              <div className="flex flex-col gap-1.5">
+                <div className="flex rounded-lg overflow-hidden border border-gray-700 text-xs w-fit">
+                  <button
+                    type="button"
+                    onClick={() => onUpdate(node.id, { amountMode: 'cart_total' })}
+                    className={`px-3 py-1 transition-colors ${amountMode === 'cart_total' ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}`}
+                  >
+                    Current Cart Total
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onUpdate(node.id, { amountMode: 'fixed' })}
+                    className={`px-3 py-1 transition-colors ${amountMode === 'fixed' ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}`}
+                  >
+                    Fixed Amount
+                  </button>
+                </div>
+                {amountMode === 'fixed' && (
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-sky-500"
+                    value={(data.fixedAmount as number) ?? ''}
+                    onChange={(e) => onUpdate(node.id, { fixedAmount: Number(e.target.value) || 0 })}
+                  />
+                )}
+              </div>,
+            )}
+
+            {field('outputVariable', 'Output Variable (optional)', input('outputVariable', 'payment_result'))}
+            <p className="text-[10px] text-gray-500 leading-snug -mt-1">
+              Exposes the result for downstream script/nodes:{' '}
+              <span className="font-mono">{'{{flow.outputVariable.responseReasonText}}'}</span> is the
+              decline/error message; <span className="font-mono">{'{{flow.outputVariable.gatewayTransactionId}}'}</span>{' '}
+              is the value an order-submission API call will need.
+            </p>
+
+            <p className="text-[10px] text-gray-500 leading-snug">
+              Connect the exit handle to wire up Approved / Declined / Error — same picker pattern
+              as API Call.
+            </p>
+          </>
+        )
+      }
+
+      case 'void_payment':
+        return (
+          <>
+            <p className="text-[10px] text-gray-500 leading-snug">
+              Voids the call's most recent approved, not-yet-voided transaction. No configuration
+              needed — connect the exit handle to wire up Voided / Failed.
+            </p>
+            {field('outputVariable', 'Output Variable (optional)', input('outputVariable', 'void_result'))}
+            <p className="text-[10px] text-gray-500 leading-snug -mt-1">
+              <span className="font-mono">{'{{flow.outputVariable.responseReasonText}}'}</span> carries
+              the failure reason on Failed.
+            </p>
+          </>
+        )
+
       case 'end':
         return field('status', 'Status', input('status', 'complete'))
     }

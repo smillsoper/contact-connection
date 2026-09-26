@@ -19,6 +19,8 @@ export type ContactConnectionNodeType =
   | 'add_to_cart'
   | 'remove_cart_item'
   | 'reset_cart'
+  | 'authorize_payment'
+  | 'void_payment'
   | 'end'
 
 export interface NodeData extends Record<string, unknown> {
@@ -108,6 +110,17 @@ export interface NodeData extends Record<string, unknown> {
   // remove_cart_item — same "raw ids for backend, parallel *Names for display" convention
   removeOfferIds?: string[]
   removeOfferNames?: string[]
+  // authorize_payment — field-key names match the upstream tf_secure_collect node's own field
+  // config, since those keys are freeform per flow. amountMode 'fixed' uses fixedAmount instead of
+  // the call's current cart total.
+  provider?: string
+  cardNumberField?: string
+  expField?: string
+  cvvField?: string
+  zipField?: string
+  amountMode?: 'cart_total' | 'fixed'
+  fixedAmount?: number
+  // void_payment — no config, voids the call's most recent approved transaction
   // end
   status?: string
 }
@@ -169,6 +182,13 @@ export interface ContactConnectionNodeDef {
   replacesOfferNames?: string[]
   removeOfferIds?: string[]
   removeOfferNames?: string[]
+  provider?: string
+  cardNumberField?: string
+  expField?: string
+  cvvField?: string
+  zipField?: string
+  amountMode?: 'cart_total' | 'fixed'
+  fixedAmount?: number
   status?: string
   _pos?: { x: number; y: number }
   transitions: Record<string, string>
@@ -306,6 +326,18 @@ export const NODE_META: Record<
     description: 'Clear every item from the current call’s cart',
     handles: 'single',
   },
+  authorize_payment: {
+    label: 'Authorize Payment',
+    color: '#047857',
+    description: 'Send an auth-only transaction to the payment gateway using captured card data',
+    handles: 'single',
+  },
+  void_payment: {
+    label: 'Void Payment',
+    color: '#9f1239',
+    description: 'Void the call’s most recent approved transaction',
+    handles: 'single',
+  },
   end: {
     label: 'End',
     color: '#ef4444',
@@ -362,6 +394,10 @@ export function defaultNodeData(type: ContactConnectionNodeType): NodeData {
       return { label: 'Remove Cart Item', removeOfferIds: [], removeOfferNames: [] }
     case 'reset_cart':
       return { label: 'Reset Cart' }
+    case 'authorize_payment':
+      return { label: 'Authorize Payment', provider: 'authorize_net', cardNumberField: 'card_number', expField: 'exp', cvvField: 'cvv', zipField: 'zip', amountMode: 'cart_total', fixedAmount: undefined, outputVariable: '' }
+    case 'void_payment':
+      return { label: 'Void Payment', outputVariable: '' }
     case 'end':
       return { label: 'End', status: 'complete' }
   }

@@ -22,6 +22,8 @@ public static class CallRecordsEndpoints
         group.MapPost("{id:guid}/cart/items", AddCartItem);
         group.MapPatch("{id:guid}/cart/items/{itemIndex:int}", UpdateCartItemQuantity);
         group.MapDelete("{id:guid}/cart/items/{itemIndex:int}", RemoveCartItem);
+        group.MapPost("{id:guid}/payments/authorize", AuthorizePayment);
+        group.MapPost("{id:guid}/payments/void", VoidPayment);
 
         return app;
     }
@@ -240,6 +242,51 @@ public static class CallRecordsEndpoints
         }
     }
 
+    // ── POST /api/v1/call-records/{id}/payments/authorize ───────────────────
+    // Thin passthrough to IPaymentService — lets an authorize_payment flow node's outcome be tested
+    // directly against a real gateway sandbox, and doubles as a future manual/admin "charge this
+    // card" action. Field-key names default to tf_secure_collect's own conventional keys.
+
+    private static async Task<IResult> AuthorizePayment(
+        Guid id,
+        AuthorizePaymentRequest request,
+        IPaymentService payments,
+        TenantContext tenantContext,
+        CancellationToken ct)
+    {
+        if (!tenantContext.HasTenant) return Results.Unauthorized();
+
+        try
+        {
+            var result = await payments.AuthorizeAsync(
+                id, request.Provider ?? "authorize_net",
+                request.CardNumberField ?? "card_number",
+                request.ExpField ?? "exp",
+                request.CvvField ?? "cvv",
+                request.ZipField, request.ZipOverride,
+                request.FixedAmount, ct);
+            return Results.Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.NotFound(new { error = ex.Message });
+        }
+    }
+
+    // ── POST /api/v1/call-records/{id}/payments/void ─────────────────────────
+
+    private static async Task<IResult> VoidPayment(
+        Guid id,
+        IPaymentService payments,
+        TenantContext tenantContext,
+        CancellationToken ct)
+    {
+        if (!tenantContext.HasTenant) return Results.Unauthorized();
+
+        var result = await payments.VoidMostRecentAsync(id, ct);
+        return Results.Ok(result);
+    }
+
     // The shared frontend fetch wrapper (api/client.ts) only surfaces a `{error}` field from a
     // non-2xx body as its thrown Error's message — compose the SKU list directly into that string
     // so a 409 shows something a caller can render as-is, not raw JSON.
@@ -316,3 +363,6 @@ public record InboundCallRequest(string? CallerNumber, string? CallerName, strin
 public record OutboundCallRequest(string? DialedNumber);
 public record AddCartItemRequest(Guid OfferId, int Quantity);
 public record UpdateCartItemQuantityRequest(int Quantity);
+public record AuthorizePaymentRequest(
+    string? Provider, string? CardNumberField, string? ExpField, string? CvvField, string? ZipField,
+    string? ZipOverride, decimal? FixedAmount);

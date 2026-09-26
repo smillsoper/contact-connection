@@ -54,7 +54,7 @@ public class ScriptPopNodeHandlerTests
         engine.Setup(e => e.StartAsync(It.IsAny<StartFlowRequest>(), It.IsAny<CancellationToken>()))
               .ReturnsAsync(new FlowNodeState
               {
-                  SessionId = sessionId, NodeId = "n1", NodeType = "script", Label = "Greeting",
+                  SessionId = sessionId, CallRecordId = Guid.NewGuid(), NodeId = "n1", NodeType = "script", Label = "Greeting",
               });
         return engine;
     }

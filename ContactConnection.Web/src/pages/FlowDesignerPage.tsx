@@ -44,6 +44,8 @@ import GetValueNode from '../components/designer/nodes/GetValueNode'
 import AddToCartNode from '../components/designer/nodes/AddToCartNode'
 import RemoveCartItemNode from '../components/designer/nodes/RemoveCartItemNode'
 import ResetCartNode from '../components/designer/nodes/ResetCartNode'
+import AuthorizePaymentNode from '../components/designer/nodes/AuthorizePaymentNode'
+import VoidPaymentNode from '../components/designer/nodes/VoidPaymentNode'
 import EndNode from '../components/designer/nodes/EndNode'
 
 import type { NodeData, ContactConnectionNodeType, ContactConnectionFlowDefinition, FlowOption } from '../types/designer'
@@ -71,6 +73,8 @@ const nodeTypes = {
   add_to_cart: AddToCartNode,
   remove_cart_item: RemoveCartItemNode,
   reset_cart: ResetCartNode,
+  authorize_payment: AuthorizePaymentNode,
+  void_payment: VoidPaymentNode,
   end: EndNode,
 }
 
@@ -87,6 +91,8 @@ const FIXED_EXIT_OPTIONS: Partial<Record<ContactConnectionNodeType, string[]>> =
   branch: ['true', 'false'],
   add_to_cart: ['added', 'failed'],
   remove_cart_item: ['removed', 'failed'],
+  authorize_payment: ['approved', 'declined', 'error'],
+  void_payment: ['voided', 'failed'],
 }
 
 // Options for a node that uses the fixed-handle picker (select-type input, or a
@@ -594,6 +600,8 @@ function DesignerCanvas({
                 api_call: '#6366f1',
                 scheduled_callback: '#0891b2',
                 add_to_cart: '#059669',
+                authorize_payment: '#047857',
+                void_payment: '#9f1239',
                 end: '#ef4444',
               }
               return meta[n.type ?? ''] ?? '#9ca3af'

@@ -75,6 +75,11 @@ public class JumpTarget
 public class FlowNodeState
 {
     public required Guid SessionId { get; init; }
+
+    /// <summary>The call this session belongs to — lets the agent UI associate each open flow tab
+    /// with its own call-scoped state (e.g. the cart) instead of relying on a single global "current
+    /// call" value that doesn't actually track which tab is active.</summary>
+    public required Guid CallRecordId { get; init; }
     public required string NodeId { get; init; }
     public required string NodeType { get; init; }   // script | input | branch | end | ...
     public required string Label { get; init; }

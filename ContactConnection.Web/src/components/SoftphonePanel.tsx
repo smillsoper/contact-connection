@@ -472,7 +472,7 @@ export default function SoftphonePanel() {
     if (t.campaignFlowId) {
       const label = t.campaignName ? `${t.campaignName} Script` : 'Transfer Script'
       flowsApi.startSession({ flowId: t.campaignFlowId, callRecordId: callRecordId ?? undefined })
-        .then((node) => addFlowSession({ id: node.sessionId, label, sessionId: node.sessionId, initialNode: node }))
+        .then((node) => addFlowSession({ id: node.sessionId, label, sessionId: node.sessionId, callRecordId: node.callRecordId, initialNode: node }))
         .catch(console.error)
     }
   }

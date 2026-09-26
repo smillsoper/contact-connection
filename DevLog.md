@@ -170,6 +170,7 @@
 | 158 | 2026-09-22 | 6:10 PM PDT | 7:20 PM PDT | 70 min | ~15644 min |
 | 159 | 2026-09-23 | 10:08 AM PDT | 11:41 AM PDT | 93 min | ~15737 min |
 | 160 | 2026-09-23 – 2026-09-24 | 11:41 AM PDT (9/23) | 5:28 PM PDT (9/24) | ~1787 min (~29h47m — start time is Session 159's end time per Stephen's instruction, not a continuously-worked span) | ~17524 min |
+| 161 | 2026-09-24 – 2026-09-25 | 6:24 PM PDT (9/24) | 5:17 PM PDT (9/25) | 383 min (156 min 9/24 6:24–9:00 PM + gap, resumed 9/25 1:30 PM, 227 min to 5:17 PM) | ~17907 min |
 
 ---
 
@@ -10127,3 +10128,174 @@ verification.
   flagged by Stephen as a future need, explicitly deferred, not urgent right now.
 - Tier 1's next item: Payment Gateway (Authorize.Net auth-only + Life Seasons' own Order API
   submission).
+
+---
+
+## Session 161
+
+**Date:** 2026-09-24 – 2026-09-25
+**Start:** 6:24 PM PDT (9/24)
+**End:** 5:17 PM PDT (9/25)
+**Duration:** 383 minutes (156 min on 9/24 from 6:24–9:00 PM, then a gap; resumed 9/25 at 1:30 PM,
+227 min to 5:17 PM)
+**Total Duration:** ~17907 minutes
+
+### Focus
+
+Tier 1's last CRM-side checklist item: Authorize.Net payment gateway integration (auth-only + void),
+per the user's own real call-center workflow. Long session with a lot of live testing — most of the
+real value came from Stephen actually building a real-world sales-call flow with the new nodes and
+finding genuine platform gaps neither of us had anticipated, rather than from the initial build
+itself.
+
+### 1. Authorize.Net payment gateway — auth-only + void, built and live-verified
+
+Design revised significantly mid-planning once Stephen's first-hand knowledge of Life Seasons came
+up: they run a **separate Authorize.Net merchant account per campaign** (My Best Heart / NeuroQ /
+Joint Food), not one account for the whole client, and Stephen asked for a **void** node this session
+too (agent can undo a just-authorized transaction if the caller changes their mind before the order
+is submitted), while a future **capture** (auth+capture) transaction type was explicitly deferred but
+not architecturally blocked.
+
+- **Two-layer architecture, mirroring the existing `ITaxProvider`/`ITaxProviderFactory` pattern**:
+  `IPaymentGatewayClient` (one per provider — `AuthorizeNetGatewayClient` the only one now) +
+  `IPaymentGatewayClientFactory` (throws on an unconfigured provider rather than silently
+  defaulting, unlike tax) + `IPaymentService` (the orchestrator every node handler calls — owns all
+  `CallRecord` access, decrypts the `tf_secure_collect` blob, resolves amount, persists a
+  `PaymentTransaction`, wipes `CallRecord.SensitiveData` with reason `api_processed` on a definitive
+  approve/decline but not on a gateway error).
+- **Credential scoping: campaign → client → tenant cascade** via the *existing* tenant credential
+  store — no new schema, just a key-naming convention (`AuthorizeNet:{campaignId}:ApiLoginId`,
+  falling back to `{clientId}:` then bare tenant-level), same precedence `CustomFieldDefinition`
+  already uses.
+- New `PaymentTransaction` entity (never stores PAN/CVV — only masked last-4 + card type) and two new
+  CRM flow nodes: `authorize_payment` (reads the already-captured card data by configurable field-key
+  names; `approved`/`declined`/`error`) and `void_payment` (no required config — voids the call's own
+  most recent approved transaction; `voided`/`failed`).
+- **Bug found and fixed via a live sandbox test, not by inspection:** `PaymentTransactionConfiguration`
+  was written but never registered in `TenantDbContext.OnModelCreating` — EF Core silently fell back
+  to default conventions (wrong table/column names, no constraints) instead of throwing. Found only
+  because the live test's own DB verification query against the *intended* `payment_transactions`
+  table came back "relation does not exist." Fixed by registering it and regenerating the migration
+  (revert → remove → re-add → re-apply) with the correct schema.
+- **Also found, not a code bug:** the first live sandbox test returned Authorize.Net's own "User
+  authentication failed" — traced to lengths/environment/URL all resolving correctly via a one-time
+  diagnostic (no secret values logged), which pointed at the credentials themselves; turned out
+  Stephen's old developer sandbox account had been closed from disuse. A fresh sandbox account's
+  credentials worked immediately.
+- Live-verified end-to-end against the real Authorize.Net sandbox: missing-card-data (clean error, no
+  gateway call attempted), a real approval (correct transId/authCode/masked card data, sensitive data
+  wiped), a void of that approval with a correctly-failing second void attempt, an expired-card case
+  (Authorize.Net classifies this as a request-level error rather than a bank decline — correctly
+  routes to this platform's `error` transition), and the full node-to-node flow-engine path in one
+  real flow session.
+
+### 2. Zip field needed to support a variable reference, not just the secure-collect blob
+
+Stephen's own properties-panel review caught this before it shipped broken: he set
+`zipField: "{{flow.billing_address.zip}}"` (an earlier address node's output), but the original
+implementation only ever looked up `zipField` as a literal key inside the same `tf_secure_collect`
+blob as card/exp/cvv. Card/exp/cvv deliberately stay blob-only with no variable-template fallback
+(PCI: never normalize "put the card number in an ordinary flow variable"), but zip isn't sensitive, so
+it now supports either source — `AuthorizePaymentNodeHandler` resolves `zipField` as a `{{...}}`
+template when it looks like one, taking precedence over the blob-key lookup. Live-verified with a
+deliberately zip-less capture blob plus a `{{flow.billing_address.zip}}` reference, confirmed via a
+one-time diagnostic (Authorize.Net's sandbox AVS codes turned out to be static/unreliable for proving
+this any other way) that the zip value could only have come from the variable path.
+
+### 3. Decline/error reason wasn't reaching the agent script at all
+
+Stephen asked directly: is the decline/error message exposed to a flow variable for the agent script
+to display? It wasn't — neither new node wrote anything to flow variables, so there was no way to
+tell the caller *why* a card failed, and no way to hand the Authorize.Net transaction id to a future
+Order API submission step even though that's the one field it will need. Fixed by adding the same
+`outputVariable` convention `api_call` already uses to both nodes —
+`{{flow.outputVariable.responseReasonText}}`, `.gatewayTransactionId`, `.status`, `.authCode`,
+`.transactionId`. Live-verified: an `authorize_payment` node (expired card → `error`) wired to a
+`script` node whose content referenced `{{flow.payment_result.responseReasonText}}` correctly
+resolved to "...The credit card has expired."
+
+### 4. Platform-level gap: the variable resolver had no arithmetic at all
+
+Found while reviewing a real sales-call flow Stephen built with the new nodes: a "retry up to 3
+times" pattern needs a counter, and `{{flow.auth_attempts}} + 1` in a `set_variable` assignment just
+concatenated the literal string `" + 1"` — `Resolve()` only ever does `{{...}}` tag substitution,
+never expression evaluation — so the counter never actually incremented and
+`{{flow.auth_attempts}} >= 3` silently always evaluated false (numeric comparison falls back to an
+always-false string compare when either side doesn't parse as a number). Stephen asked for the
+general fix rather than a narrower `set_variable`-only increment mode. Design constraint: the
+operator+operand had to live *inside* the same `{{...}}` tag as the variable reference
+(`{{flow.auth_attempts + 1}}`), never inferred from a *resolved value* — otherwise ordinary hyphenated
+data (a phone number, a date) could misfire as subtraction. Implemented in
+`VariableResolver.ResolveTag` via a new regex requiring whitespace around the operator (further
+reduces collision with a legitimately hyphenated variable name); supports `+ - * /`, treats a
+missing/non-numeric base as 0 (a counter needs no initializer), formats whole-number results without
+a trailing `.0`. 9 new unit tests added; full solution suite (1088 tests) passes with no regressions.
+Live-verified: three chained increments from 0 correctly produced 3, and the branch condition
+correctly evaluated true.
+
+### 5. Jump-to-section dropdown missing on `script` nodes
+
+Stephen recalled this from testing a few days prior: `script` nodes never showed the "Jump to
+section" dropdown other agent-stopping node types (input/phone/email/address) already show. Root
+cause: `NodeDisplay.tsx`'s shared "just show a Continue button" render block — covering `script` and
+every auto-advancing/silent node type — never rendered `{jumpDropdown}` at all, unlike every other
+node-type block. Backend data was never the problem (`FlowEngine.AttachSectionInfo` already populates
+`JumpTargets` for any current node whenever the flow has sections anywhere in it, confirmed live).
+`script` is the one type in that shared block that's genuinely agent-facing (excluded from
+`AutoAdvanceTypes` on purpose); the fix is a no-op for the rest in normal operation since they only
+ever reach the agent's screen as a flow's own entry node. One-line fix.
+
+### 6. Stale cart after a flow-preview session ends
+
+Stephen noticed the cart strip kept showing a finished call's cart after returning to "Select flow…
+Start." Root cause: `FlowPanel.tsx`'s preview toolbar mints a stub `CallRecord` on first Start and
+stores its id in `useCallStore.callRecordId`, but ending a session only ever closed the tab — nothing
+cleared `callRecordId`. Since `CartPanel` keys entirely off that value, the finished call's cart
+stayed visible indefinitely, and — worse — the *next* "Start" click would have silently reused the
+same stub call record and its stale cart. Fixed with a narrowly-scoped `clearCallRecordId()` action
+(clears only the id, not the whole call state) fired when the last open preview tab ends and no real
+call is in progress.
+
+### 7. No per-tab cart/call association at all
+
+Stephen asked to verify that switching between 2+ open flow tabs would switch the cart to match —
+tracing it found there was no such association to begin with. `FlowSessionEntry` never stored which
+call it belonged to, and `useCallStore.callRecordId` (what `CartPanel` reads) is a single global value
+with nothing syncing it on tab switch. With 2+ tabs open (a manual preview alongside a real bridged
+call delivered via `receiveScriptPop`, a warm-transfer auto-opened script, or several in sequence),
+switching tabs would have left the cart stuck on whichever call last happened to set that global
+value. Fixed by adding `CallRecordId` to the backend `FlowNodeState` (marked `required`, which
+immediately caught two more construction sites needing the same fix while wiring this up — a test
+file and a third, previously-missed `addSession` call site in `SoftphonePanel.tsx`'s warm-transfer
+auto-open), threading it into a new `FlowSessionEntry.callRecordId`, and a new effect in
+`FlowPanel.tsx` keeping `useCallStore.callRecordId` synced to whichever tab is active. Live-verified
+the backend half: two sessions on two different call records, each with a distinct cart, each
+correctly returned its own `callRecordId`. Frontend tab-switching sync awaits Stephen's visual
+confirmation in the browser.
+
+### Verification
+
+Backend: `dotnet build` clean throughout; full solution test suite (1088 tests across all 4 test
+projects — Domain/Application/Infrastructure/Api) passes with zero regressions, including 9 new
+arithmetic-resolver tests. `dotnet watch` stopped/restarted several times for EF migration commands
+and to run `dotnet test` (file-lock contention with its own build output — established runbook).
+Frontend: `npm run build` clean after every change. Live-verified via direct HTTP test scripts against
+the real running API and a real Authorize.Net sandbox account: auth-only approve/decline/error, void,
+double-void rejection, zip-as-variable, outputVariable exposure to a script node, arithmetic
+increment through a real branch condition, and per-tab callRecordId isolation. Two things still need
+Stephen's own visual confirmation in the browser (both pure frontend behavior with no server call to
+verify against): the jump dropdown actually rendering, and the stale-cart/multi-tab fixes.
+
+### Not done / follow-up
+
+- Life Seasons' own Order API submission step — still blocked on Stephen setting up file sharing to
+  the machine holding historical CRMPro integration notes (full Postgres export + `.vb`/`.designer.vb`
+  script files with base64-encoded API integration objects).
+- `IOfferRepository.GetAvailableForContextAsync` still unwired into the agent-facing `CartModal`'s
+  offer picker (built, unused) — client/campaign offer scoping is admin-visible metadata only so far.
+- Future `capture` (auth+capture) transaction type — deferred, not architecturally blocked (the
+  two-layer gateway-client design was built with this in mind).
+- Stephen still needs to visually confirm in the browser: the jump-to-section dropdown on script
+  nodes, the cart clearing after a flow ends, and the cart switching correctly when toggling between
+  2+ open flow-preview tabs.

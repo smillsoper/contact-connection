@@ -66,6 +66,11 @@ interface CallState {
   setMuted: (muted: boolean) => void
   setOnHold: (held: boolean) => void
   setCallRecordId: (id: string) => void
+  // Narrowly clears just the call record id (unlike reset(), which also clears callStatus/campaignId/
+  // etc.) — used when the flow-preview toolbar's own stub call record is done being previewed, so it
+  // doesn't linger and get reused by the next "Start" click, without disturbing a real concurrent
+  // call's state if one happens to be active in another tab/panel at the same time.
+  clearCallRecordId: () => void
   setCampaignId: (id: string) => void
   setTransferDialing: (target: string, label: string) => void
   setTransferConnected: () => void
@@ -139,6 +144,7 @@ export const useCallStore = create<CallState>((set) => ({
   setOnHold: (held)  => set({ isOnHold: held }),
 
   setCallRecordId: (id) => set({ callRecordId: id }),
+  clearCallRecordId: () => set({ callRecordId: null }),
   setCampaignId:   (id) => set({ campaignId: id }),
 
   setTransferDialing: (target, label) =>

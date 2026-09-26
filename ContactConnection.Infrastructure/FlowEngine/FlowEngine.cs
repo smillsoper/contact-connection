@@ -48,7 +48,8 @@ public class FlowEngine : IFlowEngine
     private static readonly HashSet<string> AutoAdvanceTypes =
         ["branch", "set_variable", "section", "execute_flow", "transition_to_flow", "api_call", "scheduled_callback",
          "set_custom_field", "get_custom_field", "store_value", "get_value",
-         "add_to_cart", "remove_cart_item", "reset_cart"];
+         "add_to_cart", "remove_cart_item", "reset_cart",
+         "authorize_payment", "void_payment"];
 
     private static readonly TimeSpan SessionTtl = TimeSpan.FromHours(12);
 

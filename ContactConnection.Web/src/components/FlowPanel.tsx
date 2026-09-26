@@ -288,7 +288,7 @@ function TabBar({ sessions, activeSessionId, onSelect }: TabBarProps) {
 
 export default function FlowPanel() {
   const { token, tenantSubdomain } = useAuthStore()
-  const { setQueued, setAutoConnecting, reset: resetCall, callRecordId, setCallRecordId, bumpCartVersion } = useCallStore()
+  const { setQueued, setAutoConnecting, reset: resetCall, callStatus, callRecordId, setCallRecordId, clearCallRecordId, bumpCartVersion } = useCallStore()
   const { sessions, activeSessionId, addSession, removeSession, setActiveSession } = useFlowSessionsStore()
   const setAgentStateCode = useAgentStateStore((s) => s.setAgentStateCode)
   const [hub, setHub] = useState<signalR.HubConnection | null>(null)
@@ -297,6 +297,16 @@ export default function FlowPanel() {
   const [flows, setFlows] = useState<{ id: string; name: string }[]>([])
   const [selectedFlowId, setSelectedFlowId] = useState('')
   const [starting, setStarting] = useState(false)
+
+  // Keep useCallStore.callRecordId in sync with whichever flow tab is actually active — with 2+
+  // tabs open (a manual preview alongside a real bridged call's script-pop, or several bridged
+  // calls in sequence), each tab's own callRecordId can differ, and call-scoped UI (the cart strip)
+  // needs to reflect whichever one the agent is currently looking at, not just whichever call last
+  // happened to set the single global value.
+  useEffect(() => {
+    const active = sessions.find((s) => s.id === activeSessionId)
+    if (active) setCallRecordId(active.callRecordId)
+  }, [activeSessionId, sessions, setCallRecordId])
 
   useEffect(() => {
     flowsApi.list().then(setFlows).catch(console.error)
@@ -351,10 +361,11 @@ export default function FlowPanel() {
       try {
         const node = JSON.parse(sessionJson) as FlowNodeState
         addSession({
-          id:          node.sessionId,
-          label:       node.flowName ?? 'Script Flow',
-          sessionId:   node.sessionId,
-          initialNode: node,
+          id:           node.sessionId,
+          label:        node.flowName ?? 'Script Flow',
+          sessionId:    node.sessionId,
+          callRecordId: node.callRecordId,
+          initialNode:  node,
         })
       } catch { /* ignore malformed payload */ }
     })
@@ -430,6 +441,7 @@ export default function FlowPanel() {
         id: node.sessionId,
         label: flow?.name ?? 'Flow',
         sessionId: node.sessionId,
+        callRecordId: node.callRecordId,
         initialNode: node,
       })
       bumpCartVersion()
@@ -494,7 +506,17 @@ export default function FlowPanel() {
             <FlowSessionView
               entry={s}
               hub={hub}
-              onEnd={() => removeSession(s.id)}
+              onEnd={() => {
+                removeSession(s.id)
+                // The stub call record the toolbar minted (see handleStartSession) has no purpose
+                // once every flow-preview tab using it is done — clear it so a stale cart doesn't
+                // linger in the UI and the next "Start" mints a fresh one instead of reusing this
+                // one. Gated on callStatus === 'idle' so this never clobbers a real concurrent call's
+                // call record if one happens to be active elsewhere at the same time.
+                if (useFlowSessionsStore.getState().sessions.length === 0 && callStatus === 'idle') {
+                  clearCallRecordId()
+                }
+              }}
             />
           </div>
         ))}
