@@ -19,6 +19,9 @@ public class PhoneNumberConfiguration : IEntityTypeConfiguration<PhoneNumber>
         builder.Property(p => p.IsActive).HasColumnName("is_active");
         builder.Property(p => p.FlowId).HasColumnName("flow_id");
         builder.Property(p => p.TelephonyFlowId).HasColumnName("telephony_flow_id");
+        builder.Property(p => p.ProviderId).HasColumnName("provider_id");
+        builder.Property(p => p.Role).HasColumnName("role").HasMaxLength(30).IsRequired().HasDefaultValue(PhoneNumberRole.Hosted);
+        builder.Property(p => p.ClientNumber).HasColumnName("client_number").HasMaxLength(20);
         builder.Property(p => p.CreatedAt).HasColumnName("created_at");
         builder.Property(p => p.UpdatedAt).HasColumnName("updated_at");
 
@@ -30,5 +33,7 @@ public class PhoneNumberConfiguration : IEntityTypeConfiguration<PhoneNumber>
         // Number unique within tenant schema (multiple tenants can share a DID)
         builder.HasIndex(p => p.Number).IsUnique();
         builder.HasIndex(p => p.CampaignId);
+        // Routing platforms look numbers up by the client number they house.
+        builder.HasIndex(p => new { p.ProviderId, p.ClientNumber });
     }
 }

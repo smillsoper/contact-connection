@@ -42,6 +42,7 @@ public class TenantDbContext : DbContext
     public DbSet<Client> Clients => Set<Client>();
     public DbSet<Campaign> Campaigns => Set<Campaign>();
     public DbSet<PhoneNumber> PhoneNumbers => Set<PhoneNumber>();
+    public DbSet<NumberProvider> NumberProviders => Set<NumberProvider>();
     public DbSet<AgentCampaignAssignment> AgentCampaignAssignments => Set<AgentCampaignAssignment>();
     public DbSet<AgentGroup> AgentGroups => Set<AgentGroup>();
     public DbSet<AgentGroupMember> AgentGroupMembers => Set<AgentGroupMember>();
@@ -91,6 +92,7 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new ClientConfiguration());
         modelBuilder.ApplyConfiguration(new CampaignConfiguration());
         modelBuilder.ApplyConfiguration(new PhoneNumberConfiguration());
+        modelBuilder.ApplyConfiguration(new NumberProviderConfiguration());
         modelBuilder.ApplyConfiguration(new AgentCampaignAssignmentConfiguration());
         modelBuilder.ApplyConfiguration(new AgentGroupConfiguration());
         modelBuilder.ApplyConfiguration(new AgentGroupMemberConfiguration());

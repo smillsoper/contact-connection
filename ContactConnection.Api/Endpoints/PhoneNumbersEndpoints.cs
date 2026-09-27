@@ -28,6 +28,7 @@ public static class PhoneNumbersEndpoints
 
     private static async Task<IResult> Create(
         CreatePhoneNumberRequest req,
+        INumberProviderRepository providers,
         IPhoneNumberRepository repo,
         IPhoneNumberRoutingRepository routing,
         ICampaignRepository campaigns,
@@ -40,6 +41,8 @@ public static class PhoneNumbersEndpoints
             return Results.NotFound(new { error = "Campaign not found." });
 
         var pn = PhoneNumber.Create(ctx.Current!.Id, req.CampaignId, req.Number, req.Label);
+        if (await ApplyProviderAsync(pn, req.ProviderId, req.Role, req.ClientNumber, providers, ct) is { } providerError)
+            return Results.BadRequest(new { error = providerError });
         await repo.AddAsync(pn, ct);
         await repo.SaveChangesAsync(ct);
 
@@ -81,6 +84,7 @@ public static class PhoneNumbersEndpoints
     private static async Task<IResult> Update(
         Guid id,
         UpdatePhoneNumberRequest req,
+        INumberProviderRepository providers,
         IPhoneNumberRepository repo,
         IPhoneNumberRoutingRepository routing,
         ICampaignRepository campaigns,
@@ -93,6 +97,14 @@ public static class PhoneNumbersEndpoints
 
         if (req.Label is not null)
             pn.UpdateLabel(req.Label);
+
+        // Provider fields are updated together when any is sent (role defaults to the current one).
+        if (req.ProviderId is not null || req.Role is not null || req.ClientNumber is not null || req.ClearProvider == true)
+        {
+            var providerId = req.ClearProvider == true ? null : req.ProviderId ?? pn.ProviderId;
+            if (await ApplyProviderAsync(pn, providerId, req.Role ?? pn.Role, req.ClientNumber ?? pn.ClientNumber, providers, ct) is { } providerError)
+                return Results.BadRequest(new { error = providerError });
+        }
 
         if (req.CampaignId.HasValue)
         {
@@ -209,16 +221,41 @@ public static class PhoneNumbersEndpoints
         return Results.Ok(ToResponse(pn));
     }
 
+    /// <summary>Validates and applies provider / role / client number. Null when OK, else the error.</summary>
+    private static async Task<string?> ApplyProviderAsync(
+        PhoneNumber pn, Guid? providerId, string? role, string? clientNumber,
+        INumberProviderRepository providers, CancellationToken ct)
+    {
+        role ??= PhoneNumberRole.Hosted;
+        if (providerId is { } id)
+        {
+            var provider = await providers.GetByIdAsync(id, ct);
+            if (provider is null) return "Number provider not found.";
+            if (role == PhoneNumberRole.RoutingDelivery && provider.Type != NumberProviderType.RoutingPlatform)
+                return $"'{provider.Name}' is a carrier — only a routing platform delivers to a routing delivery number.";
+        }
+        else if (role == PhoneNumberRole.RoutingDelivery)
+        {
+            return "A routing delivery number needs its routing platform provider.";
+        }
+        try { pn.SetProvider(providerId, role, clientNumber); }
+        catch (ArgumentException ex) { return ex.Message; }
+        return null;
+    }
+
     // ── Response shape ───────────────────────────────────────────────────────
 
     internal static object ToResponse(PhoneNumber pn) => new
     {
         pn.Id, pn.TenantId, pn.CampaignId, pn.Number, pn.Label, pn.IsActive, pn.FlowId, pn.TelephonyFlowId,
+        pn.ProviderId, pn.Role, pn.ClientNumber,
         Campaign = pn.Campaign is null ? null : new { pn.Campaign.Id, pn.Campaign.Name },
         pn.CreatedAt, pn.UpdatedAt
     };
 }
 
-public record CreatePhoneNumberRequest(Guid CampaignId, string Number, string? Label = null);
-public record UpdatePhoneNumberRequest(string? Label = null, Guid? CampaignId = null);
+public record CreatePhoneNumberRequest(Guid CampaignId, string Number, string? Label = null,
+    Guid? ProviderId = null, string? Role = null, string? ClientNumber = null);
+public record UpdatePhoneNumberRequest(string? Label = null, Guid? CampaignId = null,
+    Guid? ProviderId = null, string? Role = null, string? ClientNumber = null, bool? ClearProvider = null);
 public record SetPhoneNumberFlowRequest(Guid FlowId);

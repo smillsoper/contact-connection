@@ -25,6 +25,11 @@ public class CallRecord
     // Caller identity — relational, queried frequently
     public string? CallerId { get; private set; }        // ANI / inbound phone number
     public string? Dnis { get; private set; }             // dialed number (telephony calls only)
+    /// <summary>Who delivered the call — the NumberProvider of the number it arrived on.</summary>
+    public Guid? NumberProviderId { get; private set; }
+    /// <summary>For calls delivered by a routing platform: the public number the caller actually
+    /// dialed (Dnis is then our delivery number / pseudo-DNIS). Null for hosted numbers.</summary>
+    public string? ClientNumber { get; private set; }
     public string? AccountNumber { get; private set; }
     public string? FirstName { get; private set; }
     public string? LastName { get; private set; }
@@ -298,6 +303,13 @@ public class CallRecord
     {
         Addresses = addresses;
         UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void SetNumberProvider(Guid? providerId, string? clientNumber)
+    {
+        NumberProviderId = providerId;
+        ClientNumber     = clientNumber;
+        UpdatedAt        = DateTimeOffset.UtcNow;
     }
 
     public void SetDnis(string dnis)

@@ -429,6 +429,15 @@ public sealed class EslBackgroundService : BackgroundService
         record.SetCampaign(routing.CampaignId, routedCampaign?.ClientId ?? Guid.Empty);
         record.SetDnis(routing.Number);
 
+        // Who delivered it: the number's provider, and — for a routing-platform delivery number
+        // (pseudo-DNIS) — the public client number the caller actually dialed.
+        var arrivedOn = await db.PhoneNumbers.AsNoTracking()
+            .Where(p => p.Number == routing.Number)
+            .Select(p => new { p.ProviderId, p.ClientNumber })
+            .FirstOrDefaultAsync(ct);
+        if (arrivedOn is not null)
+            record.SetNumberProvider(arrivedOn.ProviderId, arrivedOn.ClientNumber);
+
         db.CallRecords.Add(record);
         await db.SaveChangesAsync(ct);
 

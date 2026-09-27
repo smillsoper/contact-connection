@@ -21,6 +21,13 @@ public class PhoneNumber
     // DID-level telephony flow override. Falls back to Campaign.InboundFlowId if null.
     public Guid? TelephonyFlowId { get; private set; }
 
+    // Who houses this number (NumberProvider) and what the row represents (PhoneNumberRole). For a
+    // routing-platform delivery number (pseudo-DNIS), ClientNumber is the public number the caller
+    // actually dialed — housed at the routing platform (e.g. RingSquared's client TFNs).
+    public Guid? ProviderId { get; private set; }
+    public string Role { get; private set; } = PhoneNumberRole.Hosted;
+    public string? ClientNumber { get; private set; }
+
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
@@ -55,6 +62,20 @@ public class PhoneNumber
     {
         Label     = label?.Trim();
         UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>Sets who houses the number and its role. A routing-delivery number must name the
+    /// public client number it stands for; a hosted number never has one.</summary>
+    public void SetProvider(Guid? providerId, string role, string? clientNumber)
+    {
+        if (!PhoneNumberRole.IsValid(role)) throw new ArgumentException($"Unknown number role '{role}'.", nameof(role));
+        var client = string.IsNullOrWhiteSpace(clientNumber) ? null : clientNumber.Trim();
+        if (role == PhoneNumberRole.RoutingDelivery && client is null)
+            throw new ArgumentException("A routing delivery number needs the client number it stands for.", nameof(clientNumber));
+        ProviderId   = providerId;
+        Role         = role;
+        ClientNumber = role == PhoneNumberRole.RoutingDelivery ? client : null;
+        UpdatedAt    = DateTimeOffset.UtcNow;
     }
 
     public void AssignFlow(Guid flowId)           { FlowId          = flowId; UpdatedAt = DateTimeOffset.UtcNow; }

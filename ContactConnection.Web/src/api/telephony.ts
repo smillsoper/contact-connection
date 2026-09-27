@@ -93,10 +93,51 @@ export interface PhoneNumber {
   isActive: boolean
   flowId?: string
   telephonyFlowId?: string
+  /** Who houses the number — see NumberProvider. */
+  providerId?: string | null
+  /** 'hosted' (real number on our carrier) | 'routing_delivery' (pseudo-DNIS a routing platform delivers to). */
+  role?: PhoneNumberRole
+  /** For routing_delivery: the public client number the caller actually dials (housed at the routing platform). */
+  clientNumber?: string | null
   campaign?: { id: string; name: string }
   createdAt: string
   updatedAt: string
 }
+
+export type PhoneNumberRole = 'hosted' | 'routing_delivery'
+export type NumberProviderType = 'carrier' | 'routing_platform'
+
+export interface NumberProvider {
+  id: string
+  name: string
+  type: NumberProviderType
+  sipGatewayId?: string | null
+  sourceIps?: string | null
+  notes?: string | null
+  isActive: boolean
+  hasApiKey: boolean
+  apiKeyPrefix?: string | null
+  apiKeyIssuedAt?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SaveNumberProvider {
+  name: string
+  type: NumberProviderType
+  sourceIps?: string
+  notes?: string
+}
+
+export const listNumberProviders = () => api.get<NumberProvider[]>('/api/v1/number-providers')
+export const createNumberProvider = (body: SaveNumberProvider) => api.post<NumberProvider>('/api/v1/number-providers', body)
+export const updateNumberProvider = (id: string, body: SaveNumberProvider) => api.put<NumberProvider>(`/api/v1/number-providers/${id}`, body)
+export const activateNumberProvider = (id: string) => api.post<NumberProvider>(`/api/v1/number-providers/${id}/activate`)
+export const deactivateNumberProvider = (id: string) => api.post<NumberProvider>(`/api/v1/number-providers/${id}/deactivate`)
+/** Issues (or rotates) the provider's API key — the plaintext is returned only this once. */
+export const issueNumberProviderApiKey = (id: string) =>
+  api.post<{ apiKey: string; provider: NumberProvider }>(`/api/v1/number-providers/${id}/api-key`)
+export const revokeNumberProviderApiKey = (id: string) => api.delete<NumberProvider>(`/api/v1/number-providers/${id}/api-key`)
 
 export interface AgentGroup {
   id: string
@@ -341,8 +382,16 @@ export const removeCampaignAgent = (campaignId: string, agentId: string) =>
 export const listPhoneNumbers = (campaignId: string) =>
   api.get<PhoneNumber[]>(`/api/v1/phone-numbers?campaignId=${campaignId}`)
 
-export const createPhoneNumber = (campaignId: string, number: string, label?: string) =>
-  api.post<PhoneNumber>('/api/v1/phone-numbers', { campaignId, number, label })
+export const createPhoneNumber = (
+  campaignId: string, number: string, label?: string,
+  provider?: { providerId?: string | null; role?: PhoneNumberRole; clientNumber?: string | null },
+) => api.post<PhoneNumber>('/api/v1/phone-numbers', { campaignId, number, label, ...provider })
+
+export const updatePhoneNumberProvider = (
+  id: string, providerId: string | null, role: PhoneNumberRole, clientNumber: string | null,
+) => api.patch<PhoneNumber>(`/api/v1/phone-numbers/${id}`, providerId
+  ? { providerId, role, clientNumber }
+  : { clearProvider: true, role: 'hosted', clientNumber: null })
 
 export const activatePhoneNumber = (id: string) =>
   api.post<PhoneNumber>(`/api/v1/phone-numbers/${id}/activate`)

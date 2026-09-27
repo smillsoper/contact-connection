@@ -542,7 +542,10 @@ rules; api_call "Only once per call"; telephony api node supports Liquid + rules
 Order body drafted as `docs/integrations/life-seasons-order.liquid` and **validated against all 23,107
 successful production requests** from the CRMPro backup (99.4% exact on the current format). Also S163:
 phone node + email node "save to call record" (`BillingPhone`/`ShippingPhone`/`Email`), set_variable
-targets for them, and Avalara fee parsing fixed to read flat-amount `isFee` details from `rate`; (4) Life Seasons Order definition as configuration.
+targets for them, and Avalara fee parsing fixed to read flat-amount `isFee` details from `rate`; (4) Life Seasons Order definition as configuration — **configured S163 in `tenant_test_tenant`**
+(client + `LIFSEA-` order numbers, NeuroQ campaign w/ Avalara settings, inactive "Life Seasons Order
+API" definition + "Add Order" Liquid endpoint). **Remaining: credentials from Life Seasons, activate,
+wire the flow, live-verify** — see the go-live checklist in `docs/integrations/life-seasons-crmpro-legacy.md`.
 
 **Next up:** Build the Order API submission step and an `"avalara"` `ITaxProvider` per that spec
 (the Order API takes the `PaymentTransaction`'s gateway transaction id as

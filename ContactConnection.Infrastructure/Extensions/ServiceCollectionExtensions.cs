@@ -85,6 +85,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IClientRepository, ClientRepository>();
         services.AddScoped<ICampaignRepository, CampaignRepository>();
         services.AddScoped<IPhoneNumberRepository, PhoneNumberRepository>();
+        services.AddScoped<INumberProviderRepository, NumberProviderRepository>();
         services.AddScoped<IAgentGroupRepository, AgentGroupRepository>();
         services.AddScoped<IPhoneNumberRoutingRepository, PhoneNumberRoutingRepository>();
 

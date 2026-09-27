@@ -6,7 +6,10 @@ import {
   listClients, createClient, activateClient, deactivateClient,
   getOrderNumberSequence, putOrderNumberSequence, deleteOrderNumberSequence,
   listCampaigns, createCampaign, activateCampaign, pauseCampaign, deactivateCampaign,
-  listPhoneNumbers, createPhoneNumber, activatePhoneNumber, deactivatePhoneNumber,
+  listPhoneNumbers, createPhoneNumber, activatePhoneNumber, deactivatePhoneNumber, updatePhoneNumberProvider,
+  listNumberProviders, createNumberProvider, updateNumberProvider, activateNumberProvider, deactivateNumberProvider,
+  issueNumberProviderApiKey, revokeNumberProviderApiKey,
+  type NumberProvider, type NumberProviderType, type PhoneNumberRole,
   setPhoneNumberFlow, removePhoneNumberFlow,
   setPhoneNumberTelephonyFlow, removePhoneNumberTelephonyFlow,
   listAgentGroups, createAgentGroup, getAgentGroup, addGroupMember, removeGroupMember,
@@ -17,12 +20,13 @@ import { flowsApi, type FlowSummary } from '../../api/flows'
 import { api } from '../../api/client'
 import { openCallTrace } from '../../components/calltrace/openCallTrace'
 
-type Tab = 'clients' | 'campaigns' | 'phone-numbers' | 'agent-groups' | 'test-call'
+type Tab = 'clients' | 'campaigns' | 'phone-numbers' | 'providers' | 'agent-groups' | 'test-call'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'clients',       label: 'Clients' },
   { id: 'campaigns',     label: 'Campaigns' },
   { id: 'phone-numbers', label: 'Phone Numbers' },
+  { id: 'providers',     label: 'Number Providers' },
   { id: 'agent-groups',  label: 'Agent Groups' },
   { id: 'test-call',     label: 'Test Call' },
 ]
@@ -572,16 +576,21 @@ function PhoneNumbersTab() {
   const [newCampaignId, setNewCampaignId] = useState('')
   const [newNumber, setNewNumber] = useState('')
   const [newLabel, setNewLabel] = useState('')
+  const [newProvider, setNewProvider] = useState<ProviderSelection>(EMPTY_PROVIDER)
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
+  const [providers, setProviders] = useState<NumberProvider[]>([])
+  const [editingProviderFor, setEditingProviderFor] = useState<string | null>(null)
 
   useEffect(() => {
     Promise.all([
       listCampaigns(),
       flowsApi.listAll(),
+      listNumberProviders().catch(() => [] as NumberProvider[]),
     ])
-      .then(([c, allFlows]) => {
+      .then(([c, allFlows, provs]) => {
         setCampaigns(c)
+        setProviders(provs)
         setScriptFlows(allFlows.filter((f) => f.flow_type === 'crm'))
         setInboundFlows(allFlows.filter((f) => f.flow_type === 'telephony' && f.flow_direction === 'inbound'))
       })
@@ -603,9 +612,12 @@ function PhoneNumbersTab() {
     setCreating(true)
     setCreateError(null)
     try {
-      const pn = await createPhoneNumber(newCampaignId, newNumber.trim(), newLabel.trim() || undefined)
+      const pn = await createPhoneNumber(newCampaignId, newNumber.trim(), newLabel.trim() || undefined,
+        newProvider.providerId
+          ? { providerId: newProvider.providerId, role: newProvider.role, clientNumber: newProvider.clientNumber.trim() || null }
+          : undefined)
       if (pn.campaignId === selectedCampaignId) setNumbers((prev) => [...prev, pn])
-      setNewNumber(''); setNewLabel(''); setShowCreate(false)
+      setNewNumber(''); setNewLabel(''); setNewProvider(EMPTY_PROVIDER); setShowCreate(false)
     } catch (e) {
       setCreateError(e instanceof Error ? e.message : 'Create failed.')
     } finally {
@@ -704,9 +716,10 @@ function PhoneNumbersTab() {
               placeholder="Label (optional)"
               className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 w-44"
             />
+            <ProviderFields providers={providers} value={newProvider} onChange={setNewProvider} />
             <button
               onClick={handleCreate}
-              disabled={creating || !newCampaignId || !newNumber.trim()}
+              disabled={creating || !newCampaignId || !newNumber.trim() || !providerSelectionValid(newProvider)}
               className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
             >
               {creating ? 'Adding…' : 'Add'}
@@ -739,6 +752,7 @@ function PhoneNumbersTab() {
               <tr className="border-b border-gray-800 text-gray-400 text-left">
                 <th className="px-4 py-3 font-medium">Number</th>
                 <th className="px-4 py-3 font-medium">Label</th>
+                <th className="px-4 py-3 font-medium">Provider</th>
                 <th className="px-4 py-3 font-medium">Script Flow Override</th>
                 <th className="px-4 py-3 font-medium">Telephony Flow Override</th>
                 <th className="px-4 py-3 font-medium">Status</th>
@@ -747,9 +761,31 @@ function PhoneNumbersTab() {
             </thead>
             <tbody>
               {visibleNumbers.map((n) => (
-                <tr key={n.id} className="border-b border-gray-800 last:border-0 hover:bg-gray-800/30">
+                <Fragment key={n.id}>
+                <tr className="border-b border-gray-800 last:border-0 hover:bg-gray-800/30">
                   <td className="px-4 py-3 text-white font-mono">{n.number}</td>
                   <td className="px-4 py-3 text-gray-400">{n.label ?? <span className="text-gray-600">—</span>}</td>
+                  <td className="px-4 py-3 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setEditingProviderFor((cur) => cur === n.id ? null : n.id)}
+                      className="text-left hover:text-white"
+                      title="Edit provider"
+                    >
+                      {n.providerId ? (
+                        <>
+                          <span className="text-gray-300">{providers.find((p) => p.id === n.providerId)?.name ?? 'Unknown provider'}</span>
+                          {n.role === 'routing_delivery' && (
+                            <span className="block text-amber-400/90">
+                              delivery for <span className="font-mono">{n.clientNumber}</span>
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-gray-600">— set provider</span>
+                      )}
+                    </button>
+                  </td>
                   <td className="px-4 py-3 w-56">
                     <SearchableSelect
                       options={scriptFlows.map((f) => ({ value: f.id, label: f.name }))}
@@ -788,6 +824,312 @@ function PhoneNumbersTab() {
                         {n.isActive ? 'Deactivate' : 'Activate'}
                       </button>
                     </div>
+                  </td>
+                </tr>
+                {editingProviderFor === n.id && (
+                  <tr className="border-b border-gray-800 bg-gray-950/40">
+                    <td colSpan={8} className="px-4 py-3">
+                      <PhoneNumberProviderEditor
+                        number={n}
+                        providers={providers}
+                        onSaved={(updated) => {
+                          setNumbers((prev) => prev.map((x) => x.id === updated.id ? updated : x))
+                          setEditingProviderFor(null)
+                        }}
+                        onCancel={() => setEditingProviderFor(null)}
+                      />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Number providers ──────────────────────────────────────────────────────────
+
+interface ProviderSelection { providerId: string; role: PhoneNumberRole; clientNumber: string }
+const EMPTY_PROVIDER: ProviderSelection = { providerId: '', role: 'hosted', clientNumber: '' }
+
+function providerSelectionValid(p: ProviderSelection) {
+  return p.role !== 'routing_delivery' || (!!p.providerId && !!p.clientNumber.trim())
+}
+
+const PROVIDER_TYPE_LABEL: Record<NumberProviderType, string> = {
+  carrier: 'Carrier',
+  routing_platform: 'Routing platform',
+}
+
+/** Provider + role + client number inputs, shared by "Add DID" and the per-number editor. A
+ *  routing-platform provider implies a routing delivery number (pseudo-DNIS) that stands for a
+ *  client number the platform houses. */
+function ProviderFields({ providers, value, onChange }: {
+  providers: NumberProvider[]
+  value: ProviderSelection
+  onChange: (v: ProviderSelection) => void
+}) {
+  const selected = providers.find((p) => p.id === value.providerId)
+  const inputCls = 'bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500'
+  return (
+    <>
+      <select
+        value={value.providerId}
+        onChange={(e) => {
+          const p = providers.find((x) => x.id === e.target.value)
+          onChange({
+            providerId: e.target.value,
+            role: p?.type === 'routing_platform' ? 'routing_delivery' : 'hosted',
+            clientNumber: p?.type === 'routing_platform' ? value.clientNumber : '',
+          })
+        }}
+        className={inputCls}
+      >
+        <option value="">Provider (optional)</option>
+        {providers.filter((p) => p.isActive || p.id === value.providerId).map((p) => (
+          <option key={p.id} value={p.id}>{p.name} — {PROVIDER_TYPE_LABEL[p.type]}</option>
+        ))}
+      </select>
+      {selected?.type === 'routing_platform' && (
+        <input
+          value={value.clientNumber}
+          onChange={(e) => onChange({ ...value, clientNumber: e.target.value })}
+          placeholder="Client number it stands for *"
+          title="The public number callers dial, housed at the routing platform"
+          className={`${inputCls} w-56 ${!value.clientNumber.trim() ? 'ring-2 ring-amber-500/60' : ''}`}
+        />
+      )}
+    </>
+  )
+}
+
+function PhoneNumberProviderEditor({ number, providers, onSaved, onCancel }: {
+  number: PhoneNumber
+  providers: NumberProvider[]
+  onSaved: (updated: PhoneNumber) => void
+  onCancel: () => void
+}) {
+  const [value, setValue] = useState<ProviderSelection>({
+    providerId: number.providerId ?? '',
+    role: number.role ?? 'hosted',
+    clientNumber: number.clientNumber ?? '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function save() {
+    setSaving(true); setError(null)
+    try {
+      onSaved(await updatePhoneNumberProvider(number.id, value.providerId || null, value.role,
+        value.role === 'routing_delivery' ? value.clientNumber.trim() : null))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Save failed.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div>
+      <p className="text-gray-500 text-xs mb-2">
+        Who houses <span className="font-mono text-gray-300">{number.number}</span>. For a routing platform
+        (e.g. RingSquared), this number is where they deliver calls — enter the public client number it stands for.
+      </p>
+      <div className="flex items-center gap-2 flex-wrap">
+        <ProviderFields providers={providers} value={value} onChange={setValue} />
+        <button
+          onClick={save}
+          disabled={saving || !providerSelectionValid(value)}
+          className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg px-4 py-2 text-sm font-medium"
+        >
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+        <button onClick={onCancel} className="text-gray-500 hover:text-white text-sm">Cancel</button>
+      </div>
+      {error && <p className="text-red-400 text-xs mt-2">{error}</p>}
+    </div>
+  )
+}
+
+function NumberProvidersTab() {
+  const [providers, setProviders] = useState<NumberProvider[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [editing, setEditing] = useState<NumberProvider | 'new' | null>(null)
+  const [form, setForm] = useState({ name: '', type: 'carrier' as NumberProviderType, sourceIps: '', notes: '' })
+  const [saving, setSaving] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
+  const [issuedKey, setIssuedKey] = useState<{ providerName: string; key: string } | null>(null)
+  const [confirmRevoke, setConfirmRevoke] = useState<string | null>(null)
+
+  useEffect(() => {
+    listNumberProviders()
+      .then(setProviders)
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false))
+  }, [])
+
+  function openForm(p: NumberProvider | 'new') {
+    setEditing(p)
+    setFormError(null)
+    setForm(p === 'new'
+      ? { name: '', type: 'carrier', sourceIps: '', notes: '' }
+      : { name: p.name, type: p.type, sourceIps: p.sourceIps ?? '', notes: p.notes ?? '' })
+  }
+
+  function replace(updated: NumberProvider) {
+    setProviders((prev) => prev.some((p) => p.id === updated.id)
+      ? prev.map((p) => p.id === updated.id ? updated : p)
+      : [...prev, updated].sort((a, b) => a.name.localeCompare(b.name)))
+  }
+
+  async function save() {
+    if (!editing || !form.name.trim()) return
+    setSaving(true); setFormError(null)
+    try {
+      const body = { name: form.name.trim(), type: form.type, sourceIps: form.sourceIps.trim(), notes: form.notes.trim() }
+      replace(editing === 'new' ? await createNumberProvider(body) : await updateNumberProvider(editing.id, body))
+      setEditing(null)
+    } catch (e) {
+      setFormError(e instanceof Error ? e.message : 'Save failed.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function issueKey(p: NumberProvider) {
+    try {
+      const res = await issueNumberProviderApiKey(p.id)
+      replace(res.provider)
+      setIssuedKey({ providerName: p.name, key: res.apiKey })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not issue key.')
+    }
+  }
+
+  const inputCls = 'bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500'
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-gray-500 text-sm max-w-2xl">
+          Who houses your numbers. <span className="text-gray-300">Carriers</span> (Telnyx, Bandwidth) host numbers and
+          hand us the calls; <span className="text-gray-300">routing platforms</span> (e.g. RingSquared) house the public
+          numbers and deliver calls to a delivery number of ours — set on the Phone Numbers tab.
+        </p>
+        <button
+          onClick={() => openForm('new')}
+          className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors shrink-0"
+        >
+          Add provider
+        </button>
+      </div>
+
+      {issuedKey && (
+        <div className="bg-emerald-950/40 border border-emerald-800 rounded-xl p-4 mb-4">
+          <p className="text-emerald-300 text-sm font-medium">API key for {issuedKey.providerName}</p>
+          <p className="text-gray-400 text-xs mt-1">
+            Copy it now — it is not stored and won't be shown again. The provider sends it in the
+            <span className="font-mono text-gray-300"> x-api-key</span> header when calling your routing endpoints.
+          </p>
+          <p className="font-mono text-sm text-white bg-gray-950 rounded-lg px-3 py-2 mt-2 break-all select-all">{issuedKey.key}</p>
+          <button onClick={() => setIssuedKey(null)} className="text-gray-400 hover:text-white text-xs mt-2">I've copied it — dismiss</button>
+        </div>
+      )}
+
+      {editing && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4">
+          <p className="text-gray-300 text-sm font-medium mb-3">{editing === 'new' ? 'New provider' : `Edit ${editing.name}`}</p>
+          <div className="flex items-center gap-3 flex-wrap">
+            <input autoFocus value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
+              placeholder="Name * (e.g. RingSquared)" className={`${inputCls} w-56`} />
+            <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as NumberProviderType })} className={inputCls}>
+              <option value="carrier">Carrier</option>
+              <option value="routing_platform">Routing platform</option>
+            </select>
+            <input value={form.sourceIps} onChange={(e) => setForm({ ...form, sourceIps: e.target.value })}
+              placeholder="Source IPs (optional, comma-separated)" className={`${inputCls} w-72`} />
+          </div>
+          <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })}
+            placeholder="Notes (SIP connection details, contacts, …)" rows={2}
+            className={`${inputCls} w-full mt-3 resize-y`} />
+          <div className="flex items-center gap-3 mt-3">
+            <button onClick={save} disabled={saving || !form.name.trim()}
+              className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg px-4 py-2 text-sm font-medium">
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            <button onClick={() => setEditing(null)} className="text-gray-500 hover:text-white text-sm">Cancel</button>
+            {formError && <span className="text-red-400 text-xs">{formError}</span>}
+          </div>
+        </div>
+      )}
+
+      {loading && <p className="text-gray-400 text-sm">Loading…</p>}
+      {error && <p className="text-red-400 text-sm mb-2">{error}</p>}
+      {!loading && providers.length === 0 && <p className="text-gray-500 text-sm">No providers yet.</p>}
+
+      {providers.length > 0 && (
+        <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-800 text-gray-400 text-left">
+                <th className="px-4 py-3 font-medium">Name</th>
+                <th className="px-4 py-3 font-medium">Type</th>
+                <th className="px-4 py-3 font-medium">Routing API key</th>
+                <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 font-medium"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {providers.map((p) => (
+                <tr key={p.id} className="border-b border-gray-800 last:border-0 hover:bg-gray-800/30">
+                  <td className="px-4 py-3 text-white font-medium">
+                    {p.name}
+                    {p.notes && <span className="block text-gray-500 text-xs font-normal truncate max-w-xs">{p.notes}</span>}
+                  </td>
+                  <td className="px-4 py-3 text-gray-400">{PROVIDER_TYPE_LABEL[p.type]}</td>
+                  <td className="px-4 py-3 text-xs">
+                    {p.type !== 'routing_platform' ? (
+                      <span className="text-gray-600">n/a</span>
+                    ) : p.hasApiKey ? (
+                      <span className="text-gray-300 font-mono">{p.apiKeyPrefix}…</span>
+                    ) : (
+                      <span className="text-gray-500">none issued</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${p.isActive ? STATUS_COLORS.active : STATUS_COLORS.inactive}`}>
+                      {p.isActive ? 'active' : 'inactive'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-right whitespace-nowrap">
+                    <button onClick={() => openForm(p)} className="text-gray-400 hover:text-white text-xs font-medium mr-4">Edit</button>
+                    {p.type === 'routing_platform' && (
+                      <button onClick={() => issueKey(p)} className="text-gray-400 hover:text-white text-xs font-medium mr-4">
+                        {p.hasApiKey ? 'Rotate key' : 'Issue key'}
+                      </button>
+                    )}
+                    {p.hasApiKey && confirmRevoke !== p.id && (
+                      <button onClick={() => setConfirmRevoke(p.id)} className="text-gray-500 hover:text-red-400 text-xs font-medium mr-4">Revoke key</button>
+                    )}
+                    {confirmRevoke === p.id && (
+                      <span className="text-xs text-gray-400 mr-4">
+                        Revoke?{' '}
+                        <button onClick={async () => { replace(await revokeNumberProviderApiKey(p.id)); setConfirmRevoke(null) }}
+                          className="text-red-400 hover:text-red-300 font-medium">Yes</button>{' '}
+                        <button onClick={() => setConfirmRevoke(null)} className="text-gray-500 hover:text-white">No</button>
+                      </span>
+                    )}
+                    <button
+                      onClick={async () => replace(p.isActive ? await deactivateNumberProvider(p.id) : await activateNumberProvider(p.id))}
+                      className="text-indigo-400 hover:text-indigo-300 text-xs font-medium"
+                    >
+                      {p.isActive ? 'Deactivate' : 'Activate'}
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -1222,6 +1564,7 @@ export default function TelephonyPage() {
         {tab === 'clients'       && <ClientsTab />}
         {tab === 'campaigns'     && <CampaignsTab />}
         {tab === 'phone-numbers' && <PhoneNumbersTab />}
+        {tab === 'providers'     && <NumberProvidersTab />}
         {tab === 'agent-groups'  && <AgentGroupsTab />}
         {tab === 'test-call'     && <TestCallTab />}
       </div>

@@ -320,3 +320,32 @@ it contains customer data). 23,129 orders, 23,107 successful; ~35,000 Avalara ca
   phone nodes ("Save to call record as") or `set_variable` `{{call_record.shipping_phone}}`; the
   template sends them as `customer_info.phone` / `shipping_info.phone` (caller phone as fallback).
 - No per-item discount concept (legacy `OLX Discount` flag, 5 orders).
+
+---
+
+## Go-live checklist (configuration prepared S163 in `tenant_test_tenant`)
+
+Already configured: client **Life Seasons, LLC** (order numbers `LIFSEA-` + 8 digits from
+10000000), campaign **NeuroQ** (Avalara: PF050714 / FR020200, ship-from Kaysville UT, customer code
+TMS, CO Retail Delivery Fee line OF400000), API Definition **Life Seasons Order API** (inactive,
+staging base URL, `x-functions-key` from credential `LifeSeasons:OrderApiKey`) with endpoint
+**Add Order** (Liquid body, success rule `success equals true`, error path `message`).
+
+To finish, once Life Seasons supplies values (Admin → Credentials unless noted):
+
+1. `LifeSeasons:OrderApiKey` — the Order API function key (staging first).
+2. **Activate** the Life Seasons Order API definition.
+3. Vendor number — set `flow.vendor_number` in the script (a set_variable node before the
+   order submission), or replace the reference in the endpoint's template.
+4. Avalara, scoped to the NeuroQ campaign (or the client ID to share across campaigns):
+   `Avalara:<campaignId>:AccountId`, `Avalara:<campaignId>:LicenseKey`,
+   `Avalara:<campaignId>:Environment` = `production` when not using the sandbox.
+5. Authorize.Net for NeuroQ: `AuthorizeNet:<campaignId>:ApiLoginId`, `...:TransactionKey`,
+   `...:Environment`.
+6. Flow: address/phone/email nodes saving to the call record → `authorize_payment` →
+   `api_call` (Add Order, **Only once per call**) → branch on success/error
+   (`{{flow.<output>.error}}` carries Life Seasons' message).
+7. Production cutover: change the definition's base URL to `https://vendor.lifeseasons.com` and
+   store the production key.
+8. Repeat the campaign setup for My Best Heart / Joint Food (own Authorize.Net merchant accounts).
+
