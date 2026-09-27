@@ -861,7 +861,7 @@ function SalesTaxForm({ campaign, onSaved }: SalesTaxFormProps) {
                     <input
                       value={row.feeDesc}
                       onChange={(e) => updateRow(i, { feeDesc: e.target.value })}
-                      placeholder="Fee description, e.g. Colorado Retail Delivery Fee"
+                      placeholder="Fee description, e.g. Retail Delivery Fee"
                       className={`${inputCls} max-w-xs ${!row.feeDesc.trim() ? 'ring-2 ring-red-500' : ''}`}
                     />
                     <div className="relative w-28">
@@ -1011,7 +1011,7 @@ function SalesTaxForm({ campaign, onSaved }: SalesTaxFormProps) {
               <button
                 type="button"
                 onClick={() => setFeeLines((rows) => [...rows,
-                  { state: 'CO', taxCode: 'OF400000', description: 'Colorado Retail Delivery Fee', code: 'CO_RDF' }])}
+                  { state: 'CO', taxCode: 'OF400000', description: 'Retail Delivery Fee', code: 'CO_RDF' }])}
                 className="text-indigo-400 hover:text-indigo-300 text-xs font-medium"
               >
                 + Colorado Retail Delivery Fee

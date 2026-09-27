@@ -1,6 +1,9 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
+using ContactConnection.Domain.Entities;
+using ContactConnection.Infrastructure.ApiExecution;
 using ContactConnection.Infrastructure.Common;
 
 namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
@@ -21,8 +24,21 @@ namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 ///   "apiDefinitionScope": "tenant" | "portal",
 ///   "outputVariable": "statsApi",
 ///   "timeoutSeconds": 30,
+///   "oncePerCall": true,   // optional — see below
 ///   "transitions": { "success": "node_x", "error": "node_y", "timeout": "node_z" }
 /// }
+///
+/// Endpoint body modes: "simple" resolves {{namespace.field}} tags; "liquid" renders the body as a
+/// Liquid template against IApiTemplateModelBuilder's model (flow vars, call record + addresses,
+/// cart + fees, payment). A Liquid body declared as JSON (Content-Type header containing "json",
+/// or no Content-Type) must render to valid JSON, or the call fails before anything is sent.
+///
+/// After a 2xx response the endpoint's SuccessCriteria (if any) decide success from the body —
+/// e.g. an order API returning 200 with {"success": false}. See ResponseSuccessEvaluator.
+///
+/// oncePerCall: once this endpoint has succeeded on this call, later executions of the node replay
+/// the stored result (transitioning "success" with the same output variables) instead of calling
+/// the API again — the submit-once guard for order submissions. Failures are never stored.
 /// </summary>
 public class ApiCallNodeHandler(
     IVariableResolver resolver,
@@ -32,7 +48,10 @@ public class ApiCallNodeHandler(
     IPortalApiEndpointRepository portalEndpoints,
     ITenantCredentialStore tenantCredentials,
     IPortalCredentialStore portalCredentials,
-    IApiDefinitionExecutor executor)
+    IApiDefinitionExecutor executor,
+    ILiquidTemplateRenderer liquid,
+    IApiTemplateModelBuilder templateModel,
+    IApiResponseCacheStore responseCache)
     : NodeHandlerBase(resolver), INodeHandler
 {
     public string NodeType => "api_call";
@@ -40,7 +59,7 @@ public class ApiCallNodeHandler(
     private record CallTarget(
         Guid DefinitionId, string HttpMethod, string BaseUrl, string Path, string Headers, string QueryParams,
         string? RequestBodyTemplate, string AuthConfig, int TimeoutSeconds, bool IsActive, bool IsRetrySafe,
-        int? RateLimitPerMinute, string SensitiveResponseFields);
+        int? RateLimitPerMinute, string SensitiveResponseFields, string BodyTemplateType, string SuccessCriteria);
 
     public async Task<NodeResult> ExecuteAsync(
         JsonObject node, FlowExecutionContext ctx,
@@ -81,15 +100,35 @@ public class ApiCallNodeHandler(
                     false, null, null, new(), null, false, "API endpoint or its definition is not active.");
                 transitionKey = "error";
             }
+            else if (node["oncePerCall"]?.GetValue<bool>() == true
+                     && await responseCache.GetAsync(ctx.CallRecordId, OnceKey(scope, endpointId), ct) is { } cachedJson
+                     && JsonSerializer.Deserialize<ApiDefinitionExecutionResult>(cachedJson) is { } cached)
+            {
+                // Already succeeded on this call — replay instead of submitting again.
+                result = cached;
+                transitionKey = "success";
+            }
             else
             {
                 var resolvedBaseUrl = Resolver.Resolve(target.BaseUrl, varCtx);
                 var resolvedPath    = Resolver.Resolve(target.Path, varCtx);
                 var resolvedUrl     = resolvedBaseUrl.TrimEnd('/') + "/" + resolvedPath.TrimStart('/');
-                var resolvedBody    = target.RequestBodyTemplate is { } bodyTemplate
-                    ? Resolver.Resolve(bodyTemplate, varCtx)
-                    : null;
                 var headers     = ResolveHeaders(target.Headers, varCtx);
+                string? resolvedBody = null;
+                string? bodyError = null;
+                if (target.RequestBodyTemplate is { } bodyTemplate)
+                {
+                    if (target.BodyTemplateType == BodyTemplateType.Liquid)
+                    {
+                        var rendered = await liquid.RenderAsync(bodyTemplate, await templateModel.BuildAsync(ctx, ct), ct);
+                        resolvedBody = rendered.Output;
+                        bodyError = rendered.Success ? LiquidJsonCheck(rendered.Output, headers) : rendered.Error;
+                    }
+                    else
+                    {
+                        resolvedBody = Resolver.Resolve(bodyTemplate, varCtx);
+                    }
+                }
                 var queryParams = ResolveQueryParams(target.QueryParams, varCtx);
                 var hmacPayload = ResolveHmacPayload(target.AuthConfig, varCtx);
 
@@ -101,6 +140,12 @@ public class ApiCallNodeHandler(
                     ? overrideSeconds
                     : (int?)null;
 
+                if (bodyError is not null)
+                {
+                    // Never send a body the template couldn't produce correctly.
+                    result = new ApiDefinitionExecutionResult(false, null, null, new(), null, false, bodyError);
+                }
+                else
                 result = await executor.ExecuteAsync(new ApiDefinitionExecutionRequest(
                     HttpMethod: target.HttpMethod,
                     Url: resolvedUrl,
@@ -115,7 +160,12 @@ public class ApiCallNodeHandler(
                     RateLimitPerMinute: target.RateLimitPerMinute,
                     HmacPayload: hmacPayload), ct);
 
+                result = ResponseSuccessEvaluator.Apply(result, target.SuccessCriteria);
                 transitionKey = result.TimedOut ? "timeout" : (!result.Success ? "error" : "success");
+
+                if (result.Success && node["oncePerCall"]?.GetValue<bool>() == true)
+                    await responseCache.SetAsync(ctx.CallRecordId, OnceKey(scope, endpointId),
+                        JsonSerializer.Serialize(ResponseFieldMasker.Mask(result, targetSensitiveFields)), ct);
             }
         }
 
@@ -139,6 +189,19 @@ public class ApiCallNodeHandler(
         return new NodeResult(state, next);
     }
 
+    private static string OnceKey(string scope, Guid endpointId) => $"once:{scope}:{endpointId}";
+
+    /// <summary>A Liquid body meant to be JSON must parse as JSON — catching a template bug (a
+    /// stray comma, an unquoted string) with a clear message instead of a vendor's 400.</summary>
+    public static string? LiquidJsonCheck(string? body, Dictionary<string, string> headers)
+    {
+        var contentType = headers.FirstOrDefault(h => h.Key.Equals("Content-Type", StringComparison.OrdinalIgnoreCase)).Value;
+        if (contentType is not null && !contentType.Contains("json", StringComparison.OrdinalIgnoreCase)) return null;
+        if (string.IsNullOrWhiteSpace(body)) return null;
+        try { using var _ = JsonDocument.Parse(body); return null; }
+        catch (JsonException ex) { return $"Liquid template produced invalid JSON: {ex.Message}"; }
+    }
+
     private async Task<CallTarget?> LoadTenantAsync(Guid endpointId, CancellationToken ct)
     {
         var endpoint = await tenantEndpoints.GetByIdAsync(endpointId, ct);
@@ -148,7 +211,7 @@ public class ApiCallNodeHandler(
         return new CallTarget(
             def.Id, endpoint.HttpMethod ?? def.HttpMethod, def.BaseUrl, endpoint.Path, endpoint.Headers, endpoint.QueryParams,
             endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive, endpoint.IsRetrySafe,
-            def.RateLimitPerMinute, endpoint.SensitiveResponseFields);
+            def.RateLimitPerMinute, endpoint.SensitiveResponseFields, endpoint.BodyTemplateType, endpoint.SuccessCriteria);
     }
 
     private async Task<CallTarget?> LoadPortalAsync(Guid endpointId, CancellationToken ct)
@@ -160,7 +223,7 @@ public class ApiCallNodeHandler(
         return new CallTarget(
             def.Id, endpoint.HttpMethod ?? def.HttpMethod, def.BaseUrl, endpoint.Path, endpoint.Headers, endpoint.QueryParams,
             endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive, endpoint.IsRetrySafe,
-            def.RateLimitPerMinute, endpoint.SensitiveResponseFields);
+            def.RateLimitPerMinute, endpoint.SensitiveResponseFields, endpoint.BodyTemplateType, endpoint.SuccessCriteria);
     }
 
     /// <summary>Extracts the hmac auth type's optional payloadTemplate (if any) and resolves it

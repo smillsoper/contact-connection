@@ -15,4 +15,6 @@ public record ApiEndpointSnapshot(
     string ApiSubType, string Name, string? Description, string Path, string? HttpMethod,
     string? RequestBodyTemplate, string QueryParams, string Headers, string ResponseMapping,
     int SortOrder, bool IsPreferred, bool IsActive, bool IsRetrySafe,
-    string SensitiveResponseFields = "[]");
+    string SensitiveResponseFields = "[]",
+    string BodyTemplateType = "simple",
+    string SuccessCriteria = "{}");

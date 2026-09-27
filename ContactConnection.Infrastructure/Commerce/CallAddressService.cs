@@ -38,4 +38,28 @@ public class CallAddressService(ICallRecordRepository callRecords, ICartService 
         var result = await carts.RecalculateAsync(callRecordId, ct);
         return result.Cart;
     }
+
+    public async Task SetEmailAsync(Guid callRecordId, string email, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(email)) return;
+        var record = await callRecords.GetByIdAsync(callRecordId, ct)
+            ?? throw new InvalidOperationException($"Call record {callRecordId} not found.");
+        record.SetEmail(email.Trim());
+        await callRecords.SaveChangesAsync(ct);
+    }
+
+    public async Task SetPhoneAsync(Guid callRecordId, string role, string phone, CancellationToken ct = default)
+    {
+        if (role == CallAddressRole.None || string.IsNullOrWhiteSpace(phone)) return;
+        if (!CallAddressRole.IsValid(role))
+            throw new ArgumentException($"Unknown phone role '{role}'.", nameof(role));
+
+        var record = await callRecords.GetByIdAsync(callRecordId, ct)
+            ?? throw new InvalidOperationException($"Call record {callRecordId} not found.");
+
+        var billing  = role is CallAddressRole.Billing or CallAddressRole.BillingAndShipping ? phone : record.BillingPhone;
+        var shipping = role is CallAddressRole.Shipping or CallAddressRole.BillingAndShipping ? phone : record.ShippingPhone;
+        record.SetContactPhones(billing, shipping);
+        await callRecords.SaveChangesAsync(ct);
+    }
 }

@@ -55,6 +55,10 @@ export interface NodeData extends Record<string, unknown> {
   showCompany?: boolean
   /** Address node: also save onto the call record — none | billing | shipping | billing_and_shipping. */
   addressRole?: string
+  /** Phone node: also save onto the call record — none | billing | shipping | billing_and_shipping. */
+  phoneRole?: string
+  /** Email node: also save as the call record's customer email. */
+  saveToCallRecord?: boolean
   requiredFields?: string[]
   fieldScripts?: Record<string, string>
   // section
@@ -168,6 +172,8 @@ export interface ContactConnectionNodeDef {
   apiDefinitionName?: string
   apiEndpointName?: string
   timeoutSeconds?: number
+  /** api_call: replay a prior success on this call instead of calling again. */
+  oncePerCall?: boolean
   definitionId?: string
   definitionFieldName?: string
   definitionDisplayLabel?: string

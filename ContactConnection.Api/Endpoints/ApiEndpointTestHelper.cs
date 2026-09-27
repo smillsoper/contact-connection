@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Web;
 using ContactConnection.Application.Interfaces.Services;
@@ -22,7 +23,15 @@ public record RunEndpointTestRequest(
     /// directly here rather than looked up server-side, since a Test click may be testing an
     /// in-progress, not-yet-saved endpoint form. Null/empty = no masking. See
     /// API_HARDENING_CHECKLIST.md Tier 3.</summary>
-    List<string>? SensitiveResponseFields = null);
+    List<string>? SensitiveResponseFields = null,
+    /// <summary>"liquid" renders RequestBodyTemplate as Liquid against <see cref="LiquidModel"/>
+    /// (or, when null, the sample model from ApiTemplateModelBuilder.Sample) instead of
+    /// substituting {{namespace.field}} tags. Null/"simple" = the original behavior.</summary>
+    string? BodyTemplateType = null,
+    JsonObject? LiquidModel = null,
+    /// <summary>The endpoint form's current SuccessCriteria (saved or not) — applied to a 2xx
+    /// response exactly as a live call would.</summary>
+    string? SuccessCriteria = null);
 
 public record RunEndpointTestResponse(
     bool Success,
@@ -68,7 +77,8 @@ internal static class ApiEndpointTestHelper
         bool allowRetryOnAmbiguousFailure = false,
         IOutboundRateLimiter? rateLimiter = null,
         int? rateLimitPerMinute = null,
-        IMtlsHttpClientProvider? mtlsProvider = null)
+        IMtlsHttpClientProvider? mtlsProvider = null,
+        ILiquidTemplateRenderer? liquid = null)
     {
         try
         {
@@ -153,9 +163,25 @@ internal static class ApiEndpointTestHelper
             // Resolved before ApplyAuth (not after, as request.Content would be) so the hmac case
             // can sign it — either directly (no payloadTemplate configured) or as the fallback
             // behind a resolved payloadTemplate, computed the same way just below.
-            var resolvedBody = !string.IsNullOrEmpty(req.RequestBodyTemplate)
-                ? SubstituteVars(req.RequestBodyTemplate, ns, data)
-                : null;
+            string? resolvedBody;
+            if (!string.IsNullOrEmpty(req.RequestBodyTemplate) && req.BodyTemplateType == Domain.Entities.BodyTemplateType.Liquid && liquid is not null)
+            {
+                var rendered = await liquid.RenderAsync(req.RequestBodyTemplate,
+                    req.LiquidModel ?? Infrastructure.ApiExecution.ApiTemplateModelBuilder.Sample(), ct);
+                var jsonError = rendered.Success
+                    ? Infrastructure.FlowEngine.NodeHandlers.ApiCallNodeHandler.LiquidJsonCheck(
+                        rendered.Output, new() { ["Content-Type"] = bodyContentType ?? "application/json" })
+                    : null;
+                if (!rendered.Success || jsonError is not null)
+                    return new RunEndpointTestResponse(false, null, rendered.Output, null, null, rendered.Error ?? jsonError);
+                resolvedBody = rendered.Output;
+            }
+            else
+            {
+                resolvedBody = !string.IsNullOrEmpty(req.RequestBodyTemplate)
+                    ? SubstituteVars(req.RequestBodyTemplate, ns, data)
+                    : null;
+            }
             var hmacPayload = ResolveHmacPayload(authConfigJson, ns, data);
 
             await ApplyAuth(request, uriBuilder, authConfigJson, getCredential, httpFactory, ct, tokenCache, hmacPayload ?? resolvedBody);
@@ -206,13 +232,19 @@ internal static class ApiEndpointTestHelper
                 .Concat(response.Content.Headers)
                 .ToDictionary(h => h.Key, h => string.Join(", ", h.Value));
 
+            // Same body-level success rules a live call applies (evaluated on the unmasked body).
+            var judged = Infrastructure.ApiExecution.ResponseSuccessEvaluator.Apply(
+                new ApiDefinitionExecutionResult(response.IsSuccessStatusCode, (int)response.StatusCode, null,
+                    responseHeaders, responseBody, false, null),
+                req.SuccessCriteria);
+
             return new RunEndpointTestResponse(
-                Success: response.IsSuccessStatusCode,
+                Success: judged.Success,
                 StatusCode: (int)response.StatusCode,
                 Body: prettyBody,
                 ResponseHeaders: responseHeaders,
                 ResolvedUrl: uriBuilder.ToString(),
-                Error: null);
+                Error: judged.Error);
         }
         catch (Exception ex)
         {
@@ -233,14 +265,15 @@ internal static class ApiEndpointTestHelper
         Func<string, CancellationToken, Task<string?>> getCredential,
         IHttpClientFactory httpFactory,
         CancellationToken ct,
-        IMtlsHttpClientProvider? mtlsProvider = null)
+        IMtlsHttpClientProvider? mtlsProvider = null,
+        ILiquidTemplateRenderer? liquid = null)
     {
         // No tokenCache passed — the "Test" button always runs a live, uncached exchange.
         // mtlsProvider IS passed (unlike tokenCache/resilience/rateLimiter, which are
         // deliberately withheld from a manual test click) — without the right client
         // certificate, an mtls-configured vendor rejects the TLS handshake outright, so a Test
         // click means nothing for that auth type unless the cert is actually applied.
-        var result = await RunTestAsync(baseUrl, authConfigJson, req, getCredential, httpFactory, ct, mtlsProvider: mtlsProvider);
+        var result = await RunTestAsync(baseUrl, authConfigJson, req, getCredential, httpFactory, ct, mtlsProvider: mtlsProvider, liquid: liquid);
         return Results.Ok(result);
     }
 

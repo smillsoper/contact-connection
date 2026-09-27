@@ -24,6 +24,19 @@ async function portalFetch<T>(
   return res.json() as Promise<T>
 }
 
+// ─── Liquid request-body authoring (same endpoints as tenant admin, portal token) ──
+
+export function getPortalApiTemplateSampleModel(): Promise<Record<string, unknown>> {
+  return portalFetch<Record<string, unknown>>('/api/v1/api-templates/sample-model')
+}
+
+export function previewPortalApiTemplate(template: string, model?: Record<string, unknown>) {
+  return portalFetch<{ success: boolean; output: string | null; error: string | null }>(
+    '/api/v1/api-templates/preview',
+    { method: 'POST', body: JSON.stringify({ template, model, expectJson: true }) },
+  )
+}
+
 // ─── Auth ───────────────────────────────────────────────────────────────────
 
 export interface PortalLoginResponse {
@@ -339,6 +352,10 @@ export interface ApiEndpointRecord {
   isActive: boolean
   isRetrySafe: boolean
   sensitiveResponseFields: string
+  /** 'simple' ({{namespace.field}}) | 'liquid' — how requestBodyTemplate is rendered. */
+  bodyTemplateType?: string
+  /** Response-body success rules JSON — see ResponseSuccessEvaluator. */
+  successCriteria?: string
   createdAt: string
   updatedAt: string | null
 }
@@ -356,6 +373,8 @@ export interface CreateApiEndpointData {
   responseMapping?: string
   isRetrySafe?: boolean
   sensitiveResponseFields?: string
+  bodyTemplateType?: string
+  successCriteria?: string
 }
 
 export interface UpdateApiEndpointData {
@@ -371,6 +390,8 @@ export interface UpdateApiEndpointData {
   responseMapping?: string
   isRetrySafe?: boolean
   sensitiveResponseFields?: string
+  bodyTemplateType?: string
+  successCriteria?: string
 }
 
 export async function listPortalApiEndpoints(definitionId: string): Promise<ApiEndpointRecord[]> {
@@ -416,6 +437,9 @@ export interface EndpointTestPayload {
   namespace: string
   testData: Record<string, string>
   sensitiveResponseFields?: string[]
+  bodyTemplateType?: string
+  liquidModel?: Record<string, unknown>
+  successCriteria?: string
 }
 
 export interface EndpointTestResult {

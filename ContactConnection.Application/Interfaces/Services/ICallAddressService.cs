@@ -26,4 +26,13 @@ public interface ICallAddressService
     /// the call has a cart, otherwise null.</summary>
     Task<Domain.ValueObjects.Commerce.CartDocument?> SetAsync(
         Guid callRecordId, string role, AddressData address, CancellationToken ct = default);
+
+    /// <summary>Saves a billing and/or shipping contact phone (digits) under <paramref name="role"/>
+    /// (a CallAddressRole value; "none" or a blank phone is a no-op). Phones don't affect pricing,
+    /// so nothing is re-priced.</summary>
+    Task SetPhoneAsync(Guid callRecordId, string role, string phone, CancellationToken ct = default);
+
+    /// <summary>Saves the customer's email onto the call record (CallRecord.Email — the value
+    /// behind {{caller.email}}). A blank email is a no-op.</summary>
+    Task SetEmailAsync(Guid callRecordId, string email, CancellationToken ct = default);
 }

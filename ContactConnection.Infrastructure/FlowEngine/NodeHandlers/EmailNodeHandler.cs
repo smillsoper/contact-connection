@@ -15,6 +15,8 @@ namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 ///   "checkARecord": true,
 ///   "checkMX": true,
 ///   "checkDisposable": true,
+///   "saveToCallRecord": true,   // optional — also save as the call record's customer email
+///                               // (CallRecord.Email / {{caller.email}}) once it passes validation
 ///   "transitions": { "default": "node_002" }
 /// }
 ///
@@ -27,7 +29,7 @@ namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 ///   isDisposable    = true/false/null (null when checkDisposable=false)
 ///   isDeliverable   = true/false
 /// </summary>
-public class EmailNodeHandler(IVariableResolver resolver, IEmailValidationService emailValidator)
+public class EmailNodeHandler(IVariableResolver resolver, IEmailValidationService emailValidator, ICallAddressService callContact)
     : NodeHandlerBase(resolver), INodeHandler
 {
     public string NodeType => "email";
@@ -136,7 +138,13 @@ public class EmailNodeHandler(IVariableResolver resolver, IEmailValidationServic
             return new NodeResult(errorState, NextNodeId: null);
         }
 
-        // All checks passed — advance
+        // All checks passed — optionally save onto the call record, then advance
+        if (node["saveToCallRecord"]?.GetValue<bool>() == true)
+        {
+            await callContact.SetEmailAsync(ctx.CallRecordId, email, ct);
+            CallAddressVars.ApplyEmail(ctx, email);
+        }
+
         var advanceNext = Transition(node, agentTransition) ?? Transition(node, "default");
         AppendHistory(ctx, node, email, advanceNext);
         return new NodeResult(WithScript(MakeState()), advanceNext);

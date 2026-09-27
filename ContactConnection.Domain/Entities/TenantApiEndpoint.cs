@@ -37,6 +37,20 @@ public class TenantApiEndpoint
     /// </summary>
     public string SensitiveResponseFields { get; private set; } = "[]";
 
+    /// <summary>How RequestBodyTemplate is rendered — BodyTemplateType.Simple ({{namespace.field}}
+    /// substitution, the default) or BodyTemplateType.Liquid (loops/conditionals/math, for payloads
+    /// like an order API's line items). See ILiquidTemplateRenderer.</summary>
+    public string BodyTemplateType { get; private set; } = Entities.BodyTemplateType.Simple;
+
+    /// <summary>
+    /// JSON rules deciding whether a 2xx response actually succeeded, for APIs that report failure
+    /// in the body (e.g. HTTP 200 with {"success": false}). "{}" (default) = any 2xx is success.
+    /// Shape: {"rules":[{"path":"success","operator":"equals","value":"true"}],"errorMessagePath":"message"}
+    /// — all rules must pass; errorMessagePath names the body field holding the failure reason.
+    /// See ResponseSuccessEvaluator.
+    /// </summary>
+    public string SuccessCriteria { get; private set; } = "{}";
+
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? UpdatedAt { get; private set; }
 
@@ -106,4 +120,10 @@ public class TenantApiEndpoint
     public void Deactivate() { IsActive = false; UpdatedAt = DateTimeOffset.UtcNow; }
     public void SetRetrySafe(bool isRetrySafe) { IsRetrySafe = isRetrySafe; UpdatedAt = DateTimeOffset.UtcNow; }
     public void SetSensitiveResponseFields(string fieldPathsJson) { SensitiveResponseFields = fieldPathsJson; UpdatedAt = DateTimeOffset.UtcNow; }
+    public void SetBodyTemplateType(string type)
+    {
+        if (!Entities.BodyTemplateType.IsValid(type)) throw new ArgumentException($"Unknown body template type '{type}'.", nameof(type));
+        BodyTemplateType = type; UpdatedAt = DateTimeOffset.UtcNow;
+    }
+    public void SetSuccessCriteria(string criteriaJson) { SuccessCriteria = string.IsNullOrWhiteSpace(criteriaJson) ? "{}" : criteriaJson; UpdatedAt = DateTimeOffset.UtcNow; }
 }

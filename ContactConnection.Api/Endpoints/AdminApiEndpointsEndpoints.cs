@@ -65,6 +65,7 @@ public static class AdminApiEndpointsEndpoints
         [FromKeyedServices("tenant")] IVersionHistoryService versions,
         TenantContext tenantContext,
         HttpContext http,
+        ILiquidTemplateRenderer liquid,
         CancellationToken ct)
     {
         if (!tenantContext.HasTenant) return Results.Unauthorized();
@@ -104,6 +105,13 @@ public static class AdminApiEndpointsEndpoints
         if (request.ResponseMapping is not null) endpoint.SetResponseMapping(request.ResponseMapping);
         if (request.IsRetrySafe is not null) endpoint.SetRetrySafe(request.IsRetrySafe.Value);
         if (request.SensitiveResponseFields is not null) endpoint.SetSensitiveResponseFields(request.SensitiveResponseFields);
+        if (EndpointBodyValidation.Validate(liquid,
+                request.BodyTemplateType ?? endpoint.BodyTemplateType,
+                request.RequestBodyTemplate ?? endpoint.RequestBodyTemplate,
+                request.SuccessCriteria ?? endpoint.SuccessCriteria) is { } bodyError)
+            return Results.BadRequest(new { error = bodyError });
+        if (request.BodyTemplateType is not null) endpoint.SetBodyTemplateType(request.BodyTemplateType);
+        if (request.SuccessCriteria is not null) endpoint.SetSuccessCriteria(request.SuccessCriteria);
 
         await repo.AddAsync(endpoint, ct);
         await repo.SaveChangesAsync(ct);
@@ -125,6 +133,7 @@ public static class AdminApiEndpointsEndpoints
         [FromKeyedServices("tenant")] IVersionHistoryService versions,
         TenantContext tenantContext,
         HttpContext http,
+        ILiquidTemplateRenderer liquid,
         CancellationToken ct)
     {
         if (!tenantContext.HasTenant) return Results.Unauthorized();
@@ -164,6 +173,13 @@ public static class AdminApiEndpointsEndpoints
         if (request.ResponseMapping is not null) endpoint.SetResponseMapping(request.ResponseMapping);
         if (request.IsRetrySafe is not null) endpoint.SetRetrySafe(request.IsRetrySafe.Value);
         if (request.SensitiveResponseFields is not null) endpoint.SetSensitiveResponseFields(request.SensitiveResponseFields);
+        if (EndpointBodyValidation.Validate(liquid,
+                request.BodyTemplateType ?? endpoint.BodyTemplateType,
+                request.RequestBodyTemplate ?? endpoint.RequestBodyTemplate,
+                request.SuccessCriteria ?? endpoint.SuccessCriteria) is { } bodyError)
+            return Results.BadRequest(new { error = bodyError });
+        if (request.BodyTemplateType is not null) endpoint.SetBodyTemplateType(request.BodyTemplateType);
+        if (request.SuccessCriteria is not null) endpoint.SetSuccessCriteria(request.SuccessCriteria);
 
         await repo.SaveChangesAsync(ct);
         await versions.SnapshotAsync(
@@ -220,7 +236,7 @@ public static class AdminApiEndpointsEndpoints
     private static string BuildSnapshot(TenantApiEndpoint e) => JsonSerializer.Serialize(new ApiEndpointSnapshot(
         e.ApiSubType, e.Name, e.Description, e.Path, e.HttpMethod, e.RequestBodyTemplate,
         e.QueryParams, e.Headers, e.ResponseMapping, e.SortOrder, e.IsPreferred, e.IsActive, e.IsRetrySafe,
-        e.SensitiveResponseFields));
+        e.SensitiveResponseFields, e.BodyTemplateType, e.SuccessCriteria));
 
     // ApiSubType is deliberately not reverted — UpdateSubType needs the parent definition's
     // ApiCategory, which this revert path doesn't load, and sub-type changes post-creation are
@@ -234,6 +250,8 @@ public static class AdminApiEndpointsEndpoints
         e.SetResponseMapping(s.ResponseMapping);
         e.SetRetrySafe(s.IsRetrySafe);
         e.SetSensitiveResponseFields(s.SensitiveResponseFields);
+        e.SetBodyTemplateType(s.BodyTemplateType);
+        e.SetSuccessCriteria(s.SuccessCriteria);
         if (s.IsActive) e.Activate(); else e.Deactivate();
         if (s.IsPreferred) e.SetPreferred(); else e.ClearPreferred();
     }
@@ -263,6 +281,7 @@ public static class AdminApiEndpointsEndpoints
         IHttpClientFactory httpFactory,
         IMtlsHttpClientProvider mtlsProvider,
         TenantContext tenantContext,
+        ILiquidTemplateRenderer liquid,
         CancellationToken ct)
     {
         if (!tenantContext.HasTenant) return Results.Unauthorized();
@@ -276,7 +295,8 @@ public static class AdminApiEndpointsEndpoints
             (key, token) => credStore.GetAsync(key, token),
             httpFactory,
             ct,
-            mtlsProvider);
+            mtlsProvider,
+            liquid);
     }
 
     private static async Task<IResult> Delete(
@@ -312,6 +332,8 @@ public static class AdminApiEndpointsEndpoints
         e.IsActive,
         e.IsRetrySafe,
         e.SensitiveResponseFields,
+        e.BodyTemplateType,
+        e.SuccessCriteria,
         e.CreatedAt,
         e.UpdatedAt,
     };

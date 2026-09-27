@@ -537,7 +537,12 @@ per-campaign tax provider (flat = per-state rate table w/ optional "tax shipping
 with tax codes, ship-from, credential cascade, state fee lines e.g. CO Retail Delivery Fee OF400000);
 cart `Fees` separate from `SalesTax`; product tax code + offer override; tax status shown to agents.
 Not yet verified against a real Avalara sandbox (no credentials); (3) Liquid bodies + response-body success
-conditions + submit-once guard; (4) Life Seasons Order definition as configuration.
+conditions + submit-once guard — **built S163** (Fluid, sandboxed; builder Preview/sample data/success
+rules; api_call "Only once per call"; telephony api node supports Liquid + rules too). Life Seasons
+Order body drafted as `docs/integrations/life-seasons-order.liquid` and **validated against all 23,107
+successful production requests** from the CRMPro backup (99.4% exact on the current format). Also S163:
+phone node + email node "save to call record" (`BillingPhone`/`ShippingPhone`/`Email`), set_variable
+targets for them, and Avalara fee parsing fixed to read flat-amount `isFee` details from `rate`; (4) Life Seasons Order definition as configuration.
 
 **Next up:** Build the Order API submission step and an `"avalara"` `ITaxProvider` per that spec
 (the Order API takes the `PaymentTransaction`'s gateway transaction id as

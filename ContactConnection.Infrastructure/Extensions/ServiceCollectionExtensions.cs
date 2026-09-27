@@ -125,6 +125,12 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IPaymentService, PaymentService>();
         services.AddScoped<IPaymentTransactionRepository, PaymentTransactionRepository>();
         services.AddScoped<IOrderNumberSequenceRepository, OrderNumberSequenceRepository>();
+
+        // Liquid request bodies for API Definition endpoints (see ILiquidTemplateRenderer) — the
+        // renderer is stateless apart from its parsed-template cache, so singleton.
+        services.AddSingleton<ILiquidTemplateRenderer, FluidLiquidTemplateRenderer>();
+        services.AddScoped<IApiTemplateModelBuilder, ApiTemplateModelBuilder>();
+        services.AddScoped<IApiResponseCacheStore, ApiResponseCacheStore>();
         services.AddScoped<IOrderNumberService, OrderNumberService>();
 
         // TTS streaming providers — each ITtsStreamProvider is enumerated by

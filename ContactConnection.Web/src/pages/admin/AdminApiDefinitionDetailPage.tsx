@@ -18,6 +18,8 @@ import {
   listAdminApiEndpointVersions,
   revertAdminApiEndpoint,
   listAdminTtsProviders,
+  getApiTemplateSampleModel,
+  previewApiTemplate,
 } from '../../api/adminApiDefinitions'
 import { listAdminCredentials, setAdminCredential } from '../../api/adminCredentials'
 
@@ -35,6 +37,8 @@ const adminApi: DetailApi = {
   setCredential: setAdminCredential,
   testAuth: testAdminAuth,
   testEndpoint: testAdminEndpoint,
+  getTemplateSampleModel: getApiTemplateSampleModel,
+  previewTemplate: previewApiTemplate,
   // Tenant admins can register their own TTS vendor account, subject to the same
   // TtsProviderValidation constraint as the platform catalog (see AdminApiEndpointsEndpoints) —
   // the provider picker applies here exactly as it does on the Portal side.

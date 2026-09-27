@@ -15,6 +15,8 @@ namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 ///   "required": true,
 ///   "allowInternational": false,
 ///   "dncCheck": false,
+///   "phoneRole": "billing",   // optional — none (default) | billing | shipping | billing_and_shipping:
+///                             // also save the digits onto the call record (BillingPhone/ShippingPhone)
 ///   "transitions": { "default": "node_002" }
 /// }
 ///
@@ -33,7 +35,7 @@ namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 ///                  Examples: 001=(+1 North America), 044=(+44 UK), 357=(+357 Cyprus)
 ///                  Leading zeros stripped for validation; stored value uses stripped code.
 /// </summary>
-public partial class PhoneNodeHandler(IVariableResolver resolver)
+public partial class PhoneNodeHandler(IVariableResolver resolver, ICallAddressService callAddresses)
     : NodeHandlerBase(resolver), INodeHandler
 {
     public string NodeType => "phone";
@@ -92,10 +94,29 @@ public partial class PhoneNodeHandler(IVariableResolver resolver)
             state.NodeScriptContent = Resolver.ResolveForDisplay(content, varCtx);
     }
 
-    public Task<NodeResult> ExecuteAsync(
+    public async Task<NodeResult> ExecuteAsync(
         JsonObject node, FlowExecutionContext ctx,
         string? agentInput, string agentTransition, CancellationToken ct = default)
     {
+        var result = Execute(node, ctx, agentInput, agentTransition, out var capturedPhone);
+
+        var role = Str(node, "phoneRole")?.Trim() ?? CallAddressRole.None;
+        if (capturedPhone is not null && role != CallAddressRole.None && CallAddressRole.IsValid(role))
+        {
+            await callAddresses.SetPhoneAsync(ctx.CallRecordId, role, capturedPhone, ct);
+            CallAddressVars.ApplyPhone(ctx, role, capturedPhone);
+        }
+        return result;
+    }
+
+    /// <summary>The node's validation/formatting logic. <paramref name="capturedPhone"/> is the
+    /// stored digits when a valid, non-blank number was accepted; null otherwise (first display,
+    /// validation error, or an optional field left blank — which never clears a saved phone).</summary>
+    private NodeResult Execute(
+        JsonObject node, FlowExecutionContext ctx,
+        string? agentInput, string agentTransition, out string? capturedPhone)
+    {
+        capturedPhone = null;
         var required           = node["required"]?.GetValue<bool>() ?? false;
         var allowInternational = node["allowInternational"]?.GetValue<bool>() ?? false;
         var outputVar          = Str(node, "outputVariable")?.Trim() ?? string.Empty;
@@ -116,14 +137,14 @@ public partial class PhoneNodeHandler(IVariableResolver resolver)
             var firstState = WithScript(MakeState());
             if (!string.IsNullOrEmpty(outputVar) && ctx.FlowVars.TryGetValue(outputVar, out var existing))
                 firstState.DefaultValue = ExtractPhoneDefault(existing, allowInternational);
-            return Task.FromResult(new NodeResult(firstState, NextNodeId: null));
+            return new NodeResult(firstState, NextNodeId: null);
         }
 
         var displayValue = agentInput.Trim();
 
         // Required guard — re-display if blank
         if (required && string.IsNullOrEmpty(displayValue))
-            return Task.FromResult(new NodeResult(WithScript(MakeState()), NextNodeId: null));
+            return new NodeResult(WithScript(MakeState()), NextNodeId: null);
 
         // Optional blank — store empty object and advance
         if (string.IsNullOrEmpty(displayValue))
@@ -133,7 +154,7 @@ public partial class PhoneNodeHandler(IVariableResolver resolver)
 
             var next = Transition(node, agentTransition) ?? Transition(node, "default");
             AppendHistory(ctx, node, displayValue, next);
-            return Task.FromResult(new NodeResult(WithScript(MakeState()), next));
+            return new NodeResult(WithScript(MakeState()), next);
         }
 
         var digits = NonDigits().Replace(displayValue, string.Empty);
@@ -181,10 +202,11 @@ public partial class PhoneNodeHandler(IVariableResolver resolver)
         {
             var errorState = WithScript(MakeState());
             errorState.ValidationError = validationError;
-            return Task.FromResult(new NodeResult(errorState, NextNodeId: null));
+            return new NodeResult(errorState, NextNodeId: null);
         }
 
         validated:
+        capturedPhone = storedValue;
         var areaCode   = localDigits.Length >= 3 ? localDigits[..3] : string.Empty;
         var isTollFree = TollFreeAreaCodes.Contains(areaCode);
 
@@ -193,7 +215,7 @@ public partial class PhoneNodeHandler(IVariableResolver resolver)
 
         var advanceNext = Transition(node, agentTransition) ?? Transition(node, "default");
         AppendHistory(ctx, node, displayValue, advanceNext);
-        return Task.FromResult(new NodeResult(WithScript(MakeState()), advanceNext));
+        return new NodeResult(WithScript(MakeState()), advanceNext);
     }
 
     /// <summary>

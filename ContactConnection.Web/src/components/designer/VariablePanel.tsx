@@ -21,6 +21,7 @@ const STATIC_NAMESPACES: StaticNamespace[] = [
       // nested fields like {{call_record.shipping_address.city}}.
       { key: 'billing_address' }, { key: 'shipping_address' },
       { key: 'shipping_address.state' }, { key: 'shipping_address.zip' },
+      { key: 'billing_phone' }, { key: 'shipping_phone' }, { key: 'email' },
     ],
   },
   {

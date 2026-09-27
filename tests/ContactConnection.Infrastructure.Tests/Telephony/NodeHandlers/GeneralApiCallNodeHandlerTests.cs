@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Domain.Entities;
+using ContactConnection.Infrastructure.ApiExecution;
 using ContactConnection.Infrastructure.Data;
 using ContactConnection.Infrastructure.Telephony.NodeHandlers;
 using Microsoft.EntityFrameworkCore;
@@ -61,7 +62,7 @@ public class GeneralApiCallNodeHandlerTests
         executor ??= Mock.Of<IApiDefinitionExecutor>();
         tenantCreds ??= Mock.Of<ITenantCredentialStore>();
         portalCreds ??= Mock.Of<IPortalCredentialStore>();
-        return new GeneralApiCallNodeHandler(factory.Object, portalDb, tenantCreds, portalCreds, executor);
+        return new GeneralApiCallNodeHandler(factory.Object, portalDb, tenantCreds, portalCreds, executor, new FluidLiquidTemplateRenderer());
     }
 
     private static Mock<IApiDefinitionExecutor> SuccessExecutor(string responseBody = "{\"ok\":true}") =>

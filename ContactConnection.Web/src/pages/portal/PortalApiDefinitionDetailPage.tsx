@@ -20,6 +20,8 @@ import {
   revertPortalApiDefinition,
   listPortalApiEndpointVersions,
   revertPortalApiEndpoint,
+  getPortalApiTemplateSampleModel,
+  previewPortalApiTemplate,
 } from '../../api/portal'
 
 const portalApi: DetailApi = {
@@ -36,6 +38,8 @@ const portalApi: DetailApi = {
   setCredential: setPortalCredential,
   testAuth: testPortalAuth,
   testEndpoint: testPortalEndpoint,
+  getTemplateSampleModel: getPortalApiTemplateSampleModel,
+  previewTemplate: previewPortalApiTemplate,
   listTtsProviders: getPortalTtsProviders,
   listPagePath: '/portal/api-definitions',
   listDefinitionVersions: listPortalApiDefinitionVersions,

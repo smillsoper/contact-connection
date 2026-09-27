@@ -234,6 +234,7 @@ app.MapPortalAuthEndpoints();
 app.MapPortalTenantsEndpoints();
 app.MapPortalApiDefinitionsEndpoints();
 app.MapPortalApiEndpointsEndpoints();
+app.MapApiTemplateEndpoints();
 app.MapPortalTtsProvidersEndpoints();
 app.MapPortalSttProvidersEndpoints();
 app.MapPortalCredentialsEndpoints();

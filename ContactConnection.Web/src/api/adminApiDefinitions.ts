@@ -112,6 +112,10 @@ export interface ApiEndpointRecord {
   isActive: boolean
   isRetrySafe: boolean
   sensitiveResponseFields: string
+  /** 'simple' ({{namespace.field}}) | 'liquid' — how requestBodyTemplate is rendered. */
+  bodyTemplateType?: string
+  /** Response-body success rules JSON — see ResponseSuccessEvaluator. */
+  successCriteria?: string
   createdAt: string
   updatedAt: string | null
 }
@@ -129,6 +133,8 @@ export interface CreateApiEndpointData {
   responseMapping?: string
   isRetrySafe?: boolean
   sensitiveResponseFields?: string
+  bodyTemplateType?: string
+  successCriteria?: string
 }
 
 export interface UpdateApiEndpointData {
@@ -143,6 +149,24 @@ export interface UpdateApiEndpointData {
   responseMapping?: string
   isRetrySafe?: boolean
   sensitiveResponseFields?: string
+  bodyTemplateType?: string
+  successCriteria?: string
+}
+
+// ── Liquid request-body authoring ────────────────────────────────────────────
+
+export interface TemplatePreviewResult {
+  success: boolean
+  output: string | null
+  error: string | null
+}
+
+export function getApiTemplateSampleModel(): Promise<Record<string, unknown>> {
+  return api.get<Record<string, unknown>>('/api/v1/api-templates/sample-model')
+}
+
+export function previewApiTemplate(template: string, model?: Record<string, unknown>): Promise<TemplatePreviewResult> {
+  return api.post<TemplatePreviewResult>('/api/v1/api-templates/preview', { template, model, expectJson: true })
 }
 
 export function listAdminApiEndpoints(definitionId: string): Promise<ApiEndpointRecord[]> {
@@ -354,6 +378,9 @@ export interface EndpointTestPayload {
   namespace: string
   testData: Record<string, string>
   sensitiveResponseFields?: string[]
+  bodyTemplateType?: string
+  liquidModel?: Record<string, unknown>
+  successCriteria?: string
 }
 
 export interface EndpointTestResult {

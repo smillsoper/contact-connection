@@ -1,0 +1,121 @@
+{%- comment -%}
+  Life Seasons Order API — POST /api/v1/addorder request body (Liquid body mode).
+  Contract: docs/integrations/life-seasons-crmpro-legacy.md §1 — this reproduces what CRMPro sent
+  in production. Mixed casing is intentional: products[], additional_fees_or_taxes[],
+  payment_info and CustomMeta use PascalCase; everything else is snake_case.
+
+  Flow variables this template reads (set them in the script, or edit the references):
+    flow.vendor_number, flow.coupon_code, flow.keycode,
+    flow.sms_consent_marketing / flow.sms_consent_transactional ("true"/"false"),
+    flow.sms_consent_at (ISO-8601 UTC), flow.referrer_first_name, flow.referrer_last_name,
+    flow.referrer_phone
+
+  Tax/fee mapping (matches CRMPro):
+    taxes                     = cart.sales_tax (shipping tax included; the CO Retail Delivery Fee
+                                is NOT — it's a cart fee, never a product)
+    additional_fees_or_taxes  = "Shipping Tax" (always, even 0.00) + one entry per cart fee
+  Validated against 23,107 real production requests (see the legacy spec) — "Shipping Tax" in
+  additional_fees_or_taxes is informational; Life Seasons' total does not add it again.
+{%- endcomment -%}
+{%- assign bill = call_record.billing_address -%}
+{%- comment -%} Not "| default:" — Liquid's default filter treats an object as empty and would
+    always fall back to the billing address. {%- endcomment -%}
+{%- if call_record.shipping_address -%}{%- assign ship = call_record.shipping_address -%}{%- else -%}{%- assign ship = bill -%}{%- endif -%}
+{%- assign subtotal = 0 -%}
+{
+  "vendor_number": {{ flow.vendor_number | json }},
+  "customer_number": {{ call_record.order_number | json }},
+  "order_number": {{ call_record.order_number | json }},
+  "order_date_utc": {{ call_record.call_started_at | default: now_utc | json }},
+  "dnis": {{ call_record.dnis | json }},
+  {%- if call_record.contact_id_external != blank %}
+  "voice_recording_id": {{ call_record.contact_id_external | json }},
+  {%- endif %}
+  "customer_info": {
+    "email": {{ caller.email | json }},
+    "first_name": {{ caller.first_name | default: bill.firstName | json }},
+    "last_name": {{ caller.last_name | default: bill.lastName | json }},
+    "phone": {{ call_record.billing_phone | default: caller.phone | json }}
+  },
+  "billing_info": {
+    "email": {{ caller.email | json }},
+    "first_name": {{ bill.firstName | json }},
+    "last_name": {{ bill.lastName | json }},
+    "company": {{ bill.company | json }},
+    "address_1": {{ bill.formattedAddress1 | json }},
+    "address_2": {{ bill.formattedAddress2 | json }},
+    "city": {{ bill.city | json }},
+    "state": {{ bill.state | json }},
+    "post_code": {{ bill.zip | json }},
+    "country_code": {% if bill.isCanada %}"CA"{% else %}"US"{% endif %}
+  },
+  "shipping_info": {
+    "phone": {{ call_record.shipping_phone | default: call_record.billing_phone | default: caller.phone | json }},
+    "first_name": {{ ship.firstName | json }},
+    "last_name": {{ ship.lastName | json }},
+    "company": {{ ship.company | json }},
+    "address_1": {{ ship.formattedAddress1 | json }},
+    "address_2": {{ ship.formattedAddress2 | json }},
+    "city": {{ ship.city | json }},
+    "state": {{ ship.state | json }},
+    "post_code": {{ ship.zip | json }},
+    "country_code": {% if ship.isCanada %}"CA"{% else %}"US"{% endif %}
+  },
+  "products": [
+    {%- for item in cart.items -%}
+    {%- assign line_total = item.full_price | times: item.quantity -%}
+    {%- assign subtotal = subtotal | plus: line_total %}
+    {
+      "ProductCode": {{ item.sku | json }},
+      "Quantity": {{ item.quantity }},
+      "Price": {{ item.full_price | money }},
+      "Discount": 0.00,
+      "Tax": {{ item.sales_tax | money }}
+    }{% unless forloop.last %},{% endunless %}
+    {%- endfor %}
+  ],
+  "coupon_code": {{ flow.coupon_code | default: "" | json }},
+  "shipping_method": {{ cart.ship_method | default: "REG" | json }},
+  "use_shipping_cost": true,
+  "shipping_cost": {{ cart.shipping | money }},
+  "subtotal": {{ subtotal | money }},
+  "taxes": {{ cart.sales_tax | money }},
+  "additional_fees_or_taxes": [
+    { "Description": "Shipping Tax", "Amount": {{ cart.shipping_tax | money }} }
+    {%- for fee in cart.fees -%},
+    { "Description": {{ fee.description | json }}, "Amount": {{ fee.amount | money }} }
+    {%- endfor %}
+  ],
+  "total": {{ cart.total | money }},
+  "payment_info": {
+    "PaymentMethod": "CC",
+    "PaymentType": "auth",
+    "PaymentTransactionId": {{ payment.gateway_transaction_id | json }},
+    "PaymentAmount": {{ payment.amount | default: cart.total | money }}
+  }
+  {%- assign has_keycode = false -%}{%- if flow.keycode != blank -%}{%- assign has_keycode = true -%}{%- endif -%}
+  {%- assign has_sms = false -%}{%- if flow.sms_consent_at != blank -%}{%- assign has_sms = true -%}{%- endif -%}
+  {%- assign has_referrer = false -%}
+  {%- if flow.referrer_first_name != blank or flow.referrer_last_name != blank or flow.referrer_phone != blank -%}{%- assign has_referrer = true -%}{%- endif -%}
+  {%- if has_keycode or has_sms or has_referrer -%},
+  "CustomMeta": {
+    {%- assign sep = "" -%}
+    {%- if has_keycode %}
+    "mailin_keycode": {{ flow.keycode | json }}
+    {%- assign sep = "," -%}
+    {%- endif -%}
+    {%- if has_sms -%}{{ sep }}
+    "ls_consented_to_marketing_texts": {% if flow.sms_consent_marketing == "true" %}true{% else %}false{% endif %},
+    "ls_consented_to_transactional_texts": {% if flow.sms_consent_transactional == "true" %}true{% else %}false{% endif %},
+    "ls_datetime_consented_to_marketing_texts": {{ flow.sms_consent_at | json }},
+    "ls_datetime_consented_to_transactional_texts": {{ flow.sms_consent_at | json }}
+    {%- assign sep = "," -%}
+    {%- endif -%}
+    {%- if has_referrer -%}{{ sep }}
+    "ls_referrer_firstname": {{ flow.referrer_first_name | json }},
+    "ls_referrer_lastname": {{ flow.referrer_last_name | json }},
+    "ls_referrer_phone": {{ flow.referrer_phone | json }}
+    {%- endif %}
+  }
+  {%- endif %}
+}

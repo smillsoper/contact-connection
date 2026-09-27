@@ -59,6 +59,7 @@ public static class PortalApiEndpointsEndpoints
         ISpeechRecognitionProviderFactory sttFactory,
         [FromKeyedServices("portal")] IVersionHistoryService versions,
         HttpContext http,
+        ILiquidTemplateRenderer liquid,
         CancellationToken ct)
     {
         var actor = ActorResolver.Resolve(http.User);
@@ -97,6 +98,13 @@ public static class PortalApiEndpointsEndpoints
         if (request.ResponseMapping is not null) endpoint.SetResponseMapping(request.ResponseMapping);
         if (request.IsRetrySafe is not null) endpoint.SetRetrySafe(request.IsRetrySafe.Value);
         if (request.SensitiveResponseFields is not null) endpoint.SetSensitiveResponseFields(request.SensitiveResponseFields);
+        if (EndpointBodyValidation.Validate(liquid,
+                request.BodyTemplateType ?? endpoint.BodyTemplateType,
+                request.RequestBodyTemplate ?? endpoint.RequestBodyTemplate,
+                request.SuccessCriteria ?? endpoint.SuccessCriteria) is { } bodyError)
+            return Results.BadRequest(new { error = bodyError });
+        if (request.BodyTemplateType is not null) endpoint.SetBodyTemplateType(request.BodyTemplateType);
+        if (request.SuccessCriteria is not null) endpoint.SetSuccessCriteria(request.SuccessCriteria);
 
         await repo.AddAsync(endpoint, ct);
         await repo.SaveChangesAsync(ct);
@@ -117,6 +125,7 @@ public static class PortalApiEndpointsEndpoints
         ISpeechRecognitionProviderFactory sttFactory,
         [FromKeyedServices("portal")] IVersionHistoryService versions,
         HttpContext http,
+        ILiquidTemplateRenderer liquid,
         CancellationToken ct)
     {
         var actor = ActorResolver.Resolve(http.User);
@@ -155,6 +164,13 @@ public static class PortalApiEndpointsEndpoints
         if (request.ResponseMapping is not null) endpoint.SetResponseMapping(request.ResponseMapping);
         if (request.IsRetrySafe is not null) endpoint.SetRetrySafe(request.IsRetrySafe.Value);
         if (request.SensitiveResponseFields is not null) endpoint.SetSensitiveResponseFields(request.SensitiveResponseFields);
+        if (EndpointBodyValidation.Validate(liquid,
+                request.BodyTemplateType ?? endpoint.BodyTemplateType,
+                request.RequestBodyTemplate ?? endpoint.RequestBodyTemplate,
+                request.SuccessCriteria ?? endpoint.SuccessCriteria) is { } bodyError)
+            return Results.BadRequest(new { error = bodyError });
+        if (request.BodyTemplateType is not null) endpoint.SetBodyTemplateType(request.BodyTemplateType);
+        if (request.SuccessCriteria is not null) endpoint.SetSuccessCriteria(request.SuccessCriteria);
 
         await repo.SaveChangesAsync(ct);
         await versions.SnapshotAsync(
@@ -207,7 +223,7 @@ public static class PortalApiEndpointsEndpoints
     private static string BuildSnapshot(PortalApiEndpoint e) => JsonSerializer.Serialize(new ApiEndpointSnapshot(
         e.ApiSubType, e.Name, e.Description, e.Path, e.HttpMethod, e.RequestBodyTemplate,
         e.QueryParams, e.Headers, e.ResponseMapping, e.SortOrder, e.IsPreferred, e.IsActive, e.IsRetrySafe,
-        e.SensitiveResponseFields));
+        e.SensitiveResponseFields, e.BodyTemplateType, e.SuccessCriteria));
 
     // ApiSubType is deliberately not reverted — see the matching note in AdminApiEndpointsEndpoints.
     private static void ApplySnapshot(PortalApiEndpoint e, ApiEndpointSnapshot s)
@@ -219,6 +235,8 @@ public static class PortalApiEndpointsEndpoints
         e.SetResponseMapping(s.ResponseMapping);
         e.SetRetrySafe(s.IsRetrySafe);
         e.SetSensitiveResponseFields(s.SensitiveResponseFields);
+        e.SetBodyTemplateType(s.BodyTemplateType);
+        e.SetSuccessCriteria(s.SuccessCriteria);
         if (s.IsActive) e.Activate(); else e.Deactivate();
         if (s.IsPreferred) e.SetPreferred(); else e.ClearPreferred();
     }
@@ -246,6 +264,7 @@ public static class PortalApiEndpointsEndpoints
         IPortalCredentialStore credStore,
         IHttpClientFactory httpFactory,
         IMtlsHttpClientProvider mtlsProvider,
+        ILiquidTemplateRenderer liquid,
         CancellationToken ct)
     {
         var def = await defRepo.GetByIdAsync(definitionId, ct);
@@ -258,7 +277,8 @@ public static class PortalApiEndpointsEndpoints
             (key, token) => credStore.GetAsync(key, token),
             httpFactory,
             ct,
-            mtlsProvider);
+            mtlsProvider,
+            liquid);
     }
 
     private static async Task<IResult> Delete(
@@ -292,6 +312,8 @@ public static class PortalApiEndpointsEndpoints
         e.IsActive,
         e.IsRetrySafe,
         e.SensitiveResponseFields,
+        e.BodyTemplateType,
+        e.SuccessCriteria,
         e.CreatedAt,
         e.UpdatedAt,
     };
@@ -312,7 +334,11 @@ public record CreateApiEndpointRequest(
     /// <summary>JSON array of dot-separated response field paths to redact — see
     /// TenantApiEndpoint/PortalApiEndpoint.SensitiveResponseFields. Null = leave at the
     /// entity default ("[]", no masking).</summary>
-    string? SensitiveResponseFields = null);
+    string? SensitiveResponseFields = null,
+    /// <summary>"simple" | "liquid" — see BodyTemplateType. Null = leave unchanged.</summary>
+    string? BodyTemplateType = null,
+    /// <summary>Body success rules JSON — see ResponseSuccessEvaluator. Null = leave unchanged.</summary>
+    string? SuccessCriteria = null);
 
 public record UpdateApiEndpointRequest(
     string Name,
@@ -326,4 +352,8 @@ public record UpdateApiEndpointRequest(
     string? Headers,
     string? ResponseMapping,
     bool? IsRetrySafe = null,
-    string? SensitiveResponseFields = null);
+    string? SensitiveResponseFields = null,
+    /// <summary>"simple" | "liquid" — see BodyTemplateType. Null = leave unchanged.</summary>
+    string? BodyTemplateType = null,
+    /// <summary>Body success rules JSON — see ResponseSuccessEvaluator. Null = leave unchanged.</summary>
+    string? SuccessCriteria = null);

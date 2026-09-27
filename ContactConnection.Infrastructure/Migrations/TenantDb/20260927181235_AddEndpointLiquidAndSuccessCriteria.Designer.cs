@@ -3,6 +3,7 @@ using System;
 using ContactConnection.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace ContactConnection.Infrastructure.Migrations.TenantDb
 {
     [DbContext(typeof(TenantDbContext))]
-    partial class TenantDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260927181235_AddEndpointLiquidAndSuccessCriteria")]
+    partial class AddEndpointLiquidAndSuccessCriteria
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -500,11 +503,6 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .HasColumnName("api_response_cache")
                         .HasDefaultValueSql("'{}'::jsonb");
 
-                    b.Property<string>("BillingPhone")
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)")
-                        .HasColumnName("billing_phone");
-
                     b.Property<DateTimeOffset?>("CallEndAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("call_end_at");
@@ -673,11 +671,6 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
                         .HasColumnName("sensitive_wipe_reason");
-
-                    b.Property<string>("ShippingPhone")
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)")
-                        .HasColumnName("shipping_phone");
 
                     b.Property<string>("Source")
                         .IsRequired()

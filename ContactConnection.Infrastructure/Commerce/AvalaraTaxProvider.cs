@@ -264,25 +264,54 @@ public class AvalaraTaxProvider(
         var lineTaxes = new decimal[itemCount];
         decimal shippingTax = 0;
         var fees = new List<CartFee>();
+        var feeNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        decimal feeTaxInTotal = 0;
         feeLines ??= [];
         foreach (var line in json?["lines"]?.AsArray() ?? [])
         {
             var number = line?["lineNumber"]?.GetValue<string>();
             var tax = Dec(line?["tax"]) ?? Dec(line?["taxCalculated"]) ?? 0m;
+
+            // Fees arrive as details flagged isFee (e.g. Colorado's Retail Delivery Fee:
+            // taxSubTypeId "DeliveryFee", unitOfBasis "FlatAmount"). Real Life Seasons production
+            // responses show the fee's "tax" as 0.00 with the actual amount in "rate" — so a
+            // flat-amount fee is read from rate. Whatever Avalara did count as tax on a fee detail is
+            // taken back out of the line's and the transaction's tax.
+            AvalaraFeeLine? configured = null;
+            if (number is not null && number.StartsWith("fee-", StringComparison.Ordinal)
+                && int.TryParse(number[4..], NumberStyles.Integer, CultureInfo.InvariantCulture, out var f)
+                && f >= 1 && f <= feeLines.Count)
+                configured = feeLines[f - 1];
+
+            foreach (var detail in line?["details"]?.AsArray() ?? [])
+            {
+                if (detail?["isFee"] is not JsonValue isFee || !isFee.TryGetValue<bool>(out var flag) || !flag) continue;
+                var detailTax = Dec(detail["tax"]) ?? 0m;
+                feeTaxInTotal += detailTax;
+                tax -= detailTax;
+                var flat = string.Equals(detail["unitOfBasis"]?.GetValue<string>(), "FlatAmount", StringComparison.OrdinalIgnoreCase);
+                var amount = detailTax != 0 ? detailTax : flat ? Dec(detail["rate"]) ?? 0m : 0m;
+                var taxName = detail["taxName"]?.GetValue<string>() ?? "Fee";
+                feeNames.Add(taxName);
+                if (amount == 0) continue;
+                fees.Add(configured is not null
+                    ? new CartFee(configured.EffectiveCode, configured.Description, amount)
+                    : new CartFee(FeeCode(detail["jurisName"]?.GetValue<string>(), taxName), taxName, amount));
+            }
+
             if (number == ShippingLineNumber)
                 shippingTax = tax;
-            else if (number is not null && number.StartsWith("fee-", StringComparison.Ordinal)
-                     && int.TryParse(number[4..], NumberStyles.Integer, CultureInfo.InvariantCulture, out var f)
-                     && f >= 1 && f <= feeLines.Count)
-            {
-                if (tax != 0) fees.Add(new CartFee(feeLines[f - 1].EffectiveCode, feeLines[f - 1].Description, tax));
-            }
-            else if (int.TryParse(number, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) && n >= 1 && n <= itemCount)
+            else if (configured is null
+                     && int.TryParse(number, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) && n >= 1 && n <= itemCount)
                 lineTaxes[n - 1] = tax;
         }
-        totalTax -= fees.Sum(x => x.Amount);
+        totalTax -= feeTaxInTotal;
 
-        var summary = json?["summary"]?.AsArray() ?? [];
+        // Fees appear in the summary too (with their flat amount as "rate") — keep them out of
+        // the blended tax rate and the jurisdiction breakdown.
+        var summary = new JsonArray((json?["summary"]?.AsArray() ?? [])
+            .Where(x => x is not null && !feeNames.Contains(x["taxName"]?.GetValue<string>() ?? ""))
+            .Select(x => x!.DeepClone()).ToArray());
         var rate = summary.Sum(s => Dec(s?["rate"]) ?? 0m);
         var jurisdictions = summary
             .Where(s => s is not null)
@@ -291,6 +320,13 @@ public class AvalaraTaxProvider(
 
         return new TaxResult(rate, totalTax, jurisdictions, lineTaxes, shippingTax, TaxCalculationStatus.Calculated, Fees: fees);
     }
+
+    /// <summary>Identifier for a fee Avalara returned without a configured fee line — e.g.
+    /// "COLORADO_RETAIL_DELIVERY_FEE".</summary>
+    private static string FeeCode(string? jurisdiction, string taxName)
+        => string.Join("_", new[] { jurisdiction, taxName }
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Select(p => new string(p!.ToUpperInvariant().Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray()).Trim('_')));
 
     private static decimal? Dec(JsonNode? node)
         => node is JsonValue v && v.TryGetValue<decimal>(out var d) ? d : null;

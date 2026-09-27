@@ -12,6 +12,54 @@ public static class CallAddressVars
 {
     public const string Billing  = "billing_address";
     public const string Shipping = "shipping_address";
+    public const string Email = "email";
+    public const string BillingPhone  = "billing_phone";
+    public const string ShippingPhone = "shipping_phone";
+
+    public static void ApplyPhone(FlowExecutionContext ctx, string role, string phone)
+    {
+        if (role is CallAddressRole.Billing or CallAddressRole.BillingAndShipping)
+            ctx.CallRecord[BillingPhone] = phone;
+        if (role is CallAddressRole.Shipping or CallAddressRole.BillingAndShipping)
+            ctx.CallRecord[ShippingPhone] = phone;
+    }
+
+    /// <summary>The customer email just saved to the call record — visible as both
+    /// {{call_record.email}} and {{caller.email}} for the rest of the flow.</summary>
+    public static void ApplyEmail(FlowExecutionContext ctx, string email)
+    {
+        ctx.CallRecord[Email] = email;
+        ctx.Caller[Email] = email;
+    }
+
+    /// <summary>An email value — an email node's output object ({"value": "a@b.com", ...}) or a
+    /// plain string. Null unless it looks like an email address.</summary>
+    public static string? EmailValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var text = value.Trim();
+        if (text.StartsWith('{'))
+        {
+            try { text = System.Text.Json.Nodes.JsonNode.Parse(text)?["value"]?.GetValue<string>()?.Trim() ?? ""; }
+            catch (System.Text.Json.JsonException) { return null; }
+        }
+        return text.Contains('@') && !text.Any(char.IsWhiteSpace) ? text : null;
+    }
+
+    /// <summary>The digits of a phone value — a phone node's output object ({"value": "5415551234",
+    /// ...}) or any plain phone string. Null when there are no digits (e.g. an unset variable).</summary>
+    public static string? PhoneDigits(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var text = value.Trim();
+        if (text.StartsWith('{'))
+        {
+            try { text = System.Text.Json.Nodes.JsonNode.Parse(text)?["value"]?.GetValue<string>() ?? ""; }
+            catch (System.Text.Json.JsonException) { return null; }
+        }
+        var digits = new string(text.Where(char.IsDigit).ToArray());
+        return digits.Length == 0 ? null : digits;
+    }
 
     public static void Apply(FlowExecutionContext ctx, string role, AddressData address)
     {

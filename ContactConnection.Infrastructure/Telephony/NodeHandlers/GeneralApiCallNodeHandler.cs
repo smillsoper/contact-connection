@@ -1,6 +1,9 @@
 using System.Text.Json.Nodes;
 using ContactConnection.Application.Interfaces.Services;
+using ContactConnection.Domain.Entities;
+using ContactConnection.Infrastructure.ApiExecution;
 using ContactConnection.Infrastructure.Common;
+using ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 using ContactConnection.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -21,13 +24,17 @@ namespace ContactConnection.Infrastructure.Telephony.NodeHandlers;
 ///
 /// Node schema: identical to the CRM "api_call" node (apiEndpointId, apiDefinitionScope,
 /// outputVariable, timeoutSeconds, transitions: success/error/timeout).
+///
+/// Liquid-bodied endpoints render against the telephony variables only ({ flow, shared, now_utc })
+/// — a telephony call has no cart or payment. SuccessCriteria apply exactly as in the CRM engine.
 /// </summary>
 public class GeneralApiCallNodeHandler(
     ITenantDbContextFactory tenantDbFactory,
     ContactConnectionDbContext portalDb,
     ITenantCredentialStore tenantCredentials,
     IPortalCredentialStore portalCredentials,
-    IApiDefinitionExecutor executor)
+    IApiDefinitionExecutor executor,
+    ILiquidTemplateRenderer liquid)
     : ITelephonyNodeHandler
 {
     public string NodeType => "tf_general_api_call";
@@ -35,7 +42,7 @@ public class GeneralApiCallNodeHandler(
     private record CallTarget(
         Guid DefinitionId, string HttpMethod, string BaseUrl, string Path, string Headers, string QueryParams,
         string? RequestBodyTemplate, string AuthConfig, int TimeoutSeconds, bool IsActive, bool IsRetrySafe,
-        int? RateLimitPerMinute, string SensitiveResponseFields);
+        int? RateLimitPerMinute, string SensitiveResponseFields, string BodyTemplateType, string SuccessCriteria);
 
     public async Task<TelephonyNodeResult> ExecuteAsync(
         JsonObject node, TelephonyFlowContext ctx, CancellationToken ct = default)
@@ -79,10 +86,23 @@ public class GeneralApiCallNodeHandler(
                 var resolvedBaseUrl = TelSetVariableNodeHandler.Resolve(target.BaseUrl, ctx);
                 var resolvedPath    = TelSetVariableNodeHandler.Resolve(target.Path, ctx);
                 var resolvedUrl     = resolvedBaseUrl.TrimEnd('/') + "/" + resolvedPath.TrimStart('/');
-                var resolvedBody    = target.RequestBodyTemplate is { } bodyTemplate
-                    ? TelSetVariableNodeHandler.Resolve(bodyTemplate, ctx)
-                    : null;
                 var headers     = ResolveHeaders(target.Headers, ctx);
+                string? resolvedBody = null;
+                string? bodyError = null;
+                if (target.RequestBodyTemplate is { } bodyTemplate)
+                {
+                    if (target.BodyTemplateType == BodyTemplateType.Liquid)
+                    {
+                        var rendered = await liquid.RenderAsync(bodyTemplate,
+                            ApiTemplateModelBuilder.VariablesOnly(ctx.Vars, ctx.SharedVars), ct);
+                        resolvedBody = rendered.Output;
+                        bodyError = rendered.Success ? ApiCallNodeHandler.LiquidJsonCheck(rendered.Output, headers) : rendered.Error;
+                    }
+                    else
+                    {
+                        resolvedBody = TelSetVariableNodeHandler.Resolve(bodyTemplate, ctx);
+                    }
+                }
                 var queryParams = ResolveQueryParams(target.QueryParams, ctx);
                 var hmacPayload = ResolveHmacPayload(target.AuthConfig, ctx);
 
@@ -94,6 +114,9 @@ public class GeneralApiCallNodeHandler(
                     ? overrideSeconds
                     : (int?)null;
 
+                if (bodyError is not null)
+                    result = new ApiDefinitionExecutionResult(false, null, null, new(), null, false, bodyError);
+                else
                 result = await executor.ExecuteAsync(new ApiDefinitionExecutionRequest(
                     HttpMethod: target.HttpMethod,
                     Url: resolvedUrl,
@@ -108,6 +131,7 @@ public class GeneralApiCallNodeHandler(
                     RateLimitPerMinute: target.RateLimitPerMinute,
                     HmacPayload: hmacPayload), ct);
 
+                result = ResponseSuccessEvaluator.Apply(result, target.SuccessCriteria);
                 transitionKey = result.TimedOut ? "timeout" : (!result.Success ? "error" : "success");
             }
         }
@@ -138,7 +162,7 @@ public class GeneralApiCallNodeHandler(
         return new CallTarget(
             def.Id, endpoint.HttpMethod ?? def.HttpMethod, def.BaseUrl, endpoint.Path, endpoint.Headers, endpoint.QueryParams,
             endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive, endpoint.IsRetrySafe,
-            def.RateLimitPerMinute, endpoint.SensitiveResponseFields);
+            def.RateLimitPerMinute, endpoint.SensitiveResponseFields, endpoint.BodyTemplateType, endpoint.SuccessCriteria);
     }
 
     private async Task<CallTarget?> LoadPortalAsync(Guid endpointId, CancellationToken ct)
@@ -150,7 +174,7 @@ public class GeneralApiCallNodeHandler(
         return new CallTarget(
             def.Id, endpoint.HttpMethod ?? def.HttpMethod, def.BaseUrl, endpoint.Path, endpoint.Headers, endpoint.QueryParams,
             endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive, endpoint.IsRetrySafe,
-            def.RateLimitPerMinute, endpoint.SensitiveResponseFields);
+            def.RateLimitPerMinute, endpoint.SensitiveResponseFields, endpoint.BodyTemplateType, endpoint.SuccessCriteria);
     }
 
     /// <summary>Telephony-engine twin of ApiCallNodeHandler.ResolveHmacPayload — extracts the

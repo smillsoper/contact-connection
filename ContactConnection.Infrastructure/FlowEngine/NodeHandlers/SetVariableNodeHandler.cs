@@ -13,6 +13,9 @@ namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 /// with that addressRole would — including re-pricing the cart when the shipping address changes.
 /// Typical use: "ship to the billing address?" → yes →
 ///   { "variable": "{{call_record.shipping_address}}", "value": "{{flow.billing_address}}" }
+/// {{call_record.billing_phone}} / {{call_record.shipping_phone}} work the same way for phone
+/// nodes' output (or any phone string) — saved as digits on the call record — and
+/// {{call_record.email}} for an email node's output (the customer email, also {{caller.email}}).
 /// Transparent to the agent; executes and advances immediately.
 /// Commonly used to extract and store api_call response fields for later use.
 ///
@@ -86,6 +89,27 @@ public class SetVariableNodeHandler(
                                     ? CallAddressRole.Billing : CallAddressRole.Shipping;
                                 await callAddresses.SetAsync(ctx.CallRecordId, role, address, ct);
                                 CallAddressVars.Apply(ctx, role, address);
+                            }
+                            break;
+                        case "call_record" when key.Equals(CallAddressVars.Email, StringComparison.OrdinalIgnoreCase):
+                            // The customer email (CallRecord.Email / {{caller.email}}) — from an email
+                            // node's output object or a plain address; anything else is ignored.
+                            if (CallAddressVars.EmailValue(resolvedValue) is { } emailValue)
+                            {
+                                await callAddresses.SetEmailAsync(ctx.CallRecordId, emailValue, ct);
+                                CallAddressVars.ApplyEmail(ctx, emailValue);
+                            }
+                            break;
+                        case "call_record" when key.Equals(CallAddressVars.BillingPhone, StringComparison.OrdinalIgnoreCase)
+                                             || key.Equals(CallAddressVars.ShippingPhone, StringComparison.OrdinalIgnoreCase):
+                            // Same idea as the address targets: persist the digits (from a phone
+                            // node's output object or a plain phone string); an empty value is ignored.
+                            if (CallAddressVars.PhoneDigits(resolvedValue) is { } phoneDigits)
+                            {
+                                var phoneRole = key.Equals(CallAddressVars.BillingPhone, StringComparison.OrdinalIgnoreCase)
+                                    ? CallAddressRole.Billing : CallAddressRole.Shipping;
+                                await callAddresses.SetPhoneAsync(ctx.CallRecordId, phoneRole, phoneDigits, ct);
+                                CallAddressVars.ApplyPhone(ctx, phoneRole, phoneDigits);
                             }
                             break;
                         case "shared":

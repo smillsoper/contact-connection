@@ -30,6 +30,12 @@ public class CallRecord
     public string? LastName { get; private set; }
     public string? Email { get; private set; }
     public string? Phone { get; private set; }
+    /// <summary>Billing / shipping contact phones (digits only), captured by phone nodes with a
+    /// "save to call record as" role or by set_variable — kept separate from the addresses on
+    /// purpose, since scripts collect them as their own steps. Order APIs send them with the
+    /// matching address (e.g. Life Seasons' customer_info.phone / shipping_info.phone).</summary>
+    public string? BillingPhone { get; private set; }
+    public string? ShippingPhone { get; private set; }
 
     // Timing — relational, aggregated constantly
     public DateTimeOffset? CallStartAt { get; private set; }
@@ -272,6 +278,20 @@ public class CallRecord
         Phone = phone;
         AccountNumber = accountNumber;
         UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>The customer's email — also what {{caller.email}} resolves to.</summary>
+    public void SetEmail(string email)
+    {
+        Email     = email;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void SetContactPhones(string? billingPhone, string? shippingPhone)
+    {
+        BillingPhone  = billingPhone;
+        ShippingPhone = shippingPhone;
+        UpdatedAt     = DateTimeOffset.UtcNow;
     }
 
     public void SetAddresses(CallAddresses addresses)

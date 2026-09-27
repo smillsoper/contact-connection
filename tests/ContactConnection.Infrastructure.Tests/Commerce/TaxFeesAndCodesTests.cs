@@ -50,31 +50,86 @@ public class TaxFeesAndCodesTests
         Assert.Single(or["lines"]!.AsArray());
     }
 
+    // Shape copied from a real Life Seasons production AvaTax response (Nov 2025, Denver CO —
+    // amounts and jurisdictions only, no customer data): the fee detail reports tax 0.00, the
+    // amount is its flat "rate", and the summary lists the fee alongside the real taxes.
+    private const string RealDenverResponse = """
+        {
+          "totalTax": 36.98,
+          "lines": [
+            { "lineNumber": "1", "tax": 28.33, "details": [
+                { "jurisName": "COLORADO", "taxName": "CO STATE TAX", "rate": 0.029, "tax": 8.98, "isFee": false, "unitOfBasis": "PerCurrencyUnit" },
+                { "jurisName": "DENVER", "taxName": "CO CITY TAX", "rate": 0.0515, "tax": 15.94, "isFee": false, "unitOfBasis": "PerCurrencyUnit" },
+                { "jurisName": "SCIENTIFIC & CULTURAL FAC.(CD)", "taxName": "CO SPECIAL TAX", "rate": 0.001, "tax": 0.31, "isFee": false, "unitOfBasis": "PerCurrencyUnit" },
+                { "jurisName": "RTD GREATER DENVER", "taxName": "CO SPECIAL TAX", "rate": 0.01, "tax": 3.10, "isFee": false, "unitOfBasis": "PerCurrencyUnit" } ] },
+            { "lineNumber": "2", "tax": 8.21, "details": [] },
+            { "lineNumber": "fee-1", "tax": 0.0, "details": [
+                { "jurisName": "COLORADO", "taxName": "Retail Delivery Fee", "taxSubTypeId": "DeliveryFee", "rate": 0.28, "tax": 0.0, "isFee": true, "unitOfBasis": "FlatAmount" } ] },
+            { "lineNumber": "shipping", "tax": 0.44, "details": [] }
+          ],
+          "summary": [
+            { "jurisType": "STA", "jurisName": "COLORADO", "taxName": "CO STATE TAX", "rate": 0.029, "tax": 11.72 },
+            { "jurisType": "STA", "jurisName": "COLORADO", "taxName": "Retail Delivery Fee", "rate": 0.28, "tax": 0.0 },
+            { "jurisType": "CIT", "jurisName": "DENVER", "taxName": "CO CITY TAX", "rate": 0.0515, "tax": 20.81 },
+            { "jurisType": "STJ", "jurisName": "RTD GREATER DENVER", "taxName": "CO SPECIAL TAX", "rate": 0.01, "tax": 4.05 },
+            { "jurisType": "STJ", "jurisName": "SCIENTIFIC & CULTURAL FAC.(CD)", "taxName": "CO SPECIAL TAX", "rate": 0.001, "tax": 0.40 }
+          ]
+        }
+        """;
+
     [Fact]
-    public void Avalara_FeeLineTax_BecomesFee_AndLeavesTheTaxTotal()
+    public void Avalara_RealResponse_FlatFeeReadFromRate_TaxesUnchanged()
     {
-        // Avalara's totalTax (3.19) includes the $0.29 fee returned as tax on the fee line.
+        var rdf = new AvalaraFeeLine("CO", "OF400000", "Retail Delivery Fee", "CO_RDF");
+        var result = AvalaraTaxProvider.ParseResponse(JsonNode.Parse(RealDenverResponse), 201, itemCount: 2, feeLines: [rdf]);
+
+        // Matches what CRMPro sent Life Seasons for this order: taxes 36.98 (incl. 0.44 shipping
+        // tax), fee 0.28 separately.
+        Assert.Equal(36.98m, result.TaxAmount);
+        Assert.Equal([28.33m, 8.21m], result.LineTaxes!);
+        Assert.Equal(0.44m, result.ShippingTax);
+        Assert.Equal(new ContactConnection.Domain.ValueObjects.Commerce.CartFee("CO_RDF", "Retail Delivery Fee", 0.28m), Assert.Single(result.Fees!));
+        Assert.Equal(0.0915m, result.Rate);                                   // fee's 0.28 kept out of the rate
+        Assert.DoesNotContain(result.Jurisdictions!, j => j.Rate == 0.28m);
+    }
+
+    [Fact]
+    public void Avalara_FeeDetailOnUnconfiguredLine_StillBecomesFee_WithDerivedCode()
+    {
         var json = JsonNode.Parse("""
-            { "totalTax": 3.19,
-              "lines": [ { "lineNumber": "1", "tax": 2.90 }, { "lineNumber": "fee-1", "tax": 0.29 } ],
-              "summary": [] }
+            { "totalTax": 2.90, "lines": [
+                { "lineNumber": "1", "tax": 2.90, "details": [] },
+                { "lineNumber": "7", "tax": 0.0, "details": [
+                    { "jurisName": "MINNESOTA", "taxName": "Retail Delivery Fee", "rate": 0.5, "tax": 0.0, "isFee": true, "unitOfBasis": "FlatAmount" } ] } ] }
             """);
+        var fee = Assert.Single(AvalaraTaxProvider.ParseResponse(json, 201, itemCount: 1).Fees!);
+        Assert.Equal("MINNESOTA_RETAIL_DELIVERY_FEE", fee.Code);
+        Assert.Equal(0.50m, fee.Amount);
+    }
 
-        var result = AvalaraTaxProvider.ParseResponse(json, 201, itemCount: 1, feeLines: [CoRdf]);
-
+    [Fact]
+    public void Avalara_FeeCountedAsTax_IsMovedOutOfTheTaxTotal()
+    {
+        // If Avalara ever does put the fee in "tax", it must not be charged twice.
+        var json = JsonNode.Parse("""
+            { "totalTax": 3.19, "lines": [
+                { "lineNumber": "1", "tax": 2.90, "details": [] },
+                { "lineNumber": "fee-1", "tax": 0.29, "details": [
+                    { "taxName": "Retail Delivery Fee", "rate": 0.29, "tax": 0.29, "isFee": true, "unitOfBasis": "FlatAmount" } ] } ] }
+            """);
+        var result = AvalaraTaxProvider.ParseResponse(json, 201, itemCount: 1,
+            feeLines: [new AvalaraFeeLine("CO", "OF400000", "Retail Delivery Fee", "CO_RDF")]);
         Assert.Equal(2.90m, result.TaxAmount);
-        var fee = Assert.Single(result.Fees!);
-        Assert.Equal("CO_RDF", fee.Code);
-        Assert.Equal("Colorado Retail Delivery Fee", fee.Description);
-        Assert.Equal(0.29m, fee.Amount);
+        Assert.Equal(0.29m, Assert.Single(result.Fees!).Amount);
     }
 
     [Fact]
     public void Avalara_FeeNotApplied_ZeroFeeOmitted()
     {
-        // e.g. nothing taxable in the order → Avalara returns 0 on the fee line.
+        // A fee detail with no amount (e.g. nothing taxable in the order) produces no fee.
         var json = JsonNode.Parse("""
-            { "totalTax": 0, "lines": [ { "lineNumber": "1", "tax": 0 }, { "lineNumber": "fee-1", "tax": 0 } ] }
+            { "totalTax": 0, "lines": [ { "lineNumber": "1", "tax": 0 }, { "lineNumber": "fee-1", "tax": 0, "details": [
+                { "taxName": "Retail Delivery Fee", "rate": 0, "tax": 0, "isFee": true, "unitOfBasis": "FlatAmount" } ] } ] }
             """);
         var result = AvalaraTaxProvider.ParseResponse(json, 201, itemCount: 1, feeLines: [CoRdf]);
         Assert.Empty(result.Fees!);

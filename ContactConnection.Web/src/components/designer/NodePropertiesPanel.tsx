@@ -377,6 +377,21 @@ export default function NodePropertiesPanel({
                   : 'Stores email + validation results as a flow object variable'}
               </p>
             </div>
+            <label className="flex items-start gap-2 text-sm text-gray-300 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={(data.saveToCallRecord as boolean) ?? false}
+                onChange={(e) => onUpdate(node.id, { saveToCallRecord: e.target.checked })}
+              />
+              <span>
+                Save to call record as customer email
+                <span className="block text-[10px] text-gray-500 leading-snug">
+                  Once it passes validation — then <span className="font-mono">{'{{call_record.email}}'}</span> /{' '}
+                  <span className="font-mono">{'{{caller.email}}'}</span>, used by order APIs and reporting.
+                </span>
+              </span>
+            </label>
             <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
               <input
                 type="checkbox"
@@ -434,6 +449,23 @@ export default function NodePropertiesPanel({
                 {(data.outputVariable as string)
                   ? <>Stores an object — access as <span className="font-mono text-teal-400">{'{{flow.' + (data.outputVariable as string) + '.isTollFree}}'}</span></>
                   : 'Stores phone number + properties as a flow object variable'}
+              </p>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-400">Save to call record as</label>
+              <select
+                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-sky-500"
+                value={(data.phoneRole as string) ?? 'none'}
+                onChange={(e) => onUpdate(node.id, { phoneRole: e.target.value })}
+              >
+                <option value="none">Don't save (flow variable only)</option>
+                <option value="billing">Billing phone</option>
+                <option value="shipping">Shipping phone</option>
+                <option value="billing_and_shipping">Billing and shipping phone</option>
+              </select>
+              <p className="text-[10px] text-gray-500 leading-snug">
+                Saved as digits on the call record — <span className="font-mono">{'{{call_record.billing_phone}}'}</span> /{' '}
+                <span className="font-mono">{'{{call_record.shipping_phone}}'}</span> — for order APIs and reporting.
               </p>
             </div>
             <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
@@ -1035,6 +1067,21 @@ export default function NodePropertiesPanel({
                 onChange={(e) => onUpdate(node.id, { timeoutSeconds: Number(e.target.value) || 30 })}
               />,
             )}
+            <label className="flex items-start gap-2 text-sm text-gray-300 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={(data.oncePerCall as boolean) ?? false}
+                onChange={(e) => onUpdate(node.id, { oncePerCall: e.target.checked })}
+              />
+              <span>
+                Only once per call
+                <span className="block text-[10px] text-gray-500 leading-snug">
+                  After this endpoint succeeds on a call, running the node again (a loop, a jump back) replays the
+                  stored result instead of calling the API again — use for order submissions. Failures always retry.
+                </span>
+              </span>
+            </label>
             <p className="text-[10px] text-gray-500 leading-snug">
               Response is stored as {'{{flow.'}{(data.outputVariable as string) || 'variable'}{'}}'}  — reference
               pieces of it with {'{{flow.'}{(data.outputVariable as string) || 'variable'}{'.response.field}}'},

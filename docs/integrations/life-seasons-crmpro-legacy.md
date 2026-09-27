@@ -275,7 +275,48 @@ duplicate behavior against the sandbox before relying on it.
 | Retail Delivery Fee cart item + `OverrideTaxCode` flag | **No placeholder cart item.** Campaign Avalara setting `feeLines: [{state:"CO", taxCode:"OF400000", description:"Colorado Retail Delivery Fee", code:"CO_RDF"}]` — the provider adds the line itself when ship-to is CO; its "tax" comes back as a `CartFee` in `CartDocument.Fees` (not `SalesTax`), included in `CartTotal`. Order API: send each fee in `additional_fees_or_taxes`; `taxes` = `SalesTax` (fees already excluded). Flat-rate campaigns get the same via a per-state fee. |
 | offer flag `OverrideTaxCode` | `Product.TaxCode`, overridable by `Offer.TaxCode`; snapshotted as `CartItem.TaxCode` |
 | `set_variable` / "ship to billing?" | `{{call_record.shipping_address}}` = `{{flow.billing_address}}` saves to the call record |
-| Life Seasons - Order integration | Order API submission step (API Definition or dedicated node), idempotent per call record |
+| Life Seasons - Order integration | Tenant API Definition endpoint in **Liquid** body mode — template: [`life-seasons-order.liquid`](life-seasons-order.liquid) (tested field-by-field against this contract) — with success rule `success equals true` / error path `message`, called by an `api_call` node with **Only once per call** on |
 | `LIFSEA-########` counter | per-client order-number sequence |
 | per-client settings | tenant credential store, campaign → client → tenant cascade |
 | Training/simulator modes | flow preview / sandbox configuration |
+
+---
+
+## Open questions for Life Seasons (before go-live)
+
+1. ~~Shipping tax reported twice?~~ **Resolved by production data:** Life Seasons' `total` never
+   adds the "Shipping Tax" entry again — it's informational. Reproduced exactly.
+2. Current values for `vendor_number`, the Order API function key (staging + production), and the
+   Avalara account/license key — supplied by Life Seasons; nothing from the TMS backup is used.
+
+---
+
+## Validation against real production data (Session 163)
+
+Streamed the CRMPro `CallData` rows for `Order API Request`, `Life Seasons Order API Response` and
+`Avalara Tax Request/Response` from the backup (no database mounted; extract deleted afterward —
+it contains customer data). 23,129 orders, 23,107 successful; ~35,000 Avalara calls.
+
+- **Order body template** (`life-seasons-order.liquid`): each successful production request was
+  re-rendered from its own data and diffed field-by-field. Against the current format (orders
+  since 2026-06-05) **3,679 / 3,702 identical**. Remaining differences: a separate shipping-address
+  phone on 67 orders (our addresses carry no phone yet — see gaps), a legacy per-item `Discount`
+  on 5, and CRMPro sending one unrounded `PaymentAmount` (156.745). Found and fixed a template bug
+  in the process (Liquid `default` on an address object always fell back to billing).
+- **`taxes`** always equalled Avalara `totalTax` (shipping tax included, delivery fee excluded);
+  **"Shipping Tax"** is always listed in `additional_fees_or_taxes`, even at 0.00; Life Seasons'
+  `total` = subtotal + shipping + taxes + Retail Delivery Fee (the Shipping Tax entry is *not*
+  added again). So the double reporting is by design, not double charging.
+- **`coupon_code`** is sent by every script since 2026-06-05 (usually `""`); older orders omitted it.
+- **Colorado Retail Delivery Fee:** Avalara returns it as an `isFee` detail with `tax` 0.00 and the
+  amount in `rate` (`unitOfBasis` "FlatAmount") — $0.28, then $0.31 from 2026-07-01. Sent to Life
+  Seasons as Description **"Retail Delivery Fee"**. 27 early orders (2025-11-09 → 11-25) sent 0.00
+  — a CRMPro bug fixed at the time. `AvalaraTaxProvider` reads flat-amount fees from `rate`.
+- **Avalara request shape** matches ours on all 35,279 requests; production used `customerCode`
+  "TMS" and omitted `commit`/`companyCode`.
+
+### Known gaps
+- ~~Addresses have no phone number~~ — closed S163: `CallRecord.BillingPhone`/`ShippingPhone`, set by
+  phone nodes ("Save to call record as") or `set_variable` `{{call_record.shipping_phone}}`; the
+  template sends them as `customer_info.phone` / `shipping_info.phone` (caller phone as fallback).
+- No per-item discount concept (legacy `OLX Discount` flag, 5 orders).

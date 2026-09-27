@@ -65,6 +65,8 @@ export interface ApiEndpointRecord {
    *  before the response is shown in the Test panel or persisted by a live api_call node. See
    *  API_HARDENING_CHECKLIST.md Tier 3. */
   sensitiveResponseFields: string
+  bodyTemplateType?: string
+  successCriteria?: string
   createdAt: string
   updatedAt: string | null
 }
@@ -78,6 +80,9 @@ export interface EndpointTestPayload {
   namespace: string
   testData: Record<string, string>
   sensitiveResponseFields?: string[]
+  bodyTemplateType?: string
+  liquidModel?: Record<string, unknown>
+  successCriteria?: string
 }
 
 export interface EndpointTestResult {
@@ -115,6 +120,10 @@ export interface DetailApi {
   setCredential(keyName: string, value: string): Promise<void>
   testAuth(authConfig: string): Promise<AuthTestResult>
   testEndpoint(definitionId: string, payload: EndpointTestPayload): Promise<EndpointTestResult>
+  /** Liquid body authoring — the sample model a template can reference, and a render-only
+   *  preview that sends nothing. */
+  getTemplateSampleModel(): Promise<Record<string, unknown>>
+  previewTemplate(template: string, model?: Record<string, unknown>): Promise<{ success: boolean; output: string | null; error: string | null }>
   /** Live-registered TTS streaming provider keys (see TtsProviderValidation) — wired on both
    *  Admin and Portal, since a tenant registering their own TTS vendor account is subject to the
    *  same constraint as the platform catalog. Optional only because it's resolved via a
@@ -142,6 +151,8 @@ interface EndpointFormData {
   responseMapping?: string
   isRetrySafe?: boolean
   sensitiveResponseFields?: string
+  bodyTemplateType?: string
+  successCriteria?: string
 }
 
 interface DefFormState {
@@ -321,6 +332,43 @@ interface EndpointForm {
   /** One dot-separated field path per line (e.g. "ssn", "customer.dob") — see
    *  pathsToJson/jsonToPaths for the JSON array round-trip. */
   sensitiveResponseFields: string
+  bodyTemplateType: 'simple' | 'liquid'
+  successRules: SuccessRule[]
+  successErrorPath: string
+  /** JSON text of the Liquid sample model (editable; loaded from the server on first use). */
+  liquidModel: string
+}
+
+interface SuccessRule { path: string; operator: string; value: string }
+
+const SUCCESS_OPERATORS = ['equals', 'not_equals', 'contains', 'exists', 'not_exists', 'truthy', 'falsy'] as const
+
+function successCriteriaToJson(rules: SuccessRule[], errorPath: string): string {
+  const clean = rules.filter((r) => r.path.trim())
+  if (clean.length === 0) return '{}'
+  return JSON.stringify({
+    rules: clean.map((r) => ({
+      path: r.path.trim(), operator: r.operator,
+      ...(['exists', 'not_exists', 'truthy', 'falsy'].includes(r.operator) ? {} : { value: r.value }),
+    })),
+    ...(errorPath.trim() ? { errorMessagePath: errorPath.trim() } : {}),
+  })
+}
+
+function successCriteriaFromJson(json: string | undefined): { rules: SuccessRule[]; errorPath: string } {
+  try {
+    const o = JSON.parse(json || '{}')
+    return {
+      rules: Array.isArray(o.rules)
+        ? o.rules.map((r: { path?: string; operator?: string; value?: unknown }) => ({
+            path: r.path ?? '', operator: r.operator ?? 'equals', value: r.value == null ? '' : String(r.value),
+          }))
+        : [],
+      errorPath: o.errorMessagePath ?? '',
+    }
+  } catch {
+    return { rules: [], errorPath: '' }
+  }
 }
 
 const BLANK_KV: KVRow[] = [{ key: '', value: '' }]
@@ -339,6 +387,10 @@ const BLANK_ENDPOINT_FORM: EndpointForm = {
   responseMapping: { outcomes: [] },
   isRetrySafe: false,
   sensitiveResponseFields: '',
+  bodyTemplateType: 'simple',
+  successRules: [],
+  successErrorPath: '',
+  liquidModel: '',
 }
 
 /** One path per line (blank lines ignored) <-> JSON array of dot-separated paths. */
@@ -1438,6 +1490,52 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
     })
   }
 
+  // Liquid body authoring
+  const [liquidPreview, setLiquidPreview] = useState<{ success: boolean; output: string | null; error: string | null } | null>(null)
+  const [liquidPreviewRunning, setLiquidPreviewRunning] = useState(false)
+  const [showSampleModel, setShowSampleModel] = useState(false)
+  const [sampleModelError, setSampleModelError] = useState<string | null>(null)
+
+  async function ensureSampleModel(): Promise<string> {
+    if (endpointForm.liquidModel.trim()) return endpointForm.liquidModel
+    const model = await api.getTemplateSampleModel()
+    const text = JSON.stringify(model, null, 2)
+    setEndpointForm((f) => ({ ...f, liquidModel: text }))
+    return text
+  }
+
+  function parseLiquidModel(text: string): Record<string, unknown> | undefined {
+    try {
+      setSampleModelError(null)
+      return text.trim() ? JSON.parse(text) : undefined
+    } catch (e) {
+      setSampleModelError(`Sample data isn't valid JSON: ${(e as Error).message}`)
+      throw e
+    }
+  }
+
+  async function runLiquidPreview() {
+    setLiquidPreviewRunning(true)
+    setLiquidPreview(null)
+    try {
+      const model = parseLiquidModel(await ensureSampleModel())
+      setLiquidPreview(await api.previewTemplate(endpointForm.requestBodyTemplate, model))
+    } catch (e) {
+      setLiquidPreview({ success: false, output: null, error: (e as Error).message })
+    } finally {
+      setLiquidPreviewRunning(false)
+    }
+  }
+
+  /** Extra Test-payload fields: success rules always; the Liquid mode + sample model when Liquid. */
+  function liquidTestFields(): Partial<EndpointTestPayload> {
+    const successCriteria = successCriteriaToJson(endpointForm.successRules, endpointForm.successErrorPath)
+    if (endpointForm.bodyTemplateType !== 'liquid') return { successCriteria }
+    let liquidModel: Record<string, unknown> | undefined
+    try { liquidModel = endpointForm.liquidModel.trim() ? JSON.parse(endpointForm.liquidModel) : undefined } catch { liquidModel = undefined }
+    return { bodyTemplateType: 'liquid', liquidModel, successCriteria }
+  }
+
   // Endpoint test execution
   const [testRunning, setTestRunning] = useState(false)
   const [testResult, setTestResult] = useState<EndpointTestResult | null>(null)
@@ -1456,6 +1554,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
         namespace: endpointSourceContext.namespace,
         testData: endpointForm.testData,
         sensitiveResponseFields: pathsToArray(endpointForm.sensitiveResponseFields),
+        ...liquidTestFields(),
       })
       setTestResult(result)
     } catch (e: unknown) {
@@ -1540,10 +1639,13 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
         httpMethod: endpointForm.httpMethod || undefined,
         queryParams: kvToJson(resolvedParams),
         headers: kvToJson(resolvedHeaders),
-        requestBodyTemplate: substituteVarTags(endpointForm.requestBodyTemplate, values) || undefined,
+        requestBodyTemplate: (endpointForm.bodyTemplateType === 'liquid'
+          ? endpointForm.requestBodyTemplate
+          : substituteVarTags(endpointForm.requestBodyTemplate, values)) || undefined,
         namespace: 'general',
         testData: {},
         sensitiveResponseFields: pathsToArray(endpointForm.sensitiveResponseFields),
+        ...liquidTestFields(),
       })
       setTestResult(result)
     } catch (e: unknown) {
@@ -1713,6 +1815,10 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
       responseMapping: parseResponseMapping(ep.responseMapping),
       isRetrySafe: ep.isRetrySafe,
       sensitiveResponseFields: jsonToPaths(ep.sensitiveResponseFields),
+      bodyTemplateType: ep.bodyTemplateType === 'liquid' ? 'liquid' : 'simple',
+      successRules: successCriteriaFromJson(ep.successCriteria).rules,
+      successErrorPath: successCriteriaFromJson(ep.successCriteria).errorPath,
+      liquidModel: '',
     })
     setEditingEndpointId(ep.id)
     setEndpointFormError(null)
@@ -1741,6 +1847,8 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
         responseMapping: JSON.stringify(endpointForm.responseMapping),
         isRetrySafe: endpointForm.isRetrySafe,
         sensitiveResponseFields: pathsToJson(endpointForm.sensitiveResponseFields),
+        bodyTemplateType: endpointForm.bodyTemplateType,
+        successCriteria: successCriteriaToJson(endpointForm.successRules, endpointForm.successErrorPath),
       }
       if (endpointModal === 'edit' && editingEndpointId) {
         const updated = await api.updateEndpoint(definitionId, editingEndpointId, data)
@@ -2312,6 +2420,75 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                         the Test panel below and before a live flow ever stores it. Optional — blank means no masking.
                       </p>
                     </div>
+                    <div>
+                      <label className="block text-gray-400 text-xs font-medium mb-1.5">Response Success Rules</label>
+                      <p className="text-gray-600 text-xs mb-2">
+                        For APIs that report failure inside a successful (2xx) response — e.g.{' '}
+                        <span className="font-mono text-gray-400">{'{"success": false}'}</span>. Every rule must pass for the call to
+                        count as a success; otherwise the flow takes its error path. Optional — no rules means any 2xx succeeds.
+                      </p>
+                      <div className="space-y-1.5">
+                        {endpointForm.successRules.map((rule, i) => {
+                          const needsValue = !['exists', 'not_exists', 'truthy', 'falsy'].includes(rule.operator)
+                          const update = (patch: Partial<SuccessRule>) => setEndpointForm((f) => ({
+                            ...f, successRules: f.successRules.map((r, j) => (j === i ? { ...r, ...patch } : r)),
+                          }))
+                          return (
+                            <div key={i} className="flex items-center gap-1.5">
+                              <input
+                                value={rule.path}
+                                onChange={(e) => update({ path: e.target.value })}
+                                placeholder="response field, e.g. success"
+                                className="w-2/5 bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white text-xs font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                              />
+                              <select
+                                value={rule.operator}
+                                onChange={(e) => update({ operator: e.target.value })}
+                                className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-white text-xs focus:outline-none focus:border-indigo-500"
+                              >
+                                {SUCCESS_OPERATORS.map((op) => <option key={op} value={op}>{op.replace('_', ' ')}</option>)}
+                              </select>
+                              {needsValue && (
+                                <input
+                                  value={rule.value}
+                                  onChange={(e) => update({ value: e.target.value })}
+                                  placeholder="value, e.g. true"
+                                  className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white text-xs font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                                />
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setEndpointForm((f) => ({ ...f, successRules: f.successRules.filter((_, j) => j !== i) }))}
+                                className="text-gray-500 hover:text-red-400 text-xs px-1.5"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setEndpointForm((f) => ({ ...f, successRules: [...f.successRules, { path: '', operator: 'equals', value: '' }] }))}
+                        className="mt-1.5 text-indigo-400 hover:text-indigo-300 text-xs font-medium"
+                      >
+                        + Add rule
+                      </button>
+                      {endpointForm.successRules.length > 0 && (
+                        <div className="mt-2">
+                          <input
+                            value={endpointForm.successErrorPath}
+                            onChange={(e) => setEndpointForm((f) => ({ ...f, successErrorPath: e.target.value }))}
+                            placeholder="Error message field (optional), e.g. message"
+                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white text-xs font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                          />
+                          <p className="text-gray-600 text-xs mt-1">
+                            When a rule fails, this response field becomes the error the flow sees
+                            (<span className="font-mono text-gray-400">{'{{flow.<output>.error}}'}</span>).
+                          </p>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
 
@@ -2362,8 +2539,24 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                   {/* Body tab */}
                   {endpointTab === 'body' && (
                     <div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-gray-400 text-xs font-medium">Template language</span>
+                        {(['simple', 'liquid'] as const).map((mode) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => { setEndpointForm((f) => ({ ...f, bodyTemplateType: mode })); setLiquidPreview(null) }}
+                            className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${endpointForm.bodyTemplateType === mode
+                              ? 'bg-indigo-600/30 border-indigo-500 text-indigo-200'
+                              : 'border-gray-700 text-gray-400 hover:text-gray-200'}`}
+                          >
+                            {mode === 'simple' ? 'Simple {{variables}}' : 'Liquid'}
+                          </button>
+                        ))}
+                      </div>
                       <textarea
-                        rows={8}
+                        rows={endpointForm.bodyTemplateType === 'liquid' ? 16 : 8}
+                        spellCheck={false}
                         value={endpointForm.requestBodyTemplate}
                         onChange={(e) => setEndpointForm((f) => ({ ...f, requestBodyTemplate: e.target.value }))}
                         placeholder={
@@ -2373,9 +2566,77 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                         }
                         className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-xs placeholder-gray-600 font-mono focus:outline-none focus:border-indigo-500 resize-y"
                       />
-                      <p className="text-gray-600 text-xs mt-1.5">
-                        Use {'{{namespace.field}}'} variable syntax. Leave blank to inherit from the definition.
-                      </p>
+                      {endpointForm.bodyTemplateType === 'simple' ? (
+                        <p className="text-gray-600 text-xs mt-1.5">
+                          Use {'{{namespace.field}}'} variable syntax. Leave blank to inherit from the definition.
+                        </p>
+                      ) : (
+                        <div className="mt-2 space-y-2">
+                          <p className="text-gray-500 text-xs leading-relaxed">
+                            <a href="https://shopify.github.io/liquid/" target="_blank" rel="noreferrer" className="text-indigo-400 hover:text-indigo-300">Liquid</a>{' '}
+                            template — loops, conditions and math for payloads like order line items. Data:{' '}
+                            <span className="font-mono text-gray-400">flow</span>, <span className="font-mono text-gray-400">call_record</span>{' '}
+                            (incl. <span className="font-mono text-gray-400">order_number</span>, <span className="font-mono text-gray-400">billing_address</span>,{' '}
+                            <span className="font-mono text-gray-400">shipping_address</span>), <span className="font-mono text-gray-400">cart</span>{' '}
+                            (<span className="font-mono text-gray-400">items</span>, <span className="font-mono text-gray-400">fees</span>, totals),{' '}
+                            <span className="font-mono text-gray-400">payment</span>, <span className="font-mono text-gray-400">caller</span>,{' '}
+                            <span className="font-mono text-gray-400">agent</span>. Use <span className="font-mono text-gray-400">{'{{ x | json }}'}</span>{' '}
+                            for text values (quotes and escapes them) and <span className="font-mono text-gray-400">{'{{ x | money }}'}</span>{' '}
+                            for amounts. A JSON body must render to valid JSON or the call won't be sent.
+                          </p>
+                          <div className="flex items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={runLiquidPreview}
+                              disabled={liquidPreviewRunning || !endpointForm.requestBodyTemplate.trim()}
+                              className="bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+                            >
+                              {liquidPreviewRunning ? 'Rendering…' : 'Preview'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                if (!showSampleModel) {
+                                  try { await ensureSampleModel() } catch (e) { setSampleModelError((e as Error).message) }
+                                }
+                                setShowSampleModel((v) => !v)
+                              }}
+                              className="text-indigo-400 hover:text-indigo-300 text-xs font-medium"
+                            >
+                              {showSampleModel ? 'Hide sample data' : 'Sample data'}
+                            </button>
+                            <span className="text-gray-600 text-xs">Preview renders against the sample data — nothing is sent.</span>
+                          </div>
+                          {showSampleModel && (
+                            <div>
+                              <textarea
+                                rows={12}
+                                spellCheck={false}
+                                value={endpointForm.liquidModel}
+                                onChange={(e) => setEndpointForm((f) => ({ ...f, liquidModel: e.target.value }))}
+                                className="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-gray-300 text-xs font-mono focus:outline-none focus:border-indigo-500 resize-y"
+                              />
+                              <p className="text-gray-600 text-xs mt-1">
+                                The same shape a live call provides, with sample values — edit it to try different carts or
+                                addresses. Also used by the Test tab. Not saved.
+                              </p>
+                            </div>
+                          )}
+                          {sampleModelError && <p className="text-red-400 text-xs">{sampleModelError}</p>}
+                          {liquidPreview && (
+                            liquidPreview.success ? (
+                              <pre className="bg-gray-950 border border-emerald-800/60 rounded-lg p-3 text-emerald-200 text-xs font-mono overflow-auto max-h-80">{liquidPreview.output}</pre>
+                            ) : (
+                              <div className="bg-red-950/40 border border-red-800/60 rounded-lg p-3 space-y-2">
+                                <p className="text-red-300 text-xs font-mono whitespace-pre-wrap">{liquidPreview.error}</p>
+                                {liquidPreview.output && (
+                                  <pre className="text-gray-400 text-xs font-mono overflow-auto max-h-60">{liquidPreview.output}</pre>
+                                )}
+                              </div>
+                            )
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -2387,7 +2648,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                       endpointForm.path,
                       ...endpointForm.params.map((r) => r.value),
                       ...endpointForm.headers.map((r) => r.value),
-                      endpointForm.requestBodyTemplate,
+                      endpointForm.bodyTemplateType === 'liquid' ? '' : endpointForm.requestBodyTemplate,
                     ])
                     return (
                       <div className="space-y-3">
