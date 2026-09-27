@@ -67,7 +67,18 @@ public record CartItem(
     decimal CanadaSurcharge,
     decimal AKHISurcharge,
     decimal OutlyingUSSurcharge,
-    decimal ForeignSurcharge);
+    decimal ForeignSurcharge,
+    // Snapshot of the offer's effective tax code (offer override → product) at add time; null =
+    // the campaign's default product tax code. Defaulted so older stored carts still deserialize.
+    string? TaxCode = null);
+
+/// <summary>
+/// A non-tax charge computed alongside tax — e.g. Colorado's Retail Delivery Fee. Kept apart from
+/// SalesTax because such fees must be stated separately on invoices and order APIs report them
+/// separately; still included in CartTotal. <see cref="Code"/> identifies the fee to downstream
+/// systems (e.g. "CO_RDF"); <see cref="Description"/> is what the agent and invoices show.
+/// </summary>
+public record CartFee(string Code, string Description, decimal Amount);
 
 /// <summary>
 /// The full cart for a call record, stored as a JSONB document on call_records.cart.
@@ -96,7 +107,16 @@ public record CartDocument(
     decimal SalesTax,
     decimal PersonalizationCharge,
     decimal CartTotal,
-    List<CartPaymentBreakdown> PaymentBreakdowns)
+    List<CartPaymentBreakdown> PaymentBreakdowns,
+    // Computed by PricingService alongside SalesTax. ShippingTax is the portion of SalesTax charged
+    // on shipping (order APIs often report it separately). TaxStatus is a TaxCalculationStatus
+    // value; TaxMessage explains a non-"calculated" status for the agent. Defaulted so carts
+    // stored before these existed still deserialize.
+    decimal ShippingTax = 0,
+    string? TaxStatus = null,
+    string? TaxMessage = null,
+    // Fees computed by the tax provider (see CartFee) — included in CartTotal, not in SalesTax.
+    List<CartFee>? Fees = null)
 {
     /// <summary>An empty cart ready for item addition.</summary>
     public static CartDocument Empty() => new(

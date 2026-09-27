@@ -10,6 +10,8 @@ export interface OfferSummary {
   shipping: number
   taxExempt: boolean
   shippingExempt: boolean
+  /** Overrides the product's tax code; null = product's code / campaign default. */
+  taxCode?: string | null
   isActive: boolean
   mixMatchCode: string | null
 }
@@ -23,6 +25,7 @@ export interface CreateOfferRequest {
   shippingExempt?: boolean
   clientId?: string | null
   campaignId?: string | null
+  taxCode?: string | null
 }
 
 export interface UpdateOfferRequest {
@@ -33,6 +36,7 @@ export interface UpdateOfferRequest {
   shippingExempt: boolean
   clientId: string | null
   campaignId: string | null
+  taxCode?: string | null
 }
 
 export const offersApi = {

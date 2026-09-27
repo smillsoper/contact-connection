@@ -13,8 +13,9 @@ namespace ContactConnection.Infrastructure.Commerce;
 ///   2. QPB      — item's own qty; find the highest qualifying QuantityPriceBreak.
 ///   3. Fallback — Offer.Payments (base schedule).
 ///
-/// Tax calculation is delegated to ITaxProviderFactory, which resolves the correct
-/// ITaxProvider from CartDocument.TaxProvider (null/empty = FlatRateTaxProvider).
+/// Tax calculation is delegated to ITaxProviderFactory, which resolves the ITaxProvider named by
+/// the call's TaxContext (its campaign's setting), else CartDocument.TaxProvider
+/// (null/empty = FlatRateTaxProvider).
 /// </summary>
 public class PricingService : IPricingService
 {
@@ -53,7 +54,8 @@ public class PricingService : IPricingService
         return offer.Payments;
     }
 
-    public async Task<CartDocument> CalculateTotalsAsync(CartDocument cart, CancellationToken ct = default)
+    public async Task<CartDocument> CalculateTotalsAsync(
+        CartDocument cart, TaxContext? taxContext = null, CancellationToken ct = default)
     {
         if (cart.Items.Count == 0)
             return cart with
@@ -61,6 +63,10 @@ public class PricingService : IPricingService
                 CartSubtotal          = 0,
                 Shipping              = 0,
                 SalesTax              = 0,
+                ShippingTax           = 0,
+                TaxStatus             = null,
+                TaxMessage            = null,
+                Fees                  = [],
                 PersonalizationCharge = 0,
                 CartTotal             = 0,
                 PaymentBreakdowns     = []
@@ -99,26 +105,46 @@ public class PricingService : IPricingService
 
         // ── Tax — delegated to the configured provider ──────────────────────
 
-        var taxProvider = _taxProviderFactory.Resolve(cart.TaxProvider);
-        var taxResult   = await taxProvider.CalculateTaxAsync(cart, ct);
+        // The call's campaign setting wins; a cart priced outside any call keeps whatever
+        // provider it was last priced with.
+        var providerKey = taxContext?.ProviderKey ?? cart.TaxProvider;
+        var taxProvider = _taxProviderFactory.Resolve(providerKey);
+        var taxResult   = await taxProvider.CalculateTaxAsync(new TaxRequest(cart, totalShipping, taxContext), ct);
         var salesTax    = taxResult.TaxAmount;
+
+        // Per-item tax only when the provider returned exactly one figure per item — otherwise
+        // clear it rather than leave a stale value from an earlier calculation.
+        var lineTaxes = taxResult.LineTaxes;
+        var items = lineTaxes is not null && lineTaxes.Count == cart.Items.Count
+            ? cart.Items.Select((item, i) => item with { SalesTax = lineTaxes[i] }).ToList()
+            : cart.Items.Select(item => item with { SalesTax = 0 }).ToList();
 
         // ── Discount ────────────────────────────────────────────────────────
 
+        var fees      = taxResult.Fees?.ToList() ?? [];
+        var feeTotal  = fees.Sum(f => f.Amount);
         var discount  = cart.Discount;
-        var cartTotal = cartSubtotal + totalShipping + salesTax + persCharge - discount;
+        var cartTotal = cartSubtotal + totalShipping + salesTax + feeTotal + persCharge - discount;
 
         // ── Payment installment breakdown ───────────────────────────────────
 
+        // Fees ride with tax in the installment breakdown (same "charged up front unless split"
+        // treatment) so each installment's Total still sums to CartTotal.
         var breakdowns = BuildPaymentBreakdowns(
-            cart.Items, cartSubtotal, totalShipping, salesTax,
+            items, cartSubtotal, totalShipping, salesTax + feeTotal,
             discount, persCharge, cart.SplitShippingInPayments, cart.SplitSalesTaxInPayments);
 
         return cart with
         {
+            Items                 = items,
+            TaxProvider           = providerKey,
             CartSubtotal          = cartSubtotal,
             Shipping              = totalShipping,
             SalesTax              = salesTax,
+            ShippingTax           = taxResult.ShippingTax,
+            TaxStatus             = taxResult.Status,
+            TaxMessage            = taxResult.Message,
+            Fees                  = fees,
             PersonalizationCharge = persCharge,
             CartTotal             = cartTotal,
             PaymentBreakdowns     = breakdowns

@@ -23,6 +23,7 @@ public class ProductConfiguration : IEntityTypeConfiguration<Product>
         builder.Property(p => p.Description).HasColumnName("description").HasMaxLength(500).IsRequired();
         builder.Property(p => p.Searchable).HasColumnName("searchable");
         builder.Property(p => p.ReportingOnly).HasColumnName("reporting_only");
+        builder.Property(p => p.TaxCode).HasColumnName("tax_code").HasMaxLength(50);
         builder.Property(p => p.ParentProductId).HasColumnName("parent_product_id");
 
         // Physical

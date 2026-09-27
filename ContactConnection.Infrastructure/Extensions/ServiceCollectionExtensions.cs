@@ -100,6 +100,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IPricingService, PricingService>();
         services.AddScoped<IInventoryService, InventoryService>();
         services.AddScoped<ICartService, CartService>();
+        services.AddScoped<ICallAddressService, CallAddressService>();
         services.AddScoped<IOrderService, OrderService>();
         services.AddScoped<ISubscriptionOrderCreator, SubscriptionOrderCreator>();
         services.AddScoped<ICustomFieldService, CustomFieldService>();
@@ -107,9 +108,11 @@ public static class ServiceCollectionExtensions
 
         // Tax providers — each ITaxProvider is enumerated by TaxProviderFactory to build its dispatch table.
         // Register FlatRateTaxProvider first (it is the default/fallback).
-        // Future: services.AddSingleton<ITaxProvider, AvalaraTaxProvider>();
-        services.AddSingleton<ITaxProvider, FlatRateTaxProvider>();
-        services.AddSingleton<ITaxProviderFactory, TaxProviderFactory>();
+        // Scoped (not singleton) because AvalaraTaxProvider reads per-tenant credentials from the
+        // scoped ITenantCredentialStore.
+        services.AddScoped<ITaxProvider, FlatRateTaxProvider>();
+        services.AddScoped<ITaxProvider, AvalaraTaxProvider>();
+        services.AddScoped<ITaxProviderFactory, TaxProviderFactory>();
 
         // Payment gateway clients — each IPaymentGatewayClient is enumerated by
         // PaymentGatewayClientFactory to build its dispatch table (mirrors TaxProviderFactory above,
@@ -344,6 +347,9 @@ public static class ServiceCollectionExtensions
 
         // HTTP client for AuthorizeNetGatewayClient
         services.AddHttpClient("AuthorizeNet");
+
+        // HTTP client for AvalaraTaxProvider
+        services.AddHttpClient("Avalara");
 
         // Redis — singleton connection multiplexer shared across all requests
         var redisConnection = configuration.GetConnectionString("Redis")

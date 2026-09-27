@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using ContactConnection.Application.Interfaces.Services;
+using ContactConnection.Domain.ValueObjects;
 
 namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 
@@ -14,6 +15,10 @@ namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 ///   "type": "address",
 ///   "label": "Billing Address",
 ///   "outputVariable": "billing_address",
+///   "addressRole": "shipping",   // optional — none (default) | billing | shipping |
+///                                // billing_and_shipping: also save the address onto the call
+///                                // record (CallRecord.Addresses), the source of truth order APIs
+///                                // and tax read from. Saving a shipping address re-prices the cart.
 ///   "allowInternational": false,
 ///   "showMiddleInitial": false,
 ///   "showCompany": false,
@@ -43,7 +48,7 @@ namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 ///                   multiple-match candidate); false whenever the agent overrides with a value
 ///                   the vendor didn't confirm, or when validation never ran
 /// </summary>
-public partial class AddressNodeHandler(IVariableResolver resolver)
+public partial class AddressNodeHandler(IVariableResolver resolver, ICallAddressService callAddresses)
     : NodeHandlerBase(resolver), INodeHandler
 {
     public string NodeType => "address";
@@ -62,11 +67,12 @@ public partial class AddressNodeHandler(IVariableResolver resolver)
     [GeneratedRegex(@"^[A-Za-z]\d[A-Za-z]\d[A-Za-z]\d$")]
     private static partial Regex CanadaPostalCodeRegex();
 
-    public Task<NodeResult> ExecuteAsync(
+    public async Task<NodeResult> ExecuteAsync(
         JsonObject node, FlowExecutionContext ctx,
         string? agentInput, string agentTransition, CancellationToken ct = default)
     {
         var outputVar          = Str(node, "outputVariable")?.Trim() ?? string.Empty;
+        var addressRole        = Str(node, "addressRole")?.Trim() ?? CallAddressRole.None;
         var allowInternational = node["allowInternational"]?.GetValue<bool>() ?? false;
         var showMiddleInitial  = node["showMiddleInitial"]?.GetValue<bool>()  ?? false;
         var showCompany        = node["showCompany"]?.GetValue<bool>()        ?? false;
@@ -137,7 +143,7 @@ public partial class AddressNodeHandler(IVariableResolver resolver)
 
         // First display — return form config, wait for submission
         if (agentInput is null)
-            return Task.FromResult(new NodeResult(MakeState(), NextNodeId: null));
+            return new NodeResult(MakeState(), NextNodeId: null);
 
         // Parse address JSON submitted by the frontend
         AddressSubmission? sub;
@@ -148,7 +154,7 @@ public partial class AddressNodeHandler(IVariableResolver resolver)
         {
             var errState = MakeState();
             errState.ValidationError = "Invalid address submission. Please try again.";
-            return Task.FromResult(new NodeResult(errState, NextNodeId: null));
+            return new NodeResult(errState, NextNodeId: null);
         }
 
         // Required field validation
@@ -166,15 +172,23 @@ public partial class AddressNodeHandler(IVariableResolver resolver)
         {
             var errState = MakeState();
             errState.ValidationError = string.Join(" ", errors);
-            return Task.FromResult(new NodeResult(errState, NextNodeId: null));
+            return new NodeResult(errState, NextNodeId: null);
         }
 
+        var addressObject = BuildAddressObject(sub);
         if (!string.IsNullOrEmpty(outputVar))
-            ctx.FlowVars[outputVar] = BuildAddressObject(sub).ToJsonString();
+            ctx.FlowVars[outputVar] = addressObject.ToJsonString();
+
+        if (addressRole != CallAddressRole.None && CallAddressRole.IsValid(addressRole)
+            && CallAddressJson.ToAddressData(addressObject) is { } addressData)
+        {
+            await callAddresses.SetAsync(ctx.CallRecordId, addressRole, addressData, ct);
+            CallAddressVars.Apply(ctx, addressRole, addressData);
+        }
 
         var next = Transition(node, agentTransition) ?? Transition(node, "default");
         AppendHistory(ctx, node, agentInput, next);
-        return Task.FromResult(new NodeResult(MakeState(), next));
+        return new NodeResult(MakeState(), next);
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────

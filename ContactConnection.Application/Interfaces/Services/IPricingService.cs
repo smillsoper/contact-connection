@@ -24,12 +24,14 @@ public interface IPricingService
     ///   - Extended prices per item (resolved price × qty)
     ///   - Shipping via weight tiers, then subtotal tiers (weight tiers take precedence if both are set)
     ///   - Geographic surcharges based on ShippingZip classification
-    ///   - Sales tax — delegated to ITaxProvider resolved from CartDocument.TaxProvider key
+    ///   - Sales tax — delegated to the ITaxProvider named by <paramref name="taxContext"/>
+    ///     (the call's campaign setting), or by CartDocument.TaxProvider when there's no context.
+    ///     Per-item tax, shipping tax and the calculation status/message are stored on the result.
     ///   - Personalization charges
     ///   - Payment installment breakdown (optionally splitting shipping and tax across installments)
     ///
     /// Returns a new CartDocument with all computed fields set. Does not mutate the input.
     /// Async because external tax providers (Avalara, TaxJar) require HTTP calls.
     /// </summary>
-    Task<CartDocument> CalculateTotalsAsync(CartDocument cart, CancellationToken ct = default);
+    Task<CartDocument> CalculateTotalsAsync(CartDocument cart, TaxContext? taxContext = null, CancellationToken ct = default);
 }

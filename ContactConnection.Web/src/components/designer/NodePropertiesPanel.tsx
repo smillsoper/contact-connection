@@ -778,6 +778,25 @@ export default function NodePropertiesPanel({
               </p>
             </div>
 
+            {/* Save to call record */}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-400">Save to call record as</label>
+              <select
+                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-sky-500"
+                value={(data.addressRole as string) ?? 'none'}
+                onChange={(e) => onUpdate(node.id, { addressRole: e.target.value })}
+              >
+                <option value="none">Don't save (flow variable only)</option>
+                <option value="billing">Billing address</option>
+                <option value="shipping">Shipping address</option>
+                <option value="billing_and_shipping">Billing and shipping address</option>
+              </select>
+              <p className="text-[10px] text-gray-500 leading-snug">
+                The call record's addresses feed sales tax, payment and order APIs. Saving a shipping
+                address recalculates the cart's tax.
+              </p>
+            </div>
+
             {/* Field visibility */}
             <div className="flex flex-col gap-1.5">
               <p className="text-xs font-medium text-gray-400">Optional fields</p>

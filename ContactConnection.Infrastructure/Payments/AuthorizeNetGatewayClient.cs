@@ -2,6 +2,7 @@ using System.Net.Http.Json;
 using System.Text.Json.Nodes;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Domain.Entities;
+using ContactConnection.Infrastructure.Credentials;
 using Microsoft.Extensions.Logging;
 
 namespace ContactConnection.Infrastructure.Payments;
@@ -216,24 +217,6 @@ public class AuthorizeNetGatewayClient(
         return (apiLoginId, transactionKey, url);
     }
 
-    /// <summary>Campaign -> client -> tenant credential cascade — same precedence
-    /// CustomFieldDefinition already uses for scope resolution, applied here to gateway credentials
-    /// since Life Seasons (and presumably other multi-campaign clients) run a separate Authorize.Net
-    /// merchant account per campaign, not just per client.</summary>
-    private async Task<string?> ResolveScopedAsync(string field, Guid campaignId, Guid clientId, CancellationToken ct)
-    {
-        if (campaignId != Guid.Empty)
-        {
-            var campaignValue = await credentials.GetAsync($"AuthorizeNet:{campaignId}:{field}", ct);
-            if (campaignValue is not null) return campaignValue;
-        }
-
-        if (clientId != Guid.Empty)
-        {
-            var clientValue = await credentials.GetAsync($"AuthorizeNet:{clientId}:{field}", ct);
-            if (clientValue is not null) return clientValue;
-        }
-
-        return await credentials.GetAsync($"AuthorizeNet:{field}", ct);
-    }
+    private Task<string?> ResolveScopedAsync(string field, Guid campaignId, Guid clientId, CancellationToken ct)
+        => ScopedCredentials.ResolveAsync(credentials, "AuthorizeNet", field, campaignId, clientId, ct);
 }

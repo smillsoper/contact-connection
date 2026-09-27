@@ -83,6 +83,13 @@ public class Campaign
     // zip, etc.) before the safety net wipes it need a longer window here than the default.
     public int? SensitiveDataRetentionMinutes { get; private set; }
 
+    // Sales tax — which ITaxProvider prices this campaign's carts (TaxProviderKey.*), and that
+    // provider's campaign-level settings as JSON (flat rate: {"rate":0.0725}; Avalara: tax codes,
+    // company code, ship-from address — see AvalaraTaxSettings). Credentials are NOT here; they
+    // live in the tenant credential store (campaign -> client -> tenant cascade).
+    public string TaxProvider { get; private set; } = TaxProviderKey.FlatRate;
+    public string? TaxSettings { get; private set; }
+
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
@@ -196,6 +203,15 @@ public class Campaign
     public void SetSensitiveDataRetentionMinutes(int? minutes)
     {
         SensitiveDataRetentionMinutes = minutes is { } m ? Math.Clamp(m, 1, 43200) : null;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void ConfigureTax(string provider, string? settingsJson)
+    {
+        if (!TaxProviderKey.IsValid(provider))
+            throw new ArgumentException($"Unknown tax provider '{provider}'.", nameof(provider));
+        TaxProvider = provider;
+        TaxSettings = string.IsNullOrWhiteSpace(settingsJson) ? null : settingsJson;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 

@@ -42,6 +42,10 @@ public class Offer
     public bool TaxExempt { get; private set; }
     public bool ShippingExempt { get; private set; }
 
+    /// <summary>Overrides the product's tax code for this offer (e.g. a bundle taxed differently).
+    /// Null = use Product.TaxCode, then the campaign default. See <see cref="EffectiveTaxCode"/>.</summary>
+    public string? TaxCode { get; private set; }
+
     // Mix & match — groups items across cart for cross-item price breaks
     public string? MixMatchCode { get; private set; }
 
@@ -186,6 +190,15 @@ public class Offer
         CampaignId = campaignId;
         UpdatedAt  = DateTimeOffset.UtcNow;
     }
+
+    public void SetTaxCode(string? taxCode)
+    {
+        TaxCode   = string.IsNullOrWhiteSpace(taxCode) ? null : taxCode.Trim();
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>Offer override, else the product's own code (Product must be loaded), else null.</summary>
+    public string? EffectiveTaxCode => TaxCode ?? Product?.TaxCode;
 
     public void SetMixMatch(string? code, List<QuantityPriceBreak>? priceBreaks = null)
     {

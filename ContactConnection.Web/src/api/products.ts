@@ -8,6 +8,8 @@ export interface ProductSearchResult {
   description: string
   weight: number
   searchable: boolean
+  /** Tax provider product code (e.g. Avalara PF050714); null = campaign default. */
+  taxCode?: string | null
   inventory: {
     inventoryStatus: ProductInventoryStatus
     qtyAvailable: number
@@ -25,6 +27,7 @@ export interface CreateProductRequest {
   inventoryStatus?: ProductInventoryStatus
   qtyAvailable?: number
   decrementOnOrder?: boolean
+  taxCode?: string | null
 }
 
 export interface UpdateProductRequest {
@@ -34,6 +37,7 @@ export interface UpdateProductRequest {
   decrementOnOrder: boolean
   minimumQty: number
   searchable: boolean
+  taxCode?: string | null
 }
 
 export const productsApi = {

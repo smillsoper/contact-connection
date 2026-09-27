@@ -64,6 +64,9 @@ public static class OffersEndpoints
         if (req.MixMatchCode is not null)
             offer.SetMixMatch(req.MixMatchCode, req.MixMatchPriceBreaks);
 
+        if (!string.IsNullOrWhiteSpace(req.TaxCode))
+            offer.SetTaxCode(req.TaxCode);
+
         if (req.IsUpsell)
             offer.SetUpsell(
                 true,
@@ -163,6 +166,7 @@ public static class OffersEndpoints
             offer.ShipMethods);
 
         offer.SetScope(req.ClientId, req.CampaignId);
+        offer.SetTaxCode(req.TaxCode);
 
         await offers.SaveChangesAsync(ct);
         return Results.Ok(ToResponse(offer));
@@ -234,6 +238,7 @@ public static class OffersEndpoints
         o.Shipping,
         o.TaxExempt,
         o.ShippingExempt,
+        o.TaxCode,
         o.AllowPriceOverride,
         o.IsActive,
         o.ValidFrom,
@@ -305,7 +310,8 @@ public record CreateOfferRequest(
     List<QuantityPriceBreak>? MixMatchPriceBreaks = null,
     List<AutoShipInterval>? AutoShipIntervals = null,
     List<ProductShipMethod>? ShipMethods = null,
-    List<PersonalizationPrompt>? Personalization = null);
+    List<PersonalizationPrompt>? Personalization = null,
+    string? TaxCode = null);
 
 public record UpdateOfferRequest(
     string Name,
@@ -314,4 +320,5 @@ public record UpdateOfferRequest(
     bool TaxExempt,
     bool ShippingExempt,
     Guid? ClientId,
-    Guid? CampaignId);
+    Guid? CampaignId,
+    string? TaxCode = null);

@@ -54,6 +54,8 @@ export interface Campaign {
   // the platform default (SensitiveData:Retention:TtlMinutes on the Worker). A campaign running a
   // daily/weekly secure export needs this longer than the default safety-net window.
   sensitiveDataRetentionMinutes?: number | null
+  taxProvider?: TaxProviderKey
+  taxSettings?: CampaignTaxSettings | null
   client?: { id: string; name: string }
   createdAt: string
   updatedAt: string
@@ -222,6 +224,63 @@ export const updateCampaignRecording = (id: string, data: {
   autoMaskOnHold: boolean
   recordingRetentionDays: number
 }) => api.put<Campaign>(`/api/v1/campaigns/${id}/recording`, data)
+
+// ── Campaign sales tax ───────────────────────────────────────────────────────
+
+/** '' = flat rate (the default), 'avalara' = Avalara AvaTax. */
+export type TaxProviderKey = '' | 'avalara'
+
+export interface TaxShipFrom {
+  street?: string
+  unit?: string
+  city?: string
+  state?: string
+  zip?: string
+  country?: string
+}
+
+export interface StateTaxRate {
+  /** Two-letter state code. */
+  state: string
+  /** Fraction: 0.029 = 2.9%. */
+  rate: number
+  /** Also tax shipping at this rate (prorated to the taxable share of the cart). */
+  taxShipping?: boolean
+  /** Fixed per-order state fee (e.g. Colorado Retail Delivery Fee) — reported separately from tax. */
+  fee?: StateFee | null
+}
+
+export interface StateFee {
+  description: string
+  amount: number
+  /** Only charge when the taxable subtotal is at least this (e.g. Minnesota's $100 threshold). */
+  minTaxableSubtotal?: number
+  /** Identifier for order APIs; defaults to "{STATE}_FEE". */
+  code?: string
+}
+
+/** A state fee Avalara calculates from a dedicated line (e.g. CO → OF400000). */
+export interface AvalaraFeeLine {
+  state: string
+  taxCode: string
+  description: string
+  code?: string
+}
+
+/** Flat rate uses `rates` (states not listed aren't taxed); Avalara uses the rest.
+ *  Credentials are never part of this. */
+export interface CampaignTaxSettings {
+  rates?: StateTaxRate[]
+  companyCode?: string
+  productTaxCode?: string
+  shippingTaxCode?: string
+  customerCode?: string
+  shipFrom?: TaxShipFrom
+  feeLines?: AvalaraFeeLine[]
+}
+
+export const updateCampaignTax = (id: string, taxProvider: TaxProviderKey, taxSettings: CampaignTaxSettings | null) =>
+  api.put<Campaign>(`/api/v1/campaigns/${id}/tax`, { taxProvider, taxSettings })
 
 export const updateCampaignSensitiveDataRetention = (id: string, sensitiveDataRetentionMinutes: number | null) =>
   api.put<Campaign>(`/api/v1/campaigns/${id}/sensitive-data-retention`, { sensitiveDataRetentionMinutes })

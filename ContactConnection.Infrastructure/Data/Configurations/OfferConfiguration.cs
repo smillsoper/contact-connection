@@ -36,6 +36,7 @@ public class OfferConfiguration : IEntityTypeConfiguration<Offer>
 
         // Mix & match
         builder.Property(o => o.MixMatchCode).HasColumnName("mix_match_code").HasMaxLength(100);
+        builder.Property(o => o.TaxCode).HasColumnName("tax_code").HasMaxLength(50);
 
         // Upsell
         builder.Property(o => o.IsUpsell).HasColumnName("is_upsell");

@@ -6,6 +6,13 @@ namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 
 /// <summary>
 /// Handles "set_variable" nodes — assigns a value to a {{flow.*}} variable.
+///
+/// Two call-record targets are special: {{call_record.billing_address}} and
+/// {{call_record.shipping_address}}. Assigning an address object to one (e.g. the output of an
+/// address node, {{flow.billing_address}}) saves it onto the call record exactly as an address node
+/// with that addressRole would — including re-pricing the cart when the shipping address changes.
+/// Typical use: "ship to the billing address?" → yes →
+///   { "variable": "{{call_record.shipping_address}}", "value": "{{flow.billing_address}}" }
 /// Transparent to the agent; executes and advances immediately.
 /// Commonly used to extract and store api_call response fields for later use.
 ///
@@ -20,7 +27,8 @@ namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 ///   "transitions": { "default": "node_010" }
 /// }
 /// </summary>
-public class SetVariableNodeHandler(IVariableResolver resolver, ISharedCallVariableStore sharedVars)
+public class SetVariableNodeHandler(
+    IVariableResolver resolver, ISharedCallVariableStore sharedVars, ICallAddressService callAddresses)
     : NodeHandlerBase(resolver), INodeHandler
 {
     public string NodeType => "set_variable";
@@ -66,6 +74,19 @@ public class SetVariableNodeHandler(IVariableResolver resolver, ISharedCallVaria
                                 SetNestedFlowVar(ctx.FlowVars, key[..nestedDot], key[(nestedDot + 1)..], resolvedValue);
                             else
                                 ctx.FlowVars[key] = resolvedValue;
+                            break;
+                        case "call_record" when key.Equals(CallAddressVars.Billing, StringComparison.OrdinalIgnoreCase)
+                                             || key.Equals(CallAddressVars.Shipping, StringComparison.OrdinalIgnoreCase):
+                            // Not a plain variable write — persist to the call record. A value that
+                            // isn't an address object (e.g. an unset variable) is ignored rather than
+                            // wiping the call's existing address.
+                            if (CallAddressJson.ToAddressData(resolvedValue) is { } address)
+                            {
+                                var role = key.Equals(CallAddressVars.Billing, StringComparison.OrdinalIgnoreCase)
+                                    ? CallAddressRole.Billing : CallAddressRole.Shipping;
+                                await callAddresses.SetAsync(ctx.CallRecordId, role, address, ct);
+                                CallAddressVars.Apply(ctx, role, address);
+                            }
                             break;
                         case "shared":
                             // Call-wide, visible to the telephony call flow for the same call too —

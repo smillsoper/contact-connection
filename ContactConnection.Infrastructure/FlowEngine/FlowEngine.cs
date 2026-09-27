@@ -392,6 +392,11 @@ public class FlowEngine : IFlowEngine
         ctx.CallRecord["dnis"] = record.Dnis ?? string.Empty;
         ctx.CallRecord["account_number"] = record.AccountNumber ?? string.Empty;
         ctx.CallRecord["order_number"] = record.OrderNumber ?? string.Empty;
+        // Address objects (same shape as an address node's output) — {{call_record.shipping_address.city}}
+        if (record.Addresses?.Billing is { } billing)
+            ctx.CallRecord[CallAddressVars.Billing] = CallAddressJson.ToJsonObject(billing).ToJsonString();
+        if (record.Addresses?.Shipping is { } shipping)
+            ctx.CallRecord[CallAddressVars.Shipping] = CallAddressJson.ToJsonObject(shipping).ToJsonString();
         ctx.CallRecord["campaign_id"] = record.CampaignId.ToString();
         ctx.CallRecord["call_started_at"] = record.CallStartAt?.ToString("O") ?? string.Empty;
         ctx.CallRecord["call_ended_at"] = record.CallEndAt?.ToString("O") ?? string.Empty;

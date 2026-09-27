@@ -272,7 +272,18 @@ export default function CartModal({ callRecordId, cart, onChanged, onClose }: Ca
           <div className="px-5 py-3 border-t border-gray-800 shrink-0 flex flex-col gap-0.5 text-xs text-gray-400">
             <div className="flex justify-between"><span>Subtotal</span><span>${cart.cartSubtotal.toFixed(2)}</span></div>
             <div className="flex justify-between"><span>Shipping</span><span>${cart.shipping.toFixed(2)}</span></div>
-            <div className="flex justify-between"><span>Tax</span><span>${cart.salesTax.toFixed(2)}</span></div>
+            <div className="flex justify-between">
+              <span>Tax{cart.shippingTax ? ` (incl. $${cart.shippingTax.toFixed(2)} on shipping)` : ''}</span>
+              <span>${cart.salesTax.toFixed(2)}</span>
+            </div>
+            {(cart.fees ?? []).map((f) => (
+              <div key={f.code} className="flex justify-between"><span>{f.description}</span><span>${f.amount.toFixed(2)}</span></div>
+            ))}
+            {cart.items.length > 0 && cart.taxMessage && (cart.taxStatus === 'error' || cart.taxStatus === 'pending_address') && (
+              <p className={`text-[11px] leading-snug ${cart.taxStatus === 'error' ? 'text-red-400' : 'text-amber-400'}`}>
+                {cart.taxMessage}
+              </p>
+            )}
             <div className="flex justify-between text-sm text-white font-semibold mt-1">
               <span>Total</span><span>${cart.cartTotal.toFixed(2)}</span>
             </div>

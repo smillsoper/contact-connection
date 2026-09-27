@@ -19,7 +19,15 @@ export interface CartDocument {
   cartSubtotal: number
   shipping: number
   salesTax: number
+  /** Portion of salesTax charged on shipping. */
+  shippingTax?: number
   cartTotal: number
+  /** 'calculated' | 'pending_address' | 'error' — null for carts priced before tax status existed. */
+  taxStatus?: string | null
+  /** Why tax isn't 'calculated' — shown to the agent. */
+  taxMessage?: string | null
+  /** Non-tax charges computed with tax (e.g. Colorado Retail Delivery Fee) — included in cartTotal. */
+  fees?: { code: string; description: string; amount: number }[] | null
 }
 
 export interface CartConflictError {

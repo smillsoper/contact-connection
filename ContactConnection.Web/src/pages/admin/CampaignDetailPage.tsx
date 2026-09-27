@@ -4,6 +4,7 @@ import AdminShell from '../../components/admin/AdminShell'
 import SearchableSelect from '../../components/SearchableSelect'
 import {
   getCampaign, updateCampaign, updateCampaignRecording, updateCampaignSensitiveDataRetention, setCampaignFlow, removeCampaignFlow,
+  updateCampaignTax, type TaxProviderKey, type CampaignTaxSettings, type AvalaraFeeLine,
   setCampaignInboundFlow, removeCampaignInboundFlow,
   setCampaignOutboundFlow, removeCampaignOutboundFlow,
   activateCampaign, pauseCampaign, deactivateCampaign,
@@ -16,6 +17,7 @@ import {
 } from '../../api/telephony'
 import { flowsApi, type FlowSummary } from '../../api/flows'
 import { listAdminAgents, type AgentRecord } from '../../api/adminAgents'
+import { US_STATES } from '../../constants/usStates'
 
 const STATUS_COLORS: Record<string, string> = {
   active:   'bg-emerald-900/50 text-emerald-400',
@@ -655,6 +657,401 @@ function SensitiveDataRetentionForm({ campaign, onSaved }: SensitiveDataRetentio
   )
 }
 
+// ── Sales tax ─────────────────────────────────────────────────────────────────
+
+interface StateRateRow {
+  state: string
+  pct: string
+  taxShipping: boolean
+  hasFee: boolean
+  feeDesc: string
+  feeAmt: string
+  feeMin: string
+  feeCode: string
+}
+
+const emptyStateRateRow = (): StateRateRow => ({
+  state: '', pct: '', taxShipping: false, hasFee: false, feeDesc: '', feeAmt: '', feeMin: '', feeCode: '',
+})
+
+interface SalesTaxFormProps {
+  campaign: CampaignDetail
+  onSaved: (updated: CampaignDetail) => void
+}
+
+function SalesTaxForm({ campaign, onSaved }: SalesTaxFormProps) {
+  const initial = campaign.taxSettings ?? {}
+  const [provider, setProvider] = useState<TaxProviderKey>(campaign.taxProvider ?? '')
+  // Rates are edited as percentages ("2.9") but stored as fractions (0.029).
+  const [stateRates, setStateRates] = useState<StateRateRow[]>(
+    (initial.rates ?? []).map((r) => ({
+      state: r.state.toUpperCase(), pct: String(+(r.rate * 100).toFixed(4)), taxShipping: r.taxShipping ?? false,
+      hasFee: !!r.fee, feeDesc: r.fee?.description ?? '', feeAmt: r.fee ? String(r.fee.amount) : '',
+      feeMin: r.fee?.minTaxableSubtotal ? String(r.fee.minTaxableSubtotal) : '', feeCode: r.fee?.code ?? '',
+    })),
+  )
+  const [feeLines, setFeeLines] = useState<AvalaraFeeLine[]>(initial.feeLines ?? [])
+  const [companyCode, setCompanyCode] = useState(initial.companyCode ?? '')
+  const [productTaxCode, setProductTaxCode] = useState(initial.productTaxCode ?? '')
+  const [shippingTaxCode, setShippingTaxCode] = useState(initial.shippingTaxCode ?? '')
+  const [customerCode, setCustomerCode] = useState(initial.customerCode ?? '')
+  const [fromStreet, setFromStreet] = useState(initial.shipFrom?.street ?? '')
+  const [fromCity, setFromCity] = useState(initial.shipFrom?.city ?? '')
+  const [fromState, setFromState] = useState(initial.shipFrom?.state ?? '')
+  const [fromZip, setFromZip] = useState(initial.shipFrom?.zip ?? '')
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+
+  const inputCls = 'w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500'
+  const labelCls = 'block text-xs text-gray-400 mb-1'
+
+  const badNum = (v: string, allowBlank = false) => {
+    if (v.trim() === '') return !allowBlank
+    const n = Number(v)
+    return Number.isNaN(n) || n < 0
+  }
+  const rowInvalid = (r: StateRateRow) => {
+    const n = Number(r.pct)
+    if (!r.state || r.pct.trim() === '' || Number.isNaN(n) || n < 0 || n >= 100) return true
+    return r.hasFee && (!r.feeDesc.trim() || badNum(r.feeAmt) || badNum(r.feeMin, true))
+  }
+  const feeLineInvalid = (f: AvalaraFeeLine) => !f.state || !f.taxCode.trim() || !f.description.trim()
+  const rateInvalid = (provider === '' && stateRates.some(rowInvalid))
+    || (provider === 'avalara' && feeLines.some(feeLineInvalid))
+
+  function updateRow(i: number, patch: Partial<StateRateRow>) {
+    setStateRates((rows) => rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  }
+
+  function updateFeeLine(i: number, patch: Partial<AvalaraFeeLine>) {
+    setFeeLines((rows) => rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  }
+
+  function buildSettings(): CampaignTaxSettings | null {
+    if (provider === '') {
+      if (stateRates.length === 0) return null
+      return {
+        rates: stateRates.map((r) => ({
+          state: r.state,
+          rate: +(Number(r.pct) / 100).toFixed(6),
+          taxShipping: r.taxShipping,
+          fee: r.hasFee
+            ? {
+                description: r.feeDesc.trim(),
+                amount: Number(r.feeAmt),
+                minTaxableSubtotal: r.feeMin.trim() ? Number(r.feeMin) : undefined,
+                code: r.feeCode.trim() || undefined,
+              }
+            : null,
+        })),
+      }
+    }
+    const t = (v: string) => v.trim() || undefined
+    const shipFrom = fromZip.trim()
+      ? { street: t(fromStreet), city: t(fromCity), state: t(fromState)?.toUpperCase(), zip: fromZip.trim(), country: 'US' }
+      : undefined
+    return {
+      companyCode: t(companyCode), productTaxCode: t(productTaxCode), shippingTaxCode: t(shippingTaxCode),
+      customerCode: t(customerCode), shipFrom,
+      feeLines: feeLines.map((f) => ({
+        state: f.state, taxCode: f.taxCode.trim(), description: f.description.trim(), code: f.code?.trim() || undefined,
+      })),
+    }
+  }
+
+  async function handleSave() {
+    setSaving(true); setSaveError(null); setSaved(false)
+    try {
+      const updated = await updateCampaignTax(campaign.id, provider, buildSettings())
+      onSaved({ ...campaign, ...updated })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+      <h2 className="text-white text-sm font-semibold mb-1">Sales Tax</h2>
+      <p className="text-xs text-gray-500 mb-5">
+        How this campaign's carts are taxed. Tax is recalculated automatically every time the cart changes and
+        whenever an address node saves a shipping address to the call record.
+      </p>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className={labelCls}>Tax provider</label>
+          <select value={provider} onChange={(e) => setProvider(e.target.value as TaxProviderKey)} className={inputCls}>
+            <option value="">Flat rate</option>
+            <option value="avalara">Avalara AvaTax</option>
+          </select>
+        </div>
+
+      </div>
+
+      {provider === '' && (
+        <div className="mt-4">
+          <p className="text-xs text-gray-400 font-medium mb-1">Taxable states</p>
+          <p className="text-xs text-gray-500 mb-3 leading-snug">
+            A static rate per state, applied to the ship-to state (billing if there's no shipping address). States not
+            listed are not taxed. Tax-exempt offers are skipped. Check "Tax shipping" for states that tax delivery charges —
+            shipping is taxed at the same rate, on the taxable share of the cart only. "State fee" adds a fixed per-order fee
+            shown separately from tax (e.g. Colorado's Retail Delivery Fee), charged only when the order has taxable items
+            and meets the optional minimum. Static rates and fees can go stale; use a tax API provider when the client has one.
+          </p>
+          {stateRates.length === 0 && (
+            <p className="text-xs text-gray-500 italic mb-2">No taxable states — carts on this campaign are not taxed.</p>
+          )}
+          <div className="flex flex-col gap-2">
+            {stateRates.map((row, i) => {
+              const taken = new Set(stateRates.filter((_, j) => j !== i).map((r) => r.state))
+              return (
+                <div key={i} className="flex flex-col gap-1.5 border-b border-gray-800/60 pb-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <select
+                    value={row.state}
+                    onChange={(e) => updateRow(i, { state: e.target.value })}
+                    className={`${inputCls} max-w-xs ${!row.state ? 'ring-2 ring-red-500' : ''}`}
+                  >
+                    <option value="">Select a state…</option>
+                    {US_STATES.filter(([code]) => !taken.has(code)).map(([code, name]) => (
+                      <option key={code} value={code}>{name} ({code})</option>
+                    ))}
+                  </select>
+                  <div className="relative w-32">
+                    <input
+                      value={row.pct}
+                      onChange={(e) => updateRow(i, { pct: e.target.value })}
+                      placeholder="e.g. 2.9"
+                      inputMode="decimal"
+                      className={`${inputCls} pr-7 ${rowInvalid(row) && row.state ? 'ring-2 ring-red-500' : ''}`}
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">%</span>
+                  </div>
+                  <label className="flex items-center gap-1.5 text-xs text-gray-300 cursor-pointer whitespace-nowrap">
+                    <input
+                      type="checkbox"
+                      checked={row.taxShipping}
+                      onChange={(e) => updateRow(i, { taxShipping: e.target.checked })}
+                    />
+                    Tax shipping
+                  </label>
+                  <label className="flex items-center gap-1.5 text-xs text-gray-300 cursor-pointer whitespace-nowrap">
+                    <input
+                      type="checkbox"
+                      checked={row.hasFee}
+                      onChange={(e) => updateRow(i, { hasFee: e.target.checked })}
+                    />
+                    State fee
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setStateRates((rows) => rows.filter((_, j) => j !== i))}
+                    className="text-gray-500 hover:text-red-400 text-xs px-2"
+                  >
+                    Remove
+                  </button>
+                </div>
+                {row.hasFee && (
+                  <div className="flex items-center gap-2 flex-wrap pl-4">
+                    <input
+                      value={row.feeDesc}
+                      onChange={(e) => updateRow(i, { feeDesc: e.target.value })}
+                      placeholder="Fee description, e.g. Colorado Retail Delivery Fee"
+                      className={`${inputCls} max-w-xs ${!row.feeDesc.trim() ? 'ring-2 ring-red-500' : ''}`}
+                    />
+                    <div className="relative w-28">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">$</span>
+                      <input
+                        value={row.feeAmt}
+                        onChange={(e) => updateRow(i, { feeAmt: e.target.value })}
+                        placeholder="0.29"
+                        inputMode="decimal"
+                        className={`${inputCls} pl-6 ${badNum(row.feeAmt) ? 'ring-2 ring-red-500' : ''}`}
+                      />
+                    </div>
+                    <div className="relative w-40">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">min $</span>
+                      <input
+                        value={row.feeMin}
+                        onChange={(e) => updateRow(i, { feeMin: e.target.value })}
+                        placeholder="optional"
+                        inputMode="decimal"
+                        className={`${inputCls} pl-14`}
+                      />
+                    </div>
+                    <input
+                      value={row.feeCode}
+                      onChange={(e) => updateRow(i, { feeCode: e.target.value })}
+                      placeholder={`Code (default ${row.state || 'ST'}_FEE)`}
+                      className={`${inputCls} max-w-[11rem]`}
+                    />
+                  </div>
+                )}
+                </div>
+              )
+            })}
+          </div>
+          <button
+            type="button"
+            onClick={() => setStateRates((rows) => [...rows, emptyStateRateRow()])}
+            className="mt-2 text-indigo-400 hover:text-indigo-300 text-xs font-medium"
+          >
+            + Add state
+          </button>
+        </div>
+      )}
+
+      {provider === 'avalara' && (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+            <div>
+              <label className={labelCls}>Product tax code</label>
+              <input value={productTaxCode} onChange={(e) => setProductTaxCode(e.target.value)} placeholder="e.g. PF050714" className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Shipping tax code</label>
+              <input value={shippingTaxCode} onChange={(e) => setShippingTaxCode(e.target.value)} placeholder="e.g. FR020200" className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Company code</label>
+              <input value={companyCode} onChange={(e) => setCompanyCode(e.target.value)} placeholder="blank = account default" className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Customer code</label>
+              <input value={customerCode} onChange={(e) => setCustomerCode(e.target.value)} placeholder="blank = ContactConnection" className={inputCls} />
+            </div>
+          </div>
+
+          <p className="text-xs text-gray-400 font-medium mt-5 mb-2">Ship-from address</p>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="md:col-span-2">
+              <label className={labelCls}>Street</label>
+              <input value={fromStreet} onChange={(e) => setFromStreet(e.target.value)} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>City</label>
+              <input value={fromCity} onChange={(e) => setFromCity(e.target.value)} className={inputCls} />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className={labelCls}>State</label>
+                <input value={fromState} maxLength={2} onChange={(e) => setFromState(e.target.value)} className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>ZIP</label>
+                <input value={fromZip} onChange={(e) => setFromZip(e.target.value)} className={inputCls} />
+              </div>
+            </div>
+          </div>
+          <p className="text-xs text-gray-500 mt-1 leading-snug">
+            Optional. Without it, Avalara taxes by the customer's ship-to address alone.
+          </p>
+
+          <p className="text-xs text-gray-400 font-medium mt-5 mb-1">State fee lines</p>
+          <p className="text-xs text-gray-500 mb-2 leading-snug">
+            Fees Avalara calculates from a dedicated line when the order ships to that state — e.g. Colorado's Retail
+            Delivery Fee (tax code OF400000). Avalara decides whether it applies and the current amount; the cart shows it
+            separately from tax.
+          </p>
+          <div className="flex flex-col gap-2">
+            {feeLines.map((f, i) => (
+              <div key={i} className="flex items-center gap-2 flex-wrap">
+                <select
+                  value={f.state}
+                  onChange={(e) => updateFeeLine(i, { state: e.target.value })}
+                  className={`${inputCls} max-w-[14rem] ${!f.state ? 'ring-2 ring-red-500' : ''}`}
+                >
+                  <option value="">Select a state…</option>
+                  {US_STATES.map(([code, name]) => (
+                    <option key={code} value={code}>{name} ({code})</option>
+                  ))}
+                </select>
+                <input
+                  value={f.taxCode}
+                  onChange={(e) => updateFeeLine(i, { taxCode: e.target.value })}
+                  placeholder="Tax code"
+                  className={`${inputCls} max-w-[8rem] ${!f.taxCode.trim() ? 'ring-2 ring-red-500' : ''}`}
+                />
+                <input
+                  value={f.description}
+                  onChange={(e) => updateFeeLine(i, { description: e.target.value })}
+                  placeholder="Description"
+                  className={`${inputCls} max-w-xs ${!f.description.trim() ? 'ring-2 ring-red-500' : ''}`}
+                />
+                <input
+                  value={f.code ?? ''}
+                  onChange={(e) => updateFeeLine(i, { code: e.target.value })}
+                  placeholder={`Code (default ${f.state || 'ST'}_FEE)`}
+                  className={`${inputCls} max-w-[11rem]`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setFeeLines((rows) => rows.filter((_, j) => j !== i))}
+                  className="text-gray-500 hover:text-red-400 text-xs px-2"
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center gap-4 mt-2">
+            <button
+              type="button"
+              onClick={() => setFeeLines((rows) => [...rows, { state: '', taxCode: '', description: '' }])}
+              className="text-indigo-400 hover:text-indigo-300 text-xs font-medium"
+            >
+              + Add fee line
+            </button>
+            {!feeLines.some((f) => f.state === 'CO' && f.taxCode.trim().toUpperCase() === 'OF400000') && (
+              <button
+                type="button"
+                onClick={() => setFeeLines((rows) => [...rows,
+                  { state: 'CO', taxCode: 'OF400000', description: 'Colorado Retail Delivery Fee', code: 'CO_RDF' }])}
+                className="text-indigo-400 hover:text-indigo-300 text-xs font-medium"
+              >
+                + Colorado Retail Delivery Fee
+              </button>
+            )}
+          </div>
+
+          <div className="mt-5 rounded-lg bg-gray-800/50 border border-gray-800 p-3 text-xs text-gray-400 leading-relaxed">
+            <p className="text-gray-300 font-medium mb-1">Credentials</p>
+            Add these on the <a href="/admin/credentials" className="text-indigo-400 hover:text-indigo-300">Credentials</a> page
+            (they are never stored with the campaign):
+            <ul className="mt-1 font-mono text-[11px] text-gray-300 space-y-0.5">
+              <li>Avalara:{campaign.id}:AccountId</li>
+              <li>Avalara:{campaign.id}:LicenseKey</li>
+              <li>Avalara:{campaign.id}:Environment <span className="font-sans text-gray-500">— optional; "production", otherwise sandbox</span></li>
+            </ul>
+            <p className="mt-1">
+              To share one Avalara account across campaigns, use the client ID in place of the campaign ID
+              (<span className="font-mono">Avalara:{campaign.clientId}:AccountId</span>), or omit the ID entirely for a tenant-wide account.
+            </p>
+          </div>
+        </>
+      )}
+
+      <div className="flex items-center gap-3 mt-6 pt-4 border-t border-gray-800">
+        <button
+          onClick={handleSave}
+          disabled={saving || rateInvalid}
+          className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg px-5 py-2 text-sm font-medium transition-colors"
+        >
+          {saving ? 'Saving…' : 'Save sales tax'}
+        </button>
+        {saved && <span className="text-emerald-400 text-sm">Saved</span>}
+        {rateInvalid && <span className="text-red-400 text-sm">Fix the highlighted fields before saving.</span>}
+        {saveError && <span className="text-red-400 text-sm">{saveError}</span>}
+      </div>
+    </div>
+  )
+}
+
 // ── Agents section ────────────────────────────────────────────────────────────
 
 interface AgentsSectionProps {
@@ -1260,6 +1657,10 @@ export default function CampaignDetailPage() {
             onSaved={(updated) => setCampaign(updated)}
           />
           <SensitiveDataRetentionForm
+            campaign={campaign}
+            onSaved={(updated) => setCampaign(updated)}
+          />
+          <SalesTaxForm
             campaign={campaign}
             onSaved={(updated) => setCampaign(updated)}
           />

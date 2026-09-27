@@ -46,6 +46,9 @@ public static class ProductsEndpoints
                 req.QtyAvailable ?? 0,
                 req.DecrementOnOrder ?? true);
 
+        if (!string.IsNullOrWhiteSpace(req.TaxCode))
+            product.SetTaxCode(req.TaxCode);
+
         if (req.GeographicSurcharges is not null)
             product.SetGeographicSurcharges(
                 req.GeographicSurcharges.Canada,
@@ -112,6 +115,7 @@ public static class ProductsEndpoints
         product.SetPhysical(req.Weight);
         product.SetInventory(req.InventoryStatus, req.QtyAvailable, req.DecrementOnOrder, req.MinimumQty);
         product.SetCatalog(req.Searchable, product.ReportingOnly, product.Keywords, product.AliasSKUs);
+        product.SetTaxCode(req.TaxCode);
 
         await products.SaveChangesAsync(ct);
         return Results.Ok(ToResponse(product));
@@ -142,6 +146,7 @@ public static class ProductsEndpoints
         p.Weight,
         p.Searchable,
         p.ReportingOnly,
+        p.TaxCode,
         p.ParentProductId,
         Inventory = new
         {
@@ -202,7 +207,8 @@ public record CreateProductRequest(
     ProductInventoryStatus? InventoryStatus = null,
     int? QtyAvailable = null,
     bool? DecrementOnOrder = null,
-    GeographicSurchargeRequest? GeographicSurcharges = null);
+    GeographicSurchargeRequest? GeographicSurcharges = null,
+    string? TaxCode = null);
 
 public record UpdateProductRequest(
     decimal Weight,
@@ -210,4 +216,5 @@ public record UpdateProductRequest(
     int QtyAvailable,
     bool DecrementOnOrder,
     int MinimumQty,
-    bool Searchable);
+    bool Searchable,
+    string? TaxCode = null);

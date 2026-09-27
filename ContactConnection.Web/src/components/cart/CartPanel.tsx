@@ -25,6 +25,7 @@ export default function CartPanel() {
 
   const itemCount = cart?.items.reduce((n, i) => n + i.quantity, 0) ?? 0
   const total = cart?.cartTotal ?? 0
+  const taxProblem = !!cart && cart.items.length > 0 && (cart.taxStatus === 'error' || cart.taxStatus === 'pending_address')
 
   return (
     <>
@@ -32,6 +33,14 @@ export default function CartPanel() {
         <span className="text-sm text-gray-300">
           🛒 Cart: <span className="font-semibold text-white">{itemCount}</span> item{itemCount === 1 ? '' : 's'}
           {' — '}<span className="font-semibold text-white">${total.toFixed(2)}</span>
+          {taxProblem && (
+            <span
+              title={cart?.taxMessage ?? ''}
+              className={`ml-2 text-xs ${cart?.taxStatus === 'error' ? 'text-red-400' : 'text-amber-400'}`}
+            >
+              {cart?.taxStatus === 'error' ? '⚠ tax not calculated' : 'tax pending address'}
+            </span>
+          )}
         </span>
         <button
           type="button"

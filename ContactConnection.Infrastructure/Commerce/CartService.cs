@@ -17,17 +17,32 @@ public class CartService : ICartService
     private readonly IOfferRepository _offers;
     private readonly IInventoryService _inventory;
     private readonly IPricingService _pricing;
+    private readonly ICampaignRepository _campaigns;
 
     public CartService(
         ICallRecordRepository callRecords,
         IOfferRepository offers,
         IInventoryService inventory,
-        IPricingService pricing)
+        IPricingService pricing,
+        ICampaignRepository campaigns)
     {
         _callRecords = callRecords;
         _offers = offers;
         _inventory = inventory;
         _pricing = pricing;
+        _campaigns = campaigns;
+    }
+
+    public async Task<CartOperationResult> RecalculateAsync(Guid callRecordId, CancellationToken ct = default)
+    {
+        var record = await LoadRecordAsync(callRecordId, ct);
+        if (record.Cart is null) return CartOperationResult.Success(CartDocument.Empty());
+
+        // Items are unchanged, so reservations are too — just re-price and save.
+        var calculated = await _pricing.CalculateTotalsAsync(record.Cart, await BuildTaxContextAsync(record, ct), ct);
+        record.SetCart(calculated);
+        await _callRecords.SaveChangesAsync(ct);
+        return CartOperationResult.Success(calculated);
     }
 
     public async Task<CartOperationResult> ReplaceCartAsync(Guid callRecordId, CartDocument newCart, CancellationToken ct = default)
@@ -131,11 +146,28 @@ public class CartService : ICartService
             return CartOperationResult.Conflict(unavailable);
         }
 
-        var calculated = await _pricing.CalculateTotalsAsync(newCart, ct);
+        var calculated = await _pricing.CalculateTotalsAsync(newCart, await BuildTaxContextAsync(record, ct), ct);
         record.SetCart(calculated);
         await _callRecords.SaveChangesAsync(ct);
 
         return CartOperationResult.Success(calculated);
+    }
+
+    /// <summary>
+    /// The call's tax context: its campaign's tax provider + settings (so every cart change is
+    /// taxed by whatever the campaign is configured for) and the call record's addresses. A call
+    /// with no campaign yet prices with the flat-rate default.
+    /// </summary>
+    private async Task<TaxContext> BuildTaxContextAsync(CallRecord record, CancellationToken ct)
+    {
+        var campaign = record.CampaignId == Guid.Empty ? null : await _campaigns.GetByIdAsync(record.CampaignId, ct);
+        return new TaxContext(
+            CampaignId:   record.CampaignId,
+            ClientId:     record.ClientId,
+            ProviderKey:  campaign?.TaxProvider ?? TaxProviderKey.FlatRate,
+            SettingsJson: campaign?.TaxSettings,
+            ShipTo:       record.Addresses?.Shipping,
+            BillTo:       record.Addresses?.Billing);
     }
 
     /// <summary>
@@ -157,7 +189,7 @@ public class CartService : ICartService
             ExtendedPrice: unitPrice * quantity,
             Shipping: offer.Shipping,
             Weight: offer.Product.Weight,
-            SalesTax: 0,          // tax is computed cart-wide by PricingService.CalculateTotalsAsync, never per-item
+            SalesTax: 0,          // set by PricingService.CalculateTotalsAsync from the tax provider's per-line result
             ShippingExempt: offer.ShippingExempt,
             TaxExempt: offer.TaxExempt,
             OnBackOrder: offer.Product.InventoryStatus == ProductInventoryStatus.CanBackorder,
@@ -175,6 +207,7 @@ public class CartService : ICartService
             CanadaSurcharge: 0,
             AKHISurcharge: 0,
             OutlyingUSSurcharge: 0,
-            ForeignSurcharge: 0);
+            ForeignSurcharge: 0,
+            TaxCode: offer.EffectiveTaxCode);
     }
 }

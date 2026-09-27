@@ -21,6 +21,10 @@ public class Product
     public bool Searchable { get; private set; } = true;
     public bool ReportingOnly { get; private set; }
 
+    /// <summary>The tax provider's product tax category (e.g. Avalara "PF050714" for dietary
+    /// supplements). Null = the campaign's default product tax code. An Offer can override it.</summary>
+    public string? TaxCode { get; private set; }
+
     // Variant — null for base products; set for size/color/etc. variants
     public Guid? ParentProductId { get; private set; }
 
@@ -89,6 +93,12 @@ public class Product
             CreatedAt   = now,
             UpdatedAt   = now
         };
+    }
+
+    public void SetTaxCode(string? taxCode)
+    {
+        TaxCode   = string.IsNullOrWhiteSpace(taxCode) ? null : taxCode.Trim();
+        UpdatedAt = DateTimeOffset.UtcNow;
     }
 
     public void SetPhysical(decimal weight)

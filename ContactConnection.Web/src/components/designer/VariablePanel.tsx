@@ -16,6 +16,11 @@ const STATIC_NAMESPACES: StaticNamespace[] = [
       { key: 'phone_number' }, { key: 'dnis' }, { key: 'account_number' }, { key: 'list_id' },
       { key: 'campaign_id' }, { key: 'disposition' }, { key: 'notes' },
       { key: 'call_started_at' }, { key: 'call_ended_at' }, { key: 'handle_time_seconds' },
+      { key: 'order_number' },
+      // Address objects — settable from set_variable (saves to the call record), readable with
+      // nested fields like {{call_record.shipping_address.city}}.
+      { key: 'billing_address' }, { key: 'shipping_address' },
+      { key: 'shipping_address.state' }, { key: 'shipping_address.zip' },
     ],
   },
   {

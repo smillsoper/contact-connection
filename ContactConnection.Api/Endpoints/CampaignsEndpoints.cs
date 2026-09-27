@@ -16,6 +16,7 @@ public static class CampaignsEndpoints
         group.MapPut("{id:guid}",                     Update);
         group.MapPut("{id:guid}/recording",           UpdateRecording);
         group.MapPut("{id:guid}/sensitive-data-retention", UpdateSensitiveDataRetention);
+        group.MapPut("{id:guid}/tax",                 UpdateTax).RequireAuthorization("TenantAdmin");
         group.MapPut("{id:guid}/flow",                SetFlow);
         group.MapDelete("{id:guid}/flow",             RemoveFlow);
         group.MapPut("{id:guid}/inbound-flow",        SetInboundFlow);
@@ -153,6 +154,87 @@ public static class CampaignsEndpoints
 
         await repo.SaveChangesAsync(ct);
         return Results.Ok(ToSummaryResponse(campaign));
+    }
+
+    // ── PUT /api/v1/campaigns/{id}/tax ──────────────────────────────────────
+    // Which ITaxProvider prices this campaign's carts, plus that provider's settings. Credentials
+    // are not part of this — they go in the tenant credential store (see AvalaraTaxProvider).
+
+    private static async Task<IResult> UpdateTax(
+        Guid id, UpdateCampaignTaxRequest req,
+        ICampaignRepository repo, TenantContext tenantContext, CancellationToken ct)
+    {
+        if (!tenantContext.HasTenant) return Results.Unauthorized();
+        var campaign = await repo.GetByIdAsync(id, ct);
+        if (campaign is null) return Results.NotFound();
+
+        var provider = req.TaxProvider?.Trim() ?? TaxProviderKey.FlatRate;
+        if (!TaxProviderKey.IsValid(provider))
+            return Results.BadRequest(new { error = $"Unknown tax provider '{provider}'." });
+
+        var settingsJson = req.TaxSettings is { ValueKind: System.Text.Json.JsonValueKind.Object } s ? s.GetRawText() : null;
+        var validationError = ValidateTaxSettings(provider, settingsJson);
+        if (validationError is not null) return Results.BadRequest(new { error = validationError });
+
+        campaign.ConfigureTax(provider, settingsJson);
+        await repo.SaveChangesAsync(ct);
+        return Results.Ok(ToSummaryResponse(campaign));
+    }
+
+    private static string? ValidateTaxSettings(string provider, string? settingsJson)
+    {
+        if (settingsJson is null) return null;
+        try
+        {
+            if (provider == TaxProviderKey.FlatRate)
+            {
+                var rates = ContactConnection.Infrastructure.Commerce.FlatRateTaxSettings.Parse(settingsJson).Rates ?? [];
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var r in rates)
+                {
+                    if (!ContactConnection.Domain.ValueObjects.UsStates.IsValid(r.State?.Trim()))
+                        return $"'{r.State}' is not a valid US state code.";
+                    if (!seen.Add(r.State!.Trim()))
+                        return $"{r.State.Trim().ToUpperInvariant()} is listed more than once.";
+                    if (r.Rate < 0 || r.Rate >= 1)
+                        return $"The rate for {r.State.Trim().ToUpperInvariant()} must be a decimal fraction between 0 and 1 (e.g. 0.0725 for 7.25%).";
+                    if (r.Fee is { } fee)
+                    {
+                        if (string.IsNullOrWhiteSpace(fee.Description))
+                            return $"The {r.State.Trim().ToUpperInvariant()} fee needs a description (e.g. \"Colorado Retail Delivery Fee\").";
+                        if (fee.Amount < 0 || fee.Amount >= 1000 || fee.MinTaxableSubtotal < 0)
+                            return $"The {r.State.Trim().ToUpperInvariant()} fee amount and minimum must be non-negative.";
+                    }
+                }
+            }
+            else if (provider == TaxProviderKey.Avalara)
+            {
+                var avalara = System.Text.Json.JsonSerializer.Deserialize<ContactConnection.Infrastructure.Commerce.AvalaraTaxSettings>(
+                    settingsJson, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                var feeStates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var f in avalara?.FeeLines ?? [])
+                {
+                    if (!ContactConnection.Domain.ValueObjects.UsStates.IsValid(f.State?.Trim()))
+                        return $"Fee line state '{f.State}' is not a valid US state code.";
+                    if (string.IsNullOrWhiteSpace(f.TaxCode) || string.IsNullOrWhiteSpace(f.Description))
+                        return $"The {f.State.Trim().ToUpperInvariant()} fee line needs an Avalara tax code and a description.";
+                    if (!feeStates.Add($"{f.State.Trim()}|{f.TaxCode.Trim()}"))
+                        return $"The {f.State.Trim().ToUpperInvariant()} fee line {f.TaxCode} is listed more than once.";
+                }
+            }
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            return $"Invalid tax settings: {ex.Message}";
+        }
+        return null;
+    }
+
+    private static System.Text.Json.Nodes.JsonNode? ParseTaxSettings(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try { return System.Text.Json.Nodes.JsonNode.Parse(json); }
+        catch (System.Text.Json.JsonException) { return null; }
     }
 
     // ── PUT /api/v1/campaigns/{id}/flow ─────────────────────────────────────
@@ -405,6 +487,7 @@ public static class CampaignsEndpoints
         c.RecordingMode, c.ConsentModel, c.RecordingRequired, c.RecordStereo,
         c.RecordingBeepEnabled, c.AutoMaskOnHold, c.RecordingRetentionDays,
         c.SensitiveDataRetentionMinutes,
+        c.TaxProvider, TaxSettings = ParseTaxSettings(c.TaxSettings),
         Client = c.Client is null ? null : new { c.Client.Id, c.Client.Name },
         c.CreatedAt, c.UpdatedAt
     };
@@ -419,6 +502,7 @@ public static class CampaignsEndpoints
         c.RecordingMode, c.ConsentModel, c.RecordingRequired, c.RecordStereo,
         c.RecordingBeepEnabled, c.AutoMaskOnHold, c.RecordingRetentionDays,
         c.SensitiveDataRetentionMinutes,
+        c.TaxProvider, TaxSettings = ParseTaxSettings(c.TaxSettings),
         Client = c.Client is null ? null : new { c.Client.Id, c.Client.Name },
         PhoneNumbers     = c.PhoneNumbers.Select(p => new { p.Id, p.Number, p.Label, p.IsActive, p.FlowId, p.TelephonyFlowId }),
         AgentAssignments = c.AgentAssignments.Where(a => a.IsActive).Select(ToAssignmentResponse),
@@ -461,6 +545,7 @@ public record UpdateCampaignRecordingRequest(
     bool AutoMaskOnHold = false,
     int RecordingRetentionDays = 90);
 public record UpdateCampaignSensitiveDataRetentionRequest(int? SensitiveDataRetentionMinutes = null);
+public record UpdateCampaignTaxRequest(string? TaxProvider, System.Text.Json.JsonElement? TaxSettings = null);
 public record SetCampaignFlowRequest(Guid FlowId);
 public record AssignAgentRequest(Guid AgentId, int Proficiency = 50);
 public record BulkAssignAgentsRequest(List<BulkAgentEntry> Agents);

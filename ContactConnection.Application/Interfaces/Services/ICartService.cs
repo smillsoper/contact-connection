@@ -78,4 +78,12 @@ public interface ICartService
     /// of range, or <paramref name="quantity"/> is less than 1 (use RemoveItemAsync to remove).
     /// </summary>
     Task<CartOperationResult> UpdateQuantityAsync(Guid callRecordId, int itemIndex, int quantity, CancellationToken ct = default);
+
+    /// <summary>
+    /// Re-prices the call's current cart without changing its items — for when something the
+    /// price depends on changed outside the cart, e.g. a new shipping address (tax). No-op success
+    /// when the call has no cart. Throws <see cref="InvalidOperationException"/> if the call record
+    /// doesn't exist.
+    /// </summary>
+    Task<CartOperationResult> RecalculateAsync(Guid callRecordId, CancellationToken ct = default);
 }

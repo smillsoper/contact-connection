@@ -13,7 +13,7 @@ namespace ContactConnection.Infrastructure.Tests.FlowEngine.NodeHandlers;
 /// </summary>
 public class AddressNodeHandlerTests
 {
-    private static AddressNodeHandler NewHandler() => new(new VariableResolver());
+    private static AddressNodeHandler NewHandler() => new(new VariableResolver(), new Moq.Mock<ContactConnection.Application.Interfaces.Services.ICallAddressService>().Object);
 
     private static FlowExecutionContext Ctx() => new()
     {
@@ -45,6 +45,40 @@ public class AddressNodeHandlerTests
 
     private static JsonObject StoredAddress(FlowExecutionContext ctx) =>
         JsonNode.Parse(ctx.FlowVars["billing_address"])!.AsObject();
+
+    // ── addressRole: saving onto the call record ─────────────────────────────
+
+    [Fact]
+    public async Task AddressRole_Shipping_SavesNormalizedAddressToCallRecord()
+    {
+        var addresses = new Moq.Mock<ContactConnection.Application.Interfaces.Services.ICallAddressService>();
+        var handler = new AddressNodeHandler(new VariableResolver(), addresses.Object);
+        var node = Node();
+        node["addressRole"] = "shipping";
+        var ctx = Ctx();
+
+        await handler.ExecuteAsync(node, ctx, agentInput: Submission(isVerified: "true"), agentTransition: "");
+
+        addresses.Verify(a => a.SetAsync(ctx.CallRecordId, "shipping",
+            Moq.It.Is<ContactConnection.Domain.ValueObjects.AddressData>(d =>
+                d.Street == "123 Main St" && d.State == "OR" && d.Zip == "97477" && d.IsVerified && d.FirstName == "John"),
+            Moq.It.IsAny<CancellationToken>()), Moq.Times.Once);
+    }
+
+    [Fact]
+    public async Task NoAddressRole_NeverTouchesCallRecord_AndFailedValidationNeverSaves()
+    {
+        var addresses = new Moq.Mock<ContactConnection.Application.Interfaces.Services.ICallAddressService>(Moq.MockBehavior.Strict);
+        var handler = new AddressNodeHandler(new VariableResolver(), addresses.Object);
+
+        await handler.ExecuteAsync(Node(), Ctx(), agentInput: Submission(), agentTransition: "");
+
+        var node = Node();
+        node["addressRole"] = "billing";
+        var missingCity = new JsonObject { ["firstName"] = "J", ["lastName"] = "D", ["address1"] = "1 A St", ["zip"] = "97477", ["state"] = "OR" };
+        var result = await handler.ExecuteAsync(node, Ctx(), agentInput: missingCity.ToJsonString(), agentTransition: "");
+        Assert.Null(result.NextNodeId); // stayed on the node with a validation error; strict mock proves no save
+    }
 
     [Fact]
     public async Task FirstDisplay_ReturnsFormState_DoesNotAdvance()

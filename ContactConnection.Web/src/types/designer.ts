@@ -53,6 +53,8 @@ export interface NodeData extends Record<string, unknown> {
   useValidation?: boolean
   showMiddleInitial?: boolean
   showCompany?: boolean
+  /** Address node: also save onto the call record — none | billing | shipping | billing_and_shipping. */
+  addressRole?: string
   requiredFields?: string[]
   fieldScripts?: Record<string, string>
   // section

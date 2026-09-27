@@ -3,6 +3,7 @@ using System;
 using ContactConnection.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace ContactConnection.Infrastructure.Migrations.TenantDb
 {
     [DbContext(typeof(TenantDbContext))]
-    partial class TenantDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260927165242_AddCampaignTaxSettings")]
+    partial class AddCampaignTaxSettings
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1855,11 +1858,6 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .HasColumnType("boolean")
                         .HasColumnName("shipping_exempt");
 
-                    b.Property<string>("TaxCode")
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
-                        .HasColumnName("tax_code");
-
                     b.Property<bool>("TaxExempt")
                         .HasColumnType("boolean")
                         .HasColumnName("tax_exempt");
@@ -2521,11 +2519,6 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
                         .HasColumnName("sku");
-
-                    b.Property<string>("TaxCode")
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
-                        .HasColumnName("tax_code");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")

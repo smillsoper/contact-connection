@@ -271,7 +271,10 @@ duplicate behavior against the sandbox before relying on it.
 |---|---|
 | Authorize.Net auth-only, `Auth_TransID` | `authorize_payment` node → `{{flow.<out>.gatewayTransactionId}}` (Session 161) |
 | Avalara Tax integration | new `"avalara"` `ITaxProvider` (`CartDocument.TaxProvider = "avalara"`), returning per-line tax + `JurisdictionTax` details |
-| `Prod_Tax` / `Shipping Tax` / Retail Delivery Fee | per-line tax + shipping tax + fee lines on `CartDocument` |
+| `Prod_Tax` / `Shipping Tax` | `CartItem.SalesTax` (per line) + `CartDocument.ShippingTax` |
+| Retail Delivery Fee cart item + `OverrideTaxCode` flag | **No placeholder cart item.** Campaign Avalara setting `feeLines: [{state:"CO", taxCode:"OF400000", description:"Colorado Retail Delivery Fee", code:"CO_RDF"}]` — the provider adds the line itself when ship-to is CO; its "tax" comes back as a `CartFee` in `CartDocument.Fees` (not `SalesTax`), included in `CartTotal`. Order API: send each fee in `additional_fees_or_taxes`; `taxes` = `SalesTax` (fees already excluded). Flat-rate campaigns get the same via a per-state fee. |
+| offer flag `OverrideTaxCode` | `Product.TaxCode`, overridable by `Offer.TaxCode`; snapshotted as `CartItem.TaxCode` |
+| `set_variable` / "ship to billing?" | `{{call_record.shipping_address}}` = `{{flow.billing_address}}` saves to the call record |
 | Life Seasons - Order integration | Order API submission step (API Definition or dedicated node), idempotent per call record |
 | `LIFSEA-########` counter | per-client order-number sequence |
 | per-client settings | tenant credential store, campaign → client → tenant cascade |

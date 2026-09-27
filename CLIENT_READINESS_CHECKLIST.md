@@ -531,8 +531,12 @@ Agreed architecture: client order APIs are **API Definition configuration with L
 bodies**, not per-client C# adapters; tax vendors (Avalara) are C# `ITaxProvider`s selected per
 campaign and auto-called on every cart change. Build order: (1) per-client order-number sequence +
 Authorize.Net `invoiceNumber`/`refId` — **built S162** (1114 tests pass, not yet sandbox-verified);
-(2) Avalara provider + per-campaign selection (prerequisite: address nodes must write
-`CallRecord.Addresses`, which nothing does today); (3) Liquid bodies + response-body success
+(2) Avalara provider + per-campaign selection — **built S163**: address node "Save to call record as"
+role + `set_variable` targets `{{call_record.billing_address}}`/`{{call_record.shipping_address}}`;
+per-campaign tax provider (flat = per-state rate table w/ optional "tax shipping" + state fee; Avalara
+with tax codes, ship-from, credential cascade, state fee lines e.g. CO Retail Delivery Fee OF400000);
+cart `Fees` separate from `SalesTax`; product tax code + offer override; tax status shown to agents.
+Not yet verified against a real Avalara sandbox (no credentials); (3) Liquid bodies + response-body success
 conditions + submit-once guard; (4) Life Seasons Order definition as configuration.
 
 **Next up:** Build the Order API submission step and an `"avalara"` `ITaxProvider` per that spec

@@ -143,7 +143,7 @@ public partial class VariableResolver : IVariableResolver
 
         return ns switch
         {
-            "call_record" => context.CallRecord.GetValueOrDefault(key),
+            "call_record" => ResolveDictVar(context.CallRecord, key),
             "caller"      => context.Caller.GetValueOrDefault(key),
             "agent"       => context.Agent.GetValueOrDefault(key),
             "tenant"      => context.Tenant.GetValueOrDefault(key),

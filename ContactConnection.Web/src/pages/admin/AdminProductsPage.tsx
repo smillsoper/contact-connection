@@ -20,6 +20,7 @@ interface EditorState {
   decrementOnOrder: boolean
   minimumQty: number
   searchable: boolean
+  taxCode: string
 }
 
 function ProductEditorModal({
@@ -41,6 +42,7 @@ function ProductEditorModal({
   const [decrementOnOrder, setDecrementOnOrder] = useState(product?.inventory.decrementOnOrder ?? false)
   const [minimumQty, setMinimumQty] = useState(product?.inventory.minimumQty ?? 0)
   const [searchable, setSearchable] = useState(product?.searchable ?? true)
+  const [taxCode, setTaxCode] = useState(product?.taxCode ?? '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -54,7 +56,7 @@ function ProductEditorModal({
     setSaving(true)
     try {
       await onSave(sku.trim(), description.trim(), {
-        weight, inventoryStatus, qtyAvailable, decrementOnOrder, minimumQty, searchable,
+        weight, inventoryStatus, qtyAvailable, decrementOnOrder, minimumQty, searchable, taxCode: taxCode.trim(),
       })
       onClose()
     } catch (e) {
@@ -116,6 +118,19 @@ function ProductEditorModal({
                 className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm"
               />
             </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1">Tax code</label>
+            <input
+              value={taxCode}
+              onChange={(e) => setTaxCode(e.target.value)}
+              placeholder="e.g. PF050714 — blank = campaign default"
+              className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              The tax provider's product category code (used by Avalara). Individual offers can override it.
+            </p>
           </div>
 
           <label className="flex items-center gap-3 cursor-pointer">
@@ -206,6 +221,7 @@ export default function AdminProductsPage() {
         inventoryStatus: data.inventoryStatus,
         qtyAvailable: data.qtyAvailable,
         decrementOnOrder: data.decrementOnOrder,
+        taxCode: data.taxCode || null,
       })
     } else if (editing) {
       await productsApi.update(editing.id, {
@@ -215,6 +231,7 @@ export default function AdminProductsPage() {
         decrementOnOrder: data.decrementOnOrder,
         minimumQty: data.minimumQty,
         searchable: data.searchable,
+        taxCode: data.taxCode || null,
       })
     }
     await load()

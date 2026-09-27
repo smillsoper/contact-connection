@@ -21,6 +21,7 @@ interface EditorState {
   shippingExempt: boolean
   clientId: string
   campaignId: string
+  taxCode: string
 }
 
 function OfferEditorModal({
@@ -41,6 +42,7 @@ function OfferEditorModal({
   const [shipping, setShipping] = useState(offer?.shipping ?? 0)
   const [taxExempt, setTaxExempt] = useState(offer?.taxExempt ?? false)
   const [shippingExempt, setShippingExempt] = useState(offer?.shippingExempt ?? false)
+  const [taxCode, setTaxCode] = useState(offer?.taxCode ?? '')
   const [clientId, setClientId] = useState(offer?.clientId ?? '')
   const [campaignId, setCampaignId] = useState(offer?.campaignId ?? '')
   const [saving, setSaving] = useState(false)
@@ -60,7 +62,7 @@ function OfferEditorModal({
 
     setSaving(true)
     try {
-      await onSave({ name: name.trim(), fullPrice, shipping, taxExempt, shippingExempt, clientId, campaignId })
+      await onSave({ name: name.trim(), fullPrice, shipping, taxExempt, shippingExempt, clientId, campaignId, taxCode: taxCode.trim() })
       onClose()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Save failed.')
@@ -118,6 +120,17 @@ function OfferEditorModal({
               <input type="checkbox" checked={shippingExempt} onChange={(e) => setShippingExempt(e.target.checked)} className="accent-indigo-600" />
               <span className="text-sm text-gray-300">Shipping exempt</span>
             </label>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1">Tax code override</label>
+            <input
+              value={taxCode}
+              onChange={(e) => setTaxCode(e.target.value)}
+              disabled={taxExempt}
+              placeholder={taxExempt ? 'Not used — offer is tax exempt' : "Blank = the product's tax code"}
+              className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm disabled:opacity-50"
+            />
           </div>
 
           <div>
@@ -202,12 +215,14 @@ export default function AdminProductOffersPage() {
         productId, name: data.name, fullPrice: data.fullPrice, shipping: data.shipping,
         taxExempt: data.taxExempt, shippingExempt: data.shippingExempt,
         clientId: data.clientId || null, campaignId: data.campaignId || null,
+        taxCode: data.taxCode || null,
       })
     } else if (editing) {
       await offersApi.update(editing.id, {
         name: data.name, fullPrice: data.fullPrice, shipping: data.shipping,
         taxExempt: data.taxExempt, shippingExempt: data.shippingExempt,
         clientId: data.clientId || null, campaignId: data.campaignId || null,
+        taxCode: data.taxCode || null,
       })
     }
     await load()

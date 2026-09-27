@@ -43,7 +43,7 @@ public class SetVariableNodeHandlerTests
     {
         var ctx = Ctx();
         var store = new Mock<ISharedCallVariableStore>();
-        var handler = new SetVariableNodeHandler(new VariableResolver(), store.Object);
+        var handler = new SetVariableNodeHandler(new VariableResolver(), store.Object, Mock.Of<ContactConnection.Application.Interfaces.Services.ICallAddressService>());
 
         var result = await handler.ExecuteAsync(
             Node(("shared.CC_Capture_Success", "true")), ctx, agentInput: null, agentTransition: "");
@@ -58,7 +58,7 @@ public class SetVariableNodeHandlerTests
     {
         var ctx = Ctx();
         var store = new Mock<ISharedCallVariableStore>();
-        var handler = new SetVariableNodeHandler(new VariableResolver(), store.Object);
+        var handler = new SetVariableNodeHandler(new VariableResolver(), store.Object, Mock.Of<ContactConnection.Application.Interfaces.Services.ICallAddressService>());
 
         await handler.ExecuteAsync(
             Node(("shared.CC_Capture_Success", "true")), ctx, agentInput: null, agentTransition: "");
@@ -72,7 +72,7 @@ public class SetVariableNodeHandlerTests
     {
         var ctx = Ctx();
         var store = new Mock<ISharedCallVariableStore>();
-        var handler = new SetVariableNodeHandler(new VariableResolver(), store.Object);
+        var handler = new SetVariableNodeHandler(new VariableResolver(), store.Object, Mock.Of<ContactConnection.Application.Interfaces.Services.ICallAddressService>());
 
         await handler.ExecuteAsync(
             Node(("orderTotal", "19.99")), ctx, agentInput: null, agentTransition: "");
@@ -87,7 +87,7 @@ public class SetVariableNodeHandlerTests
         var ctx = Ctx();
         ctx.SharedVars["CC_Capture_Success"] = "true";
         var store = new Mock<ISharedCallVariableStore>();
-        var handler = new SetVariableNodeHandler(new VariableResolver(), store.Object);
+        var handler = new SetVariableNodeHandler(new VariableResolver(), store.Object, Mock.Of<ContactConnection.Application.Interfaces.Services.ICallAddressService>());
 
         await handler.ExecuteAsync(
             Node(("disposition", "{{shared.CC_Capture_Success}}")), ctx, agentInput: null, agentTransition: "");
