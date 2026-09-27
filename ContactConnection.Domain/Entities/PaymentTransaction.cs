@@ -31,6 +31,11 @@ public class PaymentTransaction
     public string? CardLast4 { get; private set; }
     public string? CardType { get; private set; }
 
+    /// <summary>The call's order number sent to the gateway as its invoice number/reference, if
+    /// the client has an OrderNumberSequence — ties the gateway-side transaction back to the order
+    /// and is part of Authorize.Net's duplicate-transaction check.</summary>
+    public string? OrderNumber { get; private set; }
+
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? VoidedAt { get; private set; }
 
@@ -42,7 +47,7 @@ public class PaymentTransaction
         string gateway, decimal amount, string status,
         string? gatewayTransactionId, string? authCode, string? responseCode,
         string? responseReasonText, string? avsResultCode, string? cvvResultCode,
-        string? cardLast4, string? cardType) => new()
+        string? cardLast4, string? cardType, string? orderNumber = null) => new()
     {
         Id                   = id,
         TenantId             = tenantId,
@@ -61,6 +66,7 @@ public class PaymentTransaction
         CvvResultCode        = cvvResultCode,
         CardLast4            = cardLast4,
         CardType             = cardType,
+        OrderNumber          = orderNumber,
         CreatedAt            = DateTimeOffset.UtcNow,
     };
 

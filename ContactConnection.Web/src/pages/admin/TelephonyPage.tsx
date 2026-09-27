@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import AdminShell from '../../components/admin/AdminShell'
 import SearchableSelect from '../../components/SearchableSelect'
 import {
   listClients, createClient, activateClient, deactivateClient,
+  getOrderNumberSequence, putOrderNumberSequence, deleteOrderNumberSequence,
   listCampaigns, createCampaign, activateCampaign, pauseCampaign, deactivateCampaign,
   listPhoneNumbers, createPhoneNumber, activatePhoneNumber, deactivatePhoneNumber,
   setPhoneNumberFlow, removePhoneNumberFlow,
@@ -37,6 +38,146 @@ const DIRECTION_COLORS: Record<string, string> = {
   outbound: 'bg-violet-900/50 text-violet-400',
 }
 
+// ── Order number sequence (per client) ───────────────────────────────────────
+
+// Must match OrderNumberSequence.MaxFormattedLength on the server — Authorize.Net's cap on
+// invoiceNumber/refId, the tightest limit of any consumer of the number.
+const ORDER_NUMBER_MAX_LENGTH = 20
+
+function formatOrderNumber(prefix: string, suffix: string, width: number, value: number) {
+  return `${prefix}${String(value).padStart(width, '0')}${suffix}`
+}
+
+function OrderNumberSequencePanel({ clientId }: { clientId: string }) {
+  const [loading, setLoading] = useState(true)
+  const [configured, setConfigured] = useState(false)
+  const [savedNextValue, setSavedNextValue] = useState<number | null>(null)
+  const [prefix, setPrefix] = useState('')
+  const [suffix, setSuffix] = useState('')
+  const [width, setWidth] = useState(8)
+  const [nextValue, setNextValue] = useState(1)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [savedMsg, setSavedMsg] = useState<string | null>(null)
+  const [confirmRemove, setConfirmRemove] = useState(false)
+
+  useEffect(() => {
+    getOrderNumberSequence(clientId)
+      .then((seq) => {
+        setConfigured(seq.configured)
+        if (seq.configured) {
+          setPrefix(seq.prefix); setSuffix(seq.suffix); setWidth(seq.width)
+          setNextValue(seq.nextValue); setSavedNextValue(seq.nextValue)
+        }
+      })
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false))
+  }, [clientId])
+
+  const preview = formatOrderNumber(prefix.trim(), suffix.trim(), width, nextValue)
+  const tooLong = preview.length > ORDER_NUMBER_MAX_LENGTH
+  const lowering = savedNextValue !== null && nextValue < savedNextValue
+
+  async function handleSave() {
+    setSaving(true); setError(null); setSavedMsg(null)
+    try {
+      const seq = await putOrderNumberSequence(clientId, {
+        prefix: prefix.trim(), suffix: suffix.trim(), width, nextValue,
+      })
+      if (seq.configured) {
+        setConfigured(true); setSavedNextValue(seq.nextValue)
+        setSavedMsg(`Saved — next order number: ${seq.nextOrderNumber}`)
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Save failed.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleRemove() {
+    setSaving(true); setError(null); setSavedMsg(null)
+    try {
+      await deleteOrderNumberSequence(clientId)
+      setConfigured(false); setSavedNextValue(null); setConfirmRemove(false)
+      setSavedMsg('Order numbers turned off for this client.')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Remove failed.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) return <p className="text-gray-400 text-xs">Loading…</p>
+
+  const inputCls = 'bg-gray-800 text-white rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500'
+
+  return (
+    <div>
+      <p className="text-gray-300 text-sm font-medium">Order numbers</p>
+      <p className="text-gray-500 text-xs mb-3">
+        Each call that places an order gets the next number (assigned at payment authorization).
+        It is sent to the payment gateway as the invoice number and is available to order APIs as{' '}
+        <code className="text-gray-400">{'{{call_record.order_number}}'}</code>.
+        {!configured && ' Not configured — no order numbers are generated for this client.'}
+      </p>
+      <div className="flex items-end gap-3 flex-wrap">
+        <label className="text-xs text-gray-400">Prefix
+          <input value={prefix} onChange={(e) => setPrefix(e.target.value)} placeholder="e.g. LIFSEA-"
+            className={`${inputCls} block mt-1 w-32`} />
+        </label>
+        <label className="text-xs text-gray-400">Digits
+          <input type="number" min={1} max={18} value={width}
+            onChange={(e) => setWidth(Math.max(1, Math.min(18, Number(e.target.value) || 1)))}
+            className={`${inputCls} block mt-1 w-20`} />
+        </label>
+        <label className="text-xs text-gray-400">Suffix
+          <input value={suffix} onChange={(e) => setSuffix(e.target.value)} placeholder="optional"
+            className={`${inputCls} block mt-1 w-24`} />
+        </label>
+        <label className="text-xs text-gray-400">Next number
+          <input type="number" min={0} value={nextValue}
+            onChange={(e) => setNextValue(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+            className={`${inputCls} block mt-1 w-36`} />
+        </label>
+        <div className="text-xs text-gray-400">Preview
+          <div className={`mt-1 px-3 py-1.5 rounded-lg font-mono text-sm ${tooLong ? 'bg-red-900/30 text-red-300' : 'bg-gray-800/60 text-emerald-300'}`}>
+            {preview}
+          </div>
+        </div>
+        <button onClick={handleSave} disabled={saving || tooLong}
+          className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg px-4 py-1.5 text-sm font-medium transition-colors">
+          {saving ? 'Saving…' : configured ? 'Save' : 'Turn on'}
+        </button>
+        {configured && !confirmRemove && (
+          <button onClick={() => setConfirmRemove(true)} className="text-gray-500 hover:text-red-400 text-xs">
+            Turn off
+          </button>
+        )}
+        {configured && confirmRemove && (
+          <span className="text-xs text-gray-400">
+            Stop generating order numbers?{' '}
+            <button onClick={handleRemove} className="text-red-400 hover:text-red-300 font-medium">Yes, turn off</button>{' '}
+            <button onClick={() => setConfirmRemove(false)} className="text-gray-500 hover:text-white">Cancel</button>
+          </span>
+        )}
+      </div>
+      {tooLong && (
+        <p className="text-red-400 text-xs mt-2">
+          Order numbers can be at most {ORDER_NUMBER_MAX_LENGTH} characters — payment gateways reject longer invoice numbers.
+        </p>
+      )}
+      {lowering && !tooLong && (
+        <p className="text-amber-400 text-xs mt-2">
+          The next number is lower than the current one ({savedNextValue}) — numbers already used may be issued again.
+        </p>
+      )}
+      {error && <p className="text-red-400 text-xs mt-2">{error}</p>}
+      {savedMsg && <p className="text-emerald-400 text-xs mt-2">{savedMsg}</p>}
+    </div>
+  )
+}
+
 // ── Clients Tab ───────────────────────────────────────────────────────────────
 
 function ClientsTab() {
@@ -44,6 +185,7 @@ function ClientsTab() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [orderNumbersFor, setOrderNumbersFor] = useState<string | null>(null)
 
   const [showCreate, setShowCreate] = useState(false)
   const [newName, setNewName] = useState('')
@@ -164,7 +306,8 @@ function ClientsTab() {
             </thead>
             <tbody>
               {visible.map((c) => (
-                <tr key={c.id} className="border-b border-gray-800 last:border-0 hover:bg-gray-800/30">
+                <Fragment key={c.id}>
+                <tr className="border-b border-gray-800 last:border-0 hover:bg-gray-800/30">
                   <td className="px-4 py-3 text-white font-medium">{c.name}</td>
                   <td className="px-4 py-3 text-gray-400">{c.accountNumber ?? <span className="text-gray-600">—</span>}</td>
                   <td className="px-4 py-3 text-gray-400">{c.campaigns.length}</td>
@@ -173,7 +316,13 @@ function ClientsTab() {
                       {c.status}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-4 py-3 text-right whitespace-nowrap">
+                    <button
+                      onClick={() => setOrderNumbersFor((cur) => cur === c.id ? null : c.id)}
+                      className="text-gray-400 hover:text-white text-xs font-medium mr-4"
+                    >
+                      {orderNumbersFor === c.id ? 'Close' : 'Order numbers'}
+                    </button>
                     <button
                       onClick={() => handleToggleActive(c)}
                       className="text-indigo-400 hover:text-indigo-300 text-xs font-medium"
@@ -182,6 +331,14 @@ function ClientsTab() {
                     </button>
                   </td>
                 </tr>
+                {orderNumbersFor === c.id && (
+                  <tr className="border-b border-gray-800 bg-gray-950/40">
+                    <td colSpan={5} className="px-4 py-4">
+                      <OrderNumberSequencePanel clientId={c.id} />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>

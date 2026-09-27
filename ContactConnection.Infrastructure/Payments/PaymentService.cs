@@ -16,7 +16,8 @@ public class PaymentService(
     ICallRecordRepository callRecords,
     ISensitiveDataProtector sensitiveData,
     IPaymentGatewayClientFactory gatewayClients,
-    IPaymentTransactionRepository transactions) : IPaymentService
+    IPaymentTransactionRepository transactions,
+    IOrderNumberService orderNumbers) : IPaymentService
 {
     public async Task<PaymentAuthResult> AuthorizeAsync(
         Guid callRecordId, string provider,
@@ -58,7 +59,9 @@ public class PaymentService(
                 "No amount to authorize — cart is empty and no fixed amount was configured.");
 
         var client = gatewayClients.Resolve(provider);
-        var result = await client.AuthorizeAsync(record.CampaignId, record.ClientId, amount, cardNumber, expirationMMYY, cvv, zip, ct);
+        var orderNumber = await orderNumbers.GetOrAssignAsync(record, ct);
+        var result = await client.AuthorizeAsync(
+            record.CampaignId, record.ClientId, amount, cardNumber, expirationMMYY, cvv, zip, orderNumber, ct);
 
         var transaction = PaymentTransaction.Create(
             id: Guid.NewGuid(),
@@ -76,7 +79,8 @@ public class PaymentService(
             avsResultCode: result.AvsResultCode,
             cvvResultCode: result.CvvResultCode,
             cardLast4: result.CardLast4,
-            cardType: result.CardType);
+            cardType: result.CardType,
+            orderNumber: orderNumber);
 
         await transactions.AddAsync(transaction, ct);
         await transactions.SaveChangesAsync(ct);
@@ -93,7 +97,7 @@ public class PaymentService(
 
         return new PaymentAuthResult(
             result.Succeeded, result.Status, transaction.Id, result.GatewayTransactionId,
-            result.AuthCode, result.ResponseReasonText);
+            result.AuthCode, result.ResponseReasonText, orderNumber);
     }
 
     public async Task<PaymentVoidResult> VoidMostRecentAsync(Guid callRecordId, CancellationToken ct = default)

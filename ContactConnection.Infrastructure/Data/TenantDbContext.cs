@@ -60,6 +60,7 @@ public class TenantDbContext : DbContext
     public DbSet<WebhookEvent> WebhookEvents => Set<WebhookEvent>();
     public DbSet<StoredValue> StoredValues => Set<StoredValue>();
     public DbSet<PaymentTransaction> PaymentTransactions => Set<PaymentTransaction>();
+    public DbSet<OrderNumberSequence> OrderNumberSequences => Set<OrderNumberSequence>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -108,6 +109,7 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new WebhookEventConfiguration());
         modelBuilder.ApplyConfiguration(new StoredValueConfiguration());
         modelBuilder.ApplyConfiguration(new PaymentTransactionConfiguration());
+        modelBuilder.ApplyConfiguration(new OrderNumberSequenceConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 

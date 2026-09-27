@@ -32,6 +32,7 @@ public class PaymentTransactionConfiguration : IEntityTypeConfiguration<PaymentT
 
         builder.Property(t => t.CardLast4).HasColumnName("card_last4").HasMaxLength(4);
         builder.Property(t => t.CardType).HasColumnName("card_type").HasMaxLength(30);
+        builder.Property(t => t.OrderNumber).HasColumnName("order_number").HasMaxLength(20);
 
         builder.Property(t => t.CreatedAt).HasColumnName("created_at");
         builder.Property(t => t.VoidedAt).HasColumnName("voided_at");

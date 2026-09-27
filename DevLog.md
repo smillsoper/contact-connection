@@ -171,6 +171,7 @@
 | 159 | 2026-09-23 | 10:08 AM PDT | 11:41 AM PDT | 93 min | ~15737 min |
 | 160 | 2026-09-23 – 2026-09-24 | 11:41 AM PDT (9/23) | 5:28 PM PDT (9/24) | ~1787 min (~29h47m — start time is Session 159's end time per Stephen's instruction, not a continuously-worked span) | ~17524 min |
 | 161 | 2026-09-24 – 2026-09-25 | 6:24 PM PDT (9/24) | 5:17 PM PDT (9/25) | 383 min (156 min 9/24 6:24–9:00 PM + gap, resumed 9/25 1:30 PM, 227 min to 5:17 PM) | ~17907 min |
+| 162 | 2026-09-26 | 6:49 PM PDT | 8:10 PM PDT | 81 min | ~17988 min |
 
 ---
 
@@ -10299,3 +10300,111 @@ verify against): the jump dropdown actually rendering, and the stale-cart/multi-
 - Stephen still needs to visually confirm in the browser: the jump-to-section dropdown on script
   nodes, the cart clearing after a flow ends, and the cart switching correctly when toggling between
   2+ open flow-preview tabs.
+
+## Session 162
+
+**Date:** 2026-09-26
+**Start:** 6:49 PM PDT
+**End:** 8:10 PM PDT
+**Duration:** 81 minutes
+**Total Duration:** ~17988 minutes
+
+### Focus
+
+Unblock the Life Seasons Order API (Tier 1 payment gateway item). Stephen got the old TMS PC's data
+drive mounted as `X:`, which holds the final CRMPro production database export and the Life Seasons
+campaign script sources. Recovered the full Order API, Avalara tax and Authorize.Net integration
+contracts from them, agreed on the architecture for rebuilding them, and built step 1 of 4.
+
+### Legacy data recovery (CRMPro → spec)
+
+- `X:\Backup_Data\CRMPro_DB\CRMPro.sql` (2.9 GB, plus `CRMProTraining.sql`) is a pg_dump
+  **custom-format** archive, not plain SQL. Source server PG 15.2 but dumped by pg_dump 18.3, so it
+  needs `pg_restore` ≥ 18 (the local 9.6 install and dev `postgres:16` are both too old). Restored
+  only the needed tables into a throwaway `postgres:18` container.
+- `CC_Processors` is the base for **all 155** CRMPro API integrations (misnamed — not just card
+  processors). Each `WebService` blob is base64 text of a .NET BinaryFormatter `clsWebService`: URL,
+  headers, and embedded VB.NET that builds the request payload and post-processes the response.
+  Per-client settings live in `ClientProcessors.ProcessorFields`; the wire DTO classes are in
+  `GlobalClasses.Code` (`LifeSeasons` and `AvalaraTaxClass` namespaces). Life Seasons, LLC used:
+  Life Seasons - Order, Avalara Tax, USPS, Dial800 New, Advantone/DialTower Caller Info.
+- NeuroQ main script (`SCRIPT_PROD_NEURO Q TV SCRIPT NEW.vb` + `.designer.resources`): shows the
+  real call-time sequence — Avalara on the offer step (tax codes `PF050714` / `FR020200`, ship-from
+  Kaysville UT, Colorado Retail Delivery Fee SKU), auth-only via an **embedded** `wsAuthNet` control
+  (not the `CC_Processors` Authorize.Net entry), `LIFSEA-` + 8-digit per-client order number, then
+  the Order API with a submit-once guard. OrderLogix/Konnective code in the script is dead
+  (earlier era).
+- Found a latent CRMPro bug: `DoAuthNet` stored the order number as `AuthOrderNum` but the embedded
+  Authorize.Net control read `RefOrderNum` (never set), so `refId`/`poNumber` likely went out empty.
+  Also, per Authorize.Net's docs, `refId`/`poNumber` aren't part of its duplicate-transaction check
+  anyway — `order.invoiceNumber` is.
+- Full sanitized contract written to **`docs/integrations/life-seasons-crmpro-legacy.md`** (Order
+  API request/response incl. its mixed snake_case/PascalCase property casing, Avalara request/
+  response + how results were applied, Authorize.Net embedded request, mapping to ContactConnection).
+- **Security decisions (Stephen):** no credential from the TMS backup is used anywhere (presumed
+  revoked; Clint supplies real test values later) — documented structure only, never values.
+  Credential-bearing scratch copies deleted. The CRMPro DB is **mounted on demand only**: the
+  `crmpro-ref` container AND its anonymous data volume were removed at session end
+  (`docker rm` alone leaves the volume behind).
+
+### Architecture decisions
+
+- **Client order APIs = API Definition configuration, not per-client C# adapters.** Stephen didn't
+  want every new client's order API to need a platform release. API Definition endpoints will get an
+  opt-in **Liquid** request-body mode (Fluid library, sandboxed) for payloads needing loops/
+  conditionals/math. Existing `{{...}}` templates unaffected; the existing `order_submit` sub-type
+  fits. Platform code owns only the generic pieces: order-number sequence, submit-once guard,
+  response-body success conditions, credential cascade.
+- **Tax vendors stay platform code:** Avalara/TaxJar as C# `ITaxProvider`s, selected **per
+  campaign**, called automatically on every cart change (same idea as auto address validation).
+- Agreed build order: (1) order-number sequence + Authorize.Net invoice number, (2) Avalara provider
+  + per-campaign selection, (3) Liquid bodies + body success conditions + submit-once, (4) Life
+  Seasons Order definition as configuration.
+
+### Built — step 1: per-client order numbers + Authorize.Net invoiceNumber/refId
+
+- `OrderNumberSequence` entity (`order_number_sequences`, one per client, unique on `client_id`):
+  prefix/suffix/width/next value; validates the formatted number fits Authorize.Net's 20-char
+  `invoiceNumber`/`refId` limit.
+- `CallRecord.OrderNumber` (`call_records.order_number`) and `PaymentTransaction.OrderNumber`.
+- `IOrderNumberService.GetOrAssignAsync` — lazy, one number per call. Allocation is a single atomic
+  `UPDATE ... RETURNING` (plain ADO command — EF `SqlQuery` may wrap it in a subquery, which Postgres
+  rejects for `UPDATE`); assignment is a conditional `UPDATE ... WHERE order_number IS NULL`, so a
+  concurrent first-use can't give a call two numbers (worst case: one unused number, a harmless gap).
+- `PaymentService.AuthorizeAsync` assigns the number and passes it to the gateway;
+  `IPaymentGatewayClient.AuthorizeAsync` gained an `orderNumber` parameter.
+- `AuthorizeNetGatewayClient` request rebuilt with `JsonObject`: explicit schema element order
+  (Authorize.Net rejects out-of-order elements), `refId` + `order.invoiceNumber` = order number,
+  optional elements omitted rather than sent as `null`.
+- Exposed as `{{call_record.order_number}}` (FlowEngine context) and
+  `{{flow.<outputVariable>.orderNumber}}` on `authorize_payment` (designer help text updated).
+- API: `GET/PUT/DELETE /api/v1/clients/{id}/order-number-sequence` (PUT/DELETE `TenantAdmin`; GET
+  returns `{configured:false}` rather than 404 when unset).
+- Admin UI: **Clients / Telephony → Clients → "Order numbers"** inline editor with live preview,
+  20-char guard, and a warning when lowering the next number.
+- Migration `AddOrderNumberSequences` applied to `tenant_test_tenant` and
+  `tenant_test_contact_center`. **Note:** `tenant_test_contact_center` was 6 migrations behind
+  (last applied 2026-09-11) — this brought it fully current (`AddSensitiveDataRetentionToCampaigns`,
+  `AddCallRecordContactIdExternalIndex`, `AddStoredValues`, `AddOfferClientCampaignScope`,
+  `AddPaymentTransactions`), all additive.
+
+### Verification
+
+`dotnet build` clean (no new warnings); full suite **1114 tests pass** (Domain 186, Application 20,
+Infrastructure 801, Api 107), including new `OrderNumberSequenceTests`, `OrderNumberServiceTests`,
+`AuthorizeNetRequestTests` (element order + null omission), `PaymentServiceOrderNumberTests`. The
+allocation SQL was dry-run in a rolled-back transaction, and a temporary (deleted) test ran the real
+repository + service against `tenant_test_tenant`: sequential allocation, same number on repeat
+requests for one call, `null` for a client with no sequence, rows cleaned up. `npm run build` clean.
+**Not yet live-verified against the Authorize.Net sandbox** — needs Stephen to run a flow.
+
+### Not done / follow-up
+
+- Live sandbox check: order numbers on for a test client, two `authorize_payment` runs with the
+  same card + amount — should now both approve (previously a duplicate within 2 min), with the
+  `LIFSEA-` invoice number visible on the transaction in Authorize.Net.
+- **Step 2 prerequisite found:** nothing ever calls `CallRecord.SetAddresses()` — address nodes only
+  write flow variables, so the call record has no shipping address for Avalara to use yet.
+- Steps 2–4 of the agreed build order (see Architecture decisions).
+- Carried over from S161: `GetAvailableForContextAsync` unwired in `CartModal`; browser checks of
+  the jump dropdown, cart clearing after a flow ends, and multi-tab cart switching.

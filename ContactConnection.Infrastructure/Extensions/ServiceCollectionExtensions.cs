@@ -121,6 +121,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IPaymentGatewayClientFactory, PaymentGatewayClientFactory>();
         services.AddScoped<IPaymentService, PaymentService>();
         services.AddScoped<IPaymentTransactionRepository, PaymentTransactionRepository>();
+        services.AddScoped<IOrderNumberSequenceRepository, OrderNumberSequenceRepository>();
+        services.AddScoped<IOrderNumberService, OrderNumberService>();
 
         // TTS streaming providers — each ITtsStreamProvider is enumerated by
         // TtsStreamProviderFactory to build its dispatch table. No default/fallback here

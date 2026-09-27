@@ -148,6 +148,34 @@ export const activateClient = (id: string) =>
 export const deactivateClient = (id: string) =>
   api.post<Client>(`/api/v1/clients/${id}/deactivate`)
 
+// ── Client order-number sequence ─────────────────────────────────────────────
+
+export type OrderNumberSequence =
+  | { configured: false; clientId: string }
+  | {
+      configured: true
+      id: string
+      clientId: string
+      prefix: string
+      suffix: string
+      width: number
+      nextValue: number
+      nextOrderNumber: string
+      createdAt: string
+      updatedAt: string
+    }
+
+export const getOrderNumberSequence = (clientId: string) =>
+  api.get<OrderNumberSequence>(`/api/v1/clients/${clientId}/order-number-sequence`)
+
+export const putOrderNumberSequence = (
+  clientId: string,
+  body: { prefix: string; suffix: string; width: number; nextValue: number },
+) => api.put<OrderNumberSequence>(`/api/v1/clients/${clientId}/order-number-sequence`, body)
+
+export const deleteOrderNumberSequence = (clientId: string) =>
+  api.delete<void>(`/api/v1/clients/${clientId}/order-number-sequence`)
+
 // ── Campaigns ─────────────────────────────────────────────────────────────────
 
 export const listCampaigns = (clientId?: string) =>

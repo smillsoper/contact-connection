@@ -391,6 +391,7 @@ public class FlowEngine : IFlowEngine
         ctx.CallRecord["phone_number"] = record.Phone ?? string.Empty;
         ctx.CallRecord["dnis"] = record.Dnis ?? string.Empty;
         ctx.CallRecord["account_number"] = record.AccountNumber ?? string.Empty;
+        ctx.CallRecord["order_number"] = record.OrderNumber ?? string.Empty;
         ctx.CallRecord["campaign_id"] = record.CampaignId.ToString();
         ctx.CallRecord["call_started_at"] = record.CallStartAt?.ToString("O") ?? string.Empty;
         ctx.CallRecord["call_ended_at"] = record.CallEndAt?.ToString("O") ?? string.Empty;

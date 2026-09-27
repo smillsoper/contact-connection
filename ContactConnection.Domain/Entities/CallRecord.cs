@@ -40,6 +40,13 @@ public class CallRecord
     public decimal? TotalAmount { get; private set; }
     public decimal? TaxAmount { get; private set; }
     public string? PaymentStatus { get; private set; }
+    /// <summary>The call's order number from its client's OrderNumberSequence (e.g.
+    /// "LIFSEA-10000123"). Assigned at most once per call, lazily, the first time something needs
+    /// it (a payment authorization, an order submission) — and only via
+    /// IOrderNumberService, which writes it with a conditional database update so two concurrent
+    /// first-uses can't give one call two numbers. Null when the client has no sequence configured
+    /// or nothing has needed a number yet.</summary>
+    public string? OrderNumber { get; private set; }
 
     // Fulfillment summary — relational, operations
     public string? FulfillmentStatus { get; private set; }

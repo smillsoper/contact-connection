@@ -6,7 +6,8 @@ public record PaymentAuthResult(
     Guid? TransactionId,
     string? GatewayTransactionId,
     string? AuthCode,
-    string? ResponseReasonText);
+    string? ResponseReasonText,
+    string? OrderNumber = null);
 
 public record PaymentVoidResult(bool Succeeded, string? ResponseReasonText);
 
@@ -28,7 +29,8 @@ public interface IPaymentService
     /// already-resolved value — pass this when the script has the zip from elsewhere, e.g. an
     /// earlier address node's output variable) takes precedence when non-null; otherwise
     /// <paramref name="zipField"/> is looked up in the same tf_secure_collect blob (for a flow that
-    /// captures zip via guided DTMF too). Returns an "error" result (no gateway call made) if
+    /// captures zip via guided DTMF too). Assigns the call's order number (IOrderNumberService) if
+    /// its client has a sequence and sends it to the gateway. Returns an "error" result (no gateway call made) if
     /// there's no captured sensitive data, or a required field key isn't present in it.</summary>
     Task<PaymentAuthResult> AuthorizeAsync(
         Guid callRecordId, string provider,

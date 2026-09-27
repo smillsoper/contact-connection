@@ -26,7 +26,7 @@ public class AuthorizeNetGatewayClient(
 
     public async Task<GatewayAuthResult> AuthorizeAsync(
         Guid campaignId, Guid clientId, decimal amount,
-        string cardNumber, string expirationMMYY, string cvv, string? zip,
+        string cardNumber, string expirationMMYY, string cvv, string? zip, string? orderNumber,
         CancellationToken ct = default)
     {
         var (apiLoginId, transactionKey, url) = await ResolveCredentialsAsync(campaignId, clientId, ct);
@@ -34,22 +34,7 @@ public class AuthorizeNetGatewayClient(
             return new GatewayAuthResult(false, PaymentTransactionStatus.Error, null, null, null,
                 "No Authorize.Net credentials configured for this campaign/client/tenant.", null, null, null, null);
 
-        var expirationDate = ToExpirationDate(expirationMMYY);
-
-        var body = new
-        {
-            createTransactionRequest = new
-            {
-                merchantAuthentication = new { name = apiLoginId, transactionKey },
-                transactionRequest = new
-                {
-                    transactionType = "authOnlyTransaction",
-                    amount = amount.ToString("F2"),
-                    payment = new { creditCard = new { cardNumber, expirationDate, cardCode = cvv } },
-                    billTo = zip is null ? null : new { zip },
-                },
-            },
-        };
+        var body = BuildAuthOnlyRequest(apiLoginId, transactionKey, amount, cardNumber, expirationMMYY, cvv, zip, orderNumber);
 
         var client = httpClientFactory.CreateClient("AuthorizeNet");
         JsonNode? json;
@@ -109,6 +94,53 @@ public class AuthorizeNetGatewayClient(
 
         var reason = ExtractReason(json);
         return new GatewayVoidResult(false, reason ?? "Void was not approved by the gateway.");
+    }
+
+    /// <summary>
+    /// Builds the createTransactionRequest body. Authorize.Net's JSON API is backed by its XML
+    /// schema, so element ORDER matters (an out-of-order element is rejected) — refId comes after
+    /// merchantAuthentication, and within transactionRequest: transactionType, amount, payment,
+    /// order, ..., billTo. Optional elements are omitted entirely rather than sent as null.
+    ///
+    /// The order number goes in both refId (echoed back in the response) and order.invoiceNumber.
+    /// invoiceNumber is part of Authorize.Net's duplicate-transaction check (same card + amount +
+    /// invoice number + bill-to within the duplicate window is rejected), so distinct orders are no
+    /// longer mistaken for duplicates, while a genuine resubmission of the same order still is.
+    /// refId/poNumber are NOT part of that check — which is why CRMPro's poNumber-only approach
+    /// didn't help. Both fields cap at 20 chars (OrderNumberSequence enforces that).
+    /// </summary>
+    internal static JsonObject BuildAuthOnlyRequest(
+        string apiLoginId, string transactionKey, decimal amount,
+        string cardNumber, string expirationMMYY, string cvv, string? zip, string? orderNumber)
+    {
+        var transactionRequest = new JsonObject
+        {
+            ["transactionType"] = "authOnlyTransaction",
+            ["amount"] = amount.ToString("F2"),
+            ["payment"] = new JsonObject
+            {
+                ["creditCard"] = new JsonObject
+                {
+                    ["cardNumber"] = cardNumber,
+                    ["expirationDate"] = ToExpirationDate(expirationMMYY),
+                    ["cardCode"] = cvv,
+                },
+            },
+        };
+        if (!string.IsNullOrEmpty(orderNumber))
+            transactionRequest["order"] = new JsonObject { ["invoiceNumber"] = orderNumber };
+        if (!string.IsNullOrEmpty(zip))
+            transactionRequest["billTo"] = new JsonObject { ["zip"] = zip };
+
+        var request = new JsonObject
+        {
+            ["merchantAuthentication"] = new JsonObject { ["name"] = apiLoginId, ["transactionKey"] = transactionKey },
+        };
+        if (!string.IsNullOrEmpty(orderNumber))
+            request["refId"] = orderNumber;
+        request["transactionRequest"] = transactionRequest;
+
+        return new JsonObject { ["createTransactionRequest"] = request };
     }
 
     private GatewayAuthResult ParseAuthResponse(JsonNode? json, string cardNumber)

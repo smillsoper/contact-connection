@@ -28,9 +28,14 @@ public interface IPaymentGatewayClient
     /// <summary>Dispatch key for IPaymentGatewayClientFactory — e.g. "authorize_net".</summary>
     string ProviderKey { get; }
 
+    /// <param name="orderNumber">The call's order number (see IOrderNumberService), or null when
+    /// the client has no order-number sequence. Gateways that support it send it as the
+    /// transaction's invoice/reference number — it identifies the order on the gateway side and,
+    /// for Authorize.Net, is part of the duplicate-transaction check, so distinct orders for the
+    /// same card and amount aren't rejected as duplicates.</param>
     Task<GatewayAuthResult> AuthorizeAsync(
         Guid campaignId, Guid clientId, decimal amount,
-        string cardNumber, string expirationMMYY, string cvv, string? zip,
+        string cardNumber, string expirationMMYY, string cvv, string? zip, string? orderNumber,
         CancellationToken ct = default);
 
     /// <summary>Voids a previously-authorized transaction. No card data needed — just the original

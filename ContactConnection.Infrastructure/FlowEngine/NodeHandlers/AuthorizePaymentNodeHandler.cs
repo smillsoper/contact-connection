@@ -33,7 +33,9 @@ namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 /// {{flow.outputVariable.status}}, {{flow.outputVariable.responseReasonText}} (the decline/error
 /// message — the only way a downstream script node can tell the caller *why*),
 /// {{flow.outputVariable.gatewayTransactionId}} (the Authorize.Net transaction id — this is the one
-/// field a future Order API submission step will need), {{flow.outputVariable.authCode}}.
+/// field a future Order API submission step will need), {{flow.outputVariable.authCode}},
+/// {{flow.outputVariable.orderNumber}} (the call's order number, empty if the client has no
+/// order-number sequence — also exposed as {{call_record.order_number}} once assigned).
 /// </summary>
 public class AuthorizePaymentNodeHandler(IVariableResolver resolver, IPaymentService payments)
     : NodeHandlerBase(resolver), INodeHandler
@@ -88,7 +90,13 @@ public class AuthorizePaymentNodeHandler(IVariableResolver resolver, IPaymentSer
             ctx.FlowVars[$"{outputVariable}.gatewayTransactionId"] = result.GatewayTransactionId ?? "";
             ctx.FlowVars[$"{outputVariable}.authCode"] = result.AuthCode ?? "";
             ctx.FlowVars[$"{outputVariable}.responseReasonText"] = result.ResponseReasonText ?? "";
+            ctx.FlowVars[$"{outputVariable}.orderNumber"] = result.OrderNumber ?? "";
         }
+
+        // The authorization may have just assigned the call's order number — make it visible to
+        // the rest of this flow without waiting for a context reload.
+        if (!string.IsNullOrEmpty(result.OrderNumber))
+            ctx.CallRecord["order_number"] = result.OrderNumber;
 
         var next = Transition(node, transitionKey);
         AppendHistory(ctx, node, input: null, transition: transitionKey);

@@ -62,6 +62,7 @@ public class CallRecordConfiguration : IEntityTypeConfiguration<CallRecord>
         builder.Property(r => r.TotalAmount).HasColumnName("total_amount").HasPrecision(10, 2);
         builder.Property(r => r.TaxAmount).HasColumnName("tax_amount").HasPrecision(10, 2);
         builder.Property(r => r.PaymentStatus).HasColumnName("payment_status").HasMaxLength(30);
+        builder.Property(r => r.OrderNumber).HasColumnName("order_number").HasMaxLength(20);
 
         // Fulfillment
         builder.Property(r => r.FulfillmentStatus).HasColumnName("fulfillment_status").HasMaxLength(30);

@@ -1335,7 +1335,10 @@ export default function NodePropertiesPanel({
               Exposes the result for downstream script/nodes:{' '}
               <span className="font-mono">{'{{flow.outputVariable.responseReasonText}}'}</span> is the
               decline/error message; <span className="font-mono">{'{{flow.outputVariable.gatewayTransactionId}}'}</span>{' '}
-              is the value an order-submission API call will need.
+              is the value an order-submission API call will need;{' '}
+              <span className="font-mono">{'{{flow.outputVariable.orderNumber}}'}</span> is the call's
+              order number (also <span className="font-mono">{'{{call_record.order_number}}'}</span>) when the
+              client has order numbers turned on.
             </p>
 
             <p className="text-[10px] text-gray-500 leading-snug">

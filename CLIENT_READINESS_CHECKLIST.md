@@ -522,10 +522,22 @@ agent-facing `CartModal` (cart item, built/unused), and the Life Seasons Order A
 (payment gateway item, blocked on the user setting up file sharing to a machine holding historical
 CRMPro integration notes).
 
-**Next up:** Once file sharing to the historical-notes machine is set up, decode the old CRMPro
-integration objects to learn Life Seasons' actual Order API contract, then build that submission step
-(passing the `PaymentTransaction`'s gateway transaction id — confirmed by the user as the only field
-the Order API actually needs from the payment side). Until then: either the `GetAvailableForContextAsync`
+**Session 162 (2026-09-26): Order API + Avalara contracts recovered** from the CRMPro production
+backup and the NeuroQ script — full sanitized spec in
+[docs/integrations/life-seasons-crmpro-legacy.md](docs/integrations/life-seasons-crmpro-legacy.md).
+**Decision: no credentials from the TMS backup are used anywhere** (presumed revoked; security).
+Real values come from Clint when testing is scheduled — build the integrations credential-agnostic.
+Agreed architecture: client order APIs are **API Definition configuration with Liquid (Fluid) request
+bodies**, not per-client C# adapters; tax vendors (Avalara) are C# `ITaxProvider`s selected per
+campaign and auto-called on every cart change. Build order: (1) per-client order-number sequence +
+Authorize.Net `invoiceNumber`/`refId` — **built S162** (1114 tests pass, not yet sandbox-verified);
+(2) Avalara provider + per-campaign selection (prerequisite: address nodes must write
+`CallRecord.Addresses`, which nothing does today); (3) Liquid bodies + response-body success
+conditions + submit-once guard; (4) Life Seasons Order definition as configuration.
+
+**Next up:** Build the Order API submission step and an `"avalara"` `ITaxProvider` per that spec
+(the Order API takes the `PaymentTransaction`'s gateway transaction id as
+`payment_info.PaymentTransactionId`). Other open options: either the `GetAvailableForContextAsync`
 wiring above, or a future capture (auth+capture) transaction type per the payment gateway's own
 "shape for expansion" design. Remember the incremental-expansion decision above before building out
 more Offer/Product admin fields speculatively — only add what a concrete task actually needs.
