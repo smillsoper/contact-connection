@@ -18,11 +18,12 @@ import AgentListWidget from '../components/dashboard/widgets/AgentListWidget'
 import CallStateByCampaignWidget from '../components/dashboard/widgets/CallStateByCampaignWidget'
 import CallbacksWidget from '../components/dashboard/widgets/CallbacksWidget'
 import ServiceLevelThresholdWidget from '../components/dashboard/widgets/ServiceLevelThresholdWidget'
+import QueuedCallsWidget from '../components/dashboard/widgets/QueuedCallsWidget'
 import {
   DashboardLiveContext, DashboardCallStateLiveContext, DashboardRegistrationLiveContext,
-  DashboardScheduledCallbackLiveContext,
+  DashboardScheduledCallbackLiveContext, DashboardQueueOfferLiveContext,
   type AgentStateEvent, type CallStateEvent, type AgentRegistrationEvent,
-  type ScheduledCallbackEvent,
+  type ScheduledCallbackEvent, type QueueOfferEvent,
 } from '../components/dashboard/DashboardLiveContext'
 
 const GridLayoutWithWidth = WidthProvider(GridLayout)
@@ -34,6 +35,7 @@ function renderWidget(type: DashboardWidgetType, config: WidgetFilterConfig) {
     case 'call_state_by_campaign':    return <CallStateByCampaignWidget config={config} />
     case 'callbacks':                 return <CallbacksWidget config={config} />
     case 'service_level_threshold':   return <ServiceLevelThresholdWidget config={config} />
+    case 'queued_calls':              return <QueuedCallsWidget config={config} />
   }
 }
 
@@ -75,6 +77,7 @@ export default function DashboardBuilderPage() {
   const [liveCallEvent, setLiveCallEvent] = useState<CallStateEvent | null>(null)
   const [liveRegEvent, setLiveRegEvent] = useState<AgentRegistrationEvent | null>(null)
   const [liveScbEvent, setLiveScbEvent] = useState<ScheduledCallbackEvent | null>(null)
+  const [liveOfferEvent, setLiveOfferEvent] = useState<QueueOfferEvent | null>(null)
   // Opening an existing dashboard defaults to view-only, even for a manager — most visits are
   // "just looking," not editing, and a blank canvas has nothing to view, so it starts in edit
   // mode instead. editMode (not isEditing alone) is what every edit-affordance below actually
@@ -157,6 +160,10 @@ export default function DashboardBuilderPage() {
     connection.on('receiveScheduledCallbackChanged', (campaignId: string, change: string) => {
       // New object each time so a repeat of the same change still re-triggers widget effects.
       setLiveScbEvent({ campaignId, change })
+    })
+
+    connection.on('receiveQueueOfferChanged', (campaignId: string) => {
+      setLiveOfferEvent({ campaignId })
     })
 
     // SignalR groups are tied to the connection id — an automatic reconnect (network blip, or
@@ -353,6 +360,7 @@ export default function DashboardBuilderPage() {
           <DashboardCallStateLiveContext.Provider value={liveCallEvent}>
           <DashboardRegistrationLiveContext.Provider value={liveRegEvent}>
           <DashboardScheduledCallbackLiveContext.Provider value={liveScbEvent}>
+          <DashboardQueueOfferLiveContext.Provider value={liveOfferEvent}>
             <GridLayoutWithWidth
               className="layout"
               layout={layout}
@@ -389,6 +397,7 @@ export default function DashboardBuilderPage() {
                 {editMode ? 'Drag a widget from the palette above to get started.' : 'This dashboard has no widgets yet.'}
               </div>
             )}
+          </DashboardQueueOfferLiveContext.Provider>
           </DashboardScheduledCallbackLiveContext.Provider>
           </DashboardRegistrationLiveContext.Provider>
           </DashboardCallStateLiveContext.Provider>

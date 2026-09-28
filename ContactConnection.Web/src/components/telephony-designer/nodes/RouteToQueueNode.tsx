@@ -15,7 +15,9 @@ export default function RouteToQueueNode({ data, selected }: NodeProps & { data:
       {ext ? (
         <p className="text-xs text-blue-300 mt-1">→ ext {ext}</p>
       ) : (
-        <p className="text-xs text-gray-400 mt-1">Campaign queue</p>
+        <p className="text-xs text-gray-400 mt-1">
+          {data.agentGroupId ? 'Campaign queue · one group only' : 'Campaign queue'}
+        </p>
       )}
       <p className="text-[10px] text-gray-500 mt-0.5">default / on_timeout</p>
     </TelNodeShell>

@@ -1,5 +1,5 @@
 export type DashboardWidgetType =
-  'agent_state_counter' | 'agent_list' | 'call_state_by_campaign' | 'callbacks' | 'service_level_threshold'
+  'agent_state_counter' | 'agent_list' | 'call_state_by_campaign' | 'callbacks' | 'service_level_threshold' | 'queued_calls'
 
 export interface TimeWindowConfig {
   mode: 'today' | 'hours' | 'minutes'
@@ -67,10 +67,16 @@ export const WIDGET_META: Record<DashboardWidgetType, WidgetMeta> = {
     defaultSize: { w: 4, h: 8 },
     minSize: { w: 3, h: 6 },
   },
+  queued_calls: {
+    type: 'queued_calls',
+    label: 'Queued Calls',
+    defaultSize: { w: 6, h: 8 },
+    minSize: { w: 4, h: 5 },
+  },
 }
 
 export const WIDGET_TYPES: DashboardWidgetType[] =
-  ['agent_state_counter', 'agent_list', 'call_state_by_campaign', 'callbacks', 'service_level_threshold']
+  ['agent_state_counter', 'agent_list', 'call_state_by_campaign', 'callbacks', 'service_level_threshold', 'queued_calls']
 
 // Which filter fields each widget's config modal should show — agent-scoped widgets support
 // Client/Campaign/Agent Group + Logged-in-only; call-scoped widgets only support Client/Campaign
@@ -90,6 +96,7 @@ export const WIDGET_FILTER_FIELDS: Record<DashboardWidgetType, WidgetFilterField
   call_state_by_campaign: { client: true, campaign: true, group: false, loggedInOnly: false, timeWindow: false },
   callbacks: { client: true, campaign: true, group: false, loggedInOnly: false, timeWindow: false },
   service_level_threshold: { client: true, campaign: true, group: false, loggedInOnly: false, timeWindow: true },
+  queued_calls: { client: true, campaign: true, group: false, loggedInOnly: false, timeWindow: false },
 }
 
 export function newWidgetId(): string {

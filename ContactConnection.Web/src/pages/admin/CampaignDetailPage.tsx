@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import AdminShell from '../../components/admin/AdminShell'
 import SearchableSelect from '../../components/SearchableSelect'
 import {
-  getCampaign, updateCampaign, updateCampaignRecording, updateCampaignSensitiveDataRetention, setCampaignFlow, removeCampaignFlow,
+  getCampaign, updateCampaign, updateCampaignRecording, updateCampaignSensitiveDataRetention, updateCampaignExternalRouting, setCampaignFlow, removeCampaignFlow,
   updateCampaignTax, type TaxProviderKey, type CampaignTaxSettings, type AvalaraFeeLine,
   setCampaignInboundFlow, removeCampaignInboundFlow,
   setCampaignOutboundFlow, removeCampaignOutboundFlow,
@@ -13,7 +13,7 @@ import {
   listExternalNumbers, addExternalNumber, removeExternalNumber,
   setExternalNumberFlow, removeExternalNumberFlow,
   setExternalNumberTelephonyFlow, removeExternalNumberTelephonyFlow,
-  type CampaignDetail, type AgentAssignment, type CampaignExternalNumber,
+  type CampaignDetail, type AgentAssignment, type CampaignExternalNumber, type ExternalRoutingAcceptMode,
 } from '../../api/telephony'
 import { flowsApi, type FlowSummary } from '../../api/flows'
 import { listAdminAgents, type AgentRecord } from '../../api/adminAgents'
@@ -649,6 +649,107 @@ function SensitiveDataRetentionForm({ campaign, onSaved }: SensitiveDataRetentio
           className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg px-5 py-2 text-sm font-medium transition-colors"
         >
           {saving ? 'Saving…' : 'Save retention override'}
+        </button>
+        {saved && <span className="text-emerald-400 text-sm">Saved</span>}
+        {saveError && <span className="text-red-400 text-sm">{saveError}</span>}
+      </div>
+    </div>
+  )
+}
+
+// ── Routing tiers + external routing (docs/design/parallel-queuing.md) ─────────
+
+const ACCEPT_MODES: { value: ExternalRoutingAcceptMode; label: string; limitLabel?: string; defaultLimit?: number }[] = [
+  { value: 'queue_count',     label: 'Max calls in queue',   limitLabel: 'Accept while fewer than this many calls are queued', defaultLimit: 1 },
+  { value: 'queue_wait',      label: 'Max queue wait',       limitLabel: 'Accept while the longest wait is under (seconds)',   defaultLimit: 30 },
+  { value: 'agent_available', label: 'Agent available now' },
+]
+
+function RoutingForm({ campaign, onSaved }: { campaign: CampaignDetail; onSaved: (updated: CampaignDetail) => void }) {
+  const [mode, setMode] = useState<ExternalRoutingAcceptMode>(campaign.externalRoutingAcceptMode ?? 'queue_count')
+  const [limit, setLimit] = useState(campaign.externalRoutingLimit?.toString() ?? '')
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+
+  const modeInfo = ACCEPT_MODES.find((m) => m.value === mode)!
+  const tiers = campaign.groupAssignments
+    .filter((g) => g.isActive)
+    .slice()
+    .sort((a, b) => (b.routingTier ?? 0) - (a.routingTier ?? 0))
+
+  async function handleSave() {
+    setSaving(true); setSaveError(null); setSaved(false)
+    try {
+      const updated = await updateCampaignExternalRouting(campaign.id, mode, modeInfo.limitLabel && limit ? Number(limit) : null)
+      onSaved({ ...campaign, ...updated })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+      <h2 className="text-white text-sm font-semibold mb-1">Routing Tiers &amp; External Routing</h2>
+      <p className="text-xs text-gray-500 mb-4">
+        Agent groups on this campaign and the tier each is offered calls at (edit on the Agent Groups tab).
+        The highest tier with anyone available gets a waiting call first.
+      </p>
+      {tiers.length === 0 ? (
+        <p className="text-xs text-gray-500 mb-5">No agent groups assigned — every agent is in the regular pool.</p>
+      ) : (
+        <div className="flex flex-wrap gap-2 mb-5">
+          {tiers.map((g) => (
+            <span key={g.groupId} className="inline-flex items-center gap-1.5 bg-gray-800 rounded-lg px-2.5 py-1 text-xs text-gray-200">
+              {g.group?.name ?? g.groupId}
+              <span className="text-gray-500">tier {g.routingTier ?? 0}</span>
+              {g.tierLabel && <span className="px-1.5 rounded-full bg-fuchsia-600/30 text-fuchsia-300 font-semibold uppercase text-[10px]">{g.tierLabel}</span>}
+              {g.exclusiveWindowSeconds != null && <span className="text-gray-500">· {g.exclusiveWindowSeconds}s exclusive</span>}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <p className="text-xs text-gray-400 font-medium mb-1">External router accept rule</p>
+      <p className="text-xs text-gray-500 mb-3">
+        How this campaign answers a routing platform (e.g. RingSquared) asking whether to send a call —
+        <span className="font-mono"> /api/v1/external-routing/{campaign.id}/Routing</span>. Every rule also needs an eligible agent logged in.
+      </p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Accept when</label>
+          <select
+            value={mode}
+            onChange={(e) => { setMode(e.target.value as ExternalRoutingAcceptMode); setLimit('') }}
+            className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+          >
+            {ACCEPT_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+          </select>
+        </div>
+        {modeInfo.limitLabel && (
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">{modeInfo.limitLabel}</label>
+            <input
+              type="number" min={1} max={10000} value={limit}
+              placeholder={`default ${modeInfo.defaultLimit}`}
+              onChange={(e) => setLimit(e.target.value)}
+              className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center gap-3 mt-6 pt-4 border-t border-gray-800">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg px-5 py-2 text-sm font-medium transition-colors"
+        >
+          {saving ? 'Saving…' : 'Save accept rule'}
         </button>
         {saved && <span className="text-emerald-400 text-sm">Saved</span>}
         {saveError && <span className="text-red-400 text-sm">{saveError}</span>}
@@ -1664,6 +1765,12 @@ export default function CampaignDetailPage() {
             campaign={campaign}
             onSaved={(updated) => setCampaign(updated)}
           />
+          {campaign.direction === 'inbound' && (
+            <RoutingForm
+              campaign={campaign}
+              onSaved={(updated) => setCampaign(updated)}
+            />
+          )}
           <AgentsSection
             campaignId={campaign.id}
             assignments={campaign.agentAssignments}

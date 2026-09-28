@@ -460,8 +460,18 @@ public static class CampaignsEndpoints
             return Results.NotFound(new { error = "Group not found." });
 
         var existing = await repo.GetGroupAssignmentAsync(id, req.GroupId, ct);
-        if (existing is not null)
+        if (existing is { IsActive: true })
             return Results.Conflict(new { error = "Group is already assigned to this campaign." });
+        if (existing is not null)
+        {
+            // RemoveGroup only deactivates (unique campaign+group row) — re-assigning revives it.
+            try { existing.SetRouting(req.RoutingTier, req.ExclusiveWindowSeconds, req.TierLabel); }
+            catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+            existing.SetProficiency(req.Proficiency);
+            existing.Activate();
+            await repo.SaveChangesAsync(ct);
+            return Results.Ok(ToGroupAssignmentResponse(existing));
+        }
 
         var assignment = GroupCampaignAssignment.Create(req.GroupId, id, req.Proficiency);
         try { assignment.SetRouting(req.RoutingTier, req.ExclusiveWindowSeconds, req.TierLabel); }

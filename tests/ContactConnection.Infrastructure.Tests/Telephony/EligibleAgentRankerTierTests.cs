@@ -188,4 +188,17 @@ public class EligibleAgentRankerTierTests
         Assert.Equal(new HashSet<Guid> { a, b }, QueueOffer.ParseAgentIds($"{a}, {b},junk"));
         Assert.Null(QueueOffer.RestrictGroupId(new Dictionary<string, string>()));
     }
+
+    [Fact]
+    public void QueueOffer_OfferTierSnapshotRoundTrip()
+    {
+        var offer = new OfferSet([
+            new RankedAgent(Guid.NewGuid(), 50, DateTimeOffset.UtcNow, 10, Guid.NewGuid(), "Alpha"),
+            new RankedAgent(Guid.NewGuid(), 50, DateTimeOffset.UtcNow, 10, Guid.NewGuid(), "Alpha")], 10, null);
+        Assert.Equal(((int?)10, "Alpha", (int?)null, 2), QueueOffer.ParseOfferTier(QueueOffer.FormatOfferTier(offer)));
+
+        var held = new OfferSet([], null, 10);
+        Assert.Equal(((int?)null, (string?)null, (int?)10, 0), QueueOffer.ParseOfferTier(QueueOffer.FormatOfferTier(held)));
+        Assert.Equal(((int?)null, (string?)null, (int?)null, 0), QueueOffer.ParseOfferTier(null));
+    }
 }

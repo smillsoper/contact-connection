@@ -69,6 +69,10 @@ public interface IFlowHubClient
     /// docs/design/parallel-queuing.md). The agent UI drops the pop for that callRecordId.</summary>
     Task ReceiveOfferWithdrawn(string callRecordId);
 
+    /// <summary>Supervisor dashboards: the routing tier a queued call on this campaign is being
+    /// offered to changed (or who's in it) — the Queued Calls widget refetches.</summary>
+    Task ReceiveQueueOfferChanged(string campaignId);
+
     /// <summary>Server-initiated delivery (RingStrategy.AutoAnswerBestAgent) — the system picked
     /// this agent (no click required). Pushed BEFORE the originate call, not after: the softphone
     /// must arm its auto-answer flag ahead of the whisper/bridge INVITE that follows, or JsSIP

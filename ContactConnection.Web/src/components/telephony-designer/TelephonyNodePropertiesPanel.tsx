@@ -9,7 +9,7 @@ import { ttsServiceApi, type TtsServiceStatus } from '../../api/ttsService'
 import { AudioPicker, useAudioFiles } from './AudioPicker'
 import { flowsApi, type GeneralApiSummary, type FlowSummary, type CustomFieldDefinitionSummary } from '../../api/flows'
 import { listAdminAgents, type AgentRecord } from '../../api/adminAgents'
-import { listCampaigns, listSipGateways } from '../../api/telephony'
+import { listAgentGroups, listCampaigns, listSipGateways } from '../../api/telephony'
 import { api } from '../../api/client'
 import SearchableSelect from '../SearchableSelect'
 import RichTextEditor, { type RichTextEditorHandle } from '../designer/RichTextEditor'
@@ -25,6 +25,7 @@ interface PickerData {
   crmFlows: FlowSummary[]
   campaigns: { id: string; name: string }[]
   gateways: { name: string }[]
+  agentGroups: { id: string; name: string; isActive: boolean }[]
 }
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -91,24 +92,25 @@ export default function TelephonyNodePropertiesPanel({
   // Shared name→id pickers (agents / flows / campaigns / gateways) — fetched once when a node
   // that uses any of them is selected. Every dropdown is a searchable SearchableSelect.
   const [pickers, setPickers] = useState<PickerData>({
-    agents: [], telephonyFlows: [], crmFlows: [], campaigns: [], gateways: [],
+    agents: [], telephonyFlows: [], crmFlows: [], campaigns: [], gateways: [], agentGroups: [],
   })
   useEffect(() => {
     if (!NEEDS_PICKERS.includes(type)) return
     let cancelled = false
     ;(async () => {
-      const [agents, telephonyFlows, crmFlows, campaigns] = await Promise.all([
+      const [agents, telephonyFlows, crmFlows, campaigns, agentGroups] = await Promise.all([
         listAdminAgents().catch(() => [] as AgentRecord[]),
         flowsApi.listAllByType('telephony').catch(() => [] as FlowSummary[]),
         flowsApi.listAllByType('crm').catch(() => [] as FlowSummary[]),
         listCampaigns().catch(() => [] as { id: string; name: string }[]),
+        listAgentGroups().catch(() => [] as { id: string; name: string; isActive: boolean }[]),
       ])
       let gateways: { name: string }[] = []
       try {
         const me = await api.get<{ id: string }>('/api/v1/tenants/me')
         gateways = await listSipGateways(me.id)
       } catch { /* gateway list is optional — free-text fallback in the editor */ }
-      if (!cancelled) setPickers({ agents, telephonyFlows, crmFlows, campaigns, gateways })
+      if (!cancelled) setPickers({ agents, telephonyFlows, crmFlows, campaigns, gateways, agentGroups })
     })()
     return () => { cancelled = true }
   }, [type])
@@ -201,6 +203,21 @@ export default function TelephonyNodePropertiesPanel({
           <p className="text-xs text-gray-500 mt-1">
             Pick an agent to bridge straight to their extension, or leave on Queue to ring the campaign.
           </p>
+          {!data.agentExtension && (
+            <>
+              <label className="block text-xs text-gray-400 mb-1 mt-3">Only offer to agent group (optional)</label>
+              <SearchableSelect
+                options={pickers.agentGroups.filter((g) => g.isActive).map((g) => ({ value: g.id, label: g.name }))}
+                value={(data.agentGroupId as string) ?? ''}
+                onChange={(v) => set('agentGroupId', v)}
+                allLabel="— Every tier (parallel queuing) —"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Pins the call to one group of the campaign (e.g. Elite calls flagged by a routing platform) —
+                it waits for that group only, with no fallback. The group must be assigned to the campaign.
+              </p>
+            </>
+          )}
         </div>
       )}
 

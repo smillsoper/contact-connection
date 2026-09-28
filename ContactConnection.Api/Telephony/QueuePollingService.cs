@@ -273,6 +273,7 @@ public sealed class QueuePollingService : BackgroundService
         var offer = await ranker.GetOfferSetAsync(
             db, placeholder.TenantId, placeholder.CampaignId, SecondsWaited(placeholder, now),
             excludeAgentIds: claimedThisTick, restrictGroupId: QueueOffer.RestrictGroupId(placeholder.Vars), ct: ct);
+        await PublishOfferTierAsync(placeholder, offer, ct);
 
         foreach (var candidate in offer.Agents.Take(MaxAutoAnswerAttempts))
         {
@@ -314,6 +315,7 @@ public sealed class QueuePollingService : BackgroundService
         var offer = await ranker.GetOfferSetAsync(
             db, session.TenantId, session.CampaignId, SecondsWaited(session, now),
             excludeAgentIds: exclude, restrictGroupId: QueueOffer.RestrictGroupId(session.Vars), ct: ct);
+        await PublishOfferTierAsync(session, offer, ct);
 
         var attemptedDelivery = false;
         foreach (var candidate in offer.Agents.Take(MaxAutoAnswerAttempts))
@@ -431,6 +433,7 @@ public sealed class QueuePollingService : BackgroundService
             eligible.Count, string.Join(", ", eligible.Select(r => r.AgentId)));
 
         await WithdrawStaleOffersAsync(session, eligible, ct);
+        await PublishOfferTierAsync(session, offer, ct);
 
         foreach (var candidate in eligible)
         {
@@ -491,6 +494,18 @@ public sealed class QueuePollingService : BackgroundService
 
         if (!previous.SetEquals(current) || previousRaw is null)
             await _sessionStore.SetKeyAsync(offerKey, string.Join(",", current), OfferKeyTtl, ct);
+    }
+
+    /// <summary>Records which tier a queued call is currently offered to (Queued Calls dashboard
+    /// widget) and, only when that changed, pushes ReceiveQueueOfferChanged to supervisors.</summary>
+    private async Task PublishOfferTierAsync(TelephonyCallSession session, OfferSet offer, CancellationToken ct)
+    {
+        var key = QueueOffer.OfferTierKey(session.ChannelUuid);
+        var snapshot = QueueOffer.FormatOfferTier(offer);
+        if (await _sessionStore.GetKeyAsync(key, ct) == snapshot) return;
+
+        await _sessionStore.SetKeyAsync(key, snapshot, OfferKeyTtl, ct);
+        await _hub.Clients.Group($"supervisor:{session.TenantId}").ReceiveQueueOfferChanged(session.CampaignId.ToString());
     }
 
     /// <summary>The AutoAnswerBestAgent arbitration order: highest effective priority first

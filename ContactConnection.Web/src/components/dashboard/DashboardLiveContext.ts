@@ -56,3 +56,15 @@ export const DashboardScheduledCallbackLiveContext = createContext<ScheduledCall
 export function useDashboardLiveScheduledCallback() {
   return useContext(DashboardScheduledCallbackLiveContext)
 }
+
+export interface QueueOfferEvent {
+  campaignId: string
+}
+
+// Parallel queuing — the queue engine moved a queued call's offer to a different tier (or who's
+// in it changed). Drives the Queued Calls widget; see QueuePollingService.PublishOfferTierAsync.
+export const DashboardQueueOfferLiveContext = createContext<QueueOfferEvent | null>(null)
+
+export function useDashboardLiveQueueOffer() {
+  return useContext(DashboardQueueOfferLiveContext)
+}

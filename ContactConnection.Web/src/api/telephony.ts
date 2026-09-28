@@ -56,6 +56,9 @@ export interface Campaign {
   sensitiveDataRetentionMinutes?: number | null
   taxProvider?: TaxProviderKey
   taxSettings?: CampaignTaxSettings | null
+  /** How this campaign answers external routers — see updateCampaignExternalRouting. */
+  externalRoutingAcceptMode?: ExternalRoutingAcceptMode
+  externalRoutingLimit?: number | null
   client?: { id: string; name: string }
   createdAt: string
   updatedAt: string
@@ -80,6 +83,9 @@ export interface CampaignDetail extends Campaign {
     proficiency: number
     isActive: boolean
     assignedAt: string
+    routingTier?: number
+    exclusiveWindowSeconds?: number | null
+    tierLabel?: string | null
     group?: { id: string; name: string }
   }[]
 }
@@ -418,6 +424,47 @@ export const addGroupMember = (groupId: string, agentId: string) =>
 
 export const removeGroupMember = (groupId: string, agentId: string) =>
   api.delete<void>(`/api/v1/agent-groups/${groupId}/members/${agentId}`)
+
+// ── Parallel queuing — group routing tiers (docs/design/parallel-queuing.md) ────
+
+/** A group's routing settings on one campaign. tier 0 = regular pool; higher tiers are offered a
+ *  waiting call first. exclusiveWindowSeconds holds new calls for this tier (only tier > 0). */
+export interface GroupRouting {
+  routingTier: number
+  exclusiveWindowSeconds: number | null
+  tierLabel: string | null
+}
+
+export interface GroupMemberCampaigns {
+  campaigns: ({ campaignId: string; campaignName: string; proficiency: number } & GroupRouting)[]
+  members: { agentId: string; allowedCampaignIds: string[] }[]
+}
+
+export const getGroupMemberCampaigns = (groupId: string) =>
+  api.get<GroupMemberCampaigns>(`/api/v1/agent-groups/${groupId}/member-campaigns`)
+
+export const setGroupMemberCampaigns = (groupId: string, agentId: string, allowedCampaignIds: string[]) =>
+  api.put<{ agentId: string; allowedCampaignIds: string[] }>(
+    `/api/v1/agent-groups/${groupId}/members/${agentId}/campaigns`, { allowedCampaignIds })
+
+export const assignGroupToCampaign = (campaignId: string, groupId: string, proficiency: number, routing: GroupRouting) =>
+  api.post<unknown>(`/api/v1/campaigns/${campaignId}/groups`, { groupId, proficiency, ...routing })
+
+export const setGroupCampaignRouting = (campaignId: string, groupId: string, routing: GroupRouting) =>
+  api.put<unknown>(`/api/v1/campaigns/${campaignId}/groups/${groupId}/routing`, routing)
+
+export const setGroupCampaignProficiency = (campaignId: string, groupId: string, proficiency: number) =>
+  api.put<unknown>(`/api/v1/campaigns/${campaignId}/groups/${groupId}`, { proficiency })
+
+export const removeGroupFromCampaign = (campaignId: string, groupId: string) =>
+  api.delete<void>(`/api/v1/campaigns/${campaignId}/groups/${groupId}`)
+
+// ── External routing (routers like RingSquared asking "will you take a call?") ────
+
+export type ExternalRoutingAcceptMode = 'queue_count' | 'queue_wait' | 'agent_available'
+
+export const updateCampaignExternalRouting = (id: string, acceptMode: ExternalRoutingAcceptMode, limit: number | null) =>
+  api.put<Campaign>(`/api/v1/campaigns/${id}/external-routing`, { acceptMode, limit })
 
 // ── SIP Gateways ──────────────────────────────────────────────────────────────
 

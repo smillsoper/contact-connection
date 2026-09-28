@@ -2,6 +2,7 @@ using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
 using ContactConnection.Domain.Entities;
+using ContactConnection.Infrastructure.Telephony;
 
 namespace ContactConnection.Api.Endpoints;
 
@@ -135,6 +136,63 @@ public static class DashboardWidgetsEndpoints
                 .OrderBy(r => r.queued_since ?? "")
                 .ToList();
 
+            return Results.Ok(rows);
+        });
+
+        // Queued calls with the parallel-queuing tier each is currently offered to (see
+        // QueuePollingService.PublishOfferTierAsync) — "which tier is this call waiting on".
+        // Live-updated by ReceiveQueueOfferChanged + call-state pushes; waits tick client-side.
+        group.MapGet("/queued-calls", async (
+            Guid? campaignId,
+            Guid? clientId,
+            ICampaignRepository campaigns,
+            IAgentGroupRepository agentGroups,
+            ITelephonyCallSessionStore sessions,
+            TenantContext tenantContext,
+            CancellationToken ct) =>
+        {
+            if (tenantContext.Current is null) return Results.Unauthorized();
+            var tenantId = tenantContext.Current.Id;
+
+            HashSet<Guid>? scope = null;
+            if (campaignId is { } cid) scope = [cid];
+            else if (clientId is { } clid)
+                scope = (await campaigns.GetAllAsync(clid, ct)).Select(c => c.Id).ToHashSet();
+
+            var queued = (await sessions.GetAllAsync(ct))
+                .Where(s => s.TenantId == tenantId
+                            && s.Vars.GetValueOrDefault("_queued") == "true"
+                            && (scope is null || scope.Contains(s.CampaignId)))
+                .ToList();
+            if (queued.Count == 0) return Results.Ok(Array.Empty<object>());
+
+            var campaignNames = new Dictionary<Guid, string>();
+            foreach (var id in queued.Select(s => s.CampaignId).Distinct())
+                campaignNames[id] = (await campaigns.GetByIdAsync(id, ct))?.Name ?? "";
+            var groupNames = (await agentGroups.GetAllAsync(ct)).ToDictionary(g => g.Id, g => g.Name);
+
+            var rows = new List<object>();
+            foreach (var s in queued.OrderBy(s => s.Vars.GetValueOrDefault("_in_queue_at") ?? ""))
+            {
+                var (tier, labels, heldFor, agentCount) =
+                    QueueOffer.ParseOfferTier(await sessions.GetKeyAsync(QueueOffer.OfferTierKey(s.ChannelUuid), ct));
+                var restrict = QueueOffer.RestrictGroupId(s.Vars);
+                rows.Add(new
+                {
+                    call_record_id    = s.CallRecordId,
+                    campaign_id       = s.CampaignId,
+                    campaign_name     = campaignNames.GetValueOrDefault(s.CampaignId),
+                    caller_number     = s.CallerNumber,
+                    queued_since      = s.Vars.GetValueOrDefault("_in_queue_at"),
+                    is_queue_callback = s.Vars.GetValueOrDefault("_queue_callback") == "true",
+                    in_menu           = !ContactConnection.Api.Telephony.QueuePollingService.IsDeliverable(s),
+                    pinned_group      = restrict is { } rg ? groupNames.GetValueOrDefault(rg, rg.ToString()) : null,
+                    offer_tier        = tier,
+                    offer_labels      = labels,
+                    held_for_tier     = heldFor,
+                    offered_agents    = agentCount,
+                });
+            }
             return Results.Ok(rows);
         });
 

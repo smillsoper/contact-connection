@@ -39,6 +39,14 @@ export default function WidgetIcon({ type }: { type: DashboardWidgetType }) {
           <path d="M18 4v2.2l1.4 1" stroke="#0ea5e9" strokeWidth="1.5" strokeLinecap="round" />
         </svg>
       )
+    case 'queued_calls':
+      return (
+        <svg viewBox="0 0 24 24" className="w-7 h-7">
+          <rect x="3" y="4" width="18" height="4" rx="1" fill="#d946ef" />
+          <rect x="3" y="10" width="18" height="4" rx="1" fill="#6b7280" />
+          <rect x="3" y="16" width="18" height="4" rx="1" fill="#6b7280" />
+        </svg>
+      )
     case 'service_level_threshold':
       return (
         <svg viewBox="0 0 24 24" className="w-7 h-7">

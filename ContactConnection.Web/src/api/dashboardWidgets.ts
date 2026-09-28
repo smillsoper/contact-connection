@@ -38,6 +38,25 @@ export interface PendingQueueCallbackRow {
   retry_after: string | null
 }
 
+export interface QueuedCallRow {
+  call_record_id: string
+  campaign_id: string
+  campaign_name: string
+  caller_number: string
+  queued_since: string | null
+  is_queue_callback: boolean
+  /** Caller is in an IVR menu / voicemail sub-dialog — not deliverable this moment. */
+  in_menu: boolean
+  /** "Only offer to this group" (e.g. Elite) — the group's name. */
+  pinned_group: string | null
+  /** Routing tier the call is offered to right now; null = nobody available. */
+  offer_tier: number | null
+  offer_labels: string | null
+  /** An exclusive window is holding the call for this tier. */
+  held_for_tier: number | null
+  offered_agents: number
+}
+
 export interface ServiceLevelThresholdData {
   met: number
   missed: number
@@ -70,6 +89,9 @@ export const dashboardWidgetsApi = {
 
   pendingQueueCallbacks: (params: WidgetFilterConfig) =>
     api.get<PendingQueueCallbackRow[]>(`/api/v1/dashboard-widgets/pending-queue-callbacks${buildQuery(params)}`),
+
+  queuedCalls: (params: WidgetFilterConfig) =>
+    api.get<QueuedCallRow[]>(`/api/v1/dashboard-widgets/queued-calls${buildQuery(params)}`),
 
   serviceLevelThreshold: (params: WidgetFilterConfig) =>
     api.get<ServiceLevelThresholdData>(`/api/v1/dashboard-widgets/service-level-threshold${buildQuery(params)}`),

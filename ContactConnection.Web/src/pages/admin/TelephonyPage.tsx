@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import AdminShell from '../../components/admin/AdminShell'
 import SearchableSelect from '../../components/SearchableSelect'
+import GroupRoutingPanel from '../../components/admin/GroupRoutingPanel'
 import {
   listClients, createClient, activateClient, deactivateClient,
   getOrderNumberSequence, putOrderNumberSequence, deleteOrderNumberSequence,
@@ -1379,6 +1380,8 @@ function AgentGroupsTab() {
                           })}
                         </div>
                       )}
+
+                      <GroupRoutingPanel groupId={g.id} agents={allAgents} membersVersion={detail.members.length} />
                     </>
                   )}
                 </div>
