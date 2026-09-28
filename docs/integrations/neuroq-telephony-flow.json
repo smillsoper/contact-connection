@@ -1,6 +1,177 @@
 {
-    "name": "NeuroQ Inbound — Parallel Queuing (draft)",
+    "name": "NeuroQ Inbound — Parallel Queuing",
     "nodes": {
+        "nq_cc_0": {
+            "_pos": {
+                "x": 1900,
+                "y": 0
+            },
+            "type": "tf_on_custom_event",
+            "label": "Secure Capture",
+            "eventName": "cc_capture",
+            "transitions": {
+                "default": "nq_cc_1"
+            }
+        },
+        "nq_cc_1": {
+            "_pos": {
+                "x": 1900,
+                "y": 170
+            },
+            "type": "tf_secure_collect",
+            "label": "CC Info Capture",
+            "fields": [
+                {
+                    "key": "pan",
+                    "maxDigits": 19,
+                    "minDigits": 13,
+                    "terminator": "#",
+                    "validation": "luhn",
+                    "promptAudioFileId": "1d74ecaf-0635-4a2a-a1be-87006185198e"
+                },
+                {
+                    "key": "expiry",
+                    "maxDigits": 4,
+                    "minDigits": 4,
+                    "terminator": "",
+                    "validation": "expiry_mmyy",
+                    "promptAudioFileId": "96d4180c-f4c3-4d0f-8889-155027ce68d4"
+                },
+                {
+                    "key": "cvv",
+                    "maxDigits": 4,
+                    "minDigits": 3,
+                    "terminator": "#",
+                    "validation": "cvv",
+                    "promptAudioFileId": "9eb4de4f-c8ad-4d18-a1be-fc042a703238"
+                }
+            ],
+            "maxTries": 3,
+            "timeoutMs": 12000,
+            "transitions": {
+                "failed": "nq_cc_5",
+                "timeout": "nq_cc_5",
+                "collected": "nq_cc_2"
+            },
+            "secureFields": [
+                {
+                    "key": "pan",
+                    "maxDigits": 19,
+                    "minDigits": 13,
+                    "terminator": "#",
+                    "validation": "luhn",
+                    "promptAudioFileId": "1d74ecaf-0635-4a2a-a1be-87006185198e"
+                },
+                {
+                    "key": "expiry",
+                    "maxDigits": 4,
+                    "minDigits": 4,
+                    "terminator": "none",
+                    "validation": "expiry_mmyy",
+                    "promptAudioFileId": "96d4180c-f4c3-4d0f-8889-155027ce68d4"
+                },
+                {
+                    "key": "cvv",
+                    "maxDigits": 4,
+                    "minDigits": 3,
+                    "terminator": "none",
+                    "validation": "cvv",
+                    "promptAudioFileId": "9eb4de4f-c8ad-4d18-a1be-fc042a703238"
+                }
+            ],
+            "invalidAudioFileId": "__platform:will/menu_invalid_entry",
+            "interDigitTimeoutMs": 5000
+        },
+        "nq_cc_2": {
+            "_pos": {
+                "x": 1900,
+                "y": 340
+            },
+            "type": "tf_set_variable",
+            "label": "Set CC_Capture_Success",
+            "assignments": [
+                {
+                    "key": "shared.CC_Capture_Success",
+                    "value": "true"
+                }
+            ],
+            "transitions": {
+                "default": "nq_cc_3"
+            }
+        },
+        "nq_cc_3": {
+            "_pos": {
+                "x": 1900,
+                "y": 510
+            },
+            "type": "tf_play",
+            "label": "Play SecureCollect Success",
+            "ttsText": "",
+            "ttsVoice": "kal",
+            "audioFileId": "322ad5f1-af7a-4066-9a1e-2627f7fa6980",
+            "audioSource": "file",
+            "autoRestart": false,
+            "transitions": {
+                "end_of_stream": "nq_cc_4"
+            },
+            "durationSeconds": 0,
+            "leadInSilenceMs": 0,
+            "rememberPosition": false,
+            "startOffsetSeconds": 0,
+            "periodicAnnouncements": [
+            ],
+            "periodicAnnouncementIntervalSeconds": 30
+        },
+        "nq_cc_4": {
+            "_pos": {
+                "x": 1900,
+                "y": 680
+            },
+            "type": "tf_end",
+            "label": "End",
+            "transitions": {
+            }
+        },
+        "nq_cc_5": {
+            "_pos": {
+                "x": 1900,
+                "y": 850
+            },
+            "type": "tf_set_variable",
+            "label": "Set CC_Capture_Success",
+            "assignments": [
+                {
+                    "key": "shared.CC_Capture_Success",
+                    "value": "false"
+                }
+            ],
+            "transitions": {
+                "default": "nq_cc_6"
+            }
+        },
+        "nq_cc_6": {
+            "_pos": {
+                "x": 1900,
+                "y": 1020
+            },
+            "type": "tf_play",
+            "label": "Play SecureCollect Failed",
+            "ttsText": "",
+            "ttsVoice": "kal",
+            "audioFileId": "34e5b5cb-d4c4-40f2-a774-12eb0990fb78",
+            "audioSource": "file",
+            "autoRestart": false,
+            "transitions": {
+                "end_of_stream": "nq_cc_4"
+            },
+            "durationSeconds": 0,
+            "leadInSilenceMs": 0,
+            "rememberPosition": false,
+            "startOffsetSeconds": 0,
+            "periodicAnnouncements": [
+            ],
+            "periodicAnnouncementIntervalSeconds": 30
+        },
         "nq_hold": {
             "_pos": {
                 "x": 0,
@@ -69,6 +240,7 @@
             "transitions": {
                 "default": "nq_busy_msg"
             },
+            "agentGroupId": "",
             "agentExtension": ""
         },
         "nq_answer": {
@@ -99,8 +271,8 @@
         },
         "nq_reject": {
             "_pos": {
-                "x": 420,
-                "y": 160
+                "x": 264.7804457625396,
+                "y": 319.7515120254154
             },
             "type": "tf_reject",
             "cause": "declined",
@@ -149,8 +321,8 @@
         },
         "nq_alert_mod": {
             "_pos": {
-                "x": 420,
-                "y": 480
+                "x": 184.33819502633753,
+                "y": 632.9535753434827
             },
             "type": "tf_send_email",
             "label": "Email MOD — No Agents Logged In",

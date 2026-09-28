@@ -1,0 +1,2896 @@
+{
+  "name": "NeuroQ - V1 (from CRMPro, draft)",
+  "flow_type": "crm",
+  "entry_node": "v1_start",
+  "nodes": {
+    "v1_start": {
+      "_pos": {
+        "x": 0,
+        "y": 0
+      },
+      "type": "set_variable",
+      "label": "Initialize",
+      "transitions": {
+        "default": "v1_sec_opening"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.auth_attempts}}",
+          "value": "0"
+        },
+        {
+          "variable": "{{flow.autoship_confirm}}",
+          "value": ""
+        },
+        {
+          "variable": "{{flow.autoship_note}}",
+          "value": ""
+        }
+      ]
+    },
+    "v1_sec_opening": {
+      "_pos": {
+        "x": 0,
+        "y": 170
+      },
+      "type": "section",
+      "label": "Opening",
+      "transitions": {
+        "default": "v1_first_name"
+      },
+      "name": "Opening",
+      "outputVariable": "v1_sec_opening_section",
+      "allowJumpFromAnywhere": true,
+      "clearPreviousValues": false
+    },
+    "v1_first_name": {
+      "_pos": {
+        "x": 0,
+        "y": 340
+      },
+      "type": "input",
+      "label": "First Name",
+      "transitions": {
+        "default": "v1_set_bill_first"
+      },
+      "fieldType": "text",
+      "required": true,
+      "scriptLabel": "",
+      "scriptContent": "<p>\"Thank you for calling about clinically-tested NeuroQ, my name is </p><p></p><p><span style=\"color: #008000\">{{agent.first_name}}</span> I’ll be your brain health <u>product specialist</u> today. May I have your first name please?\"</p><p></p>",
+      "outputVariable": "first_name",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_set_bill_first": {
+      "_pos": {
+        "x": 0,
+        "y": 510
+      },
+      "type": "set_variable",
+      "label": "Billing first name = first name",
+      "transitions": {
+        "default": "v1_zip"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.billing_address.firstName}}",
+          "value": "{{flow.first_name}}"
+        }
+      ]
+    },
+    "v1_zip": {
+      "_pos": {
+        "x": 0,
+        "y": 680
+      },
+      "type": "input",
+      "label": "Zip Code",
+      "transitions": {
+        "default": "v1_set_bill_zip"
+      },
+      "fieldType": "text",
+      "required": false,
+      "scriptLabel": "",
+      "scriptContent": "<p>\"And your zip code as well, please?\"</p><p></p><p><span style=\"color: #0000ff\">•</span><span style=\"color: #0000ff\">•</span><span style=\"color: #0000ff\">•</span><span style=\"color: #0000ff\"> AGENT: If refused or cust hangs up, enter NOZIP </span><span style=\"color: #0000ff\">•</span><span style=\"color: #0000ff\">•</span><span style=\"color: #0000ff\">•</span></p><p></p><p><span style=\"color: #0000ff\">AGENT: If caller ask for price READ:</span></p><p><span style=\"color: #0000ff\">\"I will be happy to pull that up for you. We advertise all over the country, so I</span><span style=\"color: #0000ff\">’</span><span style=\"color: #0000ff\">ll need to pull up the promotions we have running in your area. While that</span><span style=\"color: #0000ff\">’</span><span style=\"color: #0000ff\">s loading are you calling for yourself or someone else?\" (AGENT: Hit </span><span style=\"color: #0000ff\">“</span><span style=\"color: #0000ff\">Place Order</span><span style=\"color: #0000ff\">”</span><span style=\"color: #0000ff\">)</span></p><p></p>",
+      "outputVariable": "zip_code",
+      "inputMask": "__zip_ca__",
+      "customMask": ""
+    },
+    "v1_set_bill_zip": {
+      "_pos": {
+        "x": 0,
+        "y": 850
+      },
+      "type": "set_variable",
+      "label": "Billing zip = zip",
+      "transitions": {
+        "default": "v1_call_type"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.billing_address.zip}}",
+          "value": "{{flow.zip_code}}"
+        }
+      ]
+    },
+    "v1_call_type": {
+      "_pos": {
+        "x": 0,
+        "y": 1020
+      },
+      "type": "input",
+      "label": "Call Type",
+      "transitions": {
+        "Order": "v1_sec_offer",
+        "All Other Calls": "v1_disp_aoc",
+        "Junk (Test / Prank / Wrong Number / No One On Line)": "v1_disp_junk"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Order",
+          "value": "Order"
+        },
+        {
+          "label": "All Other Calls",
+          "value": "All Other Calls"
+        },
+        {
+          "label": "Junk (Test / Prank / Wrong Number / No One On Line)",
+          "value": "Junk (Test / Prank / Wrong Number / No One On Line)"
+        }
+      ],
+      "scriptLabel": "Opening",
+      "scriptContent": "<p>\"Thank you <span style=\"color: #008000\">{{flow.first_name}}</span> I'd be happy to help you today. This call will be recorded for quality assurance.</p><p></p><p>Did you just see <strong>NeuroQ </strong>on TV with our <strong>TV Special Package</strong>? <span style=\"color: #0000ff\">(Wait for response)</span> </p><p></p><p>It’s really a great deal. Now, are you calling for yourself or a loved one? <span style=\"color: #0000ff\">(Pause for response)</span></p><p></p><p>I have few different packages available today <span style=\"color: #008000\">{{flow.first_name}}</span>, including the TV special, but I need to get some information from you <strong>first</strong>, so I can recommend the <strong>best package</strong> for you. Sound good?\"</p><p><span style=\"color: #0000ff\">                                                               Select ORDER for scripting</span></p><p></p>",
+      "outputVariable": "call_type",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_sec_offer": {
+      "_pos": {
+        "x": 380,
+        "y": 0
+      },
+      "type": "section",
+      "label": "Offer",
+      "transitions": {
+        "default": "v1_probe1"
+      },
+      "name": "Offer",
+      "outputVariable": "v1_sec_offer_section",
+      "allowJumpFromAnywhere": true,
+      "clearPreviousValues": false
+    },
+    "v1_probe_set_0": {
+      "_pos": {
+        "x": 760,
+        "y": 0
+      },
+      "type": "set_variable",
+      "label": "Probe: Memory issues and forgetfulness",
+      "transitions": {
+        "default": "v1_probe2"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.probe_phrase}}",
+          "value": "your memory issues and forgetfulness"
+        },
+        {
+          "variable": "{{flow.probe_topic}}",
+          "value": "Memory issues and forgetfulness"
+        }
+      ]
+    },
+    "v1_probe_set_1": {
+      "_pos": {
+        "x": 760,
+        "y": 170
+      },
+      "type": "set_variable",
+      "label": "Probe: Struggling to recall things or learn new  things",
+      "transitions": {
+        "default": "v1_probe2"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.probe_phrase}}",
+          "value": "your struggling to recall things or learn new things"
+        },
+        {
+          "variable": "{{flow.probe_topic}}",
+          "value": "Struggling to recall things or learn new things"
+        }
+      ]
+    },
+    "v1_probe_set_2": {
+      "_pos": {
+        "x": 760,
+        "y": 340
+      },
+      "type": "set_variable",
+      "label": "Probe: Poor mental clarity",
+      "transitions": {
+        "default": "v1_probe2"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.probe_phrase}}",
+          "value": "your poor mental clarity"
+        },
+        {
+          "variable": "{{flow.probe_topic}}",
+          "value": "Poor mental clarity"
+        }
+      ]
+    },
+    "v1_probe_set_3": {
+      "_pos": {
+        "x": 760,
+        "y": 510
+      },
+      "type": "set_variable",
+      "label": "Probe: Struggles with focus",
+      "transitions": {
+        "default": "v1_probe2"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.probe_phrase}}",
+          "value": "your struggles with focus"
+        },
+        {
+          "variable": "{{flow.probe_topic}}",
+          "value": "Struggles with focus"
+        }
+      ]
+    },
+    "v1_probe_set_4": {
+      "_pos": {
+        "x": 760,
+        "y": 680
+      },
+      "type": "set_variable",
+      "label": "Probe: Poor Concentration",
+      "transitions": {
+        "default": "v1_probe2"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.probe_phrase}}",
+          "value": "your poor concentration"
+        },
+        {
+          "variable": "{{flow.probe_topic}}",
+          "value": "Poor Concentration"
+        }
+      ]
+    },
+    "v1_probe_set_5": {
+      "_pos": {
+        "x": 760,
+        "y": 850
+      },
+      "type": "set_variable",
+      "label": "Probe: Brain fog",
+      "transitions": {
+        "default": "v1_probe2"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.probe_phrase}}",
+          "value": "your brain fog"
+        },
+        {
+          "variable": "{{flow.probe_topic}}",
+          "value": "Brain fog"
+        }
+      ]
+    },
+    "v1_probe_set_6": {
+      "_pos": {
+        "x": 760,
+        "y": 1020
+      },
+      "type": "set_variable",
+      "label": "Probe: Confusion",
+      "transitions": {
+        "default": "v1_probe2"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.probe_phrase}}",
+          "value": "your confusion"
+        },
+        {
+          "variable": "{{flow.probe_topic}}",
+          "value": "Confusion"
+        }
+      ]
+    },
+    "v1_probe_set_7": {
+      "_pos": {
+        "x": 760,
+        "y": 1190
+      },
+      "type": "set_variable",
+      "label": "Probe: All the above",
+      "transitions": {
+        "default": "v1_probe2"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.probe_phrase}}",
+          "value": "the issues you've been experiencing"
+        },
+        {
+          "variable": "{{flow.probe_topic}}",
+          "value": "brain health"
+        }
+      ]
+    },
+    "v1_probe_set_8": {
+      "_pos": {
+        "x": 760,
+        "y": 1360
+      },
+      "type": "set_variable",
+      "label": "Probe: Something Else",
+      "transitions": {
+        "default": "v1_probe2"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.probe_phrase}}",
+          "value": "the issues you've been experiencing"
+        },
+        {
+          "variable": "{{flow.probe_topic}}",
+          "value": "brain health"
+        }
+      ]
+    },
+    "v1_probe_set_9": {
+      "_pos": {
+        "x": 760,
+        "y": 1530
+      },
+      "type": "set_variable",
+      "label": "Probe: I just want the price",
+      "transitions": {
+        "default": "v1_price_rebuttal"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.probe_phrase}}",
+          "value": "the issues you've been experiencing"
+        },
+        {
+          "variable": "{{flow.probe_topic}}",
+          "value": "brain health"
+        }
+      ]
+    },
+    "v1_probe1": {
+      "_pos": {
+        "x": 380,
+        "y": 170
+      },
+      "type": "input",
+      "label": "Probe 1",
+      "transitions": {
+        "Memory issues and forgetfulness": "v1_probe_set_0",
+        "Struggling to recall things or learn new  things": "v1_probe_set_1",
+        "Poor mental clarity": "v1_probe_set_2",
+        "Struggles with focus": "v1_probe_set_3",
+        "Poor Concentration": "v1_probe_set_4",
+        "Brain fog": "v1_probe_set_5",
+        "Confusion": "v1_probe_set_6",
+        "All the above": "v1_probe_set_7",
+        "Something Else": "v1_probe_set_8",
+        "I just want the price": "v1_probe_set_9"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Memory issues and forgetfulness",
+          "value": "Memory issues and forgetfulness"
+        },
+        {
+          "label": "Struggling to recall things or learn new  things",
+          "value": "Struggling to recall things or learn new  things"
+        },
+        {
+          "label": "Poor mental clarity",
+          "value": "Poor mental clarity"
+        },
+        {
+          "label": "Struggles with focus",
+          "value": "Struggles with focus"
+        },
+        {
+          "label": "Poor Concentration",
+          "value": "Poor Concentration"
+        },
+        {
+          "label": "Brain fog",
+          "value": "Brain fog"
+        },
+        {
+          "label": "Confusion",
+          "value": "Confusion"
+        },
+        {
+          "label": "All the above",
+          "value": "All the above"
+        },
+        {
+          "label": "Something Else",
+          "value": "Something Else"
+        },
+        {
+          "label": "I just want the price",
+          "value": "I just want the price"
+        }
+      ],
+      "scriptLabel": "Offer",
+      "scriptContent": "<p>\"So <span style=\"color: #008000\">{{flow.first_name}}</span>, First off, can you tell me a little about what you are experiencing that you want Neuro Q and the doctor’s brain health program to help with? \"</p><p></p><hr><p><strong><span style=\"color: #ff0000\">↓</span></strong><strong><span style=\"color: #ff0000\"> SCROLL for More PRICE Redirects </span></strong><strong><span style=\"color: #ff0000\">↓</span></strong></p><p><strong>•</strong><strong>  How much is it? / What</strong><strong>’</strong><strong>s the price?</strong></p><p>•  I have a few different packages available today, including the TV Special you saw with over $100 in free gifts. The price depends on the package you select (Name). So, let me ask a few questions so I can get you into the <strong>right package</strong> for <strong>your</strong> needs. First off, what are you experiencing that you want Neuro Q to help with?<strong> </strong><strong><span style=\"color: #0000ff\">(Capture information and Continue with probes)</span></strong></p><p><strong>•</strong><strong>  I just want the price...</strong></p><p>•  Normally, it’s just a little over a dollar a day for NeuroQ, plus you get over $100 in free bonus gifts today with the TV Special! So what are you experiencing that you want NeuroQ to help with?<strong> </strong><strong><span style=\"color: #0000ff\">(Capture information and Continue with probes)</span></strong></p><p><strong>•</strong><strong>  Is it really free?</strong></p><p>•  Yes, you called in time for the TV Special promotion, so you will get a free bottle of NeuroQ <strong>and</strong> the Doctor’s Brain Care Program with your order today. What are you experiencing that you want Neuro Q to help with?<strong> </strong><strong><span style=\"color: #0000ff\">(Capture information and Continue with probes)</span></strong></p><p></p>",
+      "outputVariable": "probe1",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_probe2": {
+      "_pos": {
+        "x": 380,
+        "y": 340
+      },
+      "type": "input",
+      "label": "Probe 2",
+      "transitions": {
+        "default": "v1_probe3"
+      },
+      "fieldType": "text",
+      "required": false,
+      "scriptLabel": "",
+      "scriptContent": "<p>\"Are you concerned that </p><p></p><p><span style=\"color: #008000\">{{flow.probe_phrase}}</span> could become more serious over time?</p><p></p><p><span style=\"color: #0000ff\">(Agent: Leave blank if no response)</span></p><p></p>",
+      "outputVariable": "probe2",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_probe3": {
+      "_pos": {
+        "x": 380,
+        "y": 510
+      },
+      "type": "input",
+      "label": "Probe 3",
+      "transitions": {
+        "default": "v1_probe4"
+      },
+      "fieldType": "text",
+      "required": false,
+      "scriptLabel": "",
+      "scriptContent": "<p>\"What's the most frustrating part of </p><p></p><p><span style=\"color: #008000\">{{flow.probe_phrase}}</span> for you?</p><p></p><p><span style=\"color: #0000ff\">(Agent: Leave blank if no response)</span></p><p></p>",
+      "outputVariable": "probe3",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_probe4": {
+      "_pos": {
+        "x": 380,
+        "y": 680
+      },
+      "type": "input",
+      "label": "Probe 4",
+      "transitions": {
+        "default": "v1_hot_button"
+      },
+      "fieldType": "text",
+      "required": false,
+      "scriptLabel": "",
+      "scriptContent": "<p>\"How long has </p><p></p><p><span style=\"color: #008000\">{{flow.probe_phrase}}</span> been an issue for you?\"</p><p></p><p><span style=\"color: #0000ff\">(Agent: Leave blank if no response.)</span></p><p></p><p><span style=\"color: #0000ff\">(Alternate Probes:</span></p><p><span style=\"color: #0000ff\">·</span><span style=\"color: #0000ff\"> </span><span style=\"color: #0000ff\">*</span><span style=\"color: #0000ff\">·</span><span style=\"color: #0000ff\"> </span><span style=\"color: #0000ff\">What</span><span style=\"color: #0000ff\">’</span><span style=\"color: #0000ff\">s the most frustrating part for you? </span></p><p><span style=\"color: #0000ff\">·</span><span style=\"color: #0000ff\"> </span><span style=\"color: #0000ff\"> </span><span style=\"color: #0000ff\">What time of the day is your mental energy or clarity the lowest?</span></p><p><span style=\"color: #0000ff\">·</span><span style=\"color: #0000ff\"> </span><span style=\"color: #0000ff\"> </span><span style=\"color: #0000ff\">What have you tried in the past to help with this?</span></p><p></p>",
+      "outputVariable": "probe4",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_hot_button": {
+      "_pos": {
+        "x": 380,
+        "y": 850
+      },
+      "type": "input",
+      "label": "Press Hot Button",
+      "transitions": {
+        "Continue": "v1_main_offer"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Continue",
+          "value": "Continue"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"Thank you for sharing that with me <span style=\"color: #008000\">{{flow.first_name}}</span>. I’m glad you called when you did, because from what you’ve described, it’s critical that we take action immediately. As the doctor explained, </p><p></p><p><span style=\"color: #008000\">{{flow.probe_phrase}}</span> are common <strong>warning signs</strong>. It’s likely to only get <strong>worse </strong>without help, and unfortunately these issues can compound over time, so starting now is essential, wouldn’t you agree? <span style=\"color: #0000ff\">(Pause: GET BUY IN!)</span> </p><p></p><p>The good news <span style=\"color: #008000\">{{flow.first_name}}</span> is it definitely sounds like the <strong>90-day</strong> TV Special Package <strong>is </strong>the right one to get you started. Because what we’ve seen, and the NeuroQ clinical trial clearly showed, is that people like you experience their <strong>biggest </strong>improvements in that <strong>third </strong>month of use. It goes to work fast, but again it's in that third month when people <strong>really </strong>feel it!</p><p></p><p>But first <span style=\"color: #008000\">{{flow.first_name}}</span> let me start by explaining <strong>how</strong> NeuroQ <strong>works</strong> to help bring <strong>back</strong> mental quickness, <strong>improve</strong> recall and most importantly help <strong>protect</strong> your brain. And that’s what you’re looking for, right <span style=\"color: #008000\">{{flow.first_name}}</span>? <span style=\"color: #0000ff\">(Continue, regardless of answer)</span></p><p></p><p>Great. Now, not only is the NeuroQ formula clinically-tested, but it’s also the <strong>only</strong> brain supplement shown to directly address the <strong>four main causes</strong> of mental decline as we age. </p><p>• First, it supports <strong>neurotransmitter</strong> levels in your brain, which get depleted with age, for <strong>quicker thinking and recall</strong></p><p>• Next, it has ingredients that support the growth of new <strong>brain neurons</strong> for a better <strong>memory</strong></p><p>• And the other two things it does are – </p><p>• It increases the <strong>blood flow</strong> to your brain, which brings in more oxygen and nutrients to help <strong>clear your mind</strong> </p><p>• While also <strong>detoxing</strong> your brain of built-up <strong>toxins</strong>, which is important for your long term brain health. </p><p>And <span style=\"color: #008000\">{{flow.first_name}}</span>, when you do <strong>all four</strong> of these daily, the way NeuroQ does, it can really have a <strong>dramatic impact</strong>. So we can do something about your </p><p></p><p><span style=\"color: #008000\">{{flow.probe_phrase}}</span>! And again, that's what you are looking for, right?\"</p><p></p>",
+      "outputVariable": "hot_button",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_main_offer": {
+      "_pos": {
+        "x": 380,
+        "y": 1020
+      },
+      "type": "input",
+      "label": "Main Offer",
+      "transitions": {
+        "Yes - Place Order": "v1_pkg_3mo",
+        "No - Does not want auto": "v1_auto_rebuttal",
+        "No - Go to Rebuttal": "v1_rebuttal"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes - Place Order",
+          "value": "Yes - Place Order"
+        },
+        {
+          "label": "No - Does not want auto",
+          "value": "No - Does not want auto"
+        },
+        {
+          "label": "No - Go to Rebuttal",
+          "value": "No - Go to Rebuttal"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"So here’s how the TV Special works - with the special you’ll get a <strong>FREE </strong>month’s supply of NeuroQ, <strong><u>plus</u></strong> 2 additional free gifts! A FREE month supply of the doctor’s <strong>Memory DHA</strong>, the brain specific omega supplement you need for proper brain function and long-term brain protection. Plus, the doctor’s at-home brain health guide and program designed for seniors, called <strong>Brain Care</strong>, with the latest information and lifestyle tips to help keep you sharp each day. Altogether this comes to over <strong>$100 in FREE bonus gifts</strong>, yours FREE today! Sounds great, right <span style=\"color: #008000\">{{flow.first_name}}</span>? <span style=\"color: #0000ff\">(Get a YES before continuing)</span></p><p></p><p><strong>Now </strong>the regular, retail price for one bottle of NeuroQ is $89.95, but you won’t pay that. Because today, I have two significant discounts available. First a senior discount, which brings it down <strong>to </strong>$69.95 a bottle, <strong>and </strong>you get a <strong>free </strong>bottle as part of the 90-day special, which makes your three month’s supply only $139.90. Essentially <span style=\"color: #008000\">{{flow.first_name}}</span> that brings it to half of the regular price, <strong>a great deal</strong>!</p><p></p><p>Plus, as a senior, you get discounted s/h of just $4.95. And to ensure lasting results, you will continue to receive this great price for as long as you like! You’re going to <strong>love </strong>NeuroQ <span style=\"color: #008000\">{{flow.first_name}}</span>!</p><p></p><p>Is <span style=\"color: #008000\">{{flow.first_name}}</span> your first name as it appears on the card you are using today?\" <span style=\"color: #0000ff\">(based upon response, go to next steps)</span></p><p></p>",
+      "outputVariable": "main_offer",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_price_rebuttal": {
+      "_pos": {
+        "x": 380,
+        "y": 1190
+      },
+      "type": "input",
+      "label": "Price Rebuttal",
+      "transitions": {
+        "Yes - Continue": "v1_pkg_3mo",
+        "No - Go to Rebuttal 1": "v1_rebuttal"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes - Continue",
+          "value": "Yes - Continue"
+        },
+        {
+          "label": "No - Go to Rebuttal 1",
+          "value": "No - Go to Rebuttal 1"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"I understand <span style=\"color: #008000\">{{flow.first_name}}</span>, your time is important, so here are the details. The TV Special is 90-day package and it’s the doctor recommends that seniors, like you <span style=\"color: #008000\">{{flow.first_name}}</span>, start with. </p><p></p><p>This is important for you to understand <span style=\"color: #008000\">{{flow.first_name}}</span> because, as the clinical trial showed, it’s in that <strong>third month</strong> where people experience the <strong>biggest </strong>benefits, and really feel the increased <strong>mental quickness</strong>, <strong>recall </strong>and <strong>focus</strong>. And that’s what you’re looking for, right <span style=\"color: #008000\">{{flow.first_name}}</span>? <span style=\"color: #0000ff\">(Continue regardless of answer)</span></p><p></p><p>So with the TV Special you’ll get a <strong>FREE </strong>month’s supply of NeuroQ <strong><u>and</u></strong> the 2 additional free gifts you saw on the show. The doctor’s <strong>Memory DHA</strong> special brain omega supplement and his new <strong>Brain Care</strong> at-home brain health program. Altogether this comes to over <strong>$100 in FREE bonuses</strong> with the TV Special offer!  Ok? <span style=\"color: #0000ff\">(Get a YES before continuing)</span></p><p></p><p><strong>Now </strong>the regular, retail price for one bottle of NeuroQ is $89.95, but you won’t pay that. Because today, I have two significant discounts available. First a senior discount, which brings it down <strong>to </strong>$69.95 a bottle, <strong>and </strong>you get a <strong>free </strong>bottle as part of the 90-day special, which makes your three month’s supply only $139.90. Essentially <span style=\"color: #008000\">{{flow.first_name}}</span> that brings it to half of the regular price, <strong>a great deal!</strong></p><p></p><p>Plus, as a senior, you get discounted s/h of just $4.95.! And to ensure lasting results, you will continue to receive this great price for as long as you like! You’re going to <strong>love </strong>NeuroQ <span style=\"color: #008000\">{{flow.first_name}}</span>!</p><p></p><p>Is <span style=\"color: #008000\">{{flow.first_name}}</span> your first name as it appears on the card you are using today?\"  <span style=\"color: #0000ff\">(based upon response, go to next steps)</span></p><p></p>",
+      "outputVariable": "price_rebuttal",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_auto_rebuttal": {
+      "_pos": {
+        "x": 380,
+        "y": 1360
+      },
+      "type": "input",
+      "label": "Auto Rebuttal",
+      "transitions": {
+        "Yes": "v1_pkg_3mo",
+        "No - Go to Basic Offer with OTS": "v1_basic_ots"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes",
+          "value": "Yes"
+        },
+        {
+          "label": "No - Go to Basic Offer with OTS",
+          "value": "No - Go to Basic Offer with OTS"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"I understand, I can set you up with a one-time purchase, and you can call us when you are ready to order more. However,<span style=\"color: #008000\">{{flow.first_name}}</span> you do miss out on some of the savings, because the one-time purchase package price is $40 more, plus you don’t get the discounted shipping, and normal shipping with the one-time purchase is$12.95.So being on the preferred customer replenishment plan saves you $48 over a one-time purchase today. </p><p></p><p><span style=\"color: #008000\">{{flow.first_name}}</span><span style=\"color: #008000\"> </span>,almost 100% of our customers are on the discounted replenishment program, and they love it. That’s because taking it consistently each day <span style=\"color: #008000\">{{flow.first_name}}</span><span style=\"color: #008000\"> </span>is so important – it’s proven to give you the best results. And the replenishment program makes sure that you won’t miss days, it <strong>ensures </strong>that you always receive it at the low member price. Either way it’s still protected by the 60-day guarantee, so why not get the savings - Is there a middle initial on the card you are using today?\"</p><p><span style=\"color: #0000ff\">(Be assumptive </span><span style=\"color: #0000ff\">–</span><span style=\"color: #0000ff\"> get a YES)</span></p><p></p>",
+      "outputVariable": "auto_rebuttal",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_basic_ots": {
+      "_pos": {
+        "x": 380,
+        "y": 1530
+      },
+      "type": "input",
+      "label": "Basic offer with OTS",
+      "transitions": {
+        "Yes": "v1_pkg_ots",
+        "No - Go to Rebuttal 2": "v1_downsell1"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes",
+          "value": "Yes"
+        },
+        {
+          "label": "No - Go to Rebuttal 2",
+          "value": "No - Go to Rebuttal 2"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"I completely understand <span style=\"color: #008000\">{{flow.first_name}}</span>  We can go ahead and send you the same great TV Special 3-month supply package, with all the FREE gifts, for just $48 more. The non-subscription price is $179.90, plus $12.95 shipping, with no future commitments. It’s still a great deal, bringing the price down about $60 a month for NeuroQ with this special. Would you like to use your credit or debit card today? \"</p><p></p>",
+      "outputVariable": "basic_with_ots",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_rebuttal": {
+      "_pos": {
+        "x": 380,
+        "y": 1700
+      },
+      "type": "input",
+      "label": "Rebuttal",
+      "transitions": {
+        "Yes": "v1_pkg_3mo",
+        "No - Go to Objections Then Downsell 1": "v1_objections"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes",
+          "value": "Yes"
+        },
+        {
+          "label": "No - Go to Objections Then Downsell 1",
+          "value": "No - Go to Objections Then Downsell 1"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"<span style=\"color: #008000\">{{flow.first_name}}</span>, with our TV special package you’re actually getting a 3 month supply of NeuroQ at $46.63 per month instead of the normal $69.95. That’s just $1.55 a day for clinically-tested NeuroQ, less than a cup of coffee, delivered right to you. And think about the value to you when it helps with </p><p></p><p><span style=\"color: #008000\">{{flow.probe_phrase}}</span>. And your first month is truly Free, so you can try it without worry. You’re protected with our great money back guarantee. You’ve got 60 days. <strong>So, let</strong><strong>’</strong><strong>s get you set-up, and make sure you also get the over $100 in Free Bonus Gifts just for trying NeuroQ today! Is your shipping and billing address the same?</strong>\"</p><p><span style=\"color: #0000ff\">(Be assumptive </span><span style=\"color: #0000ff\">–</span><span style=\"color: #0000ff\"> get a YES)</span></p><p></p>",
+      "outputVariable": "rebuttal",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_objections": {
+      "_pos": {
+        "x": 380,
+        "y": 1870
+      },
+      "type": "input",
+      "label": "Objections",
+      "transitions": {
+        "Too expensive": "v1_objreb_0",
+        "Think it over / More info": "v1_objreb_1",
+        "No CC": "v1_objreb_2",
+        "Thought it was Free": "v1_objreb_3",
+        "Spouse": "v1_objreb_4",
+        "MD (Need to ask doctor)": "v1_objreb_5",
+        "Skeptical - Not Sure it will Work": "v1_objreb_6"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Too expensive",
+          "value": "Too expensive"
+        },
+        {
+          "label": "Think it over / More info",
+          "value": "Think it over / More info"
+        },
+        {
+          "label": "No CC",
+          "value": "No CC"
+        },
+        {
+          "label": "Thought it was Free",
+          "value": "Thought it was Free"
+        },
+        {
+          "label": "Spouse",
+          "value": "Spouse"
+        },
+        {
+          "label": "MD (Need to ask doctor)",
+          "value": "MD (Need to ask doctor)"
+        },
+        {
+          "label": "Skeptical - Not Sure it will Work",
+          "value": "Skeptical - Not Sure it will Work"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p><span style=\"color: #0000ff\">Agent: Select Callers Objection, If needed READ:</span> \"<span style=\"color: #008000\">{{flow.first_name}}</span>, May I ask what your hesitation is to place an order today?\" </p><p></p><p><span style=\"color: #0000ff\">OR restate what objection the caller said like this - </span>\"I just want to be clear your only objection to the offer is (insert objection).\"              <span style=\"color: #0000ff\">- then make the appropriate drop down selection.</span></p><p></p><p><span style=\"color: #0000ff\">AGENT: the most important part here is to ISOLATE the objection so we can make our 3-5 attempts as needed.</span> </p><p></p>",
+      "outputVariable": "objection",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_objreb_0": {
+      "_pos": {
+        "x": 760,
+        "y": 1700
+      },
+      "type": "input",
+      "label": "Objection Rebuttal: Too expensive",
+      "transitions": {
+        "Yes - Place Order - B2G1": "v1_pkg_3mo",
+        "No - Go to Downsell 1": "v1_downsell1"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes - Place Order - B2G1",
+          "value": "Yes - Place Order - B2G1"
+        },
+        {
+          "label": "No - Go to Downsell 1",
+          "value": "No - Go to Downsell 1"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"I understand your hesitation, and earlier in the call you mentioned you have been dealing with <span style=\"color: #008000\">{{flow.probe_topic}}</span> for <span style=\"color: #008000\">{{flow.probe4}}</span> and that is impacting your life and things that make you happy. If you start taking NeuroQ and get those key brain nutrients working to help with your mental clarity and it would be well worth the investment, wouldn't it?! You're making a great decision for your brain health, what type of Credit Card will you be using today?\"</p>",
+      "outputVariable": "objection_rebuttal",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_objreb_1": {
+      "_pos": {
+        "x": 760,
+        "y": 1870
+      },
+      "type": "input",
+      "label": "Objection Rebuttal: Think it over / More info",
+      "transitions": {
+        "Yes - Place Order - B2G1": "v1_pkg_3mo",
+        "No - Go to Downsell 1": "v1_downsell1"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes - Place Order - B2G1",
+          "value": "Yes - Place Order - B2G1"
+        },
+        {
+          "label": "No - Go to Downsell 1",
+          "value": "No - Go to Downsell 1"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"I understand where you're coming from, and the most important thing is getting NeuroQ working in your brain to help slow the mental decline and begin to improve your brain function so we begin to address your <span style=\"color: #008000\">{{flow.probe_topic}}</span>. The only way to do that is to just get started. You’re making a great decision for your brain health, to what address would you like us to send your NeuroQ?\"</p>",
+      "outputVariable": "objection_rebuttal",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_objreb_2": {
+      "_pos": {
+        "x": 760,
+        "y": 2040
+      },
+      "type": "input",
+      "label": "Objection Rebuttal: No CC",
+      "transitions": {
+        "Yes - Place Order - B2G1": "v1_pkg_3mo",
+        "No - Go to Downsell 1": "v1_downsell1"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes - Place Order - B2G1",
+          "value": "Yes - Place Order - B2G1"
+        },
+        {
+          "label": "No - Go to Downsell 1",
+          "value": "No - Go to Downsell 1"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"I understand. Is it that it is too much up front, or you are not sure if it is worth the price?\"</p>",
+      "outputVariable": "objection_rebuttal",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_objreb_3": {
+      "_pos": {
+        "x": 760,
+        "y": 2210
+      },
+      "type": "input",
+      "label": "Objection Rebuttal: Thought it was Free",
+      "transitions": {
+        "Yes - Place Order - B2G1": "v1_pkg_3mo",
+        "No - Go to Downsell 1": "v1_downsell1"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes - Place Order - B2G1",
+          "value": "Yes - Place Order - B2G1"
+        },
+        {
+          "label": "No - Go to Downsell 1",
+          "value": "No - Go to Downsell 1"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"I understand <span style=\"color: #008000\">{{flow.first_name}}</span> that your time is important, so let me re-cap one more time. Today with the TV Special Package, you'll get a FREE month and the 2 additional free gifts you saw on the show today. That's approx $100 in FREE bonuses with the TV Special offer! Sounds great, right? This buy 2 get one FREE Deal, a full 3-month supply of NeuroQ is only $139.90 + $4.95 S/H. AND you have 60 days to make sure it is right for you, Let's try this offer ok? What address would you like me to ship this to <span style=\"color: #008000\">{{flow.first_name}}</span>?\"</p>",
+      "outputVariable": "objection_rebuttal",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_objreb_4": {
+      "_pos": {
+        "x": 760,
+        "y": 2380
+      },
+      "type": "input",
+      "label": "Objection Rebuttal: Spouse",
+      "transitions": {
+        "Yes - Place Order - B2G1": "v1_pkg_3mo",
+        "No - Go to Downsell 1": "v1_downsell1"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes - Place Order - B2G1",
+          "value": "Yes - Place Order - B2G1"
+        },
+        {
+          "label": "No - Go to Downsell 1",
+          "value": "No - Go to Downsell 1"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"I understand. I'm sure you spouse will have two questions, how much is it, and does it work, right? You are getting a great discount today from the TV special, and the only way to find out if it works is to try it out. SO, let's get this right out to you. What address would you like us to send it to?\"</p>",
+      "outputVariable": "objection_rebuttal",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_objreb_5": {
+      "_pos": {
+        "x": 760,
+        "y": 2550
+      },
+      "type": "input",
+      "label": "Objection Rebuttal: MD (Need to ask doctor)",
+      "transitions": {
+        "Yes - Place Order - B2G1": "v1_pkg_3mo",
+        "No - Go to Downsell 1": "v1_downsell1"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes - Place Order - B2G1",
+          "value": "Yes - Place Order - B2G1"
+        },
+        {
+          "label": "No - Go to Downsell 1",
+          "value": "No - Go to Downsell 1"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"I understand, a doctor’s seal of approval is important, that's why NeuroQ was developed by a doctor. But not just any doctor, a neurologist, and one of the world’s top experts on the aging brain.  If you have a concern then just bring  the actual bottles and show your doctor or pharmacist the supplement facts and ingredient listing. If they understand supplements, then they should recognize all the natural ingredients that work with your body much like good nutrition. You’ve got the 60-day money back guarantee. So, let’s get this right out to you. What address would you like us to send it?\"</p>",
+      "outputVariable": "objection_rebuttal",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_objreb_6": {
+      "_pos": {
+        "x": 760,
+        "y": 2720
+      },
+      "type": "input",
+      "label": "Objection Rebuttal: Skeptical - Not Sure it will Work",
+      "transitions": {
+        "Yes - Place Order - B2G1": "v1_pkg_3mo",
+        "No - Go to Downsell 1": "v1_downsell1"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes - Place Order - B2G1",
+          "value": "Yes - Place Order - B2G1"
+        },
+        {
+          "label": "No - Go to Downsell 1",
+          "value": "No - Go to Downsell 1"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"I understand, it’s good to be skeptical when it comes to your health, whether it's a supplement or a drug. But NeuroQ is different, as you saw in the commercial. It underwent a large-scale clinical trial confirming its safety and efficacy. It’s also doctor-developed, by a neurologist who is considered one of the world’s experts on brain aging and brain health. We have tens of thousands of people around the world that rely on NeuroQ. We wouldn’t be able to be on TV making these claims if it wasn’t effective. And NeuroQ is easy to take too. You’re making a great decision, a critical one actually, for your brain health as you age, what address would you like us to send your NeuroQ to?\"</p>",
+      "outputVariable": "objection_rebuttal",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_downsell1": {
+      "_pos": {
+        "x": 380,
+        "y": 2040
+      },
+      "type": "input",
+      "label": "Downsell 1",
+      "transitions": {
+        "Yes - Place Order": "v1_pkg_2mo",
+        "No - Go to Rebuttal for Downsell 1": "v1_rebuttal1"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes - Place Order",
+          "value": "Yes - Place Order"
+        },
+        {
+          "label": "No - Go to Rebuttal for Downsell 1",
+          "value": "No - Go to Rebuttal for Downsell 1"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"I understand. <span style=\"color: #008000\">{{flow.first_name}}</span>, but I’d hate for you to miss out on this opportunity. If you prefer, I do have a great special <strong>2 bottle</strong> offer going right now too. It’s an unadvertised special that <strong>only we have here at the call center</strong>. This offer allows you to try NeuroQ for 60 days.</p><p></p><p>What’s also great about this offer is the price! Because it’s just $49.95 per bottle, which is close to the <strong>same discounted per bottle price </strong>as the bigger TV special offer, plus it still includes the Doctor’s Brain Health Guide and Program, and the 60 day money back guarantee too, so there’s no risk. I can send you a <strong>two-month supply </strong>of NeuroQ at that <strong>discounted price of only $99.90 with the discounted $4.95 shipping and handling</strong>, and our replenishment program so you have this great offer for the future. With this package deal you save almost $50 today. Let’s get you started with this 2-month trial package, alright? \"</p><p></p>",
+      "outputVariable": "downsell1",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_rebuttal1": {
+      "_pos": {
+        "x": 380,
+        "y": 2210
+      },
+      "type": "input",
+      "label": "Rebuttal for Downsell 1",
+      "transitions": {
+        "Yes - Place Order": "v1_pkg_2mo_dha",
+        "No - Go to Rebuttal 2": "v1_rebuttal2"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes - Place Order",
+          "value": "Yes - Place Order"
+        },
+        {
+          "label": "No - Go to Rebuttal 2",
+          "value": "No - Go to Rebuttal 2"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"<span style=\"color: #008000\">{{flow.first_name}}</span>. I do understand. I’ll tell you what I can do. I’ll add a free month’s supply of the doctor’s Memory DHA Brain Omega supplement, a $25 value, to your package at <strong>no extra charge</strong>. You typically only get it with the TV or Doctor’s special packages, but I’ll include it because I really believe NeuroQ is going to be great for you. So with this, for just $99.90, you’ll get a full two-month supply of clinically-tested NeuroQ, the Memory DHA supplement, and I’m throwing in the Brain Care program as well. This is <strong>too good</strong> of an offer <strong>not </strong>take advantage of <span style=\"color: #008000\">{{flow.first_name}}</span>. You must get started - what card are you using to take action? </p><p></p><p><span style=\"color: #0000ff\">(Be assumptive </span><span style=\"color: #0000ff\">–</span><span style=\"color: #0000ff\"> get a YES)</span></p><p></p>",
+      "outputVariable": "rebuttal1",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_rebuttal2": {
+      "_pos": {
+        "x": 380,
+        "y": 2380
+      },
+      "type": "input",
+      "label": "Rebuttal 2",
+      "transitions": {
+        "Yes - 3 Month Package": "v1_pkg_3mo",
+        "Yes - 2 Month Package": "v1_pkg_2mo",
+        "Yes - 2 Month Package + 1 Free One-Time DHA": "v1_pkg_2mo_dha",
+        "No - Log Call": "v1_call_type"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes - 3 Month Package",
+          "value": "Yes - 3 Month Package"
+        },
+        {
+          "label": "Yes - 2 Month Package",
+          "value": "Yes - 2 Month Package"
+        },
+        {
+          "label": "Yes - 2 Month Package + 1 Free One-Time DHA",
+          "value": "Yes - 2 Month Package + 1 Free One-Time DHA"
+        },
+        {
+          "label": "No - Log Call",
+          "value": "No - Log Call"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"<span style=\"color: #008000\">{{flow.first_name}}</span>, I do understand. The reason the doctor insists we have you start with a three month supply is because it’s in <strong>that third month</strong> of taking NeuroQ that seniors realize their <strong>best results</strong>, as the 3- month clinical trial showed. It starts working from day one, but the brain detoxing and the neurotransmitter replenishment, along with the benefits of improved blood flow, all take time. And we want it to work, <strong>really work</strong> to address </p><p></p><p><span style=\"color: #008000\">{{flow.probe_phrase}}</span>. So my job is to get the limited time “special” 3 month package out to customers, this is literally the <strong>doctor</strong><strong>’</strong><strong>s orders</strong> – it’s the package he wants you to start with. If you really want just a one bottle then you can go to the website, NeuroQ.com, however I can tell you that it’s expensive doing it like that - <strong>$70 a bottle vs what comes to $46 a bottle with the special that I</strong><strong>’</strong><strong>m offering</strong>. It’s up to you, but I strongly suggest you follow the <strong>doctor</strong><strong>’</strong><strong>s recommendations</strong>. Which would <strong>you</strong> like to do?\"</p><p></p><p><span style=\"color: #0000ff\">(Be assumptive </span><span style=\"color: #0000ff\">–</span><span style=\"color: #0000ff\"> get a YES)</span></p><p></p>",
+      "outputVariable": "rebuttal2",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_pkg_3mo": {
+      "_pos": {
+        "x": 1140,
+        "y": 0
+      },
+      "type": "reset_cart",
+      "label": "Package: NeuroQ Memory & Focus Buy 2 Get 1 Free Every 3 Months",
+      "transitions": {
+        "default": "v1_pkg_3mo_add"
+      }
+    },
+    "v1_pkg_3mo_add": {
+      "_pos": {
+        "x": 1140,
+        "y": 170
+      },
+      "type": "add_to_cart",
+      "label": "Add 283-3-CTY-90",
+      "transitions": {
+        "added": "v1_pkg_3mo_vars",
+        "failed": "v1_cart_failed"
+      },
+      "offerId": "d84588a6-9bfa-580c-8d17-2deb8028eefe",
+      "offerDisplayName": "NeuroQ Memory & Focus Buy 2 Get 1 Free Every 3 Months",
+      "quantity": 1,
+      "mode": "add",
+      "replacesOfferIds": [],
+      "replacesOfferNames": []
+    },
+    "v1_pkg_3mo_vars": {
+      "_pos": {
+        "x": 1140,
+        "y": 340
+      },
+      "type": "set_variable",
+      "label": "Package vars (3mo)",
+      "transitions": {
+        "default": "v1_sec_customer"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.pkg_tier}}",
+          "value": "3mo"
+        },
+        {
+          "variable": "{{flow.autoship_supply}}",
+          "value": "90 days you’ll get a fresh 90 day supply – at that same great price of $139.90 with $4.95 S/H today and on all future shipments"
+        },
+        {
+          "variable": "{{flow.autoship_confirm}}",
+          "value": "Also, to confirm, by taking advantage of our preferred customer feature, we will ship you a brand new shipment in 3 months and every 3 months thereafter at the same discounted pricing charged to the same card you are using today. You can cancel shipments at any time by calling 1-833-638-7674 OK?"
+        },
+        {
+          "variable": "{{flow.autoship_note}}",
+          "value": " (Must get clear Yes or Ok)"
+        }
+      ]
+    },
+    "v1_pkg_2mo": {
+      "_pos": {
+        "x": 1140,
+        "y": 510
+      },
+      "type": "reset_cart",
+      "label": "Package: NeuroQ Memory & Focus 2 Bottles Every 2 Months",
+      "transitions": {
+        "default": "v1_pkg_2mo_add"
+      }
+    },
+    "v1_pkg_2mo_add": {
+      "_pos": {
+        "x": 1140,
+        "y": 680
+      },
+      "type": "add_to_cart",
+      "label": "Add 283-2-CTY-60",
+      "transitions": {
+        "added": "v1_pkg_2mo_vars",
+        "failed": "v1_cart_failed"
+      },
+      "offerId": "366a9449-782b-50cf-9e03-51116c009f80",
+      "offerDisplayName": "NeuroQ Memory & Focus 2 Bottles Every 2 Months",
+      "quantity": 1,
+      "mode": "add",
+      "replacesOfferIds": [],
+      "replacesOfferNames": []
+    },
+    "v1_pkg_2mo_vars": {
+      "_pos": {
+        "x": 1140,
+        "y": 850
+      },
+      "type": "set_variable",
+      "label": "Package vars (2mo)",
+      "transitions": {
+        "default": "v1_sec_customer"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.pkg_tier}}",
+          "value": "2mo"
+        },
+        {
+          "variable": "{{flow.autoship_supply}}",
+          "value": "60 days you’ll get a fresh 60 day supply – at that same great of $99.90 with $4.95 S/H today and on all future shipments"
+        },
+        {
+          "variable": "{{flow.autoship_confirm}}",
+          "value": "Also, to confirm, by taking advantage of our preferred customer feature, we will ship you a brand new shipment in 2 months and every 2 months thereafter at the same discounted pricing charged to the same card you are using today. You can cancel shipments at any time by calling 1-833-638-7674 OK?"
+        },
+        {
+          "variable": "{{flow.autoship_note}}",
+          "value": " (Must get clear Yes or Ok)"
+        }
+      ]
+    },
+    "v1_pkg_2mo_dha": {
+      "_pos": {
+        "x": 1140,
+        "y": 1020
+      },
+      "type": "reset_cart",
+      "label": "Package: NeuroQ Memory & Focus 2 Bottles Every 2 Months with DHA",
+      "transitions": {
+        "default": "v1_pkg_2mo_dha_add"
+      }
+    },
+    "v1_pkg_2mo_dha_add": {
+      "_pos": {
+        "x": 1140,
+        "y": 1190
+      },
+      "type": "add_to_cart",
+      "label": "Add 283-2-CTY-60-P1",
+      "transitions": {
+        "added": "v1_pkg_2mo_dha_vars",
+        "failed": "v1_cart_failed"
+      },
+      "offerId": "b2121dd0-0fb2-5c16-99d1-331f5f4c08cf",
+      "offerDisplayName": "NeuroQ Memory & Focus 2 Bottles Every 2 Months with DHA",
+      "quantity": 1,
+      "mode": "add",
+      "replacesOfferIds": [],
+      "replacesOfferNames": []
+    },
+    "v1_pkg_2mo_dha_vars": {
+      "_pos": {
+        "x": 1140,
+        "y": 1360
+      },
+      "type": "set_variable",
+      "label": "Package vars (2mo)",
+      "transitions": {
+        "default": "v1_sec_customer"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.pkg_tier}}",
+          "value": "2mo"
+        },
+        {
+          "variable": "{{flow.autoship_supply}}",
+          "value": "60 days you’ll get a fresh 60 day supply – at that same great of $99.90 with $4.95 S/H today and on all future shipments"
+        },
+        {
+          "variable": "{{flow.autoship_confirm}}",
+          "value": "Also, to confirm, by taking advantage of our preferred customer feature, we will ship you a brand new shipment in 2 months and every 2 months thereafter at the same discounted pricing charged to the same card you are using today. You can cancel shipments at any time by calling 1-833-638-7674 OK?"
+        },
+        {
+          "variable": "{{flow.autoship_note}}",
+          "value": " (Must get clear Yes or Ok)"
+        }
+      ]
+    },
+    "v1_pkg_ots": {
+      "_pos": {
+        "x": 1140,
+        "y": 1530
+      },
+      "type": "reset_cart",
+      "label": "Package: NeuroQ Memory & Focus Buy 2 Get 1 Free",
+      "transitions": {
+        "default": "v1_pkg_ots_add"
+      }
+    },
+    "v1_pkg_ots_add": {
+      "_pos": {
+        "x": 1140,
+        "y": 1700
+      },
+      "type": "add_to_cart",
+      "label": "Add 283-3-OT-1",
+      "transitions": {
+        "added": "v1_pkg_ots_vars",
+        "failed": "v1_cart_failed"
+      },
+      "offerId": "bb2e5098-9f5c-5155-9c64-ee6130cb940a",
+      "offerDisplayName": "NeuroQ Memory & Focus Buy 2 Get 1 Free",
+      "quantity": 1,
+      "mode": "add",
+      "replacesOfferIds": [],
+      "replacesOfferNames": []
+    },
+    "v1_pkg_ots_vars": {
+      "_pos": {
+        "x": 1140,
+        "y": 1870
+      },
+      "type": "set_variable",
+      "label": "Package vars (one-time)",
+      "transitions": {
+        "default": "v1_sec_customer"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.pkg_tier}}",
+          "value": "ots"
+        },
+        {
+          "variable": "{{flow.autoship_supply}}",
+          "value": ""
+        },
+        {
+          "variable": "{{flow.autoship_confirm}}",
+          "value": ""
+        },
+        {
+          "variable": "{{flow.autoship_note}}",
+          "value": ""
+        }
+      ]
+    },
+    "v1_cart_failed": {
+      "_pos": {
+        "x": 1140,
+        "y": 2040
+      },
+      "type": "script",
+      "label": "Cart update failed",
+      "transitions": {
+        "default": "v1_sec_offer"
+      },
+      "content": "<p><strong><span style=\"color: #0000ff\">AGENT: The item could not be added to the cart (it may be out of stock). Let a supervisor know, then click Continue to return to the offer.</span></strong></p>"
+    },
+    "v1_sec_customer": {
+      "_pos": {
+        "x": 1520,
+        "y": 0
+      },
+      "type": "section",
+      "label": "Customer Info",
+      "transitions": {
+        "default": "v1_bill_addr"
+      },
+      "name": "Customer Info",
+      "outputVariable": "v1_sec_customer_section",
+      "allowJumpFromAnywhere": true,
+      "clearPreviousValues": false
+    },
+    "v1_bill_addr": {
+      "_pos": {
+        "x": 1520,
+        "y": 170
+      },
+      "type": "address",
+      "label": "Billing Address",
+      "transitions": {
+        "default": "v1_bill_phone"
+      },
+      "addressRole": "billing",
+      "scriptLabel": "",
+      "scriptContent": "",
+      "outputVariable": "billing_address",
+      "useValidation": true,
+      "allowInternational": false,
+      "showMiddleInitial": true,
+      "showCompany": false,
+      "requiredFields": [
+        "firstName",
+        "lastName",
+        "address1",
+        "zip",
+        "city",
+        "state"
+      ],
+      "fieldScripts": {
+        "firstName": "<p>\"</p><p></p><p>May I have your first name, please?\"</p><p></p><p><strong><span style=\"color: #0000ff\">AGENT: Verify the spelling!</span></strong></p><p></p>",
+        "lastName": "<p>\"Thank you <span style=\"color: #008000\">{{flow.first_name}}</span>, May I have your last name please?\"</p><p></p><p><span style=\"color: #0000ff\">AGENT: MUST CONFIRM SPELLING OF ALL BILLING INFO</span></p><p></p>",
+        "address1": "<p>\"</p><p></p><p>May I have your billing address please?\"</p><p></p><p>(AGENT: The address must be the same as it shows on the check or the credit card statement.)</p><p></p>",
+        "city": "<p>\"I show that zip code is for </p><p></p><p><span style=\"color: #008000\">{{flow.billing_address.city}}</span>, <span style=\"color: #008000\">{{flow.billing_address.state}}</span>, is that correct?\"</p><p></p>"
+      }
+    },
+    "v1_bill_phone": {
+      "_pos": {
+        "x": 1520,
+        "y": 340
+      },
+      "type": "phone",
+      "label": "Billing Phone",
+      "transitions": {
+        "default": "v1_ship_same"
+      },
+      "phoneRole": "billing",
+      "required": true,
+      "dncCheck": false,
+      "allowInternational": false,
+      "scriptLabel": "",
+      "outputVariable": "billing_phone",
+      "scriptContent": "<p>\"May I have your phone number, please?\"</p>"
+    },
+    "v1_ship_same": {
+      "_pos": {
+        "x": 1520,
+        "y": 510
+      },
+      "type": "input",
+      "label": "Shipping same as billing?",
+      "transitions": {
+        "Yes": "v1_ship_copy",
+        "No": "v1_ship_addr"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes",
+          "value": "Yes"
+        },
+        {
+          "label": "No",
+          "value": "No"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"Will we be shipping your order to the same address?\"</p><p></p>",
+      "outputVariable": "ship_same_as_billing",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_ship_copy": {
+      "_pos": {
+        "x": 1520,
+        "y": 680
+      },
+      "type": "set_variable",
+      "label": "Shipping = billing",
+      "transitions": {
+        "default": "v1_email"
+      },
+      "assignments": [
+        {
+          "variable": "{{call_record.shipping_address}}",
+          "value": "{{flow.billing_address}}"
+        },
+        {
+          "variable": "{{flow.shipping_address}}",
+          "value": "{{flow.billing_address}}"
+        }
+      ]
+    },
+    "v1_ship_addr": {
+      "_pos": {
+        "x": 1900,
+        "y": 0
+      },
+      "type": "address",
+      "label": "Shipping Address",
+      "transitions": {
+        "default": "v1_canada"
+      },
+      "addressRole": "shipping",
+      "scriptLabel": "",
+      "scriptContent": "<p>\"And what address will we be shipping your order to?\"</p>",
+      "outputVariable": "shipping_address",
+      "useValidation": true,
+      "allowInternational": true,
+      "showMiddleInitial": false,
+      "showCompany": false,
+      "requiredFields": [
+        "firstName",
+        "lastName",
+        "address1",
+        "zip",
+        "city",
+        "state"
+      ],
+      "fieldScripts": {
+        "city": "<p>\"I show that zip code is for </p><p></p><p><span style=\"color: #008000\">{{flow.shipping_address.city}}</span>, <span style=\"color: #008000\">{{flow.shipping_address.state}}</span>, is that correct?\"</p><p></p>"
+      }
+    },
+    "v1_canada": {
+      "_pos": {
+        "x": 1900,
+        "y": 170
+      },
+      "type": "branch",
+      "label": "Shipping to Canada?",
+      "transitions": {
+        "true": "v1_canada_disp",
+        "false": "v1_email"
+      },
+      "condition": "{{flow.shipping_address.isCanada}} == \"true\""
+    },
+    "v1_canada_disp": {
+      "_pos": {
+        "x": 1900,
+        "y": 340
+      },
+      "type": "set_variable",
+      "label": "Canada → All Other Calls / Shipping to Canada",
+      "transitions": {
+        "default": "v1_disp_close_canada"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.call_type}}",
+          "value": "All Other Calls"
+        },
+        {
+          "variable": "{{flow.disposition}}",
+          "value": "Shipping to Canada"
+        }
+      ]
+    },
+    "v1_email": {
+      "_pos": {
+        "x": 1520,
+        "y": 850
+      },
+      "type": "email",
+      "label": "Email Address",
+      "transitions": {
+        "default": "v1_sec_payment"
+      },
+      "required": false,
+      "saveToCallRecord": true,
+      "checkMX": true,
+      "checkARecord": false,
+      "checkDisposable": true,
+      "scriptLabel": "",
+      "outputVariable": "customer_email",
+      "scriptContent": "<p>\"So we can automatically send you shipping notification, additional product information, and future updates. May I have your email address please?\"</p><p></p>"
+    },
+    "v1_sec_payment": {
+      "_pos": {
+        "x": 1900,
+        "y": 510
+      },
+      "type": "section",
+      "label": "Payment",
+      "transitions": {
+        "default": "v1_pay_intro"
+      },
+      "name": "Payment",
+      "outputVariable": "v1_sec_payment_section",
+      "allowJumpFromAnywhere": true,
+      "clearPreviousValues": false
+    },
+    "v1_pay_intro": {
+      "_pos": {
+        "x": 1900,
+        "y": 680
+      },
+      "type": "script",
+      "label": "Payment — secure capture",
+      "transitions": {
+        "default": "v1_cc_trigger"
+      },
+      "content": "<p>\"Great! For your security, you’ll enter your card details on your phone’s keypad — I won’t see or hear them. You’ll hear a short prompt for your card number, then the expiration date, then the security code. Ready?\"</p><p><strong><span style=\"color: #0000ff\">AGENT: Click Continue to start the secure capture. You’ll be on hold music while the caller enters the card; their progress shows in your softphone panel.</span></strong></p>"
+    },
+    "v1_cc_trigger": {
+      "_pos": {
+        "x": 1900,
+        "y": 850
+      },
+      "type": "trigger_telephony_event",
+      "label": "Start secure card capture",
+      "transitions": {
+        "default": "v1_cc_wait"
+      },
+      "eventName": "cc_capture"
+    },
+    "v1_cc_wait": {
+      "_pos": {
+        "x": 1900,
+        "y": 1020
+      },
+      "type": "script",
+      "label": "Wait for secure capture",
+      "transitions": {
+        "default": "v1_cc_ok"
+      },
+      "content": "<p><strong><span style=\"color: #0000ff\">AGENT: Wait for the secure capture to finish, then click Continue.</span></strong></p>",
+      "waitForTelephonyEventName": "cc_capture",
+      "waitForTelephonyEventTimeoutSeconds": 180
+    },
+    "v1_cc_ok": {
+      "_pos": {
+        "x": 1900,
+        "y": 1190
+      },
+      "type": "branch",
+      "label": "Card captured?",
+      "transitions": {
+        "true": "v1_after_payment",
+        "false": "v1_cc_retry"
+      },
+      "condition": "{{shared.CC_Capture_Success}} == true"
+    },
+    "v1_cc_retry": {
+      "_pos": {
+        "x": 2280,
+        "y": 0
+      },
+      "type": "input",
+      "label": "Card capture failed",
+      "transitions": {
+        "Yes": "v1_cc_trigger",
+        "No": "v1_no_mop"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes",
+          "value": "Yes"
+        },
+        {
+          "label": "No",
+          "value": "No"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"I see you had some difficulty entering your payment information. Would you like to try again?\"</p>",
+      "outputVariable": "retry_cc_capture",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_no_mop": {
+      "_pos": {
+        "x": 2280,
+        "y": 170
+      },
+      "type": "set_variable",
+      "label": "No method of payment",
+      "transitions": {
+        "default": "v1_disp_close_aoc"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.call_type}}",
+          "value": "All Other Calls"
+        },
+        {
+          "variable": "{{flow.disposition}}",
+          "value": "No MOP (No Method of Payment)"
+        }
+      ]
+    },
+    "v1_after_payment": {
+      "_pos": {
+        "x": 1900,
+        "y": 1360
+      },
+      "type": "branch",
+      "label": "One-time (basic with OTS)?",
+      "transitions": {
+        "true": "v1_sec_closing",
+        "false": "v1_sec_upsell"
+      },
+      "condition": "{{flow.pkg_tier}} == \"ots\""
+    },
+    "v1_sec_upsell": {
+      "_pos": {
+        "x": 2280,
+        "y": 340
+      },
+      "type": "section",
+      "label": "Upsell",
+      "transitions": {
+        "default": "v1_autoship"
+      },
+      "name": "Upsell",
+      "outputVariable": "v1_sec_upsell_section",
+      "allowJumpFromAnywhere": true,
+      "clearPreviousValues": false
+    },
+    "v1_autoship": {
+      "_pos": {
+        "x": 2280,
+        "y": 510
+      },
+      "type": "input",
+      "label": "Preferred Customer (AutoShip)",
+      "transitions": {
+        "Yes - Preferred Customer - Go to Family Offer": "v1_as_yes",
+        "Not Interested": "v1_autoship_rb"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes - Preferred Customer - Go to Family Offer",
+          "value": "Yes - Preferred Customer - Go to Family Offer"
+        },
+        {
+          "label": "Not Interested",
+          "value": "Not Interested"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"<span style=\"color: #008000\">{{flow.first_name}}</span> I want to thank you for your order today. Now as I mentioned earlier, this offer also ensures that you get the same great discounted price on future shipments too, because it comes with our Preferred Customer Replenishment program.NeuroQ is a daily supplement with benefits that build over time, and the replenishment program ensures you won’t run out. So starting in </p><p></p><p><span style=\"color: #008000\">{{flow.autoship_supply}}</span> charged to the card you provide today. And remember you're in complete control. You can customize or cancel at ANY TIME by calling Customer Service at 1-833-638-7674. OK!\"</p><p></p><p><span style=\"color: #0000ff\">(Be assumptive </span><span style=\"color: #0000ff\">–</span><span style=\"color: #0000ff\"> get a YES)</span></p><p></p>",
+      "outputVariable": "autoship",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_as_yes": {
+      "_pos": {
+        "x": 2280,
+        "y": 680
+      },
+      "type": "branch",
+      "label": "2-bottle package?",
+      "transitions": {
+        "true": "v1_dha_2mo",
+        "false": "v1_family"
+      },
+      "condition": "{{flow.pkg_tier}} == \"2mo\""
+    },
+    "v1_autoship_rb": {
+      "_pos": {
+        "x": 2280,
+        "y": 850
+      },
+      "type": "input",
+      "label": "Preferred Customer Rebuttal",
+      "transitions": {
+        "Yes - Preferred Customer - Go to Family Offer": "v1_as_yes",
+        "Not Interested - Go to One Time Offer": "v1_as_rb2_route"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes - Preferred Customer - Go to Family Offer",
+          "value": "Yes - Preferred Customer - Go to Family Offer"
+        },
+        {
+          "label": "Not Interested - Go to One Time Offer",
+          "value": "Not Interested - Go to One Time Offer"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"I understand your concerns <span style=\"color: #008000\">{{flow.first_name}}</span>, but you see  taking NeuroQ consistently each day is what is proven to give you the best results.Your brain health requires daily support, and you’ll feel better with the increased mental energy that keeps building the longer you take it. Our shipment replenishment program ensures that you won’t miss days. It also ensures that you continue to receive your low member pricing, with additional free gifts in your shipments too! And. <span style=\"color: #008000\">{{flow.first_name}}</span>, you cancel shipments whenever you want and, you're completely protected by our money back guarantee. Ok?\"</p><p></p><p> <span style=\"color: #0000ff\">(Be assumptive </span><span style=\"color: #0000ff\">–</span><span style=\"color: #0000ff\"> get a YES)</span></p><p></p>",
+      "outputVariable": "autoship_rebuttal",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_as_rb2_route": {
+      "_pos": {
+        "x": 2280,
+        "y": 1020
+      },
+      "type": "branch",
+      "label": "Downsell package?",
+      "transitions": {
+        "true": "v1_autoship_rb2b",
+        "false": "v1_autoship_rb2a"
+      },
+      "condition": "{{flow.pkg_tier}} == \"2mo\""
+    },
+    "v1_autoship_rb2a": {
+      "_pos": {
+        "x": 2660,
+        "y": 0
+      },
+      "type": "input",
+      "label": "Preferred Customer Rebuttal 2a",
+      "transitions": {
+        "Yes - Preferred Customer - Go to Family Offer": "v1_as_yes",
+        "Not Interested - Go to One Time Offer": "v1_onetime"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes - Preferred Customer - Go to Family Offer",
+          "value": "Yes - Preferred Customer - Go to Family Offer"
+        },
+        {
+          "label": "Not Interested - Go to One Time Offer",
+          "value": "Not Interested - Go to One Time Offer"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"I understand, we can set you up with a one-time purchase, and you can call us when you are ready to order more. However, you do miss out on some of the member savings. The same package with  a one-time purchase is $40 more, plus you don't get the discounted shipping, so being a member with the preferred customer replenishment program saves you $48 today over a one-time purchase. </p><p></p><p>So why not get the savings with the preferred customer package? Ok?\"</p><p></p>",
+      "outputVariable": "autoship_rebuttal_2a",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_autoship_rb2b": {
+      "_pos": {
+        "x": 2660,
+        "y": 170
+      },
+      "type": "input",
+      "label": "Preferred Customer Rebuttal 2b",
+      "transitions": {
+        "Yes - Go to Memory DHA cross-sell": "v1_dha_2mo",
+        "Not Interested - Go to One Time Offer": "v1_onetime"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes - Go to Memory DHA cross-sell",
+          "value": "Yes - Go to Memory DHA cross-sell"
+        },
+        {
+          "label": "Not Interested - Go to One Time Offer",
+          "value": "Not Interested - Go to One Time Offer"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"I understand, we can set you up with a one-time purchase, and you can call us when you are ready to order more. However, currently we are only offering the 3 month TV special as a onetime offer. This package as a one-time purchase is $80 more, plus you don’t get the discounted shipping, so being a member with the preferred customer replenishment program saves you $88 today over a one-time purchase</p><p></p><p>So why not get the savings with the preferred customer package? Ok?\"</p><p></p>",
+      "outputVariable": "autoship_rebuttal_2b",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_onetime": {
+      "_pos": {
+        "x": 2660,
+        "y": 340
+      },
+      "type": "input",
+      "label": "One Time Offer",
+      "transitions": {
+        "Yes - 3 Month Supply $179.90 + $12.95 S/H ($192.85) - Go to Cross Sell 1": "v1_ot_pkg"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes - 3 Month Supply $179.90 + $12.95 S/H ($192.85) - Go to Cross Sell 1",
+          "value": "Yes - 3 Month Supply $179.90 + $12.95 S/H ($192.85) - Go to Cross Sell 1"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"I completely understand <span style=\"color: #008000\">{{flow.first_name}}</span>. We can go ahead and send you the same great TV Special 3-month supply package, with all the FREE gifts.. The non-subscription price is $179.90 plus $12.95 shipping, with no future commitments. Would you like to use your credit or debit card today? \"</p><p></p><p>AGENT: Total is $192.85 ($179.90 + $12.95 s/h)</p><p></p>",
+      "outputVariable": "one_time_offer",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_ot_pkg": {
+      "_pos": {
+        "x": 2660,
+        "y": 510
+      },
+      "type": "reset_cart",
+      "label": "Package: one-time",
+      "transitions": {
+        "default": "v1_ot_add"
+      }
+    },
+    "v1_ot_add": {
+      "_pos": {
+        "x": 2660,
+        "y": 680
+      },
+      "type": "add_to_cart",
+      "label": "Add 283-3-OT-1",
+      "transitions": {
+        "added": "v1_ot_vars",
+        "failed": "v1_cart_failed"
+      },
+      "offerId": "bb2e5098-9f5c-5155-9c64-ee6130cb940a",
+      "offerDisplayName": "NeuroQ Memory & Focus Buy 2 Get 1 Free",
+      "quantity": 1,
+      "mode": "add",
+      "replacesOfferIds": [],
+      "replacesOfferNames": []
+    },
+    "v1_ot_vars": {
+      "_pos": {
+        "x": 2660,
+        "y": 850
+      },
+      "type": "set_variable",
+      "label": "Package vars (one-time)",
+      "transitions": {
+        "default": "v1_sec_closing"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.pkg_tier}}",
+          "value": "ots"
+        },
+        {
+          "variable": "{{flow.autoship_confirm}}",
+          "value": ""
+        },
+        {
+          "variable": "{{flow.autoship_note}}",
+          "value": ""
+        }
+      ]
+    },
+    "v1_family": {
+      "_pos": {
+        "x": 2280,
+        "y": 1190
+      },
+      "type": "input",
+      "label": "Upsell - Matching Family Offer",
+      "transitions": {
+        "Yes - Go To Cross Sell": "v1_family_add",
+        "Not Interested": "v1_dha_3mo"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes - Go To Cross Sell",
+          "value": "Yes - Go To Cross Sell"
+        },
+        {
+          "label": "Not Interested",
+          "value": "Not Interested"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"Now<span style=\"color: #0000ff\"> </span><span style=\"color: #008000\">{{flow.first_name}}</span> , NeuroQ is for <strong>everyone </strong>to help people <strong>protect</strong> their cognitive health and keep them mentally sharp as they age – avoiding that big mental decline the doctor talked about in the show. So, I have this incredible friends and family deal, so he/she can have their <strong>own supply </strong>at an incredible price. It’s our “<strong>add-on</strong>” special where <strong>we add another 3-month supply of NeuroQ to your order for just the price of one month </strong>– it’s just an additional $69.95, with no additional shipping for the additional 3-month supply <span style=\"color: #0000ff\">(comes to about $23 a bottle for the add-on bottles)</span>. <strong>You can see why this is so popular</strong>. So let’s go ahead and add another 3-month supply of NeuroQ to your order today? <span style=\"color: #0000ff\">(Be assumptive </span><span style=\"color: #0000ff\">–</span><span style=\"color: #0000ff\"> get a YES .)</span></p><p><span style=\"color: #0000ff\">(</span><strong><u><span style=\"color: #0000ff\">THIS IS A MATCHING 3-Month SUPPLY</span></u></strong><span style=\"color: #0000ff\">)</span></p><p></p>",
+      "outputVariable": "family_offer",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_family_add": {
+      "_pos": {
+        "x": 2280,
+        "y": 1360
+      },
+      "type": "add_to_cart",
+      "label": "Swap to 283-6-CTY-90 (family)",
+      "transitions": {
+        "added": "v1_family_vars",
+        "failed": "v1_cart_failed"
+      },
+      "offerId": "3c6f4376-6e1b-5428-9901-5f5e58a00453",
+      "offerDisplayName": "NeuroQ Memory & Focus Couples Buy 4 Get 2 Free Every 3 Months",
+      "quantity": 1,
+      "mode": "replace",
+      "replacesOfferIds": [
+        "d84588a6-9bfa-580c-8d17-2deb8028eefe"
+      ],
+      "replacesOfferNames": [
+        "NeuroQ Memory & Focus Buy 2 Get 1 Free Every 3 Months"
+      ]
+    },
+    "v1_family_vars": {
+      "_pos": {
+        "x": 2280,
+        "y": 1530
+      },
+      "type": "set_variable",
+      "label": "Package vars (family)",
+      "transitions": {
+        "default": "v1_dha_family"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.pkg_tier}}",
+          "value": "family"
+        },
+        {
+          "variable": "{{flow.autoship_confirm}}",
+          "value": "Also, to confirm, by taking advantage of our preferred customer feature, we will ship you a brand new shipment in 3 months and every 3 months thereafter at the same discounted pricing charged to the same card you are using today. You can cancel shipments at any time by calling 1-833-638-7674 OK?"
+        }
+      ]
+    },
+    "v1_dha_family": {
+      "_pos": {
+        "x": 2660,
+        "y": 1020
+      },
+      "type": "input",
+      "label": "Cross Sell 1 - Memory DHA (family)",
+      "transitions": {
+        "Yes - Matching Memory DHA - 3*2 w/Auto $309.60": "v1_dha_family_add",
+        "Not Interested": "v1_sleep_family"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes - Matching Memory DHA - 3*2 w/Auto $309.60",
+          "value": "Yes - Matching Memory DHA - 3*2 w/Auto $309.60"
+        },
+        {
+          "label": "Not Interested",
+          "value": "Not Interested"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"<span style=\"color: #008000\">{{flow.first_name}}</span>, I also wanted to briefly tell you a little <strong>more</strong> about the doctor’s other brain supplement, his Omega Memory DHA supplement. This important for you to know <span style=\"color: #008000\">{{flow.first_name}}</span>, because, like NeuroQ, Memory DHA is a daily supplement we all need to be taking. Older adults need <strong>400 mg of DHA daily</strong> for their brains to function properly, but more importantly, it provides added protection against <strong>neurogenerative issues</strong>. It’s literally the <strong>most critical nutrient</strong> for brain health and seniors simply don’t get enough of it in their diets.    </p><p></p><p>So to ensure you can get the brain Omega-DHA you need daily, I can add a matching supply of Memory DHA today to your order so you won’t run out...</p><p></p><p>That’s 5 more bottles to go with your free one today for a matching 6 bottle supply. It’s just $99.75, saving you an additional $50 today, and with no additional shipping. And of course, all of our great products are covered by our rock solid 60-day money back guarantee, so you have nothing to lose! And that price is locked in on future shipments too. So let’s go ahead and upgrade your order with a matching supply of Memory DHA, as the doctor recommends. </p><p></p><p><span style=\"color: #0000ff\">(Must get yes, okay, sure and or alright)</span></p><p></p>",
+      "outputVariable": "dha_cross_sell",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_dha_family_add": {
+      "_pos": {
+        "x": 2660,
+        "y": 1190
+      },
+      "type": "add_to_cart",
+      "label": "Add 326-2-CTY-90",
+      "transitions": {
+        "added": "v1_sleep_family",
+        "failed": "v1_cart_failed"
+      },
+      "offerId": "d0a7832d-ae8c-539a-bae2-ebc46dba9fd9",
+      "offerDisplayName": "Memory & Focus Couples Buy 4 Get 2 Free + Matching DHA",
+      "quantity": 1,
+      "mode": "replace",
+      "replacesOfferIds": [
+        "3c6f4376-6e1b-5428-9901-5f5e58a00453"
+      ],
+      "replacesOfferNames": [
+        "NeuroQ Memory & Focus Couples Buy 4 Get 2 Free Every 3 Months"
+      ]
+    },
+    "v1_sleep_family": {
+      "_pos": {
+        "x": 3040,
+        "y": 0
+      },
+      "type": "input",
+      "label": "Cross Sell 2 - Sleep Now (family)",
+      "transitions": {
+        "Yes - Matching Sleep Now - 3*2 w/Auto $89.70": "v1_sleep_family_add",
+        "Not Interested": "v1_sec_closing"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes - Matching Sleep Now - 3*2 w/Auto $89.70",
+          "value": "Yes - Matching Sleep Now - 3*2 w/Auto $89.70"
+        },
+        {
+          "label": "Not Interested",
+          "value": "Not Interested"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"<span style=\"color: #008000\">{{flow.first_name}}</span>, I also want to share with you something that Dr. Bredesen recommends everyone over 60 <strong>also </strong>take each day for their cognitive <strong>and </strong>emotional health...</p><p></p><p>You see seniors are the most prone to poor, disruptive sleep – they have the most difficulty staying asleep through the night.</p><p></p><p>This happens because, as we age, we produce less sleep hormone, <strong>melatonin</strong>. And if you struggle with anxious feelings too, then that only adds to the problem. The result is at night your important <strong>deep</strong>-sleep cycle begins to decrease, while your <strong>lighter</strong>-sleep cycle increases. And that’s not good.</p><p></p><p>That’s why the doctor developed his nightly sleep supplement <strong>for seniors</strong> called <strong>Sleep Now</strong>. They’re fast acting sleep strips that you put under your tongue 20-30 minutes before bed, for a sound, restful sleep. The minty strips are infused with all-natural melatonin and relaxing theanine, and they really work. You’ll wake feeling rested and refreshed. </p><p></p><p>We strongly advise you add the Doctor’s Sleep Now to your bedtime routine. And we have great matching supply <strong>pricing </strong>to make that easy!</p><p></p><p>We have a great 40% off special going on a matching 6-month supply of Sleep Now, bringing the price down to just $14.95 a month for the doctor’s premium sleep formula.  That’s just $89.70, and with no additional shipping. And, of course, it’s covered by our rock solid 60-day money back guarantee. So let‘s go ahead and add a matching supply of Sleep Now to your order for the best results. Ok?</p><p></p><p><span style=\"color: #0000ff\">(Must get yes, okay, sure and or alright)</span></p><p></p>",
+      "outputVariable": "sleep_cross_sell",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_sleep_family_add": {
+      "_pos": {
+        "x": 3040,
+        "y": 170
+      },
+      "type": "add_to_cart",
+      "label": "Add 307-6-CTY-90",
+      "transitions": {
+        "added": "v1_sec_closing",
+        "failed": "v1_cart_failed"
+      },
+      "offerId": "38e87f61-07c6-50b9-8d5c-a91a4f474882",
+      "offerDisplayName": "Sleep Now 6 Boxes Every 3 Months",
+      "quantity": 1,
+      "mode": "add",
+      "replacesOfferIds": [],
+      "replacesOfferNames": []
+    },
+    "v1_dha_3mo": {
+      "_pos": {
+        "x": 3040,
+        "y": 340
+      },
+      "type": "input",
+      "label": "Cross Sell 1 - Memory DHA (3mo)",
+      "transitions": {
+        "Yes - Matching Memory DHA - 3 w/Auto $189.90": "v1_dha_3mo_add",
+        "Not Interested": "v1_sleep_3mo"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes - Matching Memory DHA - 3 w/Auto $189.90",
+          "value": "Yes - Matching Memory DHA - 3 w/Auto $189.90"
+        },
+        {
+          "label": "Not Interested",
+          "value": "Not Interested"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"<span style=\"color: #008000\">{{flow.first_name}}</span>, I also wanted to briefly tell you a little <strong>more</strong> about the doctor’s other brain supplement, his Omega Memory DHA supplement. This important for you to know <span style=\"color: #008000\">{{flow.first_name}}</span>, because, like NeuroQ, Memory DHA is a daily supplement we all need to be taking. Older adults need <strong>400 mg of DHA daily</strong> for their brains to function properly, but more importantly, it provides added protection against <strong>neurogenerative issues</strong>. It’s literally the <strong>most critical nutrient</strong> for brain health and seniors simply don’t get enough of it in their diets.    </p><p></p><p>So to ensure you can get the brain Omega-DHA you need daily, I can add a matching supply of Memory DHA today to your order so you won’t run out...</p><p></p><p>That’s 2 more bottles to go with your free one today for a matching 3-month supply. It’s just $49.90, saving you another $10 today, and with no additional shipping. And of course, all of our great products are covered by our rock solid 60-day money back guarantee, so you have nothing to lose! And that price is locked in on future shipments too. So let’s go ahead and upgrade your order with a matching supply of Memory DHA, as the doctor recommends. </p><p></p><p><span style=\"color: #0000ff\">(Must get yes, okay, sure and or alright)</span></p><p></p>",
+      "outputVariable": "dha_cross_sell",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_dha_3mo_add": {
+      "_pos": {
+        "x": 3040,
+        "y": 510
+      },
+      "type": "add_to_cart",
+      "label": "Add 326-1-CTY-90",
+      "transitions": {
+        "added": "v1_sleep_3mo",
+        "failed": "v1_cart_failed"
+      },
+      "offerId": "d5cbd4f0-deac-54b7-8d3f-c3ad229de1bb",
+      "offerDisplayName": "Memory & Focus Buy 2 Get 1 Free + Matching DHA",
+      "quantity": 1,
+      "mode": "replace",
+      "replacesOfferIds": [
+        "d84588a6-9bfa-580c-8d17-2deb8028eefe"
+      ],
+      "replacesOfferNames": [
+        "NeuroQ Memory & Focus Buy 2 Get 1 Free Every 3 Months"
+      ]
+    },
+    "v1_sleep_3mo": {
+      "_pos": {
+        "x": 3040,
+        "y": 680
+      },
+      "type": "input",
+      "label": "Cross Sell 2 - Sleep Now (3mo)",
+      "transitions": {
+        "Yes - Matching Sleep Now - 3 w/Auto $49.90": "v1_sleep_3mo_add",
+        "Not Interested": "v1_sec_closing"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes - Matching Sleep Now - 3 w/Auto $49.90",
+          "value": "Yes - Matching Sleep Now - 3 w/Auto $49.90"
+        },
+        {
+          "label": "Not Interested",
+          "value": "Not Interested"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"<span style=\"color: #008000\">{{flow.first_name}}</span>, I also want to share with you something that Dr. Bredesen recommends everyone over 60 <strong>also </strong>take each day for their cognitive <strong>and </strong>emotional health...</p><p></p><p>You see seniors are the most prone to poor, disruptive sleep – they have the most difficulty staying asleep through the night.</p><p></p><p>This happens because, as we age, we produce less sleep hormone, <strong>melatonin</strong>. And if you struggle with anxious feelings too, then that only adds to the problem. The result is at night your important <strong>deep</strong>-sleep cycle begins to decrease, while your <strong>lighter</strong>-sleep cycle increases. And that’s not good.</p><p></p><p>That’s why the doctor developed his nightly sleep supplement <strong>for seniors</strong> called <strong>Sleep Now</strong>. They’re fast acting sleep strips that you put under your tongue 20-30 minutes before bed, for a sound, restful sleep. The minty strips are infused with all-natural melatonin and relaxing theanine, and they really work. You’ll wake feeling rested and refreshed. </p><p></p><p>We strongly advise you add the Doctor’s Sleep Now to your bedtime routine. And we have great matching supply <strong>pricing </strong>to make that easy!</p><p></p><p>We have a great buy 2 get 1 free special going on Sleep Now, so you’ll get a matching 3-month supply at the discounted price of just $49.90, with no additional shipping. And, of course, it’s covered by our rock solid 60-day money back guarantee. So let‘s go ahead and add a matching supply of Sleep Now to your order for the best results. Ok?</p><p></p><p><span style=\"color: #0000ff\">(Must get yes, okay, sure and or alright)</span></p><p></p>",
+      "outputVariable": "sleep_cross_sell",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_sleep_3mo_add": {
+      "_pos": {
+        "x": 3040,
+        "y": 850
+      },
+      "type": "add_to_cart",
+      "label": "Add 307-3-CTY-90",
+      "transitions": {
+        "added": "v1_sec_closing",
+        "failed": "v1_cart_failed"
+      },
+      "offerId": "7bb2eee5-c6ad-564e-9197-864381df8767",
+      "offerDisplayName": "Sleep Now 3 Boxes Every 3 Months",
+      "quantity": 1,
+      "mode": "add",
+      "replacesOfferIds": [],
+      "replacesOfferNames": []
+    },
+    "v1_dha_2mo": {
+      "_pos": {
+        "x": 3040,
+        "y": 1020
+      },
+      "type": "input",
+      "label": "Cross Sell 1 - Memory DHA (2mo)",
+      "transitions": {
+        "Yes - Matching Memory DHA - 2 w/Auto $49.90": "v1_dha_2mo_add",
+        "Not Interested": "v1_sleep_2mo"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes - Matching Memory DHA - 2 w/Auto $49.90",
+          "value": "Yes - Matching Memory DHA - 2 w/Auto $49.90"
+        },
+        {
+          "label": "Not Interested",
+          "value": "Not Interested"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"<span style=\"color: #008000\">{{flow.first_name}}</span>, I also wanted to briefly tell you a little <strong>more</strong> about the doctor’s other brain supplement, his Omega Memory DHA supplement. This important for you to know <span style=\"color: #008000\">{{flow.first_name}}</span>, because, like NeuroQ, Memory DHA is a daily supplement we all need to be taking. Older adults need <strong>400 mg of DHA daily</strong> for their brains to function properly, but more importantly, it provides added protection against <strong>neurogenerative issues</strong>. It’s literally the <strong>most critical nutrient</strong> for brain health and seniors simply don’t get enough of it in their diets.    </p><p></p><p>So to ensure you can get the brain Omega-DHA you need daily, I can add a matching supply of Memory DHA today to your order so you won’t run out...</p><p></p><p>That’s 2 bottles to go with your 2 bottles of NeuroQ. It’s just $49.90, saving you another $10 today, and with no additional shipping. And of course, all of our great products are covered by our rock solid 60-day money back guarantee, so you have nothing to lose! And that price is locked in on future shipments too. So let’s go ahead and upgrade your order with a matching supply of Memory DHA, as the doctor recommends. </p><p></p><p><span style=\"color: #0000ff\">(Must get yes, okay, sure and or alright)</span></p><p></p>",
+      "outputVariable": "dha_cross_sell",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_dha_2mo_add": {
+      "_pos": {
+        "x": 3040,
+        "y": 1190
+      },
+      "type": "add_to_cart",
+      "label": "Add 303-2-CTY-60",
+      "transitions": {
+        "added": "v1_sleep_2mo",
+        "failed": "v1_cart_failed"
+      },
+      "offerId": "928e4401-9d57-520a-bb78-f3fbd194ec97",
+      "offerDisplayName": "NeuroQ Memory DHA-400 2 Bottles Every 2 Months",
+      "quantity": 1,
+      "mode": "add",
+      "replacesOfferIds": [],
+      "replacesOfferNames": []
+    },
+    "v1_sleep_2mo": {
+      "_pos": {
+        "x": 3040,
+        "y": 1360
+      },
+      "type": "input",
+      "label": "Cross Sell 2 - Sleep Now (2mo)",
+      "transitions": {
+        "Yes - Matching Sleep Now - 2 w/Auto $39.90": "v1_sleep_2mo_add",
+        "Not Interested": "v1_sec_closing"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes - Matching Sleep Now - 2 w/Auto $39.90",
+          "value": "Yes - Matching Sleep Now - 2 w/Auto $39.90"
+        },
+        {
+          "label": "Not Interested",
+          "value": "Not Interested"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"<span style=\"color: #008000\">{{flow.first_name}}</span>, I also want to share with you something that Dr. Bredesen recommends everyone over 60 <strong>also </strong>take each day for their cognitive <strong>and </strong>emotional health...</p><p></p><p>You see seniors are the most prone to poor, disruptive sleep – they have the most difficulty staying asleep through the night.</p><p></p><p>This happens because, as we age, we produce less sleep hormone, <strong>melatonin</strong>. And if you struggle with anxious feelings too, then that only adds to the problem. The result is at night your important <strong>deep</strong>-sleep cycle begins to decrease, while your <strong>lighter</strong>-sleep cycle increases. And that’s not good.</p><p></p><p>That’s why the doctor developed his nightly sleep supplement <strong>for seniors</strong> called <strong>Sleep Now</strong>. They’re fast acting sleep strips that you put under your tongue 20-30 minutes before bed, for a sound, restful sleep. The minty strips are infused with all-natural melatonin and relaxing theanine, and they really work. You’ll wake feeling rested and refreshed. </p><p></p><p>We strongly advise you add the Doctor’s Sleep Now to your bedtime routine. And we have great matching supply <strong>pricing </strong>to make that easy!</p><p></p><p>I can add a matching 2-month supply of Sleep Now at the discounted price of just $39.90, with no additional shipping, saving you an additional $10 today. And, of course, it’s covered by our rock solid 60-day money back guarantee. So let‘s go ahead and add a matching supply of Sleep Now to your order for the best results. Ok?</p><p></p><p><span style=\"color: #0000ff\">(Must get yes, okay, sure and or alright)</span></p><p></p>",
+      "outputVariable": "sleep_cross_sell",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_sleep_2mo_add": {
+      "_pos": {
+        "x": 3040,
+        "y": 1530
+      },
+      "type": "add_to_cart",
+      "label": "Add 307-2-CTY-60",
+      "transitions": {
+        "added": "v1_sec_closing",
+        "failed": "v1_cart_failed"
+      },
+      "offerId": "7de0bf1a-d10f-52eb-936a-6e8ec1e940ea",
+      "offerDisplayName": "Sleep Now 2 Boxes Every 2 Months",
+      "quantity": 1,
+      "mode": "add",
+      "replacesOfferIds": [],
+      "replacesOfferNames": []
+    },
+    "v1_sec_closing": {
+      "_pos": {
+        "x": 3420,
+        "y": 0
+      },
+      "type": "section",
+      "label": "Closing",
+      "transitions": {
+        "default": "v1_closing"
+      },
+      "name": "Closing",
+      "outputVariable": "v1_sec_closing_section",
+      "allowJumpFromAnywhere": true,
+      "clearPreviousValues": false
+    },
+    "v1_closing": {
+      "_pos": {
+        "x": 3420,
+        "y": 170
+      },
+      "type": "input",
+      "label": "Closing Read",
+      "transitions": {
+        "Continue": "v1_sms",
+        "Change Call Type": "v1_call_type"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Continue",
+          "value": "Continue"
+        },
+        {
+          "label": "Change Call Type",
+          "value": "Change Call Type"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"<span style=\"color: #008000\">{{flow.first_name}}</span> , just as a reminder, It usually takes people 1-2 months of consistent usage of NeuroQ to see its full effects, Everyone is different, and results will vary from person to person. The key is to maintain consistent use every day to see best results.</p><p></p><p>Now I would like to go ahead and confirm your order, OK? <span style=\"color: #0000ff\">(Wait for answer)</span> <br><br>OK great <span style=\"color: #008000\">{{flow.first_name}}</span>. I'd just like to confirm that you've ordered <br><br></p><p></p><p><span style=\"color: #008000\">{{cart.items_summary}}</span><br><br>Your name, as it appears on your card is <span style=\"color: #008000\">{{flow.billing_address.firstName}}</span><span style=\"color: #008000\"> </span></p><p></p><p><span style=\"color: #008000\">{{flow.billing_address.lastName}}</span>. Your address is <span style=\"color: #008000\">{{flow.billing_address.address1}}</span><span style=\"color: #008000\"> </span><span style=\"color: #008000\">{{flow.billing_address.address2}}</span><span style=\"color: #008000\"> </span><span style=\"color: #008000\">{{flow.billing_address.city}}</span>, <span style=\"color: #008000\">{{flow.billing_address.state}}</span><span style=\"color: #008000\"> </span><span style=\"color: #008000\">{{flow.billing_address.zip}}</span> and your phone number is </p><p></p><p><span style=\"color: #008000\">{{flow.billing_phone}}</span>. Your total today including Tax that will be charged to your account is $<span style=\"color: #008000\">{{cart.first_payment}}</span> under the company name LifeSeasons. Is all your information correct? <span style=\"color: #0000ff\">(Wait for affirmative)</span></p><p></p><p>You'll see a charge on your credit card statement saying “NeuroQ 833-638-7674”</p><p></p><p><span style=\"color: #008000\">{{flow.autoship_confirm}}</span></p><p></p><p><span style=\"color: #008000\">{{flow.autoship_note}}</span></p><p></p><p>For security purposes and to confirm I have your approval for this order and you agree to the terms, please read back the last four digits of the method of payment you have provided today.\"</p><p></p><p><span style=\"color: #0000ff\">(AGENT: THE LAST FOUR #</span><span style=\"color: #0000ff\">’</span><span style=\"color: #0000ff\">S MUST BE THE SAME AS THE #</span><span style=\"color: #0000ff\">’</span><span style=\"color: #0000ff\">S OF THE ACCOUNT PREVIOUSLY PROVIDED: </span>captured securely by keypad — not visible to you; if the caller’s digits don’t sound right, use Change Payment Info after authorization<strong><span style=\"color: #ff0000\"> </span></strong><strong><span style=\"color: #0000ff\">)</span></strong></p><p>                             <br></p><p></p>",
+      "outputVariable": "closing_read",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_sms": {
+      "_pos": {
+        "x": 3420,
+        "y": 340
+      },
+      "type": "input",
+      "label": "SMS Consent",
+      "transitions": {
+        "Yes": "v1_sms_yes",
+        "No": "v1_sms_no"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes",
+          "value": "Yes"
+        },
+        {
+          "label": "No",
+          "value": "No"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"As I'm wrapping up your order, I wanted to check — would you like me to text you order and shipping updates so you always know where things stand, plus occasional brain health tips from Dr. Bredesen and special offers from the NeuroQ team? Message and data rates may apply and you can reply STOP anytime. Can I go ahead and set that up for you?\"</p><p></p>",
+      "outputVariable": "sms_consent",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_sms_yes": {
+      "_pos": {
+        "x": 3420,
+        "y": 510
+      },
+      "type": "set_variable",
+      "label": "SMS consent: yes",
+      "transitions": {
+        "default": "v1_sms_cf"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.sms_consent_marketing}}",
+          "value": "true"
+        },
+        {
+          "variable": "{{flow.sms_consent_transactional}}",
+          "value": "true"
+        },
+        {
+          "variable": "{{flow.sms_consent_at}}",
+          "value": "{{now.iso}}"
+        }
+      ]
+    },
+    "v1_sms_no": {
+      "_pos": {
+        "x": 3800,
+        "y": 0
+      },
+      "type": "set_variable",
+      "label": "SMS consent: no",
+      "transitions": {
+        "default": "v1_sms_cf"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.sms_consent_marketing}}",
+          "value": "false"
+        },
+        {
+          "variable": "{{flow.sms_consent_transactional}}",
+          "value": "false"
+        },
+        {
+          "variable": "{{flow.sms_consent_at}}",
+          "value": "{{now.iso}}"
+        }
+      ]
+    },
+    "v1_sms_cf": {
+      "_pos": {
+        "x": 3420,
+        "y": 680
+      },
+      "type": "set_custom_field",
+      "label": "SMS Consent",
+      "transitions": {
+        "success": "v1_confirm_submit",
+        "error": "v1_confirm_submit",
+        "invalid_value": "v1_confirm_submit"
+      },
+      "definitionId": "37506fc2-86ed-5684-9b34-e9c17d43ec79",
+      "definitionFieldName": "sms_consent",
+      "definitionDataTypeName": "string",
+      "definitionDisplayLabel": "SMS Consent",
+      "value": "{{flow.sms_consent}} at {{flow.sms_consent_at}}"
+    },
+    "v1_confirm_submit": {
+      "_pos": {
+        "x": 3420,
+        "y": 850
+      },
+      "type": "input",
+      "label": "Submit order?",
+      "transitions": {
+        "Yes - Submit Order": "v1_auth",
+        "No - Go Back": "v1_sms"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Yes - Submit Order",
+          "value": "Yes - Submit Order"
+        },
+        {
+          "label": "No - Go Back",
+          "value": "No - Go Back"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p><strong><span style=\"color: #0000ff\">AGENT: The order is about to be authorized and submitted. Are you sure the responses are correct?</span></strong></p>",
+      "outputVariable": "confirm_submit",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_auth": {
+      "_pos": {
+        "x": 3420,
+        "y": 1020
+      },
+      "type": "authorize_payment",
+      "label": "Authorize Payment",
+      "transitions": {
+        "approved": "v1_auth_ok",
+        "declined": "v1_auth_declined",
+        "error": "v1_auth_error"
+      },
+      "provider": "authorize_net",
+      "amountMode": "cart_total",
+      "cardNumberField": "pan",
+      "expField": "expiry",
+      "cvvField": "cvv",
+      "zipField": "{{flow.billing_address.zip}}",
+      "outputVariable": "auth_result"
+    },
+    "v1_auth_ok": {
+      "_pos": {
+        "x": 3420,
+        "y": 1190
+      },
+      "type": "set_variable",
+      "label": "Count attempt",
+      "transitions": {
+        "default": "v1_order"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.auth_attempts}}",
+          "value": "{{flow.auth_attempts + 1}}"
+        }
+      ]
+    },
+    "v1_order": {
+      "_pos": {
+        "x": 3420,
+        "y": 1360
+      },
+      "type": "api_call",
+      "label": "Submit Life Seasons Order",
+      "transitions": {
+        "success": "v1_order_ok",
+        "error": "v1_ordfail",
+        "timeout": "v1_ordfail"
+      },
+      "apiEndpointId": "f5ac2a4c-502c-4d4e-9ade-1932c2b29be5",
+      "apiDefinitionScope": "tenant",
+      "apiDefinitionName": "Life Seasons Order API",
+      "apiEndpointName": "Add Order",
+      "outputVariable": "order_response",
+      "timeoutSeconds": 30,
+      "oncePerCall": true
+    },
+    "v1_order_ok": {
+      "_pos": {
+        "x": 3420,
+        "y": 1530
+      },
+      "type": "set_variable",
+      "label": "Disposition: Order",
+      "transitions": {
+        "default": "v1_disp_close_order"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.disposition}}",
+          "value": "Order"
+        }
+      ]
+    },
+    "v1_auth_declined": {
+      "_pos": {
+        "x": 3800,
+        "y": 170
+      },
+      "type": "set_variable",
+      "label": "Count attempt",
+      "transitions": {
+        "default": "v1_auth_exhausted"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.auth_attempts}}",
+          "value": "{{flow.auth_attempts + 1}}"
+        }
+      ]
+    },
+    "v1_auth_exhausted": {
+      "_pos": {
+        "x": 3800,
+        "y": 340
+      },
+      "type": "branch",
+      "label": "3 attempts used?",
+      "transitions": {
+        "true": "v1_decline_final",
+        "false": "v1_decline"
+      },
+      "condition": "{{flow.auth_attempts}} >= 3"
+    },
+    "v1_decline": {
+      "_pos": {
+        "x": 3800,
+        "y": 510
+      },
+      "type": "input",
+      "label": "Decline",
+      "transitions": {
+        "Change Customer Info": "v1_sec_customer",
+        "Change Payment Info": "v1_sec_payment",
+        "Cancel Order": "v1_declined_disp"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Change Customer Info",
+          "value": "Change Customer Info"
+        },
+        {
+          "label": "Change Payment Info",
+          "value": "Change Payment Info"
+        },
+        {
+          "label": "Cancel Order",
+          "value": "Cancel Order"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>Agent: The authorization failed due to the below reason.  Select the appropriate option. Up to 3 attempts can be made to authorize the transaction.</p><p>Transaction Failure Reason:</p><p><span style=\"color: #008000\">{{flow.auth_result.responseReasonText}}</span></p><p>Customer Info (for reference):</p><p><span style=\"color: #008000\">{{flow.billing_address.firstName}}</span> <span style=\"color: #008000\">{{flow.billing_address.lastName}}</span><br><span style=\"color: #008000\">{{flow.billing_address.address1}}</span> <span style=\"color: #008000\">{{flow.billing_address.address2}}</span><br><span style=\"color: #008000\">{{flow.billing_address.city}}</span>, <span style=\"color: #008000\">{{flow.billing_address.state}}</span> <span style=\"color: #008000\">{{flow.billing_address.zip}}</span></p>",
+      "outputVariable": "decline_action",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_decline_final": {
+      "_pos": {
+        "x": 3800,
+        "y": 680
+      },
+      "type": "input",
+      "label": "Decline — attempts exhausted",
+      "transitions": {
+        "Cancel Order": "v1_declined_disp"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Cancel Order",
+          "value": "Cancel Order"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>3 attempts have been made to authorize the transaction without success.  The order MUST be canceled.</p><p><span style=\"color: #008000\">{{flow.auth_result.responseReasonText}}</span></p>",
+      "outputVariable": "decline_action",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_auth_error": {
+      "_pos": {
+        "x": 3800,
+        "y": 850
+      },
+      "type": "script",
+      "label": "Authorization error",
+      "transitions": {
+        "default": "v1_decline"
+      },
+      "content": "<p><strong><span style=\"color: #0000ff\">AGENT: There was an error processing the transaction — THIS IS NOT A DECLINE.</span></strong></p><p><span style=\"color: #008000\">{{flow.auth_result.responseReasonText}}</span></p>"
+    },
+    "v1_declined_disp": {
+      "_pos": {
+        "x": 3800,
+        "y": 1020
+      },
+      "type": "set_variable",
+      "label": "Cancel → All Other Calls / Credit Card Declined",
+      "transitions": {
+        "default": "v1_disp_close_aoc"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.call_type}}",
+          "value": "All Other Calls"
+        },
+        {
+          "variable": "{{flow.disposition}}",
+          "value": "Credit Card Declined"
+        }
+      ]
+    },
+    "v1_ordfail": {
+      "_pos": {
+        "x": 3800,
+        "y": 1190
+      },
+      "type": "input",
+      "label": "Order Post Failure",
+      "transitions": {
+        "Change Customer Info": "v1_sec_customer",
+        "Change Payment Info": "v1_sec_payment",
+        "Order Post keeps failing (IT will be notified)": "v1_ordfail_email"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Change Customer Info",
+          "value": "Change Customer Info"
+        },
+        {
+          "label": "Change Payment Info",
+          "value": "Change Payment Info"
+        },
+        {
+          "label": "Order Post keeps failing (IT will be notified)",
+          "value": "Order Post keeps failing (IT will be notified)"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p><span style=\"color: #0000ff\">Agent: The order could not be posted. Please review the error(s) below and select the appropriate option.</span></p><p></p><p>Order Post Failure Reason:</p><p></p><p><span style=\"color: #008000\">{{flow.order_response.error}}</span></p><p></p>",
+      "outputVariable": "order_post_failure",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_ordfail_email": {
+      "_pos": {
+        "x": 3800,
+        "y": 1360
+      },
+      "type": "send_email",
+      "label": "Email IT — order post failure",
+      "transitions": {
+        "default": "v1_ordfail_disp"
+      },
+      "emailTo": "",
+      "emailCc": "",
+      "emailBcc": "",
+      "emailFromName": "Life Seasons Order Post Failure",
+      "emailReplyTo": "",
+      "emailSubject": "Life Seasons - Order Post Failure ({{call_record.order_number}})",
+      "emailBodyHtml": "<p>Life Seasons: Failure Posting Order for call {{call_record.id}} (order {{call_record.order_number}}).</p><p>Error: {{flow.order_response.error}}</p><p>Once the record has been corrected, re-submit the order and make sure it is included in the Daily Call Detail and Response Data File exports.</p>"
+    },
+    "v1_ordfail_disp": {
+      "_pos": {
+        "x": 3800,
+        "y": 1530
+      },
+      "type": "set_variable",
+      "label": "Disposition: Order (post failed)",
+      "transitions": {
+        "default": "v1_disp_close_order"
+      },
+      "assignments": [
+        {
+          "variable": "{{flow.disposition}}",
+          "value": "Order"
+        }
+      ]
+    },
+    "v1_disp_aoc": {
+      "_pos": {
+        "x": 4180,
+        "y": 0
+      },
+      "type": "input",
+      "label": "Disposition — All Other Calls",
+      "transitions": {
+        "Alzheimers Consumer": "v1_disp_store",
+        "Credit Card Declined": "v1_disp_store",
+        "Disconnected During Offer": "v1_disp_store",
+        "Language Barrier/International": "v1_disp_store",
+        "No MOP (No Method of Payment)": "v1_disp_store",
+        "Not Interested (Disconnected after offer presentation)": "v1_disp_store",
+        "Price Objection Too Expensive": "v1_disp_store",
+        "Referred to Customer Service": "v1_explain",
+        "Shipping to Canada": "v1_disp_store",
+        "Spousal Objection": "v1_disp_store",
+        "Thought it was free": "v1_disp_store",
+        "Too many upsells - Caller Fatigue": "v1_disp_store",
+        "Transferred to Customer Service": "v1_disp_store",
+        "Wants to speak to Doctor": "v1_disp_store"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Alzheimers Consumer",
+          "value": "Alzheimers Consumer"
+        },
+        {
+          "label": "Credit Card Declined",
+          "value": "Credit Card Declined"
+        },
+        {
+          "label": "Disconnected During Offer",
+          "value": "Disconnected During Offer"
+        },
+        {
+          "label": "Language Barrier/International",
+          "value": "Language Barrier/International"
+        },
+        {
+          "label": "No MOP (No Method of Payment)",
+          "value": "No MOP (No Method of Payment)"
+        },
+        {
+          "label": "Not Interested (Disconnected after offer presentation)",
+          "value": "Not Interested (Disconnected after offer presentation)"
+        },
+        {
+          "label": "Price Objection Too Expensive",
+          "value": "Price Objection Too Expensive"
+        },
+        {
+          "label": "Referred to Customer Service",
+          "value": "Referred to Customer Service"
+        },
+        {
+          "label": "Shipping to Canada",
+          "value": "Shipping to Canada"
+        },
+        {
+          "label": "Spousal Objection",
+          "value": "Spousal Objection"
+        },
+        {
+          "label": "Thought it was free",
+          "value": "Thought it was free"
+        },
+        {
+          "label": "Too many upsells - Caller Fatigue",
+          "value": "Too many upsells - Caller Fatigue"
+        },
+        {
+          "label": "Transferred to Customer Service",
+          "value": "Transferred to Customer Service"
+        },
+        {
+          "label": "Wants to speak to Doctor",
+          "value": "Wants to speak to Doctor"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p>\"Thank you for calling and have a great day!\"</p><p><strong><span style=\"color: #0000ff\">AGENT: Select the appropriate disposition</span></strong></p>",
+      "outputVariable": "disposition",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_disp_junk": {
+      "_pos": {
+        "x": 4180,
+        "y": 170
+      },
+      "type": "input",
+      "label": "Disposition — Junk",
+      "transitions": {
+        "Accidental Screen Pop": "v1_disp_store",
+        "Busy Signal": "v1_disp_store",
+        "Call Recording": "v1_disp_store",
+        "Ghost Call/Dead Air": "v1_disp_store",
+        "Prank Caller": "v1_disp_store",
+        "Test Call": "v1_disp_store",
+        "Voicemail": "v1_disp_store",
+        "Wrong Number": "v1_disp_store"
+      },
+      "fieldType": "select",
+      "required": true,
+      "options": [
+        {
+          "label": "Accidental Screen Pop",
+          "value": "Accidental Screen Pop"
+        },
+        {
+          "label": "Busy Signal",
+          "value": "Busy Signal"
+        },
+        {
+          "label": "Call Recording",
+          "value": "Call Recording"
+        },
+        {
+          "label": "Ghost Call/Dead Air",
+          "value": "Ghost Call/Dead Air"
+        },
+        {
+          "label": "Prank Caller",
+          "value": "Prank Caller"
+        },
+        {
+          "label": "Test Call",
+          "value": "Test Call"
+        },
+        {
+          "label": "Voicemail",
+          "value": "Voicemail"
+        },
+        {
+          "label": "Wrong Number",
+          "value": "Wrong Number"
+        }
+      ],
+      "scriptLabel": "",
+      "scriptContent": "<p><strong><span style=\"color: #0000ff\">AGENT: Select the appropriate disposition</span></strong></p>",
+      "outputVariable": "disposition",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_explain": {
+      "_pos": {
+        "x": 4180,
+        "y": 340
+      },
+      "type": "input",
+      "label": "Explain",
+      "transitions": {
+        "default": "v1_disp_store"
+      },
+      "fieldType": "text",
+      "required": true,
+      "scriptLabel": "",
+      "scriptContent": "<p><strong><span style=\"color: #0000ff\">AGENT: An explanation is required for this disposition.</span></strong></p>",
+      "outputVariable": "disposition_reason",
+      "inputMask": "",
+      "customMask": ""
+    },
+    "v1_disp_close_aoc": {
+      "_pos": {
+        "x": 4180,
+        "y": 510
+      },
+      "type": "script",
+      "label": "Closing — All Other Calls",
+      "transitions": {
+        "default": "v1_disp_store"
+      },
+      "content": "<p>\"Thank you for calling and have a great day!\"</p>"
+    },
+    "v1_disp_close_canada": {
+      "_pos": {
+        "x": 4180,
+        "y": 680
+      },
+      "type": "script",
+      "label": "Closing - Canada",
+      "transitions": {
+        "default": "v1_disp_store"
+      },
+      "content": "<p>\"Thank you for your interest in NeuroQ. At this time we cannot ship to Canada.\"</p>"
+    },
+    "v1_disp_close_order": {
+      "_pos": {
+        "x": 4180,
+        "y": 850
+      },
+      "type": "script",
+      "label": "Closing — Order",
+      "transitions": {
+        "default": "v1_disp_store"
+      },
+      "content": "<p>\"I want to thank you for calling and I hope you have a great day!\"</p>"
+    },
+    "v1_disp_store": {
+      "_pos": {
+        "x": 4180,
+        "y": 1020
+      },
+      "type": "set_custom_field",
+      "label": "Call Type",
+      "transitions": {
+        "success": "v1_disp_store2",
+        "error": "v1_disp_store2",
+        "invalid_value": "v1_disp_store2"
+      },
+      "definitionId": "115b7d9c-b5a5-4681-bc7e-27c0f7dc59fa",
+      "definitionFieldName": "call_type",
+      "definitionDataTypeName": "string",
+      "definitionDisplayLabel": "Call Type",
+      "value": "{{flow.call_type}}"
+    },
+    "v1_disp_store2": {
+      "_pos": {
+        "x": 4180,
+        "y": 1190
+      },
+      "type": "set_custom_field",
+      "label": "Disposition",
+      "transitions": {
+        "success": "v1_disp_store3",
+        "error": "v1_disp_store3",
+        "invalid_value": "v1_disp_store3"
+      },
+      "definitionId": "fe68b17e-0fb6-46bb-b5ab-daa6b12404d0",
+      "definitionFieldName": "disposition",
+      "definitionDataTypeName": "string",
+      "definitionDisplayLabel": "Disposition",
+      "value": "{{flow.disposition}}"
+    },
+    "v1_disp_store3": {
+      "_pos": {
+        "x": 4180,
+        "y": 1360
+      },
+      "type": "set_custom_field",
+      "label": "Disposition Reason",
+      "transitions": {
+        "success": "v1_end",
+        "error": "v1_end",
+        "invalid_value": "v1_end"
+      },
+      "definitionId": "98908031-b34b-5a7a-b749-c973839d1e7f",
+      "definitionFieldName": "disposition_reason",
+      "definitionDataTypeName": "string",
+      "definitionDisplayLabel": "Disposition Reason",
+      "value": "{{flow.disposition_reason}}"
+    },
+    "v1_end": {
+      "_pos": {
+        "x": 4180,
+        "y": 1530
+      },
+      "type": "end",
+      "label": "End",
+      "transitions": {},
+      "status": "complete"
+    }
+  }
+}

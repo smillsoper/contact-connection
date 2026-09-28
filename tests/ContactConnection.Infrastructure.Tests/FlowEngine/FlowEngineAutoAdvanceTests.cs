@@ -29,6 +29,7 @@ public class FlowEngineAutoAdvanceTests
     [InlineData("get_custom_field")]
     [InlineData("store_value")]
     [InlineData("get_value")]
+    [InlineData("send_email")]
     public void TransparentNodeType_IsAutoAdvanced(string nodeType) =>
         Assert.Contains(nodeType, AutoAdvanceTypes);
 }

@@ -151,6 +151,16 @@ public partial class VariableResolver : IVariableResolver
             "input"       => context.Inputs.GetValueOrDefault(key),
             "api"         => context.ApiResults.GetValueOrDefault(key),
             "shared"      => ResolveDictVar(context.SharedVars, key),
+            "cart"        => context.Cart.GetValueOrDefault(key),
+            // {{now.iso}} — exact UTC instant (e.g. a consent timestamp an order API must carry);
+            // date/time are UTC too (the CRM context has no tenant timezone).
+            "now"         => key.ToLowerInvariant() switch
+            {
+                "iso"  => DateTimeOffset.UtcNow.ToString("O"),
+                "date" => DateTimeOffset.UtcNow.ToString("yyyy-MM-dd"),
+                "time" => DateTimeOffset.UtcNow.ToString("HH:mm"),
+                _      => null,
+            },
             _             => null
         };
     }

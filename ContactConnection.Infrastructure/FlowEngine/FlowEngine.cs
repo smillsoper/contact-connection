@@ -241,6 +241,7 @@ public class FlowEngine : IFlowEngine
         var nodeType = node["type"]?.GetValue<string>() ?? "script";
         if (!_handlers.TryGetValue(nodeType, out var handler)) return null;
 
+        if (ReferencesCart(node)) await RefreshCartVarsAsync(ctx, ct);
         var result = await handler.ExecuteAsync(node, ctx, agentInput: null, agentTransition: "default", ct);
         return result.State;
     }
@@ -276,6 +277,7 @@ public class FlowEngine : IFlowEngine
             if (!_handlers.TryGetValue(nodeType, out var handler))
                 throw new InvalidOperationException($"No handler registered for node type '{nodeType}'.");
 
+            if (ReferencesCart(node)) await RefreshCartVarsAsync(ctx, ct);
             var result = await handler.ExecuteAsync(node, ctx, agentInput, transition, ct);
 
             // A "script" node's Continue click re-invokes its handler purely to look up the next
@@ -370,6 +372,33 @@ public class FlowEngine : IFlowEngine
             Agent      = new() { ["id"] = request.AgentId.ToString() },
             Tenant     = new() { ["id"] = request.TenantId.ToString() }
         };
+    }
+
+    private static bool ReferencesCart(JsonObject node) =>
+        node.ToJsonString().Contains("{{cart.", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// {{cart.*}} — the call's current cart (commerce engine output on call_records.cart), read
+    /// fresh only for nodes that reference it, since add_to_cart and tax/fee recalculation after an
+    /// address change both update it mid-flow. Amounts are plain decimals ("139.90"); items_summary
+    /// is "1 x NeuroQ …, 1 x Memory DHA …".
+    /// </summary>
+    private async Task RefreshCartVarsAsync(FlowExecutionContext ctx, CancellationToken ct)
+    {
+        ctx.Cart.Clear();
+        var cart = (await _callRecords.GetByIdAsync(ctx.CallRecordId, ct))?.Cart;
+        if (cart is null) return;
+
+        static string Money(decimal d) => d.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+        ctx.Cart["total"]         = Money(cart.CartTotal);
+        ctx.Cart["subtotal"]      = Money(cart.CartSubtotal);
+        ctx.Cart["shipping"]      = Money(cart.Shipping);
+        ctx.Cart["sales_tax"]     = Money(cart.SalesTax);
+        ctx.Cart["shipping_tax"]  = Money(cart.ShippingTax);
+        ctx.Cart["fees"]          = Money(cart.Fees?.Sum(f => f.Amount) ?? 0);
+        ctx.Cart["first_payment"] = Money(cart.PaymentBreakdowns.FirstOrDefault()?.Total ?? cart.CartTotal);
+        ctx.Cart["item_count"]    = cart.Items.Count.ToString();
+        ctx.Cart["items_summary"] = string.Join(", ", cart.Items.Select(i => $"{i.Quantity} x {i.Description}"));
     }
 
     /// <summary>

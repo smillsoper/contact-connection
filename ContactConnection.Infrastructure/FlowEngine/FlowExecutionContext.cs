@@ -47,6 +47,9 @@ public class FlowExecutionContext
 
     // Baseline data populated from call record and agent at session start
     public Dictionary<string, string> CallRecord { get; init; } = [];
+
+    // {{cart.*}} — refreshed on demand by FlowEngine.RefreshCartVarsAsync (not persisted state)
+    public Dictionary<string, string> Cart { get; init; } = [];
     public Dictionary<string, string> Caller { get; init; } = [];
     public Dictionary<string, string> Agent { get; init; } = [];
     public Dictionary<string, string> Tenant { get; init; } = [];
@@ -68,7 +71,8 @@ public class FlowExecutionContext
         Inputs     = Inputs,
         ApiResults = ApiResults,
         FlowVars   = FlowVars,
-        SharedVars = SharedVars
+        SharedVars = SharedVars,
+        Cart       = Cart
     };
 
     public string SerializeVariableStore() =>

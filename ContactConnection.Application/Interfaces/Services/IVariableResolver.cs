@@ -82,4 +82,10 @@ public class VariableContext
     // dictionaries above), so a value the telephony side just set is visible as soon as the agent
     // next interacts with the script.
     public Dictionary<string, string> SharedVars { get; init; } = [];
+
+    /// <summary>{{cart.*}} — the call's current cart totals (total, subtotal, shipping, sales_tax,
+    /// shipping_tax, fees, first_payment, item_count, items_summary). Refreshed by the CRM flow engine
+    /// just before any node that references a cart tag, so it reflects tax/fees recalculated after
+    /// address changes. See FlowEngine.RefreshCartVarsAsync.</summary>
+    public Dictionary<string, string> Cart { get; init; } = [];
 }
