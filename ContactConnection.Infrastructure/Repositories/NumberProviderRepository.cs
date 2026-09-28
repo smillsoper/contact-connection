@@ -16,6 +16,9 @@ public class NumberProviderRepository(ScopedTenantDbContextFactory factory) : IN
     public Task<NumberProvider?> GetByIdAsync(Guid id, CancellationToken ct = default)
         => Ctx.NumberProviders.FirstOrDefaultAsync(p => p.Id == id, ct);
 
+    public Task<NumberProvider?> GetActiveByApiKeyHashAsync(string apiKeyHash, CancellationToken ct = default)
+        => Ctx.NumberProviders.FirstOrDefaultAsync(p => p.ApiKeyHash == apiKeyHash && p.IsActive, ct);
+
     public Task<bool> NameExistsAsync(string name, Guid? exceptId, CancellationToken ct = default)
         => Ctx.NumberProviders.AnyAsync(p => p.Name.ToLower() == name.Trim().ToLower() && p.Id != exceptId, ct);
 

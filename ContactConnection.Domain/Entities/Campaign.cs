@@ -90,6 +90,14 @@ public class Campaign
     public string TaxProvider { get; private set; } = TaxProviderKey.FlatRate;
     public string? TaxSettings { get; private set; }
 
+    // ── External routing (docs/design/parallel-queuing.md) ─────────────────
+    /// <summary>How this campaign answers an external router's routing request —
+    /// <see cref="Entities.ExternalRoutingAcceptMode"/>.</summary>
+    public string ExternalRoutingAcceptMode { get; private set; } = Entities.ExternalRoutingAcceptMode.QueueCount;
+    /// <summary>The mode's limit: max queued calls (QueueCount, default 1) or max longest wait in
+    /// seconds (QueueWait). Unused for AgentAvailable.</summary>
+    public int? ExternalRoutingLimit { get; private set; }
+
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
@@ -203,6 +211,18 @@ public class Campaign
     public void SetSensitiveDataRetentionMinutes(int? minutes)
     {
         SensitiveDataRetentionMinutes = minutes is { } m ? Math.Clamp(m, 1, 43200) : null;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void SetExternalRouting(string acceptMode, int? limit)
+    {
+        if (!Entities.ExternalRoutingAcceptMode.IsValid(acceptMode))
+            throw new ArgumentException($"Unknown accept mode '{acceptMode}'.", nameof(acceptMode));
+        if (acceptMode == Entities.ExternalRoutingAcceptMode.AgentAvailable) limit = null;
+        else if (limit is { } l && (l < 1 || l > 10000))
+            throw new ArgumentException("Limit must be between 1 and 10000.", nameof(limit));
+        ExternalRoutingAcceptMode = acceptMode;
+        ExternalRoutingLimit = limit;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 

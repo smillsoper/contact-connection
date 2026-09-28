@@ -209,6 +209,7 @@ app.MapCampaignsEndpoints();
 app.MapCampaignExternalNumbersEndpoints();
 app.MapPhoneNumbersEndpoints();
 app.MapNumberProvidersEndpoints();
+app.MapExternalRoutingEndpoints();
 app.MapAgentGroupsEndpoints();
 app.MapBlockListEndpoints();
 app.MapRolesEndpoints();

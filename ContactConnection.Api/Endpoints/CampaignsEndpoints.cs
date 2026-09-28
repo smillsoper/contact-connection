@@ -17,6 +17,7 @@ public static class CampaignsEndpoints
         group.MapPut("{id:guid}/recording",           UpdateRecording);
         group.MapPut("{id:guid}/sensitive-data-retention", UpdateSensitiveDataRetention);
         group.MapPut("{id:guid}/tax",                 UpdateTax).RequireAuthorization("TenantAdmin");
+        group.MapPut("{id:guid}/external-routing",    UpdateExternalRouting).RequireAuthorization("TenantAdmin");
         group.MapPut("{id:guid}/flow",                SetFlow);
         group.MapDelete("{id:guid}/flow",             RemoveFlow);
         group.MapPut("{id:guid}/inbound-flow",        SetInboundFlow);
@@ -152,6 +153,24 @@ public static class CampaignsEndpoints
         if (campaign is null) return Results.NotFound();
 
         campaign.SetSensitiveDataRetentionMinutes(req.SensitiveDataRetentionMinutes);
+
+        await repo.SaveChangesAsync(ct);
+        return Results.Ok(ToSummaryResponse(campaign));
+    }
+
+    // ── PUT /api/v1/campaigns/{id}/external-routing ─────────────────────────
+    // How this campaign answers external routers' "will you take a call?" — see
+    // Campaign.ExternalRoutingAcceptMode and ExternalRoutingEndpoints.
+    private static async Task<IResult> UpdateExternalRouting(
+        Guid id, UpdateCampaignExternalRoutingRequest req,
+        ICampaignRepository repo, TenantContext tenantContext, CancellationToken ct)
+    {
+        if (!tenantContext.HasTenant) return Results.Unauthorized();
+        var campaign = await repo.GetByIdAsync(id, ct);
+        if (campaign is null) return Results.NotFound();
+
+        try { campaign.SetExternalRouting(req.AcceptMode?.Trim() ?? "", req.Limit); }
+        catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
 
         await repo.SaveChangesAsync(ct);
         return Results.Ok(ToSummaryResponse(campaign));
@@ -506,6 +525,7 @@ public static class CampaignsEndpoints
         c.RecordingBeepEnabled, c.AutoMaskOnHold, c.RecordingRetentionDays,
         c.SensitiveDataRetentionMinutes,
         c.TaxProvider, TaxSettings = ParseTaxSettings(c.TaxSettings),
+        c.ExternalRoutingAcceptMode, c.ExternalRoutingLimit,
         Client = c.Client is null ? null : new { c.Client.Id, c.Client.Name },
         c.CreatedAt, c.UpdatedAt
     };
@@ -521,6 +541,7 @@ public static class CampaignsEndpoints
         c.RecordingBeepEnabled, c.AutoMaskOnHold, c.RecordingRetentionDays,
         c.SensitiveDataRetentionMinutes,
         c.TaxProvider, TaxSettings = ParseTaxSettings(c.TaxSettings),
+        c.ExternalRoutingAcceptMode, c.ExternalRoutingLimit,
         Client = c.Client is null ? null : new { c.Client.Id, c.Client.Name },
         PhoneNumbers     = c.PhoneNumbers.Select(p => new { p.Id, p.Number, p.Label, p.IsActive, p.FlowId, p.TelephonyFlowId }),
         AgentAssignments = c.AgentAssignments.Where(a => a.IsActive).Select(ToAssignmentResponse),
@@ -564,6 +585,7 @@ public record UpdateCampaignRecordingRequest(
     bool AutoMaskOnHold = false,
     int RecordingRetentionDays = 90);
 public record UpdateCampaignSensitiveDataRetentionRequest(int? SensitiveDataRetentionMinutes = null);
+public record UpdateCampaignExternalRoutingRequest(string? AcceptMode, int? Limit = null);
 public record UpdateCampaignTaxRequest(string? TaxProvider, System.Text.Json.JsonElement? TaxSettings = null);
 public record SetCampaignFlowRequest(Guid FlowId);
 public record AssignAgentRequest(Guid AgentId, int Proficiency = 50);

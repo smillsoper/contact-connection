@@ -96,6 +96,13 @@ public class EligibleAgentRanker(IAgentStateStore stateStore)
         return routes.TryGetValue(agentId, out var list) ? BestRoute(list) : null;
     }
 
+    /// <summary>Every agent with a route to the campaign (optionally through one group only),
+    /// mapped to their best route — no availability filter. Used by external-routing stats.</summary>
+    public static async Task<Dictionary<Guid, AgentRoute>> GetBestRoutesAsync(
+        TenantDbContext db, Guid campaignId, Guid? restrictGroupId = null, CancellationToken ct = default)
+        => (await LoadRoutesAsync(db, campaignId, restrictGroupId, onlyAgentId: null, ct))
+            .ToDictionary(kv => kv.Key, kv => BestRoute(kv.Value));
+
     private async Task<(IReadOnlyList<RankedAgent> Ranked, IReadOnlyList<TierWindow> Windows)> LoadAsync(
         TenantDbContext db, Guid tenantId, Guid campaignId,
         IReadOnlySet<Guid>? excludeAgentIds, Guid? restrictGroupId, CancellationToken ct)

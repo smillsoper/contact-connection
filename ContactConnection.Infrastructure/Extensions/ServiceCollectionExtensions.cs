@@ -344,6 +344,7 @@ public static class ServiceCollectionExtensions
         // other per-request telephony services above, even though its only dependency
         // (IAgentStateStore) is itself a singleton.
         services.AddScoped<EligibleAgentRanker>();
+        services.AddScoped<ExternalRoutingService>();
 
         // Email
         services.AddSingleton<IEmailService, ResendEmailService>();

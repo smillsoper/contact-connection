@@ -61,4 +61,32 @@ public class ParallelQueuingTierTests
         Assert.Equal(10, record.RoutedTier);
         Assert.Equal("Alpha", record.RoutedTierLabel);
     }
+
+    [Fact]
+    public void Campaign_ExternalRouting_DefaultsAndValidation()
+    {
+        var c = Campaign.Create(Guid.NewGuid(), Guid.NewGuid(), "NeuroQ", "neuroq");
+        Assert.Equal(ExternalRoutingAcceptMode.QueueCount, c.ExternalRoutingAcceptMode);
+        Assert.Null(c.ExternalRoutingLimit);
+
+        c.SetExternalRouting(ExternalRoutingAcceptMode.QueueWait, 45);
+        Assert.Equal((ExternalRoutingAcceptMode.QueueWait, (int?)45), (c.ExternalRoutingAcceptMode, c.ExternalRoutingLimit));
+
+        c.SetExternalRouting(ExternalRoutingAcceptMode.AgentAvailable, 45);   // limit unused → dropped
+        Assert.Null(c.ExternalRoutingLimit);
+
+        Assert.Throws<ArgumentException>(() => c.SetExternalRouting("always", null));
+        Assert.Throws<ArgumentException>(() => c.SetExternalRouting(ExternalRoutingAcceptMode.QueueCount, 0));
+    }
+
+    [Fact]
+    public void ExternalRoutingRequest_Factories()
+    {
+        var r = ExternalRoutingRequest.Routing(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), null,
+            "sess-1", "8009399174", "5035551234", false, "No Agents Available", []);
+        Assert.Equal((ExternalRoutingRequestKind.Routing, (bool?)false, (string?)null), (r.Kind, r.Accepted, r.Targets));
+
+        var ci = ExternalRoutingRequest.CallInfo(Guid.NewGuid(), Guid.NewGuid(), "c-1", "2026-09-27 10:00", "8009399174", null);
+        Assert.Equal((ExternalRoutingRequestKind.CallInfo, (bool?)null, "c-1"), (ci.Kind, ci.Accepted, ci.ExternalSessionId));
+    }
 }

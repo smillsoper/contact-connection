@@ -116,6 +116,25 @@ Reject  → 404  { "Targets": [...], "Message": "No Agents Available" }
 - Answers come from the same ranker + queue sessions the queue engine uses — tier/group-aware.
 - Rejects recorded for reporting; CallInfo stored per tenant.
 
+**As built (S163)** — `ExternalRoutingEndpoints` at `/api/v1/external-routing`, on the tenant's own
+host, anonymous but gated by a NumberProvider API key (`X-Api-Key` header, or `api_key` query for
+routers that can only configure a URL):
+- `POST {campaignId}/Routing[?group=]` — RingSquared shapes exactly (PascalCase `Targets`/`Message`;
+  `tel:+1` stripped; targets returned 10-digit). Target = that provider's active `routing_delivery`
+  number(s) whose `ClientNumber` matches DNIS. **Deliberate change from TMS:** an unmapped DNIS is
+  rejected (404 "Number not configured") instead of accepted with a placeholder number.
+- `POST CallInfo` — `{CallData:{…}}` (or bare), stored.
+- `GET {campaignId}/availability[?group=]` — logged in / available / unavailable / queued / longest
+  wait / `wouldAccept`, plus a per-tier breakdown. Logged in = any state except `logged_out`.
+- `GET {campaignId}/available[?group=]` — 200/404 on the **same accept rule** as Routing.
+- Accept rule: `Campaign.ExternalRoutingAcceptMode` (`queue_count` default, limit default 1 /
+  `queue_wait`, limit default 30s / `agent_available`) + `ExternalRoutingLimit`, set via
+  `PUT /api/v1/campaigns/{id}/external-routing`.
+- Queued count: without `?group=` the campaign's calls *not* pinned to a group; with it, only calls
+  pinned to that group — an Elite call doesn't make the general route reject, and vice versa.
+- Every Routing decision and CallInfo is logged to `external_routing_requests` (reject reporting,
+  reconciliation). Stats/yes-no polls are not logged.
+
 **Call delivery from RingSquared** — the campaigns' numbers were ported to RingSquared; at TMS they
 delivered by SIP to CXone CloudConnect numbers. We'll need RingSquared's SIP connection details.
 Note: custom SIP headers (`X-Elite`) only survive **SIP-to-SIP** delivery straight to our platform;
