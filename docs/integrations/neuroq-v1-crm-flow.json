@@ -5,7 +5,7 @@
   "nodes": {
     "v1_start": {
       "_pos": {
-        "x": 0,
+        "x": 4747,
         "y": 0
       },
       "type": "set_variable",
@@ -30,8 +30,8 @@
     },
     "v1_sec_opening": {
       "_pos": {
-        "x": 0,
-        "y": 170
+        "x": 4747,
+        "y": 190
       },
       "type": "section",
       "label": "Opening",
@@ -45,8 +45,8 @@
     },
     "v1_first_name": {
       "_pos": {
-        "x": 0,
-        "y": 340
+        "x": 4806,
+        "y": 380
       },
       "type": "input",
       "label": "First Name",
@@ -63,8 +63,8 @@
     },
     "v1_set_bill_first": {
       "_pos": {
-        "x": 0,
-        "y": 510
+        "x": 4884,
+        "y": 570
       },
       "type": "set_variable",
       "label": "Billing first name = first name",
@@ -80,8 +80,8 @@
     },
     "v1_zip": {
       "_pos": {
-        "x": 0,
-        "y": 680
+        "x": 4981,
+        "y": 760
       },
       "type": "input",
       "label": "Zip Code",
@@ -98,8 +98,8 @@
     },
     "v1_set_bill_zip": {
       "_pos": {
-        "x": 0,
-        "y": 850
+        "x": 5095,
+        "y": 950
       },
       "type": "set_variable",
       "label": "Billing zip = zip",
@@ -115,8 +115,8 @@
     },
     "v1_call_type": {
       "_pos": {
-        "x": 0,
-        "y": 1020
+        "x": 5227,
+        "y": 1140
       },
       "type": "input",
       "label": "Call Type",
@@ -149,8 +149,8 @@
     },
     "v1_sec_offer": {
       "_pos": {
-        "x": 380,
-        "y": 0
+        "x": 4282,
+        "y": 1330
       },
       "type": "section",
       "label": "Offer",
@@ -164,8 +164,8 @@
     },
     "v1_probe_set_0": {
       "_pos": {
-        "x": 760,
-        "y": 0
+        "x": 2575,
+        "y": 1710
       },
       "type": "set_variable",
       "label": "Probe: Memory issues and forgetfulness",
@@ -185,8 +185,8 @@
     },
     "v1_probe_set_1": {
       "_pos": {
-        "x": 760,
-        "y": 170
+        "x": 2855,
+        "y": 1710
       },
       "type": "set_variable",
       "label": "Probe: Struggling to recall things or learn new  things",
@@ -206,8 +206,8 @@
     },
     "v1_probe_set_2": {
       "_pos": {
-        "x": 760,
-        "y": 340
+        "x": 3135,
+        "y": 1710
       },
       "type": "set_variable",
       "label": "Probe: Poor mental clarity",
@@ -227,8 +227,8 @@
     },
     "v1_probe_set_3": {
       "_pos": {
-        "x": 760,
-        "y": 510
+        "x": 3415,
+        "y": 1710
       },
       "type": "set_variable",
       "label": "Probe: Struggles with focus",
@@ -248,8 +248,8 @@
     },
     "v1_probe_set_4": {
       "_pos": {
-        "x": 760,
-        "y": 680
+        "x": 3695,
+        "y": 1710
       },
       "type": "set_variable",
       "label": "Probe: Poor Concentration",
@@ -269,8 +269,8 @@
     },
     "v1_probe_set_5": {
       "_pos": {
-        "x": 760,
-        "y": 850
+        "x": 3975,
+        "y": 1710
       },
       "type": "set_variable",
       "label": "Probe: Brain fog",
@@ -290,8 +290,8 @@
     },
     "v1_probe_set_6": {
       "_pos": {
-        "x": 760,
-        "y": 1020
+        "x": 4255,
+        "y": 1710
       },
       "type": "set_variable",
       "label": "Probe: Confusion",
@@ -311,8 +311,8 @@
     },
     "v1_probe_set_7": {
       "_pos": {
-        "x": 760,
-        "y": 1190
+        "x": 4535,
+        "y": 1710
       },
       "type": "set_variable",
       "label": "Probe: All the above",
@@ -332,8 +332,8 @@
     },
     "v1_probe_set_8": {
       "_pos": {
-        "x": 760,
-        "y": 1360
+        "x": 4815,
+        "y": 1710
       },
       "type": "set_variable",
       "label": "Probe: Something Else",
@@ -353,8 +353,8 @@
     },
     "v1_probe_set_9": {
       "_pos": {
-        "x": 760,
-        "y": 1530
+        "x": 5168,
+        "y": 1710
       },
       "type": "set_variable",
       "label": "Probe: I just want the price",
@@ -374,8 +374,8 @@
     },
     "v1_probe1": {
       "_pos": {
-        "x": 380,
-        "y": 170
+        "x": 3881,
+        "y": 1520
       },
       "type": "input",
       "label": "Probe 1",
@@ -443,8 +443,8 @@
     },
     "v1_probe2": {
       "_pos": {
-        "x": 380,
-        "y": 340
+        "x": 3585,
+        "y": 1900
       },
       "type": "input",
       "label": "Probe 2",
@@ -461,8 +461,8 @@
     },
     "v1_probe3": {
       "_pos": {
-        "x": 380,
-        "y": 510
+        "x": 2852,
+        "y": 2090
       },
       "type": "input",
       "label": "Probe 3",
@@ -479,8 +479,8 @@
     },
     "v1_probe4": {
       "_pos": {
-        "x": 380,
-        "y": 680
+        "x": 2428,
+        "y": 2280
       },
       "type": "input",
       "label": "Probe 4",
@@ -497,8 +497,8 @@
     },
     "v1_hot_button": {
       "_pos": {
-        "x": 380,
-        "y": 850
+        "x": 2013,
+        "y": 2470
       },
       "type": "input",
       "label": "Press Hot Button",
@@ -521,8 +521,8 @@
     },
     "v1_main_offer": {
       "_pos": {
-        "x": 380,
-        "y": 1020
+        "x": 1604,
+        "y": 2660
       },
       "type": "input",
       "label": "Main Offer",
@@ -555,8 +555,8 @@
     },
     "v1_price_rebuttal": {
       "_pos": {
-        "x": 380,
-        "y": 1190
+        "x": 4225,
+        "y": 1900
       },
       "type": "input",
       "label": "Price Rebuttal",
@@ -584,8 +584,8 @@
     },
     "v1_auto_rebuttal": {
       "_pos": {
-        "x": 380,
-        "y": 1360
+        "x": 771,
+        "y": 2850
       },
       "type": "input",
       "label": "Auto Rebuttal",
@@ -613,8 +613,8 @@
     },
     "v1_basic_ots": {
       "_pos": {
-        "x": 380,
-        "y": 1530
+        "x": 312,
+        "y": 3040
       },
       "type": "input",
       "label": "Basic offer with OTS",
@@ -642,8 +642,8 @@
     },
     "v1_rebuttal": {
       "_pos": {
-        "x": 380,
-        "y": 1700
+        "x": 2287,
+        "y": 2850
       },
       "type": "input",
       "label": "Rebuttal",
@@ -671,8 +671,8 @@
     },
     "v1_objections": {
       "_pos": {
-        "x": 380,
-        "y": 1870
+        "x": 1655,
+        "y": 3040
       },
       "type": "input",
       "label": "Objections",
@@ -725,8 +725,8 @@
     },
     "v1_objreb_0": {
       "_pos": {
-        "x": 760,
-        "y": 1700
+        "x": 680,
+        "y": 3230
       },
       "type": "input",
       "label": "Objection Rebuttal: Too expensive",
@@ -754,8 +754,8 @@
     },
     "v1_objreb_1": {
       "_pos": {
-        "x": 760,
-        "y": 1870
+        "x": 1060,
+        "y": 3230
       },
       "type": "input",
       "label": "Objection Rebuttal: Think it over / More info",
@@ -783,8 +783,8 @@
     },
     "v1_objreb_2": {
       "_pos": {
-        "x": 760,
-        "y": 2040
+        "x": 1340,
+        "y": 3230
       },
       "type": "input",
       "label": "Objection Rebuttal: No CC",
@@ -812,8 +812,8 @@
     },
     "v1_objreb_3": {
       "_pos": {
-        "x": 760,
-        "y": 2210
+        "x": 1620,
+        "y": 3230
       },
       "type": "input",
       "label": "Objection Rebuttal: Thought it was Free",
@@ -841,8 +841,8 @@
     },
     "v1_objreb_4": {
       "_pos": {
-        "x": 760,
-        "y": 2380
+        "x": 1900,
+        "y": 3230
       },
       "type": "input",
       "label": "Objection Rebuttal: Spouse",
@@ -870,8 +870,8 @@
     },
     "v1_objreb_5": {
       "_pos": {
-        "x": 760,
-        "y": 2550
+        "x": 2180,
+        "y": 3230
       },
       "type": "input",
       "label": "Objection Rebuttal: MD (Need to ask doctor)",
@@ -899,8 +899,8 @@
     },
     "v1_objreb_6": {
       "_pos": {
-        "x": 760,
-        "y": 2720
+        "x": 2460,
+        "y": 3230
       },
       "type": "input",
       "label": "Objection Rebuttal: Skeptical - Not Sure it will Work",
@@ -928,8 +928,8 @@
     },
     "v1_downsell1": {
       "_pos": {
-        "x": 380,
-        "y": 2040
+        "x": 1098,
+        "y": 3420
       },
       "type": "input",
       "label": "Downsell 1",
@@ -957,8 +957,8 @@
     },
     "v1_rebuttal1": {
       "_pos": {
-        "x": 380,
-        "y": 2210
+        "x": 973,
+        "y": 3610
       },
       "type": "input",
       "label": "Rebuttal for Downsell 1",
@@ -986,8 +986,8 @@
     },
     "v1_rebuttal2": {
       "_pos": {
-        "x": 380,
-        "y": 2380
+        "x": 1103,
+        "y": 3800
       },
       "type": "input",
       "label": "Rebuttal 2",
@@ -1025,8 +1025,8 @@
     },
     "v1_pkg_3mo": {
       "_pos": {
-        "x": 1140,
-        "y": 0
+        "x": 1851,
+        "y": 3990
       },
       "type": "reset_cart",
       "label": "Package: NeuroQ Memory & Focus Buy 2 Get 1 Free Every 3 Months",
@@ -1034,16 +1034,28 @@
         "default": "v1_pkg_3mo_add"
       }
     },
+    "v1_pkg_3mo_add_fail": {
+      "_pos": {
+        "x": 1587,
+        "y": 4370
+      },
+      "type": "script",
+      "label": "283-3-CTY-90 could not be added",
+      "transitions": {
+        "default": "v1_pkg_3mo_vars"
+      },
+      "content": "<p><strong><span style=\"color: #0000ff\">AGENT: NeuroQ Memory & Focus Buy 2 Get 1 Free Every 3 Months could not be added to the cart (it may be out of stock). Tell the caller it is unavailable today, let a supervisor know, then click Continue.</span></strong></p>"
+    },
     "v1_pkg_3mo_add": {
       "_pos": {
-        "x": 1140,
-        "y": 170
+        "x": 1719,
+        "y": 4180
       },
       "type": "add_to_cart",
       "label": "Add 283-3-CTY-90",
       "transitions": {
         "added": "v1_pkg_3mo_vars",
-        "failed": "v1_cart_failed"
+        "failed": "v1_pkg_3mo_add_fail"
       },
       "offerId": "d84588a6-9bfa-580c-8d17-2deb8028eefe",
       "offerDisplayName": "NeuroQ Memory & Focus Buy 2 Get 1 Free Every 3 Months",
@@ -1054,8 +1066,8 @@
     },
     "v1_pkg_3mo_vars": {
       "_pos": {
-        "x": 1140,
-        "y": 340
+        "x": 1560,
+        "y": 4560
       },
       "type": "set_variable",
       "label": "Package vars (3mo)",
@@ -1083,8 +1095,8 @@
     },
     "v1_pkg_2mo": {
       "_pos": {
-        "x": 1140,
-        "y": 510
+        "x": 1221,
+        "y": 3990
       },
       "type": "reset_cart",
       "label": "Package: NeuroQ Memory & Focus 2 Bottles Every 2 Months",
@@ -1092,16 +1104,28 @@
         "default": "v1_pkg_2mo_add"
       }
     },
+    "v1_pkg_2mo_add_fail": {
+      "_pos": {
+        "x": 1207,
+        "y": 4370
+      },
+      "type": "script",
+      "label": "283-2-CTY-60 could not be added",
+      "transitions": {
+        "default": "v1_pkg_2mo_vars"
+      },
+      "content": "<p><strong><span style=\"color: #0000ff\">AGENT: NeuroQ Memory & Focus 2 Bottles Every 2 Months could not be added to the cart (it may be out of stock). Tell the caller it is unavailable today, let a supervisor know, then click Continue.</span></strong></p>"
+    },
     "v1_pkg_2mo_add": {
       "_pos": {
-        "x": 1140,
-        "y": 680
+        "x": 1282,
+        "y": 4180
       },
       "type": "add_to_cart",
       "label": "Add 283-2-CTY-60",
       "transitions": {
         "added": "v1_pkg_2mo_vars",
-        "failed": "v1_cart_failed"
+        "failed": "v1_pkg_2mo_add_fail"
       },
       "offerId": "366a9449-782b-50cf-9e03-51116c009f80",
       "offerDisplayName": "NeuroQ Memory & Focus 2 Bottles Every 2 Months",
@@ -1112,8 +1136,8 @@
     },
     "v1_pkg_2mo_vars": {
       "_pos": {
-        "x": 1140,
-        "y": 850
+        "x": 1280,
+        "y": 4560
       },
       "type": "set_variable",
       "label": "Package vars (2mo)",
@@ -1141,8 +1165,8 @@
     },
     "v1_pkg_2mo_dha": {
       "_pos": {
-        "x": 1140,
-        "y": 1020
+        "x": 940,
+        "y": 3990
       },
       "type": "reset_cart",
       "label": "Package: NeuroQ Memory & Focus 2 Bottles Every 2 Months with DHA",
@@ -1150,16 +1174,28 @@
         "default": "v1_pkg_2mo_dha_add"
       }
     },
+    "v1_pkg_2mo_dha_add_fail": {
+      "_pos": {
+        "x": 827,
+        "y": 4370
+      },
+      "type": "script",
+      "label": "283-2-CTY-60-P1 could not be added",
+      "transitions": {
+        "default": "v1_pkg_2mo_dha_vars"
+      },
+      "content": "<p><strong><span style=\"color: #0000ff\">AGENT: NeuroQ Memory & Focus 2 Bottles Every 2 Months with DHA could not be added to the cart (it may be out of stock). Tell the caller it is unavailable today, let a supervisor know, then click Continue.</span></strong></p>"
+    },
     "v1_pkg_2mo_dha_add": {
       "_pos": {
-        "x": 1140,
-        "y": 1190
+        "x": 922,
+        "y": 4180
       },
       "type": "add_to_cart",
       "label": "Add 283-2-CTY-60-P1",
       "transitions": {
         "added": "v1_pkg_2mo_dha_vars",
-        "failed": "v1_cart_failed"
+        "failed": "v1_pkg_2mo_dha_add_fail"
       },
       "offerId": "b2121dd0-0fb2-5c16-99d1-331f5f4c08cf",
       "offerDisplayName": "NeuroQ Memory & Focus 2 Bottles Every 2 Months with DHA",
@@ -1170,8 +1206,8 @@
     },
     "v1_pkg_2mo_dha_vars": {
       "_pos": {
-        "x": 1140,
-        "y": 1360
+        "x": 1000,
+        "y": 4560
       },
       "type": "set_variable",
       "label": "Package vars (2mo)",
@@ -1199,8 +1235,8 @@
     },
     "v1_pkg_ots": {
       "_pos": {
-        "x": 1140,
-        "y": 1530
+        "x": -105,
+        "y": 3230
       },
       "type": "reset_cart",
       "label": "Package: NeuroQ Memory & Focus Buy 2 Get 1 Free",
@@ -1208,16 +1244,28 @@
         "default": "v1_pkg_ots_add"
       }
     },
+    "v1_pkg_ots_add_fail": {
+      "_pos": {
+        "x": 101,
+        "y": 3610
+      },
+      "type": "script",
+      "label": "283-3-OT-1 could not be added",
+      "transitions": {
+        "default": "v1_pkg_ots_vars"
+      },
+      "content": "<p><strong><span style=\"color: #0000ff\">AGENT: NeuroQ Memory & Focus Buy 2 Get 1 Free could not be added to the cart (it may be out of stock). Tell the caller it is unavailable today, let a supervisor know, then click Continue.</span></strong></p>"
+    },
     "v1_pkg_ots_add": {
       "_pos": {
-        "x": 1140,
-        "y": 1700
+        "x": 151,
+        "y": 3420
       },
       "type": "add_to_cart",
       "label": "Add 283-3-OT-1",
       "transitions": {
         "added": "v1_pkg_ots_vars",
-        "failed": "v1_cart_failed"
+        "failed": "v1_pkg_ots_add_fail"
       },
       "offerId": "bb2e5098-9f5c-5155-9c64-ee6130cb940a",
       "offerDisplayName": "NeuroQ Memory & Focus Buy 2 Get 1 Free",
@@ -1228,8 +1276,8 @@
     },
     "v1_pkg_ots_vars": {
       "_pos": {
-        "x": 1140,
-        "y": 1870
+        "x": 255,
+        "y": 3800
       },
       "type": "set_variable",
       "label": "Package vars (one-time)",
@@ -1255,22 +1303,10 @@
         }
       ]
     },
-    "v1_cart_failed": {
-      "_pos": {
-        "x": 1140,
-        "y": 2040
-      },
-      "type": "script",
-      "label": "Cart update failed",
-      "transitions": {
-        "default": "v1_sec_offer"
-      },
-      "content": "<p><strong><span style=\"color: #0000ff\">AGENT: The item could not be added to the cart (it may be out of stock). Let a supervisor know, then click Continue to return to the offer.</span></strong></p>"
-    },
     "v1_sec_customer": {
       "_pos": {
-        "x": 1520,
-        "y": 0
+        "x": 1159,
+        "y": 4750
       },
       "type": "section",
       "label": "Customer Info",
@@ -1284,8 +1320,8 @@
     },
     "v1_bill_addr": {
       "_pos": {
-        "x": 1520,
-        "y": 170
+        "x": 1212,
+        "y": 4940
       },
       "type": "address",
       "label": "Billing Address",
@@ -1317,8 +1353,8 @@
     },
     "v1_bill_phone": {
       "_pos": {
-        "x": 1520,
-        "y": 340
+        "x": 1248,
+        "y": 5130
       },
       "type": "phone",
       "label": "Billing Phone",
@@ -1335,8 +1371,8 @@
     },
     "v1_ship_same": {
       "_pos": {
-        "x": 1520,
-        "y": 510
+        "x": 1285,
+        "y": 5320
       },
       "type": "input",
       "label": "Shipping same as billing?",
@@ -1364,8 +1400,8 @@
     },
     "v1_ship_copy": {
       "_pos": {
-        "x": 1520,
-        "y": 680
+        "x": 1165,
+        "y": 5510
       },
       "type": "set_variable",
       "label": "Shipping = billing",
@@ -1385,8 +1421,8 @@
     },
     "v1_ship_addr": {
       "_pos": {
-        "x": 1900,
-        "y": 0
+        "x": 1445,
+        "y": 5510
       },
       "type": "address",
       "label": "Shipping Address",
@@ -1415,8 +1451,8 @@
     },
     "v1_canada": {
       "_pos": {
-        "x": 1900,
-        "y": 170
+        "x": 1427,
+        "y": 5700
       },
       "type": "branch",
       "label": "Shipping to Canada?",
@@ -1428,8 +1464,8 @@
     },
     "v1_canada_disp": {
       "_pos": {
-        "x": 1900,
-        "y": 340
+        "x": 1568,
+        "y": 5890
       },
       "type": "set_variable",
       "label": "Canada → All Other Calls / Shipping to Canada",
@@ -1449,8 +1485,8 @@
     },
     "v1_email": {
       "_pos": {
-        "x": 1520,
-        "y": 850
+        "x": 1288,
+        "y": 5890
       },
       "type": "email",
       "label": "Email Address",
@@ -1468,8 +1504,8 @@
     },
     "v1_sec_payment": {
       "_pos": {
-        "x": 1900,
-        "y": 510
+        "x": 1327,
+        "y": 6080
       },
       "type": "section",
       "label": "Payment",
@@ -1483,8 +1519,8 @@
     },
     "v1_pay_intro": {
       "_pos": {
-        "x": 1900,
-        "y": 680
+        "x": 1366,
+        "y": 6270
       },
       "type": "script",
       "label": "Payment — secure capture",
@@ -1495,8 +1531,8 @@
     },
     "v1_cc_trigger": {
       "_pos": {
-        "x": 1900,
-        "y": 850
+        "x": 1406,
+        "y": 6460
       },
       "type": "trigger_telephony_event",
       "label": "Start secure card capture",
@@ -1507,8 +1543,8 @@
     },
     "v1_cc_wait": {
       "_pos": {
-        "x": 1900,
-        "y": 1020
+        "x": 1448,
+        "y": 6650
       },
       "type": "script",
       "label": "Wait for secure capture",
@@ -1521,8 +1557,8 @@
     },
     "v1_cc_ok": {
       "_pos": {
-        "x": 1900,
-        "y": 1190
+        "x": 1492,
+        "y": 6840
       },
       "type": "branch",
       "label": "Card captured?",
@@ -1534,8 +1570,8 @@
     },
     "v1_cc_retry": {
       "_pos": {
-        "x": 2280,
-        "y": 0
+        "x": 1770,
+        "y": 7030
       },
       "type": "input",
       "label": "Card capture failed",
@@ -1563,8 +1599,8 @@
     },
     "v1_no_mop": {
       "_pos": {
-        "x": 2280,
-        "y": 170
+        "x": 1872,
+        "y": 7220
       },
       "type": "set_variable",
       "label": "No method of payment",
@@ -1584,8 +1620,8 @@
     },
     "v1_after_payment": {
       "_pos": {
-        "x": 1900,
-        "y": 1360
+        "x": 1490,
+        "y": 7030
       },
       "type": "branch",
       "label": "One-time (basic with OTS)?",
@@ -1597,8 +1633,8 @@
     },
     "v1_sec_upsell": {
       "_pos": {
-        "x": 2280,
-        "y": 340
+        "x": 1444,
+        "y": 7220
       },
       "type": "section",
       "label": "Upsell",
@@ -1612,8 +1648,8 @@
     },
     "v1_autoship": {
       "_pos": {
-        "x": 2280,
-        "y": 510
+        "x": 1465,
+        "y": 7410
       },
       "type": "input",
       "label": "Preferred Customer (AutoShip)",
@@ -1641,8 +1677,8 @@
     },
     "v1_as_yes": {
       "_pos": {
-        "x": 2280,
-        "y": 680
+        "x": 1596,
+        "y": 8170
       },
       "type": "branch",
       "label": "2-bottle package?",
@@ -1654,8 +1690,8 @@
     },
     "v1_autoship_rb": {
       "_pos": {
-        "x": 2280,
-        "y": 850
+        "x": 1393,
+        "y": 7600
       },
       "type": "input",
       "label": "Preferred Customer Rebuttal",
@@ -1683,8 +1719,8 @@
     },
     "v1_as_rb2_route": {
       "_pos": {
-        "x": 2280,
-        "y": 1020
+        "x": 1284,
+        "y": 7790
       },
       "type": "branch",
       "label": "Downsell package?",
@@ -1696,8 +1732,8 @@
     },
     "v1_autoship_rb2a": {
       "_pos": {
-        "x": 2660,
-        "y": 0
+        "x": 1407,
+        "y": 7980
       },
       "type": "input",
       "label": "Preferred Customer Rebuttal 2a",
@@ -1725,8 +1761,8 @@
     },
     "v1_autoship_rb2b": {
       "_pos": {
-        "x": 2660,
-        "y": 170
+        "x": 1127,
+        "y": 7980
       },
       "type": "input",
       "label": "Preferred Customer Rebuttal 2b",
@@ -1754,8 +1790,8 @@
     },
     "v1_onetime": {
       "_pos": {
-        "x": 2660,
-        "y": 340
+        "x": 1316,
+        "y": 8170
       },
       "type": "input",
       "label": "One Time Offer",
@@ -1778,8 +1814,8 @@
     },
     "v1_ot_pkg": {
       "_pos": {
-        "x": 2660,
-        "y": 510
+        "x": 1442,
+        "y": 8360
       },
       "type": "reset_cart",
       "label": "Package: one-time",
@@ -1787,16 +1823,28 @@
         "default": "v1_ot_add"
       }
     },
+    "v1_ot_add_fail": {
+      "_pos": {
+        "x": 1384,
+        "y": 8740
+      },
+      "type": "script",
+      "label": "283-3-OT-1 could not be added",
+      "transitions": {
+        "default": "v1_ot_vars"
+      },
+      "content": "<p><strong><span style=\"color: #0000ff\">AGENT: NeuroQ Memory & Focus Buy 2 Get 1 Free could not be added to the cart (it may be out of stock). Tell the caller it is unavailable today, let a supervisor know, then click Continue.</span></strong></p>"
+    },
     "v1_ot_add": {
       "_pos": {
-        "x": 2660,
-        "y": 680
+        "x": 1472,
+        "y": 8550
       },
       "type": "add_to_cart",
       "label": "Add 283-3-OT-1",
       "transitions": {
         "added": "v1_ot_vars",
-        "failed": "v1_cart_failed"
+        "failed": "v1_ot_add_fail"
       },
       "offerId": "bb2e5098-9f5c-5155-9c64-ee6130cb940a",
       "offerDisplayName": "NeuroQ Memory & Focus Buy 2 Get 1 Free",
@@ -1807,8 +1855,8 @@
     },
     "v1_ot_vars": {
       "_pos": {
-        "x": 2660,
-        "y": 850
+        "x": 1437,
+        "y": 8930
       },
       "type": "set_variable",
       "label": "Package vars (one-time)",
@@ -1832,8 +1880,8 @@
     },
     "v1_family": {
       "_pos": {
-        "x": 2280,
-        "y": 1190
+        "x": 1939,
+        "y": 8360
       },
       "type": "input",
       "label": "Upsell - Matching Family Offer",
@@ -1859,16 +1907,28 @@
       "inputMask": "",
       "customMask": ""
     },
+    "v1_family_add_fail": {
+      "_pos": {
+        "x": 1764,
+        "y": 8740
+      },
+      "type": "script",
+      "label": "283-6-CTY-90 could not be added",
+      "transitions": {
+        "default": "v1_family_vars"
+      },
+      "content": "<p><strong><span style=\"color: #0000ff\">AGENT: NeuroQ Memory & Focus Couples Buy 4 Get 2 Free Every 3 Months could not be added to the cart (it may be out of stock). Tell the caller it is unavailable today, let a supervisor know, then click Continue.</span></strong></p>"
+    },
     "v1_family_add": {
       "_pos": {
-        "x": 2280,
-        "y": 1360
+        "x": 1849,
+        "y": 8550
       },
       "type": "add_to_cart",
       "label": "Swap to 283-6-CTY-90 (family)",
       "transitions": {
         "added": "v1_family_vars",
-        "failed": "v1_cart_failed"
+        "failed": "v1_family_add_fail"
       },
       "offerId": "3c6f4376-6e1b-5428-9901-5f5e58a00453",
       "offerDisplayName": "NeuroQ Memory & Focus Couples Buy 4 Get 2 Free Every 3 Months",
@@ -1883,8 +1943,8 @@
     },
     "v1_family_vars": {
       "_pos": {
-        "x": 2280,
-        "y": 1530
+        "x": 1778,
+        "y": 8930
       },
       "type": "set_variable",
       "label": "Package vars (family)",
@@ -1904,8 +1964,8 @@
     },
     "v1_dha_family": {
       "_pos": {
-        "x": 2660,
-        "y": 1020
+        "x": 1811,
+        "y": 9120
       },
       "type": "input",
       "label": "Cross Sell 1 - Memory DHA (family)",
@@ -1931,16 +1991,28 @@
       "inputMask": "",
       "customMask": ""
     },
+    "v1_dha_family_add_fail": {
+      "_pos": {
+        "x": 1647,
+        "y": 9500
+      },
+      "type": "script",
+      "label": "326-2-CTY-90 could not be added",
+      "transitions": {
+        "default": "v1_sleep_family"
+      },
+      "content": "<p><strong><span style=\"color: #0000ff\">AGENT: Memory & Focus Couples Buy 4 Get 2 Free + Matching DHA could not be added to the cart (it may be out of stock). Tell the caller it is unavailable today, let a supervisor know, then click Continue.</span></strong></p>"
+    },
     "v1_dha_family_add": {
       "_pos": {
-        "x": 2660,
-        "y": 1190
+        "x": 1725,
+        "y": 9310
       },
       "type": "add_to_cart",
       "label": "Add 326-2-CTY-90",
       "transitions": {
         "added": "v1_sleep_family",
-        "failed": "v1_cart_failed"
+        "failed": "v1_dha_family_add_fail"
       },
       "offerId": "d0a7832d-ae8c-539a-bae2-ebc46dba9fd9",
       "offerDisplayName": "Memory & Focus Couples Buy 4 Get 2 Free + Matching DHA",
@@ -1955,8 +2027,8 @@
     },
     "v1_sleep_family": {
       "_pos": {
-        "x": 3040,
-        "y": 0
+        "x": 1799,
+        "y": 9690
       },
       "type": "input",
       "label": "Cross Sell 2 - Sleep Now (family)",
@@ -1982,16 +2054,28 @@
       "inputMask": "",
       "customMask": ""
     },
+    "v1_sleep_family_add_fail": {
+      "_pos": {
+        "x": 1638,
+        "y": 10070
+      },
+      "type": "script",
+      "label": "307-6-CTY-90 could not be added",
+      "transitions": {
+        "default": "v1_sec_closing"
+      },
+      "content": "<p><strong><span style=\"color: #0000ff\">AGENT: Sleep Now 6 Boxes Every 3 Months could not be added to the cart (it may be out of stock). Tell the caller it is unavailable today, let a supervisor know, then click Continue.</span></strong></p>"
+    },
     "v1_sleep_family_add": {
       "_pos": {
-        "x": 3040,
-        "y": 170
+        "x": 1717,
+        "y": 9880
       },
       "type": "add_to_cart",
       "label": "Add 307-6-CTY-90",
       "transitions": {
         "added": "v1_sec_closing",
-        "failed": "v1_cart_failed"
+        "failed": "v1_sleep_family_add_fail"
       },
       "offerId": "38e87f61-07c6-50b9-8d5c-a91a4f474882",
       "offerDisplayName": "Sleep Now 6 Boxes Every 3 Months",
@@ -2002,8 +2086,8 @@
     },
     "v1_dha_3mo": {
       "_pos": {
-        "x": 3040,
-        "y": 340
+        "x": 2207,
+        "y": 8550
       },
       "type": "input",
       "label": "Cross Sell 1 - Memory DHA (3mo)",
@@ -2029,16 +2113,28 @@
       "inputMask": "",
       "customMask": ""
     },
+    "v1_dha_3mo_add_fail": {
+      "_pos": {
+        "x": 2121,
+        "y": 8930
+      },
+      "type": "script",
+      "label": "326-1-CTY-90 could not be added",
+      "transitions": {
+        "default": "v1_sleep_3mo"
+      },
+      "content": "<p><strong><span style=\"color: #0000ff\">AGENT: Memory & Focus Buy 2 Get 1 Free + Matching DHA could not be added to the cart (it may be out of stock). Tell the caller it is unavailable today, let a supervisor know, then click Continue.</span></strong></p>"
+    },
     "v1_dha_3mo_add": {
       "_pos": {
-        "x": 3040,
-        "y": 510
+        "x": 2211,
+        "y": 8740
       },
       "type": "add_to_cart",
       "label": "Add 326-1-CTY-90",
       "transitions": {
         "added": "v1_sleep_3mo",
-        "failed": "v1_cart_failed"
+        "failed": "v1_dha_3mo_add_fail"
       },
       "offerId": "d5cbd4f0-deac-54b7-8d3f-c3ad229de1bb",
       "offerDisplayName": "Memory & Focus Buy 2 Get 1 Free + Matching DHA",
@@ -2053,8 +2149,8 @@
     },
     "v1_sleep_3mo": {
       "_pos": {
-        "x": 3040,
-        "y": 680
+        "x": 2282,
+        "y": 9120
       },
       "type": "input",
       "label": "Cross Sell 2 - Sleep Now (3mo)",
@@ -2080,16 +2176,28 @@
       "inputMask": "",
       "customMask": ""
     },
+    "v1_sleep_3mo_add_fail": {
+      "_pos": {
+        "x": 2127,
+        "y": 9500
+      },
+      "type": "script",
+      "label": "307-3-CTY-90 could not be added",
+      "transitions": {
+        "default": "v1_sec_closing"
+      },
+      "content": "<p><strong><span style=\"color: #0000ff\">AGENT: Sleep Now 3 Boxes Every 3 Months could not be added to the cart (it may be out of stock). Tell the caller it is unavailable today, let a supervisor know, then click Continue.</span></strong></p>"
+    },
     "v1_sleep_3mo_add": {
       "_pos": {
-        "x": 3040,
-        "y": 850
+        "x": 2209,
+        "y": 9310
       },
       "type": "add_to_cart",
       "label": "Add 307-3-CTY-90",
       "transitions": {
         "added": "v1_sec_closing",
-        "failed": "v1_cart_failed"
+        "failed": "v1_sleep_3mo_add_fail"
       },
       "offerId": "7bb2eee5-c6ad-564e-9197-864381df8767",
       "offerDisplayName": "Sleep Now 3 Boxes Every 3 Months",
@@ -2100,8 +2208,8 @@
     },
     "v1_dha_2mo": {
       "_pos": {
-        "x": 3040,
-        "y": 1020
+        "x": 1162,
+        "y": 8360
       },
       "type": "input",
       "label": "Cross Sell 1 - Memory DHA (2mo)",
@@ -2127,16 +2235,28 @@
       "inputMask": "",
       "customMask": ""
     },
+    "v1_dha_2mo_add_fail": {
+      "_pos": {
+        "x": 904,
+        "y": 8740
+      },
+      "type": "script",
+      "label": "303-2-CTY-60 could not be added",
+      "transitions": {
+        "default": "v1_sleep_2mo"
+      },
+      "content": "<p><strong><span style=\"color: #0000ff\">AGENT: NeuroQ Memory DHA-400 2 Bottles Every 2 Months could not be added to the cart (it may be out of stock). Tell the caller it is unavailable today, let a supervisor know, then click Continue.</span></strong></p>"
+    },
     "v1_dha_2mo_add": {
       "_pos": {
-        "x": 3040,
-        "y": 1190
+        "x": 1014,
+        "y": 8550
       },
       "type": "add_to_cart",
       "label": "Add 303-2-CTY-60",
       "transitions": {
         "added": "v1_sleep_2mo",
-        "failed": "v1_cart_failed"
+        "failed": "v1_dha_2mo_add_fail"
       },
       "offerId": "928e4401-9d57-520a-bb78-f3fbd194ec97",
       "offerDisplayName": "NeuroQ Memory DHA-400 2 Bottles Every 2 Months",
@@ -2147,8 +2267,8 @@
     },
     "v1_sleep_2mo": {
       "_pos": {
-        "x": 3040,
-        "y": 1360
+        "x": 1094,
+        "y": 8930
       },
       "type": "input",
       "label": "Cross Sell 2 - Sleep Now (2mo)",
@@ -2174,16 +2294,28 @@
       "inputMask": "",
       "customMask": ""
     },
+    "v1_sleep_2mo_add_fail": {
+      "_pos": {
+        "x": 956,
+        "y": 9310
+      },
+      "type": "script",
+      "label": "307-2-CTY-60 could not be added",
+      "transitions": {
+        "default": "v1_sec_closing"
+      },
+      "content": "<p><strong><span style=\"color: #0000ff\">AGENT: Sleep Now 2 Boxes Every 2 Months could not be added to the cart (it may be out of stock). Tell the caller it is unavailable today, let a supervisor know, then click Continue.</span></strong></p>"
+    },
     "v1_sleep_2mo_add": {
       "_pos": {
-        "x": 3040,
-        "y": 1530
+        "x": 1031,
+        "y": 9120
       },
       "type": "add_to_cart",
       "label": "Add 307-2-CTY-60",
       "transitions": {
         "added": "v1_sec_closing",
-        "failed": "v1_cart_failed"
+        "failed": "v1_sleep_2mo_add_fail"
       },
       "offerId": "7de0bf1a-d10f-52eb-936a-6e8ec1e940ea",
       "offerDisplayName": "Sleep Now 2 Boxes Every 2 Months",
@@ -2194,8 +2326,8 @@
     },
     "v1_sec_closing": {
       "_pos": {
-        "x": 3420,
-        "y": 0
+        "x": 1739,
+        "y": 10260
       },
       "type": "section",
       "label": "Closing",
@@ -2209,8 +2341,8 @@
     },
     "v1_closing": {
       "_pos": {
-        "x": 3420,
-        "y": 170
+        "x": 1683,
+        "y": 10450
       },
       "type": "input",
       "label": "Closing Read",
@@ -2238,8 +2370,8 @@
     },
     "v1_sms": {
       "_pos": {
-        "x": 3420,
-        "y": 340
+        "x": 1652,
+        "y": 10640
       },
       "type": "input",
       "label": "SMS Consent",
@@ -2267,8 +2399,8 @@
     },
     "v1_sms_yes": {
       "_pos": {
-        "x": 3420,
-        "y": 510
+        "x": 1497,
+        "y": 10830
       },
       "type": "set_variable",
       "label": "SMS consent: yes",
@@ -2292,8 +2424,8 @@
     },
     "v1_sms_no": {
       "_pos": {
-        "x": 3800,
-        "y": 0
+        "x": 1777,
+        "y": 10830
       },
       "type": "set_variable",
       "label": "SMS consent: no",
@@ -2317,8 +2449,8 @@
     },
     "v1_sms_cf": {
       "_pos": {
-        "x": 3420,
-        "y": 680
+        "x": 1624,
+        "y": 11020
       },
       "type": "set_custom_field",
       "label": "SMS Consent",
@@ -2335,8 +2467,8 @@
     },
     "v1_confirm_submit": {
       "_pos": {
-        "x": 3420,
-        "y": 850
+        "x": 1602,
+        "y": 11210
       },
       "type": "input",
       "label": "Submit order?",
@@ -2364,8 +2496,8 @@
     },
     "v1_auth": {
       "_pos": {
-        "x": 3420,
-        "y": 1020
+        "x": 1587,
+        "y": 11400
       },
       "type": "authorize_payment",
       "label": "Authorize Payment",
@@ -2384,8 +2516,8 @@
     },
     "v1_auth_ok": {
       "_pos": {
-        "x": 3420,
-        "y": 1190
+        "x": 1279,
+        "y": 11590
       },
       "type": "set_variable",
       "label": "Count attempt",
@@ -2401,8 +2533,8 @@
     },
     "v1_order": {
       "_pos": {
-        "x": 3420,
-        "y": 1360
+        "x": 1188,
+        "y": 11780
       },
       "type": "api_call",
       "label": "Submit Life Seasons Order",
@@ -2421,8 +2553,8 @@
     },
     "v1_order_ok": {
       "_pos": {
-        "x": 3420,
-        "y": 1530
+        "x": 1023,
+        "y": 11970
       },
       "type": "set_variable",
       "label": "Disposition: Order",
@@ -2438,8 +2570,8 @@
     },
     "v1_auth_declined": {
       "_pos": {
-        "x": 3800,
-        "y": 170
+        "x": 1595,
+        "y": 11590
       },
       "type": "set_variable",
       "label": "Count attempt",
@@ -2455,8 +2587,8 @@
     },
     "v1_auth_exhausted": {
       "_pos": {
-        "x": 3800,
-        "y": 340
+        "x": 1715,
+        "y": 11780
       },
       "type": "branch",
       "label": "3 attempts used?",
@@ -2468,8 +2600,8 @@
     },
     "v1_decline": {
       "_pos": {
-        "x": 3800,
-        "y": 510
+        "x": 1912,
+        "y": 11970
       },
       "type": "input",
       "label": "Decline",
@@ -2502,8 +2634,8 @@
     },
     "v1_decline_final": {
       "_pos": {
-        "x": 3800,
-        "y": 680
+        "x": 1632,
+        "y": 11970
       },
       "type": "input",
       "label": "Decline — attempts exhausted",
@@ -2526,8 +2658,8 @@
     },
     "v1_auth_error": {
       "_pos": {
-        "x": 3800,
-        "y": 850
+        "x": 1875,
+        "y": 11590
       },
       "type": "script",
       "label": "Authorization error",
@@ -2538,8 +2670,8 @@
     },
     "v1_declined_disp": {
       "_pos": {
-        "x": 3800,
-        "y": 1020
+        "x": 1809,
+        "y": 12160
       },
       "type": "set_variable",
       "label": "Cancel → All Other Calls / Credit Card Declined",
@@ -2559,8 +2691,8 @@
     },
     "v1_ordfail": {
       "_pos": {
-        "x": 3800,
-        "y": 1190
+        "x": 1303,
+        "y": 11970
       },
       "type": "input",
       "label": "Order Post Failure",
@@ -2593,8 +2725,8 @@
     },
     "v1_ordfail_email": {
       "_pos": {
-        "x": 3800,
-        "y": 1360
+        "x": 1265,
+        "y": 12160
       },
       "type": "send_email",
       "label": "Email IT — order post failure",
@@ -2611,8 +2743,8 @@
     },
     "v1_ordfail_disp": {
       "_pos": {
-        "x": 3800,
-        "y": 1530
+        "x": 1237,
+        "y": 12350
       },
       "type": "set_variable",
       "label": "Disposition: Order (post failed)",
@@ -2626,28 +2758,156 @@
         }
       ]
     },
+    "v1_aoc_cf1": {
+      "_pos": {
+        "x": 6144,
+        "y": 1710
+      },
+      "type": "set_custom_field",
+      "label": "Call Type",
+      "transitions": {
+        "success": "v1_aoc_cf2",
+        "error": "v1_aoc_cf2",
+        "invalid_value": "v1_aoc_cf2"
+      },
+      "definitionId": "115b7d9c-b5a5-4681-bc7e-27c0f7dc59fa",
+      "definitionFieldName": "call_type",
+      "definitionDataTypeName": "string",
+      "definitionDisplayLabel": "Call Type",
+      "value": "{{flow.call_type}}"
+    },
+    "v1_aoc_cf2": {
+      "_pos": {
+        "x": 6040,
+        "y": 1900
+      },
+      "type": "set_custom_field",
+      "label": "Disposition",
+      "transitions": {
+        "success": "v1_aoc_cf3",
+        "error": "v1_aoc_cf3",
+        "invalid_value": "v1_aoc_cf3"
+      },
+      "definitionId": "fe68b17e-0fb6-46bb-b5ab-daa6b12404d0",
+      "definitionFieldName": "disposition",
+      "definitionDataTypeName": "string",
+      "definitionDisplayLabel": "Disposition",
+      "value": "{{flow.disposition}}"
+    },
+    "v1_aoc_cf3": {
+      "_pos": {
+        "x": 6009,
+        "y": 2090
+      },
+      "type": "set_custom_field",
+      "label": "Disposition Reason",
+      "transitions": {
+        "success": "v1_aoc_end",
+        "error": "v1_aoc_end",
+        "invalid_value": "v1_aoc_end"
+      },
+      "definitionId": "98908031-b34b-5a7a-b749-c973839d1e7f",
+      "definitionFieldName": "disposition_reason",
+      "definitionDataTypeName": "string",
+      "definitionDisplayLabel": "Disposition Reason",
+      "value": "{{flow.disposition_reason}}"
+    },
+    "v1_aoc_end": {
+      "_pos": {
+        "x": 5993,
+        "y": 2280
+      },
+      "type": "end",
+      "label": "End",
+      "transitions": {},
+      "status": "complete"
+    },
+    "v1_junk_cf1": {
+      "_pos": {
+        "x": 6217,
+        "y": 1520
+      },
+      "type": "set_custom_field",
+      "label": "Call Type",
+      "transitions": {
+        "success": "v1_junk_cf2",
+        "error": "v1_junk_cf2",
+        "invalid_value": "v1_junk_cf2"
+      },
+      "definitionId": "115b7d9c-b5a5-4681-bc7e-27c0f7dc59fa",
+      "definitionFieldName": "call_type",
+      "definitionDataTypeName": "string",
+      "definitionDisplayLabel": "Call Type",
+      "value": "{{flow.call_type}}"
+    },
+    "v1_junk_cf2": {
+      "_pos": {
+        "x": 6508,
+        "y": 1710
+      },
+      "type": "set_custom_field",
+      "label": "Disposition",
+      "transitions": {
+        "success": "v1_junk_cf3",
+        "error": "v1_junk_cf3",
+        "invalid_value": "v1_junk_cf3"
+      },
+      "definitionId": "fe68b17e-0fb6-46bb-b5ab-daa6b12404d0",
+      "definitionFieldName": "disposition",
+      "definitionDataTypeName": "string",
+      "definitionDisplayLabel": "Disposition",
+      "value": "{{flow.disposition}}"
+    },
+    "v1_junk_cf3": {
+      "_pos": {
+        "x": 6417,
+        "y": 1900
+      },
+      "type": "set_custom_field",
+      "label": "Disposition Reason",
+      "transitions": {
+        "success": "v1_junk_end",
+        "error": "v1_junk_end",
+        "invalid_value": "v1_junk_end"
+      },
+      "definitionId": "98908031-b34b-5a7a-b749-c973839d1e7f",
+      "definitionFieldName": "disposition_reason",
+      "definitionDataTypeName": "string",
+      "definitionDisplayLabel": "Disposition Reason",
+      "value": "{{flow.disposition_reason}}"
+    },
+    "v1_junk_end": {
+      "_pos": {
+        "x": 6402,
+        "y": 2090
+      },
+      "type": "end",
+      "label": "End",
+      "transitions": {},
+      "status": "complete"
+    },
     "v1_disp_aoc": {
       "_pos": {
-        "x": 4180,
-        "y": 0
+        "x": 5632,
+        "y": 1330
       },
       "type": "input",
       "label": "Disposition — All Other Calls",
       "transitions": {
-        "Alzheimers Consumer": "v1_disp_store",
-        "Credit Card Declined": "v1_disp_store",
-        "Disconnected During Offer": "v1_disp_store",
-        "Language Barrier/International": "v1_disp_store",
-        "No MOP (No Method of Payment)": "v1_disp_store",
-        "Not Interested (Disconnected after offer presentation)": "v1_disp_store",
-        "Price Objection Too Expensive": "v1_disp_store",
+        "Alzheimers Consumer": "v1_aoc_cf1",
+        "Credit Card Declined": "v1_aoc_cf1",
+        "Disconnected During Offer": "v1_aoc_cf1",
+        "Language Barrier/International": "v1_aoc_cf1",
+        "No MOP (No Method of Payment)": "v1_aoc_cf1",
+        "Not Interested (Disconnected after offer presentation)": "v1_aoc_cf1",
+        "Price Objection Too Expensive": "v1_aoc_cf1",
         "Referred to Customer Service": "v1_explain",
-        "Shipping to Canada": "v1_disp_store",
-        "Spousal Objection": "v1_disp_store",
-        "Thought it was free": "v1_disp_store",
-        "Too many upsells - Caller Fatigue": "v1_disp_store",
-        "Transferred to Customer Service": "v1_disp_store",
-        "Wants to speak to Doctor": "v1_disp_store"
+        "Shipping to Canada": "v1_aoc_cf1",
+        "Spousal Objection": "v1_aoc_cf1",
+        "Thought it was free": "v1_aoc_cf1",
+        "Too many upsells - Caller Fatigue": "v1_aoc_cf1",
+        "Transferred to Customer Service": "v1_aoc_cf1",
+        "Wants to speak to Doctor": "v1_aoc_cf1"
       },
       "fieldType": "select",
       "required": true,
@@ -2717,20 +2977,20 @@
     },
     "v1_disp_junk": {
       "_pos": {
-        "x": 4180,
-        "y": 170
+        "x": 5912,
+        "y": 1330
       },
       "type": "input",
       "label": "Disposition — Junk",
       "transitions": {
-        "Accidental Screen Pop": "v1_disp_store",
-        "Busy Signal": "v1_disp_store",
-        "Call Recording": "v1_disp_store",
-        "Ghost Call/Dead Air": "v1_disp_store",
-        "Prank Caller": "v1_disp_store",
-        "Test Call": "v1_disp_store",
-        "Voicemail": "v1_disp_store",
-        "Wrong Number": "v1_disp_store"
+        "Accidental Screen Pop": "v1_junk_cf1",
+        "Busy Signal": "v1_junk_cf1",
+        "Call Recording": "v1_junk_cf1",
+        "Ghost Call/Dead Air": "v1_junk_cf1",
+        "Prank Caller": "v1_junk_cf1",
+        "Test Call": "v1_junk_cf1",
+        "Voicemail": "v1_junk_cf1",
+        "Wrong Number": "v1_junk_cf1"
       },
       "fieldType": "select",
       "required": true,
@@ -2776,13 +3036,13 @@
     },
     "v1_explain": {
       "_pos": {
-        "x": 4180,
-        "y": 340
+        "x": 5764,
+        "y": 1520
       },
       "type": "input",
       "label": "Explain",
       "transitions": {
-        "default": "v1_disp_store"
+        "default": "v1_aoc_cf1"
       },
       "fieldType": "text",
       "required": true,
@@ -2792,53 +3052,17 @@
       "inputMask": "",
       "customMask": ""
     },
-    "v1_disp_close_aoc": {
+    "v1_close_cf1": {
       "_pos": {
-        "x": 4180,
-        "y": 510
-      },
-      "type": "script",
-      "label": "Closing — All Other Calls",
-      "transitions": {
-        "default": "v1_disp_store"
-      },
-      "content": "<p>\"Thank you for calling and have a great day!\"</p>"
-    },
-    "v1_disp_close_canada": {
-      "_pos": {
-        "x": 4180,
-        "y": 680
-      },
-      "type": "script",
-      "label": "Closing - Canada",
-      "transitions": {
-        "default": "v1_disp_store"
-      },
-      "content": "<p>\"Thank you for your interest in NeuroQ. At this time we cannot ship to Canada.\"</p>"
-    },
-    "v1_disp_close_order": {
-      "_pos": {
-        "x": 4180,
-        "y": 850
-      },
-      "type": "script",
-      "label": "Closing — Order",
-      "transitions": {
-        "default": "v1_disp_store"
-      },
-      "content": "<p>\"I want to thank you for calling and I hope you have a great day!\"</p>"
-    },
-    "v1_disp_store": {
-      "_pos": {
-        "x": 4180,
-        "y": 1020
+        "x": 1889,
+        "y": 12540
       },
       "type": "set_custom_field",
       "label": "Call Type",
       "transitions": {
-        "success": "v1_disp_store2",
-        "error": "v1_disp_store2",
-        "invalid_value": "v1_disp_store2"
+        "success": "v1_close_cf2",
+        "error": "v1_close_cf2",
+        "invalid_value": "v1_close_cf2"
       },
       "definitionId": "115b7d9c-b5a5-4681-bc7e-27c0f7dc59fa",
       "definitionFieldName": "call_type",
@@ -2846,17 +3070,17 @@
       "definitionDisplayLabel": "Call Type",
       "value": "{{flow.call_type}}"
     },
-    "v1_disp_store2": {
+    "v1_close_cf2": {
       "_pos": {
-        "x": 4180,
-        "y": 1190
+        "x": 1880,
+        "y": 12730
       },
       "type": "set_custom_field",
       "label": "Disposition",
       "transitions": {
-        "success": "v1_disp_store3",
-        "error": "v1_disp_store3",
-        "invalid_value": "v1_disp_store3"
+        "success": "v1_close_cf3",
+        "error": "v1_close_cf3",
+        "invalid_value": "v1_close_cf3"
       },
       "definitionId": "fe68b17e-0fb6-46bb-b5ab-daa6b12404d0",
       "definitionFieldName": "disposition",
@@ -2864,17 +3088,17 @@
       "definitionDisplayLabel": "Disposition",
       "value": "{{flow.disposition}}"
     },
-    "v1_disp_store3": {
+    "v1_close_cf3": {
       "_pos": {
-        "x": 4180,
-        "y": 1360
+        "x": 1874,
+        "y": 12920
       },
       "type": "set_custom_field",
       "label": "Disposition Reason",
       "transitions": {
-        "success": "v1_end",
-        "error": "v1_end",
-        "invalid_value": "v1_end"
+        "success": "v1_close_end",
+        "error": "v1_close_end",
+        "invalid_value": "v1_close_end"
       },
       "definitionId": "98908031-b34b-5a7a-b749-c973839d1e7f",
       "definitionFieldName": "disposition_reason",
@@ -2882,15 +3106,1141 @@
       "definitionDisplayLabel": "Disposition Reason",
       "value": "{{flow.disposition_reason}}"
     },
-    "v1_end": {
+    "v1_close_end": {
       "_pos": {
-        "x": 4180,
-        "y": 1530
+        "x": 1871,
+        "y": 13110
       },
       "type": "end",
       "label": "End",
       "transitions": {},
       "status": "complete"
+    },
+    "v1_disp_close_aoc": {
+      "_pos": {
+        "x": 1903,
+        "y": 12350
+      },
+      "type": "script",
+      "label": "Closing — All Other Calls",
+      "transitions": {
+        "default": "v1_close_cf1"
+      },
+      "content": "<p>\"Thank you for calling and have a great day!\"</p>"
+    },
+    "v1_canada_cf1": {
+      "_pos": {
+        "x": 1646,
+        "y": 6270
+      },
+      "type": "set_custom_field",
+      "label": "Call Type",
+      "transitions": {
+        "success": "v1_canada_cf2",
+        "error": "v1_canada_cf2",
+        "invalid_value": "v1_canada_cf2"
+      },
+      "definitionId": "115b7d9c-b5a5-4681-bc7e-27c0f7dc59fa",
+      "definitionFieldName": "call_type",
+      "definitionDataTypeName": "string",
+      "definitionDisplayLabel": "Call Type",
+      "value": "{{flow.call_type}}"
+    },
+    "v1_canada_cf2": {
+      "_pos": {
+        "x": 1686,
+        "y": 6460
+      },
+      "type": "set_custom_field",
+      "label": "Disposition",
+      "transitions": {
+        "success": "v1_canada_cf3",
+        "error": "v1_canada_cf3",
+        "invalid_value": "v1_canada_cf3"
+      },
+      "definitionId": "fe68b17e-0fb6-46bb-b5ab-daa6b12404d0",
+      "definitionFieldName": "disposition",
+      "definitionDataTypeName": "string",
+      "definitionDisplayLabel": "Disposition",
+      "value": "{{flow.disposition}}"
+    },
+    "v1_canada_cf3": {
+      "_pos": {
+        "x": 1728,
+        "y": 6650
+      },
+      "type": "set_custom_field",
+      "label": "Disposition Reason",
+      "transitions": {
+        "success": "v1_canada_end",
+        "error": "v1_canada_end",
+        "invalid_value": "v1_canada_end"
+      },
+      "definitionId": "98908031-b34b-5a7a-b749-c973839d1e7f",
+      "definitionFieldName": "disposition_reason",
+      "definitionDataTypeName": "string",
+      "definitionDisplayLabel": "Disposition Reason",
+      "value": "{{flow.disposition_reason}}"
+    },
+    "v1_canada_end": {
+      "_pos": {
+        "x": 1772,
+        "y": 6840
+      },
+      "type": "end",
+      "label": "End",
+      "transitions": {},
+      "status": "complete"
+    },
+    "v1_disp_close_canada": {
+      "_pos": {
+        "x": 1607,
+        "y": 6080
+      },
+      "type": "script",
+      "label": "Closing - Canada",
+      "transitions": {
+        "default": "v1_canada_cf1"
+      },
+      "content": "<p>\"Thank you for your interest in NeuroQ. At this time we cannot ship to Canada.\"</p>"
+    },
+    "v1_order_cf1": {
+      "_pos": {
+        "x": 1120,
+        "y": 12730
+      },
+      "type": "set_custom_field",
+      "label": "Call Type",
+      "transitions": {
+        "success": "v1_order_cf2",
+        "error": "v1_order_cf2",
+        "invalid_value": "v1_order_cf2"
+      },
+      "definitionId": "115b7d9c-b5a5-4681-bc7e-27c0f7dc59fa",
+      "definitionFieldName": "call_type",
+      "definitionDataTypeName": "string",
+      "definitionDisplayLabel": "Call Type",
+      "value": "{{flow.call_type}}"
+    },
+    "v1_order_cf2": {
+      "_pos": {
+        "x": 1111,
+        "y": 12920
+      },
+      "type": "set_custom_field",
+      "label": "Disposition",
+      "transitions": {
+        "success": "v1_order_cf3",
+        "error": "v1_order_cf3",
+        "invalid_value": "v1_order_cf3"
+      },
+      "definitionId": "fe68b17e-0fb6-46bb-b5ab-daa6b12404d0",
+      "definitionFieldName": "disposition",
+      "definitionDataTypeName": "string",
+      "definitionDisplayLabel": "Disposition",
+      "value": "{{flow.disposition}}"
+    },
+    "v1_order_cf3": {
+      "_pos": {
+        "x": 1105,
+        "y": 13110
+      },
+      "type": "set_custom_field",
+      "label": "Disposition Reason",
+      "transitions": {
+        "success": "v1_order_end",
+        "error": "v1_order_end",
+        "invalid_value": "v1_order_end"
+      },
+      "definitionId": "98908031-b34b-5a7a-b749-c973839d1e7f",
+      "definitionFieldName": "disposition_reason",
+      "definitionDataTypeName": "string",
+      "definitionDisplayLabel": "Disposition Reason",
+      "value": "{{flow.disposition_reason}}"
+    },
+    "v1_order_end": {
+      "_pos": {
+        "x": 1103,
+        "y": 13300
+      },
+      "type": "end",
+      "label": "End",
+      "transitions": {},
+      "status": "complete"
+    },
+    "v1_disp_close_order": {
+      "_pos": {
+        "x": 1133,
+        "y": 12540
+      },
+      "type": "script",
+      "label": "Closing — Order",
+      "transitions": {
+        "default": "v1_order_cf1"
+      },
+      "content": "<p>\"I want to thank you for calling and I hope you have a great day!\"</p>"
     }
+  },
+  "_waypoints": {
+    "v1_main_offer-Yes - Place Order-v1_pkg_3mo": [
+      {
+        "x": 1455,
+        "y": 2900.0
+      },
+      {
+        "x": 1213,
+        "y": 3090.0
+      },
+      {
+        "x": 975,
+        "y": 3280.0
+      },
+      {
+        "x": 1521,
+        "y": 3470.0
+      },
+      {
+        "x": 1569,
+        "y": 3660.0
+      },
+      {
+        "x": 1641,
+        "y": 3850.0
+      }
+    ],
+    "v1_price_rebuttal-Yes - Continue-v1_pkg_3mo": [
+      {
+        "x": 4315,
+        "y": 2140.0
+      },
+      {
+        "x": 4149,
+        "y": 2330.0
+      },
+      {
+        "x": 3991,
+        "y": 2520.0
+      },
+      {
+        "x": 3840,
+        "y": 2710.0
+      },
+      {
+        "x": 3695,
+        "y": 2900.0
+      },
+      {
+        "x": 3556,
+        "y": 3090.0
+      },
+      {
+        "x": 3421,
+        "y": 3280.0
+      },
+      {
+        "x": 3062,
+        "y": 3470.0
+      },
+      {
+        "x": 2800,
+        "y": 3660.0
+      },
+      {
+        "x": 2541,
+        "y": 3850.0
+      }
+    ],
+    "v1_price_rebuttal-No - Go to Rebuttal 1-v1_rebuttal": [
+      {
+        "x": 3882,
+        "y": 2140.0
+      },
+      {
+        "x": 3499,
+        "y": 2330.0
+      },
+      {
+        "x": 3124,
+        "y": 2520.0
+      },
+      {
+        "x": 2755,
+        "y": 2710.0
+      }
+    ],
+    "v1_auto_rebuttal-Yes-v1_pkg_3mo": [
+      {
+        "x": 805,
+        "y": 3090.0
+      },
+      {
+        "x": 575,
+        "y": 3280.0
+      },
+      {
+        "x": 1393,
+        "y": 3470.0
+      },
+      {
+        "x": 1453,
+        "y": 3660.0
+      },
+      {
+        "x": 1541,
+        "y": 3850.0
+      }
+    ],
+    "v1_basic_ots-No - Go to Rebuttal 2-v1_downsell1": [
+      {
+        "x": 411,
+        "y": 3280.0
+      }
+    ],
+    "v1_rebuttal-Yes-v1_pkg_3mo": [
+      {
+        "x": 2892,
+        "y": 3090.0
+      },
+      {
+        "x": 3112,
+        "y": 3280.0
+      },
+      {
+        "x": 2795,
+        "y": 3470.0
+      },
+      {
+        "x": 2617,
+        "y": 3660.0
+      },
+      {
+        "x": 2441,
+        "y": 3850.0
+      }
+    ],
+    "v1_objreb_0-Yes - Place Order - B2G1-v1_pkg_3mo": [
+      {
+        "x": 1621,
+        "y": 3470.0
+      },
+      {
+        "x": 1669,
+        "y": 3660.0
+      },
+      {
+        "x": 1741,
+        "y": 3850.0
+      }
+    ],
+    "v1_objreb_1-Yes - Place Order - B2G1-v1_pkg_3mo": [
+      {
+        "x": 1779,
+        "y": 3470.0
+      },
+      {
+        "x": 1802,
+        "y": 3660.0
+      },
+      {
+        "x": 1841,
+        "y": 3850.0
+      }
+    ],
+    "v1_objreb_2-Yes - Place Order - B2G1-v1_pkg_3mo": [
+      {
+        "x": 1916,
+        "y": 3470.0
+      },
+      {
+        "x": 1923,
+        "y": 3660.0
+      },
+      {
+        "x": 1941,
+        "y": 3850.0
+      }
+    ],
+    "v1_objreb_3-Yes - Place Order - B2G1-v1_pkg_3mo": [
+      {
+        "x": 2053,
+        "y": 3470.0
+      },
+      {
+        "x": 2045,
+        "y": 3660.0
+      },
+      {
+        "x": 2041,
+        "y": 3850.0
+      }
+    ],
+    "v1_objreb_4-Yes - Place Order - B2G1-v1_pkg_3mo": [
+      {
+        "x": 2190,
+        "y": 3470.0
+      },
+      {
+        "x": 2166,
+        "y": 3660.0
+      },
+      {
+        "x": 2141,
+        "y": 3850.0
+      }
+    ],
+    "v1_objreb_5-Yes - Place Order - B2G1-v1_pkg_3mo": [
+      {
+        "x": 2327,
+        "y": 3470.0
+      },
+      {
+        "x": 2287,
+        "y": 3660.0
+      },
+      {
+        "x": 2241,
+        "y": 3850.0
+      }
+    ],
+    "v1_objreb_6-Yes - Place Order - B2G1-v1_pkg_3mo": [
+      {
+        "x": 2483,
+        "y": 3470.0
+      },
+      {
+        "x": 2411,
+        "y": 3660.0
+      },
+      {
+        "x": 2341,
+        "y": 3850.0
+      }
+    ],
+    "v1_downsell1-Yes - Place Order-v1_pkg_2mo": [
+      {
+        "x": 1295,
+        "y": 3660.0
+      },
+      {
+        "x": 1398,
+        "y": 3850.0
+      }
+    ],
+    "v1_rebuttal1-Yes - Place Order-v1_pkg_2mo_dha": [
+      {
+        "x": 942,
+        "y": 3850.0
+      }
+    ],
+    "v1_rebuttal2-No - Log Call-v1_call_type": [
+      {
+        "x": 1208.430712083877,
+        "y": 3930
+      },
+      {
+        "x": -80,
+        "y": 3930
+      },
+      {
+        "x": -80,
+        "y": 1100
+      },
+      {
+        "x": 5331.531388393995,
+        "y": 1100
+      }
+    ],
+    "v1_pkg_3mo_add-added-v1_pkg_3mo_vars": [
+      {
+        "x": 1882,
+        "y": 4420.0
+      }
+    ],
+    "v1_pkg_2mo_add-added-v1_pkg_2mo_vars": [
+      {
+        "x": 1502,
+        "y": 4420.0
+      }
+    ],
+    "v1_pkg_2mo_dha_add-added-v1_pkg_2mo_dha_vars": [
+      {
+        "x": 1122,
+        "y": 4420.0
+      }
+    ],
+    "v1_pkg_ots_add-added-v1_pkg_ots_vars": [
+      {
+        "x": 396,
+        "y": 3660.0
+      }
+    ],
+    "v1_pkg_ots_vars-default-v1_sec_customer": [
+      {
+        "x": 482,
+        "y": 4040.0
+      },
+      {
+        "x": 582,
+        "y": 4230.0
+      },
+      {
+        "x": 682,
+        "y": 4420.0
+      },
+      {
+        "x": 915,
+        "y": 4610.0
+      }
+    ],
+    "v1_ship_copy-default-v1_email": [
+      {
+        "x": 1342,
+        "y": 5750.0
+      }
+    ],
+    "v1_cc_retry-Yes-v1_cc_trigger": [
+      {
+        "x": 1875.0410807761032,
+        "y": 7160
+      },
+      {
+        "x": -104,
+        "y": 7160
+      },
+      {
+        "x": -104,
+        "y": 6420
+      },
+      {
+        "x": 1510.8422615235845,
+        "y": 6420
+      }
+    ],
+    "v1_no_mop-default-v1_disp_close_aoc": [
+      {
+        "x": 2072,
+        "y": 7460.0
+      },
+      {
+        "x": 2163,
+        "y": 7650.0
+      },
+      {
+        "x": 2256,
+        "y": 7840.0
+      },
+      {
+        "x": 2351,
+        "y": 8030.0
+      },
+      {
+        "x": 2449,
+        "y": 8220.0
+      },
+      {
+        "x": 2550,
+        "y": 8410.0
+      },
+      {
+        "x": 2652,
+        "y": 8600.0
+      },
+      {
+        "x": 2757,
+        "y": 8790.0
+      },
+      {
+        "x": 2791,
+        "y": 8980.0
+      },
+      {
+        "x": 2778,
+        "y": 9170.0
+      },
+      {
+        "x": 2792,
+        "y": 9360.0
+      },
+      {
+        "x": 2809,
+        "y": 9550.0
+      },
+      {
+        "x": 2781,
+        "y": 9740.0
+      },
+      {
+        "x": 2778,
+        "y": 9930.0
+      },
+      {
+        "x": 2779,
+        "y": 10120.0
+      },
+      {
+        "x": 2610,
+        "y": 10310.0
+      },
+      {
+        "x": 2559,
+        "y": 10500.0
+      },
+      {
+        "x": 2510,
+        "y": 10690.0
+      },
+      {
+        "x": 2465,
+        "y": 10880.0
+      },
+      {
+        "x": 2422,
+        "y": 11070.0
+      },
+      {
+        "x": 2382,
+        "y": 11260.0
+      },
+      {
+        "x": 2345,
+        "y": 11450.0
+      },
+      {
+        "x": 2311,
+        "y": 11640.0
+      },
+      {
+        "x": 2280,
+        "y": 11830.0
+      },
+      {
+        "x": 2252,
+        "y": 12020.0
+      },
+      {
+        "x": 2104,
+        "y": 12210.0
+      }
+    ],
+    "v1_after_payment-true-v1_sec_closing": [
+      {
+        "x": 1752,
+        "y": 7270.0
+      },
+      {
+        "x": 1876,
+        "y": 7460.0
+      },
+      {
+        "x": 1979,
+        "y": 7650.0
+      },
+      {
+        "x": 2084,
+        "y": 7840.0
+      },
+      {
+        "x": 2192,
+        "y": 8030.0
+      },
+      {
+        "x": 2302,
+        "y": 8220.0
+      },
+      {
+        "x": 2415,
+        "y": 8410.0
+      },
+      {
+        "x": 2530,
+        "y": 8600.0
+      },
+      {
+        "x": 2648,
+        "y": 8790.0
+      },
+      {
+        "x": 2678,
+        "y": 8980.0
+      },
+      {
+        "x": 2647,
+        "y": 9170.0
+      },
+      {
+        "x": 2651,
+        "y": 9360.0
+      },
+      {
+        "x": 2658,
+        "y": 9550.0
+      },
+      {
+        "x": 2541,
+        "y": 9740.0
+      },
+      {
+        "x": 2486,
+        "y": 9930.0
+      },
+      {
+        "x": 2433,
+        "y": 10120.0
+      }
+    ],
+    "v1_autoship-Yes - Preferred Customer - Go to Family Offer-v1_as_yes": [
+      {
+        "x": 1688,
+        "y": 7650.0
+      },
+      {
+        "x": 1751,
+        "y": 7840.0
+      },
+      {
+        "x": 1802,
+        "y": 8030.0
+      }
+    ],
+    "v1_autoship_rb-Yes - Preferred Customer - Go to Family Offer-v1_as_yes": [
+      {
+        "x": 1621,
+        "y": 7840.0
+      },
+      {
+        "x": 1702,
+        "y": 8030.0
+      }
+    ],
+    "v1_autoship_rb2b-Yes - Go to Memory DHA cross-sell-v1_dha_2mo": [
+      {
+        "x": 1224,
+        "y": 8220.0
+      }
+    ],
+    "v1_ot_add-added-v1_ot_vars": [
+      {
+        "x": 1679,
+        "y": 8790.0
+      }
+    ],
+    "v1_ot_vars-default-v1_sec_closing": [
+      {
+        "x": 1512,
+        "y": 9170.0
+      },
+      {
+        "x": 1495,
+        "y": 9360.0
+      },
+      {
+        "x": 1475,
+        "y": 9550.0
+      },
+      {
+        "x": 1507,
+        "y": 9740.0
+      },
+      {
+        "x": 1529,
+        "y": 9930.0
+      },
+      {
+        "x": 1553,
+        "y": 10120.0
+      }
+    ],
+    "v1_family_add-added-v1_family_vars": [
+      {
+        "x": 2059,
+        "y": 8790.0
+      }
+    ],
+    "v1_dha_family-Not Interested-v1_sleep_family": [
+      {
+        "x": 2020,
+        "y": 9360.0
+      },
+      {
+        "x": 2042,
+        "y": 9550.0
+      }
+    ],
+    "v1_dha_family_add-added-v1_sleep_family": [
+      {
+        "x": 1942,
+        "y": 9550.0
+      }
+    ],
+    "v1_sleep_family-Not Interested-v1_sec_closing": [
+      {
+        "x": 2012,
+        "y": 9930.0
+      },
+      {
+        "x": 2033,
+        "y": 10120.0
+      }
+    ],
+    "v1_sleep_family_add-added-v1_sec_closing": [
+      {
+        "x": 1933,
+        "y": 10120.0
+      }
+    ],
+    "v1_dha_3mo-Not Interested-v1_sleep_3mo": [
+      {
+        "x": 2506,
+        "y": 8790.0
+      },
+      {
+        "x": 2516,
+        "y": 8980.0
+      }
+    ],
+    "v1_dha_3mo_add-added-v1_sleep_3mo": [
+      {
+        "x": 2416,
+        "y": 8980.0
+      }
+    ],
+    "v1_sleep_3mo-Not Interested-v1_sec_closing": [
+      {
+        "x": 2504,
+        "y": 9360.0
+      },
+      {
+        "x": 2543,
+        "y": 9550.0
+      },
+      {
+        "x": 2430,
+        "y": 9740.0
+      },
+      {
+        "x": 2380,
+        "y": 9930.0
+      },
+      {
+        "x": 2333,
+        "y": 10120.0
+      }
+    ],
+    "v1_sleep_3mo_add_fail-default-v1_sec_closing": [
+      {
+        "x": 2168,
+        "y": 9740.0
+      },
+      {
+        "x": 2149,
+        "y": 9930.0
+      },
+      {
+        "x": 2133,
+        "y": 10120.0
+      }
+    ],
+    "v1_sleep_3mo_add-added-v1_sec_closing": [
+      {
+        "x": 2422,
+        "y": 9550.0
+      },
+      {
+        "x": 2313,
+        "y": 9740.0
+      },
+      {
+        "x": 2272,
+        "y": 9930.0
+      },
+      {
+        "x": 2233,
+        "y": 10120.0
+      }
+    ],
+    "v1_dha_2mo-Not Interested-v1_sleep_2mo": [
+      {
+        "x": 1309,
+        "y": 8600.0
+      },
+      {
+        "x": 1299,
+        "y": 8790.0
+      }
+    ],
+    "v1_dha_2mo_add-added-v1_sleep_2mo": [
+      {
+        "x": 1199,
+        "y": 8790.0
+      }
+    ],
+    "v1_sleep_2mo-Not Interested-v1_sec_closing": [
+      {
+        "x": 1326,
+        "y": 9170.0
+      },
+      {
+        "x": 1369,
+        "y": 9360.0
+      },
+      {
+        "x": 1362,
+        "y": 9550.0
+      },
+      {
+        "x": 1397,
+        "y": 9740.0
+      },
+      {
+        "x": 1424,
+        "y": 9930.0
+      },
+      {
+        "x": 1453,
+        "y": 10120.0
+      }
+    ],
+    "v1_sleep_2mo_add_fail-default-v1_sec_closing": [
+      {
+        "x": 1115,
+        "y": 9550.0
+      },
+      {
+        "x": 1158,
+        "y": 9740.0
+      },
+      {
+        "x": 1204,
+        "y": 9930.0
+      },
+      {
+        "x": 1253,
+        "y": 10120.0
+      }
+    ],
+    "v1_sleep_2mo_add-added-v1_sec_closing": [
+      {
+        "x": 1251,
+        "y": 9360.0
+      },
+      {
+        "x": 1255,
+        "y": 9550.0
+      },
+      {
+        "x": 1292,
+        "y": 9740.0
+      },
+      {
+        "x": 1321,
+        "y": 9930.0
+      },
+      {
+        "x": 1353,
+        "y": 10120.0
+      }
+    ],
+    "v1_closing-Change Call Type-v1_call_type": [
+      {
+        "x": 1787.7421666573357,
+        "y": 10580
+      },
+      {
+        "x": -128,
+        "y": 10580
+      },
+      {
+        "x": -128,
+        "y": 1100
+      },
+      {
+        "x": 5331.531388393995,
+        "y": 1100
+      }
+    ],
+    "v1_confirm_submit-No - Go Back-v1_sms": [
+      {
+        "x": 1707.326604577121,
+        "y": 11340
+      },
+      {
+        "x": -152,
+        "y": 11340
+      },
+      {
+        "x": -152,
+        "y": 10600
+      },
+      {
+        "x": 1756.557255441491,
+        "y": 10600
+      }
+    ],
+    "v1_order_ok-default-v1_disp_close_order": [
+      {
+        "x": 1150,
+        "y": 12210.0
+      },
+      {
+        "x": 1152,
+        "y": 12400.0
+      }
+    ],
+    "v1_decline-Change Customer Info-v1_sec_customer": [
+      {
+        "x": 2016.8765500760203,
+        "y": 12100
+      },
+      {
+        "x": -176,
+        "y": 12100
+      },
+      {
+        "x": -176,
+        "y": 4710
+      },
+      {
+        "x": 1264.059217319097,
+        "y": 4710
+      }
+    ],
+    "v1_decline-Change Payment Info-v1_sec_payment": [
+      {
+        "x": 2016.8765500760203,
+        "y": 12100
+      },
+      {
+        "x": -200,
+        "y": 12100
+      },
+      {
+        "x": -200,
+        "y": 6040
+      },
+      {
+        "x": 1431.9887224616864,
+        "y": 6040
+      }
+    ],
+    "v1_auth_error-default-v1_decline": [
+      {
+        "x": 2010,
+        "y": 11830.0
+      }
+    ],
+    "v1_ordfail-Change Customer Info-v1_sec_customer": [
+      {
+        "x": 1408.1861110624886,
+        "y": 12100
+      },
+      {
+        "x": -224,
+        "y": 12100
+      },
+      {
+        "x": -224,
+        "y": 4710
+      },
+      {
+        "x": 1264.059217319097,
+        "y": 4710
+      }
+    ],
+    "v1_ordfail-Change Payment Info-v1_sec_payment": [
+      {
+        "x": 1408.1861110624886,
+        "y": 12100
+      },
+      {
+        "x": -248,
+        "y": 12100
+      },
+      {
+        "x": -248,
+        "y": 6040
+      },
+      {
+        "x": 1431.9887224616864,
+        "y": 6040
+      }
+    ],
+    "v1_disp_aoc-Alzheimers Consumer-v1_aoc_cf1": [
+      {
+        "x": 6059,
+        "y": 1570.0
+      }
+    ],
+    "v1_disp_aoc-Credit Card Declined-v1_aoc_cf1": [
+      {
+        "x": 6059,
+        "y": 1570.0
+      }
+    ],
+    "v1_disp_aoc-Disconnected During Offer-v1_aoc_cf1": [
+      {
+        "x": 6059,
+        "y": 1570.0
+      }
+    ],
+    "v1_disp_aoc-Language Barrier/International-v1_aoc_cf1": [
+      {
+        "x": 6059,
+        "y": 1570.0
+      }
+    ],
+    "v1_disp_aoc-No MOP (No Method of Payment)-v1_aoc_cf1": [
+      {
+        "x": 6059,
+        "y": 1570.0
+      }
+    ],
+    "v1_disp_aoc-Not Interested (Disconnected after offer presentation)-v1_aoc_cf1": [
+      {
+        "x": 6059,
+        "y": 1570.0
+      }
+    ],
+    "v1_disp_aoc-Price Objection Too Expensive-v1_aoc_cf1": [
+      {
+        "x": 6059,
+        "y": 1570.0
+      }
+    ],
+    "v1_disp_aoc-Shipping to Canada-v1_aoc_cf1": [
+      {
+        "x": 6059,
+        "y": 1570.0
+      }
+    ],
+    "v1_disp_aoc-Spousal Objection-v1_aoc_cf1": [
+      {
+        "x": 6059,
+        "y": 1570.0
+      }
+    ],
+    "v1_disp_aoc-Thought it was free-v1_aoc_cf1": [
+      {
+        "x": 6059,
+        "y": 1570.0
+      }
+    ],
+    "v1_disp_aoc-Too many upsells - Caller Fatigue-v1_aoc_cf1": [
+      {
+        "x": 6059,
+        "y": 1570.0
+      }
+    ],
+    "v1_disp_aoc-Transferred to Customer Service-v1_aoc_cf1": [
+      {
+        "x": 6059,
+        "y": 1570.0
+      }
+    ],
+    "v1_disp_aoc-Wants to speak to Doctor-v1_aoc_cf1": [
+      {
+        "x": 6059,
+        "y": 1570.0
+      }
+    ]
   }
 }
