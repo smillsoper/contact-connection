@@ -83,7 +83,10 @@ export default function DashboardBuilderPage() {
   // mode instead. editMode (not isEditing alone) is what every edit-affordance below actually
   // checks — it also folds in the permission check, so a view-only role can never toggle in.
   const [isEditing, setIsEditing] = useState(!id)
-  const editMode = canManage && isEditing
+  // Whether THIS dashboard is editable by me — its owner or a tenant admin (server's can_edit).
+  // A new, unsaved dashboard is mine by definition.
+  const [canEditThis, setCanEditThis] = useState(true)
+  const editMode = canManage && canEditThis && isEditing
 
   const draggingTypeRef = useRef<DashboardWidgetType | null>(null)
 
@@ -96,6 +99,7 @@ export default function DashboardBuilderPage() {
         setDashboardId(detail.id)
         setName(detail.name)
         setIsShared(detail.is_shared)
+        setCanEditThis(detail.can_edit)
         try {
           setWidgets(JSON.parse(detail.layout) as DashboardWidgetInstance[])
         } catch {
@@ -221,6 +225,20 @@ export default function DashboardBuilderPage() {
     setWidgets((prev) => prev.map((w) => (w.id === widgetId ? { ...w, config, title } : w)))
   }
 
+  // Not the owner and not an admin: take the layout as a new private dashboard of my own.
+  const handleSaveCopy = useCallback(async () => {
+    setSaving(true)
+    setError(null)
+    try {
+      const created = await dashboardsApi.create(`${name} (copy)`, false, JSON.stringify(widgets))
+      navigate(`/dashboard-builder/${created.id}`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to copy dashboard')
+    } finally {
+      setSaving(false)
+    }
+  }, [name, widgets, navigate])
+
   const handleSave = useCallback(async () => {
     setSaving(true)
     setError(null)
@@ -305,12 +323,22 @@ export default function DashboardBuilderPage() {
                 >
                   Back
                 </button>
-                {canManage && (
+                {canManage && canEditThis && (
                   <button
                     onClick={handleStartEdit}
                     className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-1.5 rounded-lg transition-colors"
                   >
                     Edit
+                  </button>
+                )}
+                {canManage && !canEditThis && (
+                  <button
+                    onClick={handleSaveCopy}
+                    disabled={saving}
+                    title="Only the owner or an admin can change this dashboard — this saves your own copy to edit."
+                    className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-1.5 rounded-lg disabled:opacity-50 transition-colors"
+                  >
+                    {saving ? 'Copying…' : 'Save as my copy'}
                   </button>
                 )}
               </>

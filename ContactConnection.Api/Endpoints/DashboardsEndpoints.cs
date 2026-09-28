@@ -1,6 +1,7 @@
 using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Services;
 using ContactConnection.Domain.Entities;
+using Microsoft.AspNetCore.Authorization;
 
 namespace ContactConnection.Api.Endpoints;
 
@@ -51,6 +52,7 @@ public static class DashboardsEndpoints
             IDashboardRepository dashboards,
             TenantContext tenantContext,
             HttpContext http,
+            IAuthorizationService auth,
             CancellationToken ct) =>
         {
             if (tenantContext.Current is null) return Results.Unauthorized();
@@ -63,7 +65,9 @@ public static class DashboardsEndpoints
             if (dashboard is null || dashboard.TenantId != tenantContext.Current.Id || !dashboard.IsVisibleTo(agentId))
                 return Results.NotFound();
 
-            return Results.Ok(dashboard.ToDetailResponse());
+            var canEdit = (await auth.AuthorizeAsync(http.User, "ReportsManage")).Succeeded
+                          && await CanEditAsync(http, auth, dashboard, agentId);
+            return Results.Ok(dashboard.ToDetailResponse(canEdit));
         }).RequireAuthorization("ReportsView");
 
         group.MapPut("/{id:guid}", async (
@@ -72,6 +76,7 @@ public static class DashboardsEndpoints
             IDashboardRepository dashboards,
             TenantContext tenantContext,
             HttpContext http,
+            IAuthorizationService auth,
             CancellationToken ct) =>
         {
             if (tenantContext.Current is null) return Results.Unauthorized();
@@ -80,15 +85,16 @@ public static class DashboardsEndpoints
             var dashboard = await dashboards.GetByIdAsync(id, ct);
             if (dashboard is null || dashboard.TenantId != tenantContext.Current.Id || !dashboard.IsVisibleTo(agentId))
                 return Results.NotFound();
-            // Sharing controls visibility, not editability — a shared dashboard is read-only to
-            // everyone except the agent who created it. reports.manage alone (checked by the
-            // route policy below) is not the same as owning this specific dashboard.
-            if (dashboard.CreatedByAgentId != agentId) return Results.Forbid();
+            // Sharing controls visibility, not editability — a shared dashboard is editable only by
+            // the agent who created it or a tenant admin (a team dashboard an admin can maintain,
+            // S163). reports.manage alone (the route policy below) doesn't grant editing someone
+            // else's dashboard; such users save their own copy instead.
+            if (!await CanEditAsync(http, auth, dashboard, agentId)) return Results.Forbid();
 
             dashboard.Update(req.Name, req.IsShared, req.Layout);
             await dashboards.SaveChangesAsync(ct);
 
-            return Results.Ok(dashboard.ToDetailResponse());
+            return Results.Ok(dashboard.ToDetailResponse(canEdit: true));
         }).RequireAuthorization("ReportsManage");
 
         group.MapDelete("/{id:guid}", async (
@@ -96,6 +102,7 @@ public static class DashboardsEndpoints
             IDashboardRepository dashboards,
             TenantContext tenantContext,
             HttpContext http,
+            IAuthorizationService auth,
             CancellationToken ct) =>
         {
             if (tenantContext.Current is null) return Results.Unauthorized();
@@ -104,7 +111,7 @@ public static class DashboardsEndpoints
             var dashboard = await dashboards.GetByIdAsync(id, ct);
             if (dashboard is null || dashboard.TenantId != tenantContext.Current.Id || !dashboard.IsVisibleTo(agentId))
                 return Results.NotFound();
-            if (dashboard.CreatedByAgentId != agentId) return Results.Forbid();
+            if (!await CanEditAsync(http, auth, dashboard, agentId)) return Results.Forbid();
 
             dashboards.Delete(dashboard);
             await dashboards.SaveChangesAsync(ct);
@@ -112,6 +119,10 @@ public static class DashboardsEndpoints
             return Results.NoContent();
         }).RequireAuthorization("ReportsManage");
     }
+
+    /// <summary>Owner, or a tenant admin (same "TenantAdmin" policy as the rest of the admin API).</summary>
+    private static async Task<bool> CanEditAsync(HttpContext http, IAuthorizationService auth, Dashboard d, Guid agentId) =>
+        d.CreatedByAgentId == agentId || (await auth.AuthorizeAsync(http.User, "TenantAdmin")).Succeeded;
 
     private static bool TryGetAgentId(HttpContext http, out Guid agentId) =>
         Guid.TryParse(http.User.FindFirst("sub")?.Value, out agentId);
@@ -126,8 +137,9 @@ public static class DashboardsEndpoints
         updated_at          = d.UpdatedAt,
     };
 
-    private static object ToDetailResponse(this Dashboard d) => new
+    private static object ToDetailResponse(this Dashboard d, bool canEdit) => new
     {
+        can_edit            = canEdit,
         id                  = d.Id,
         name                = d.Name,
         is_shared           = d.IsShared,

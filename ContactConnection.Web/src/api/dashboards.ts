@@ -11,6 +11,8 @@ export interface DashboardSummary {
 
 export interface DashboardDetail extends DashboardSummary {
   layout: string
+  /** Owner or tenant admin (and holds reports.manage) — anyone else can only save their own copy. */
+  can_edit: boolean
 }
 
 export const dashboardsApi = {
