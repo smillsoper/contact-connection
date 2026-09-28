@@ -172,6 +172,7 @@
 | 160 | 2026-09-23 – 2026-09-24 | 11:41 AM PDT (9/23) | 5:28 PM PDT (9/24) | ~1787 min (~29h47m — start time is Session 159's end time per Stephen's instruction, not a continuously-worked span) | ~17524 min |
 | 161 | 2026-09-24 – 2026-09-25 | 6:24 PM PDT (9/24) | 5:17 PM PDT (9/25) | 383 min (156 min 9/24 6:24–9:00 PM + gap, resumed 9/25 1:30 PM, 227 min to 5:17 PM) | ~17907 min |
 | 162 | 2026-09-26 | 6:49 PM PDT | 8:10 PM PDT | 81 min | ~17988 min |
+| 163 | 2026-09-27 | 9:44 AM PDT | 6:20 PM PDT | 516 min | ~18504 min |
 
 ---
 
@@ -10408,3 +10409,125 @@ requests for one call, `null` for a client with no sequence, rows cleaned up. `n
 - Steps 2–4 of the agreed build order (see Architecture decisions).
 - Carried over from S161: `GetAvailableForContextAsync` unwired in `CartModal`; browser checks of
   the jump dropdown, cart clearing after a flow ends, and multi-tab cart switching.
+
+## Session 163
+
+**Date:** 2026-09-27
+**Start:** 9:44 AM PDT
+**End:** 6:20 PM PDT
+**Duration:** 516 minutes
+**Total Duration:** ~18504 minutes
+
+### Focus
+
+Finish the Life Seasons order build (steps 2–4 of the S162 plan), then a full sprint on **true
+parallel queuing** (ARCHITECTURE §15) for Life Seasons' Alpha/Elite routing and their RingSquared
+router, plus the supporting nodes and supervisor tooling it surfaced.
+
+### Life Seasons order build (commits `73f8923`, `9a2a660`)
+
+- **Step 2 — per-campaign sales tax:** `Campaign.TaxProvider/TaxSettings` + Sales Tax admin section;
+  tax recomputed on every cart change. `AvalaraTaxProvider` (SalesOrder quote, per-line tax, item
+  tax code > campaign default, ship-from, campaign→client→tenant credential cascade, state fee lines
+  such as the CO Retail Delivery Fee returned as fees, never throws). Flat rate became a per-state
+  table with optional shipping tax and a per-state fee; half-up rounding (was banker's). Cart shows
+  sales tax, shipping tax, tax status and fees separately; product tax code + offer override.
+  Addresses reach the call record (address node role, `set_variable` targets).
+- **Step 3 — Liquid request bodies** (Fluid, sandboxed, step-limited), response-body success rules,
+  and api_call "Only once per call" (replays a stored success). Builder Simple/Liquid switch, sample
+  data, Preview. `docs/integrations/life-seasons-order.liquid` validated against **all 23,107
+  successful production requests** from the CRMPro backup — 99.4% exact on the current format.
+  Avalara fee parsing fixed (flat amount is in `rate` on `isFee` details). Phone/email nodes can
+  save to the call record (`BillingPhone`/`ShippingPhone`/`Email`).
+- **Step 4 — configured in `tenant_test_tenant`:** Life Seasons client with `LIFSEA-` order numbers,
+  NeuroQ campaign with Avalara settings, inactive "Life Seasons Order API" definition + "Add Order"
+  Liquid endpoint (auth placeholder `LifeSeasons:OrderApiKey`). Credentials come from Clint.
+
+### Parallel queuing sprint (6 phases)
+
+Decisions confirmed with Stephen up front (recorded in `docs/design/parallel-queuing.md`): pure
+priority with an optional exclusive window; offers re-evaluated until answered, lower-tier pops
+withdrawn; winning group/tier/label recorded for commissions; longest-waiting call first with
+Campaign.Priority override; **Elite = an agent group within the campaign**, pinned by the queue node
+with no fallback (not a second campaign); external endpoints keyed by our campaign ids with an API
+key; script pop stays call-driven.
+
+1. **Number providers** (`7d2b591`) — carrier vs routing platform; `PhoneNumber` role
+   `routing_delivery` + `ClientNumber` (the public TFN a platform like RingSquared houses);
+   provider + client number stamped on every call; hashed partner API keys.
+2. **Data model** (`77cc484`) — `GroupCampaignAssignment.RoutingTier/ExclusiveWindowSeconds/
+   TierLabel`; `AgentGroupMemberCampaignExclusion` (per-member opt-outs, not an allow-list, so new
+   members/campaigns need no re-sync); `CallRecord.RoutedGroupId/RoutedTier/RoutedTierLabel`.
+3. **Queue engine** (`77cc484`) — `EligibleAgentRanker` ranks tier → proficiency → longest idle;
+   `GetOfferSetAsync`/`SelectOffer` offers only the highest tier with anyone available (exclusive
+   window holds for a tier); `QueuePollingService` uses it for ring, auto-answer and queue-callback
+   delivery and withdraws stale pops (`ReceiveOfferWithdrawn`, offered set in Redis
+   `queue_offer:{channel}`); tier label on screen pops + agent badge; `QueuedCallDeliveryService`
+   stamps the winning route and refuses a click from outside a pinned group. A tier-0 group's label
+   only tags calls pinned to that group (else an Elite member answering an ordinary call would be
+   tagged "Elite").
+4. **External routing API** (`b055487`) — `/api/v1/external-routing`: RingSquared `{campaignId}/Routing`
+   and `CallInfo` in TMS Dial800Routing's exact shapes, `availability` stats (per tier) and a
+   200/404 `available`; tenant from host, partner from `X-Api-Key` (or `api_key`); per-campaign
+   accept rule (queue count / queue wait / agent available); every decision logged to
+   `external_routing_requests`. Deliberate change from TMS: an unmapped DNIS is rejected instead of
+   accepted with a placeholder. Live smoke-tested against the running API with a temporary provider
+   (401s, both reject paths, accept → delivery number, CallInfo stored) — test data removed.
+5. **UI** (`f0585b4`) — Agent Groups: campaign tiers + member campaign checkboxes; campaign Routing
+   Tiers & External Routing card; queue node "Only offer to agent group"; supervisor **Queued Calls**
+   widget (offered tier per call, SignalR-pushed via `ReceiveQueueOfferChanged`). Fixed: re-assigning
+   a removed group to a campaign returned 409 instead of reviving it.
+6. **NeuroQ flow** (`511f6b9`, `d7934c8`, `41c2e4b`) — built from the CXone NeuroQ_Only/NQ_Queue
+   exports, seeded **inactive** with empty "Alpha Sales" (tier 10) / "NeuroQ Elite" (tier 0) groups;
+   exported to `docs/integrations/neuroq-telephony-flow.json`. Scratch copies of the CXone exports
+   (TMS API key, staff emails) deleted.
+
+### Stephen's direction on the flow (and new pieces it needed)
+
+- **Never reject a caller for staffing or maintenance.** "No agents logged in" now emails the MOD
+  and queues anyway; the queue poller flags such calls and the Queued Calls widget shows a red alert
+  with **Assign agent** (to the campaign, or to the pinned group for Elite calls). Assignments are
+  re-read every 1-second poll, so a newly assigned Available agent gets the call (test added).
+  Maintenance window removed. NeuroQ: **no queue size limit or timeout** (campaign values set to 0).
+- Blocked ANIs are **rejected before answering** (`tf_check_block_list` → `tf_reject`).
+- New **Send Email** node for both designers (`send_email` / `tf_send_email`), templated like the
+  voicemail delivery block (now a shared `FlowEmail` composer + `EmailComposeFields` editor), sent
+  in the background so the caller/agent never waits. `tf_check_agent_availability` gained a
+  `check: logged_in` mode (busy agents count).
+- Platform maintenance question: nothing on our side calls for a flow-level maintenance hang-up;
+  FreeSWITCH/API/Redis restarts are deployment concerns (drain, off-hours). Noted: queued calls live
+  in Redis sessions, so Redis persistence matters before go-live.
+
+### Dashboards fix (`3fa3acf`)
+
+Stephen's save of the shared "Supervisor Dashboard" (created by admin@contactconnection.local) hit a
+403: the builder offered Edit/Save to anyone with `reports.manage`, but the API only let the creator
+save. Per Stephen: owner **or tenant admin** can edit/delete; others with `reports.manage` get "Save
+as my copy". Detail response carries `can_edit`.
+
+### Verification
+
+`dotnet build` clean; full suite **1269 tests pass** (Domain 202, Application 20, Infrastructure 940,
+Api 107); `tsc -b` clean. Migrations `AddNumberProviders`, `AddParallelQueuingTiers`,
+`AddExternalRouting` applied to `tenant_test_tenant` and `tenant_test_contact_center`. External
+routing endpoints live smoke-tested. **No live PSTN testing** — Telnyx account still deactivated.
+
+### Test call + cleanup
+
+Stephen's internal test call to NeuroQ's +18001234567 showed PRE-QUEUE on the dashboard and never
+advanced; after he hung up it stayed there. Redis held no session; the call record had `call_end_at`
+set, but no terminal `call_state_history` row was ever written. Cleaned up by hand: appended a
+`completed` row (detail "Manual cleanup S163…", not an abandon, so stats aren't skewed) and deleted
+`callstate:seq:83438257-…`. **Not investigated** (Stephen will retest with a real provider).
+
+### Not done / follow-up
+
+- Why the NeuroQ test call never left pre-queue (the NeuroQ flow is an inactive draft — check which
+  flow the number resolved to), and why a pre-queue hang-up records no terminal call state.
+- Live tests: Alpha → regular offer + withdrawal, Elite pinning, tier stamp, dashboard alert +
+  Assign agent, Send Email (Resend), RingSquared Routing from their side.
+- RingSquared SIP details + fresh client TFNs; Alpha/Elite members; MOD email To; real audio;
+  publish the NeuroQ flow.
+- Not built: hold-message resume-at-position.
+- Carried over: Avalara sandbox + Authorize.Net sandbox verification; Life Seasons order credentials.
+

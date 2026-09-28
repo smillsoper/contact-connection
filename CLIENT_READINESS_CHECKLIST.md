@@ -356,6 +356,32 @@ Nothing else matters if an agent can't take an order and get paid on a call.
           needs the user's visual confirmation (open 2+ tabs, switch between them, confirm the cart
           strip follows).
 
+- [ ] **Parallel queuing — Alpha priority tier + Elite routing + RingSquared (added S163).** How
+      NeuroQ sells: a premium **Alpha** agent group (higher commission) is offered calls on NeuroQ
+      TV / SF TV / My Best Heart / Joint Food before the regular pool, re-offered to Alpha as they
+      free up; **Elite** calls, flagged by Life Seasons' router RingSquared with `X-Elite: true`,
+      wait for the Elite group only. RingSquared asks an availability API before sending each call.
+      Design + contract: `docs/design/parallel-queuing.md`; CXone mapping:
+      `docs/integrations/neuroq-cxone-callflow.md`.
+      - **Built S163 (not live-verified — no PSTN provider):** number providers (carrier vs routing
+        platform, pseudo-DNIS delivery numbers with the client TFN they stand for); per-group routing
+        tier / exclusive window / label per campaign; per-member campaign exclusions; tier-aware
+        queue engine with offer withdrawal; winning group/tier/label stamped on the call record
+        (`RoutedGroupId`/`RoutedTier`/`RoutedTierLabel` — the commissions hook); agent tier badge;
+        external routing API (`/api/v1/external-routing` — RingSquared Routing/CallInfo, availability
+        stats, 200/404 available; NumberProvider API key; per-campaign accept rule; every decision
+        logged); admin UI + supervisor **Queued Calls** widget (offered tier, "no agents logged in"
+        alert with Assign agent); `send_email`/`tf_send_email` nodes; NeuroQ telephony flow as an
+        inactive draft (`docs/integrations/neuroq-telephony-flow.json`).
+      - **Stephen's rules (S163):** never reject a caller for staffing or maintenance — alert (MOD
+        email + dashboard) and queue anyway; blocked ANIs are rejected *before* answering. Life
+        Seasons: **no queue size limit and no queue timeout** (campaign values 0).
+      - **Remaining:** live test once a PSTN provider is back (Alpha/regular/Elite offers,
+        withdrawal, tier stamp); RingSquared SIP connection details + fresh client TFNs; Alpha/Elite
+        members; MOD email address in the flow; real audio (Clint); publish the flow. Open bug: an
+        internal test call to NeuroQ (+18001234567) stuck in pre-queue, and hanging up during
+        pre-queue wrote no terminal call-state row (phantom on the dashboard, cleaned up by hand).
+
 ## Tier 2 — Attribution & compliance
 
 How the client measures success and enforces their strict-scripting requirement — needed almost
@@ -385,6 +411,9 @@ immediately once calls are live, not deferrable.
 - [ ] **Commissions tracking.** Depends on Tier 1's order/payment existing (commissions are computed
       off real order data) and on the flow engine's variable resolution (already built) for
       script-driven flags:
+      - *S163:* the call record now carries the routing tier it was won through
+        (`RoutedTierLabel` "Alpha"/"Elite", `RoutedGroupId`, `RoutedTier`) — Alpha agents earn a
+        higher commission, so the calculation can key on it.
       - Commission driven by a flat $ amount for a **specific product** added to the order.
       - Commission as a flat $ amount **per order**.
       - Commission as a **% of order subtotal**.
@@ -547,7 +576,17 @@ targets for them, and Avalara fee parsing fixed to read flat-amount `isFee` deta
 API" definition + "Add Order" Liquid endpoint). **Remaining: credentials from Life Seasons, activate,
 wire the flow, live-verify** — see the go-live checklist in `docs/integrations/life-seasons-crmpro-legacy.md`.
 
-**Next up:** Build the Order API submission step and an `"avalara"` `ITaxProvider` per that spec
+**Session 163 (2026-09-27):** tax/Liquid/order configuration (above), then the full **parallel
+queuing** sprint — see its Tier 1 item. Also fixed: shared dashboards were editable in the UI by
+anyone with `reports.manage` but only saveable by the creator (403) — now owner or tenant admin, others
+get "Save as my copy".
+
+**Next up (S163):** blocked on a PSTN provider for any live call testing (Bandwidth call 2026-09-29).
+Meanwhile: investigate the NeuroQ test call stuck in pre-queue + the missing terminal call-state row
+on a pre-queue hang-up; then Commissions (the tier label is now on the call). Previous pointer kept
+below for history.
+
+**Previous next up:** Build the Order API submission step and an `"avalara"` `ITaxProvider` per that spec
 (the Order API takes the `PaymentTransaction`'s gateway transaction id as
 `payment_info.PaymentTransactionId`). Other open options: either the `GetAvailableForContextAsync`
 wiring above, or a future capture (auth+capture) transaction type per the payment gateway's own
