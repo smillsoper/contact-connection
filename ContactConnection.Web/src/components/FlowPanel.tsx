@@ -308,8 +308,10 @@ export default function FlowPanel() {
     if (active) setCallRecordId(active.callRecordId)
   }, [activeSessionId, sessions, setCallRecordId])
 
+  // CRM script flows only — a telephony flow needs a real call on the line, so it can't be
+  // started from this manual test toolbar.
   useEffect(() => {
-    flowsApi.list().then(setFlows).catch(console.error)
+    flowsApi.list().then((all) => setFlows(all.filter((f) => f.flow_type === 'crm'))).catch(console.error)
   }, [])
 
   // SignalR connection — shared across all tabs
