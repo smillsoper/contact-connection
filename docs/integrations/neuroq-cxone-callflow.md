@@ -84,3 +84,23 @@ Audio prompts referenced: `AllRepsBusyKelly.wav`, `Inactive.wav`, `TechDiff.wav`
 `NQ_Hold_MessageV2.wav`, `RingTone.wav`, `Good_MOH_Mix.wav` (plus `GenericCallback.wav`,
 `Callback_6100–6104.wav`, `Thanks.wav` if the callback offer is used). Until provided, TTS
 placeholders with the recorded phrases (captured in the scripts) can stand in.
+
+## Built (S163) — draft flow "NeuroQ Inbound — Parallel Queuing (draft)"
+
+Seeded **inactive** in `tenant_test_tenant` (flow `a1b2c3d4-0163-4000-9000-00000000e001`, campaign
+NeuroQ); definition exported to `neuroq-telephony-flow.json` (its `agentGroupId` is the test tenant's
+"NeuroQ Elite" group — remap for production). Groups created alongside, no members yet: **Alpha
+Sales** (NeuroQ tier 10, label "Alpha") and **NeuroQ Elite** (tier 0, label "Elite").
+
+`X-Elite` header → answer → block list (TTS "not currently active") → maintenance window
+(placeholder date — set the real schedule) → **any agent logged in?** (new `check: logged_in` mode
+of tf_check_agent_availability; busy counts) → Elite? → `tf_route_to_queue` pinned to NeuroQ Elite,
+or unpinned (parallel queuing: Alpha first, regular pool, re-offered to Alpha) → "all reps busy" →
+music with a periodic hold message. Event branches: agent selected → script pop → whisper
+"NeuroQ"; agent answer → start recording. Queue timeout → high-call-volume message → hang up
+(CXone had no timeout — confirm the wanted behavior).
+
+Gaps from the list above now closed: tiered routing (1), Elite without a second campaign (2),
+"Alpha Sales!" cue = the agent's tier badge + `CallRecord.RoutedTierLabel` for commissions (4).
+Still open: email alert when nobody is logged in (3), hold-message resume-at-position (5), and the
+real audio (TTS/platform phrases stand in).

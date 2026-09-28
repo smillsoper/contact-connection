@@ -54,7 +54,8 @@ export default function GroupRoutingPanel({ groupId, agents, membersVersion }: {
         <p className="text-gray-500 text-xs mb-3">
           Tier 0 = regular pool. A higher tier (e.g. 10 for Alpha) is offered a waiting call first; the offer
           drops to the next tier only when nobody in the higher one is available. An exclusive window holds
-          new calls for the tier even when lower tiers are free.
+          new calls for the tier even when lower tiers are free. A tier-0 group's label only tags calls a
+          queue node pins to that group (e.g. Elite).
         </p>
 
         {data.campaigns.length > 0 && (

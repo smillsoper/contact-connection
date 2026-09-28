@@ -133,4 +133,27 @@ public class CheckAgentAvailabilityNodeHandlerTests
 
         Assert.Equal("available", result.TransitionTaken);
     }
+
+    [Theory]
+    [InlineData(AgentStateCodes.OnCall, "available")]      // busy but logged in → will be answered eventually
+    [InlineData(AgentStateCodes.LoggedOut, "unavailable")]
+    [InlineData(null, "unavailable")]                      // never logged in
+    public async Task LoggedInCheck_CountsBusyAgents_ButNotLoggedOut(string? stateCode, string expected)
+    {
+        await using var db = NewDb();
+        var (tenantId, campaignId, agentId) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        db.AgentCampaignAssignments.Add(AgentCampaignAssignment.Create(agentId, campaignId));
+        await db.SaveChangesAsync();
+
+        var stateStore = new Mock<IAgentStateStore>();
+        stateStore.Setup(s => s.GetAsync(tenantId, agentId, default))
+            .ReturnsAsync(stateCode is null ? null : new AgentStateEntry(stateCode, stateCode, null, DateTimeOffset.UtcNow));
+        var factory = new Mock<ITenantDbContextFactory>();
+        factory.Setup(f => f.Create(It.IsAny<string>())).Returns(db);
+        var handler = new CheckAgentAvailabilityNodeHandler(factory.Object, new EligibleAgentRanker(stateStore.Object));
+
+        var node = Node();
+        node["check"] = "logged_in";
+        Assert.Equal(expected, (await handler.ExecuteAsync(node, Ctx(tenantId, campaignId))).TransitionTaken);
+    }
 }

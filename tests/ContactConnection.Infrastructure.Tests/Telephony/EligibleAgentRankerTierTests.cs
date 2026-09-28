@@ -201,4 +201,17 @@ public class EligibleAgentRankerTierTests
         Assert.Equal(((int?)null, (string?)null, (int?)10, 0), QueueOffer.ParseOfferTier(QueueOffer.FormatOfferTier(held)));
         Assert.Equal(((int?)null, (string?)null, (int?)null, 0), QueueOffer.ParseOfferTier(null));
     }
+
+    [Fact]
+    public async Task TierZeroGroupLabel_OnlyWhenCallIsPinnedToThatGroup()
+    {
+        await using var db = NewDb();
+        var (campaignId, eliteGroup, agent) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        db.GroupCampaignAssignments.Add(Tiered(eliteGroup, campaignId, 0, "Elite"));
+        db.AgentGroupMembers.Add(AgentGroupMember.Create(eliteGroup, agent));
+        await db.SaveChangesAsync();
+
+        Assert.Null((await EligibleAgentRanker.ResolveRouteAsync(db, campaignId, agent))!.TierLabel);
+        Assert.Equal("Elite", (await EligibleAgentRanker.ResolveRouteAsync(db, campaignId, agent, eliteGroup))!.TierLabel);
+    }
 }

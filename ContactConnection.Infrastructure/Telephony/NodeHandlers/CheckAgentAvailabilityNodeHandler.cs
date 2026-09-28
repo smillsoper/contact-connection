@@ -43,9 +43,14 @@ public class CheckAgentAvailabilityNodeHandler : ITelephonyNodeHandler
         var campaignId = campaignIdOverride ?? ctx.CampaignId;
 
         await using var db = _factory.Create(ctx.TenantSchemaName);
-        var ranked = await _ranker.GetRankedEligibleAgentsAsync(db, ctx.TenantId, campaignId, ct: ct);
 
-        var transition = ranked.Count > 0 ? "available" : "unavailable";
+        // check: "available" (default) — someone could take the call right now; "logged_in" —
+        // anyone eligible is signed in at all (busy counts), i.e. the call will be answered eventually.
+        var ok = node["check"]?.GetValue<string>() == "logged_in"
+            ? await _ranker.AnyLoggedInAsync(db, ctx.TenantId, campaignId, ct)
+            : (await _ranker.GetRankedEligibleAgentsAsync(db, ctx.TenantId, campaignId, ct: ct)).Count > 0;
+
+        var transition = ok ? "available" : "unavailable";
         var nextNodeId = node["transitions"]?[transition]?.GetValue<string>()
                       ?? node["transitions"]?["default"]?.GetValue<string>();
 

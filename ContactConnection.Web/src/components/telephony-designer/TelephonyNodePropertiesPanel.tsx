@@ -181,6 +181,15 @@ export default function TelephonyNodePropertiesPanel({
 
       {type === 'tf_check_agent_availability' && (
         <div>
+          <label className="block text-xs text-gray-400 mb-1">Check for</label>
+          <select
+            className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm mb-3 focus:outline-none focus:border-blue-500"
+            value={(data.check as string) || 'available'}
+            onChange={(e) => set('check', e.target.value)}
+          >
+            <option value="available">An agent available right now</option>
+            <option value="logged_in">Any agent logged in (busy counts)</option>
+          </select>
           <label className="block text-xs text-gray-400 mb-1">Campaign override (optional)</label>
           <SearchableSelect
             options={campaignOptions}

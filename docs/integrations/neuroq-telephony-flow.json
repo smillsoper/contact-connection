@@ -1,0 +1,355 @@
+{
+    "name": "NeuroQ Inbound — Parallel Queuing (draft)",
+    "nodes": {
+        "nq_hold": {
+            "_pos": {
+                "x": 0,
+                "y": 1280
+            },
+            "type": "tf_play",
+            "label": "Hold Music + Hold Message",
+            "ttsText": "",
+            "ttsVoice": "bIHbv24MWmeRgasZH58o",
+            "audioFileId": "__builtin:/usr/share/freeswitch/sounds/music/48000/danza-espanola-op-37-h-142-xii-arabesca.wav",
+            "audioSource": "file",
+            "autoRestart": true,
+            "transitions": {
+            },
+            "durationSeconds": 0,
+            "interruptDigits": "",
+            "leadInSilenceMs": 0,
+            "rememberPosition": false,
+            "startOffsetSeconds": 0,
+            "periodicAnnouncements": [
+                {
+                    "fileId": "__platform:will/hold_thanks_for_patience"
+                }
+            ],
+            "periodicAnnouncementIntervalSeconds": 30
+        },
+        "nq_block": {
+            "_pos": {
+                "x": 0,
+                "y": 320
+            },
+            "type": "tf_check_block_list",
+            "label": "Blocked ANI?",
+            "transitions": {
+                "blocked": "nq_inactive",
+                "not_blocked": "nq_hours"
+            }
+        },
+        "nq_end_1": {
+            "_pos": {
+                "x": 1100,
+                "y": 480
+            },
+            "type": "tf_end",
+            "label": "End",
+            "transitions": {
+            }
+        },
+        "nq_end_2": {
+            "_pos": {
+                "x": 1420,
+                "y": 320
+            },
+            "type": "tf_end",
+            "label": "End",
+            "transitions": {
+            }
+        },
+        "nq_hours": {
+            "_pos": {
+                "x": 0,
+                "y": 480
+            },
+            "type": "tf_time_of_day",
+            "label": "Maintenance Window",
+            "windows": [
+                {
+                    "end": "00:01",
+                    "date": "2000-01-01",
+                    "name": "maintenance",
+                    "start": "00:00",
+                    "windowType": "date"
+                }
+            ],
+            "timezone": "America/New_York",
+            "transitions": {
+                "no_match": "nq_logged_in",
+                "maintenance": "nq_techdiff"
+            }
+        },
+        "nq_queue": {
+            "_pos": {
+                "x": -220,
+                "y": 960
+            },
+            "type": "tf_route_to_queue",
+            "label": "Queue (Alpha → Regular)",
+            "transitions": {
+                "default": "nq_busy_msg",
+                "on_timeout": "nq_timeout_msg"
+            },
+            "agentExtension": ""
+        },
+        "nq_answer": {
+            "_pos": {
+                "x": 0,
+                "y": 160
+            },
+            "type": "tf_answer",
+            "label": "Answer",
+            "transitions": {
+                "default": "nq_block"
+            },
+            "leadInSilenceMs": 400
+        },
+        "nq_record": {
+            "_pos": {
+                "x": 1420,
+                "y": 160
+            },
+            "type": "tf_record",
+            "label": "Start Recording",
+            "action": "start",
+            "maskFill": "silence",
+            "transitions": {
+                "default": "nq_end_2"
+            },
+            "recordLimitSeconds": 0
+        },
+        "nq_whisper": {
+            "_pos": {
+                "x": 1100,
+                "y": 320
+            },
+            "type": "tf_whisper",
+            "label": "Whisper",
+            "ttsText": "NeuroQ",
+            "ttsVoice": "bIHbv24MWmeRgasZH58o",
+            "audioFileId": "",
+            "audioSource": "tts",
+            "transitions": {
+                "default": "nq_end_1"
+            }
+        },
+        "nq_busy_msg": {
+            "_pos": {
+                "x": 0,
+                "y": 1120
+            },
+            "type": "tf_play",
+            "label": "All Reps Busy (AllRepsBusyKelly.wav)",
+            "ttsText": "",
+            "ttsVoice": "bIHbv24MWmeRgasZH58o",
+            "audioFileId": "__platform:will/hold_all_agents_busy",
+            "audioSource": "file",
+            "autoRestart": false,
+            "transitions": {
+                "end_of_stream": "nq_hold"
+            },
+            "durationSeconds": 0,
+            "interruptDigits": "",
+            "leadInSilenceMs": 0,
+            "rememberPosition": false,
+            "startOffsetSeconds": 0,
+            "periodicAnnouncements": [
+            ],
+            "periodicAnnouncementIntervalSeconds": 30
+        },
+        "nq_hangup_1": {
+            "_pos": {
+                "x": 420,
+                "y": 480
+            },
+            "type": "tf_hangup",
+            "label": "Hang Up",
+            "transitions": {
+            }
+        },
+        "nq_hangup_2": {
+            "_pos": {
+                "x": 420,
+                "y": 800
+            },
+            "type": "tf_hangup",
+            "label": "Hang Up",
+            "transitions": {
+            }
+        },
+        "nq_hangup_3": {
+            "_pos": {
+                "x": 640,
+                "y": 1280
+            },
+            "type": "tf_hangup",
+            "label": "Hang Up",
+            "transitions": {
+            }
+        },
+        "nq_inactive": {
+            "_pos": {
+                "x": 420,
+                "y": 320
+            },
+            "type": "tf_play",
+            "label": "Number Not Active (Inactive.wav)",
+            "ttsText": "Sorry, this number is not currently active. Goodbye.",
+            "ttsVoice": "bIHbv24MWmeRgasZH58o",
+            "audioFileId": "",
+            "audioSource": "tts",
+            "autoRestart": false,
+            "transitions": {
+                "end_of_stream": "nq_hangup_1"
+            },
+            "durationSeconds": 0,
+            "interruptDigits": "",
+            "leadInSilenceMs": 0,
+            "rememberPosition": false,
+            "startOffsetSeconds": 0,
+            "periodicAnnouncements": [
+            ],
+            "periodicAnnouncementIntervalSeconds": 30
+        },
+        "nq_techdiff": {
+            "_pos": {
+                "x": 420,
+                "y": 640
+            },
+            "type": "tf_play",
+            "label": "Technical Difficulties (TechDiff.wav)",
+            "ttsText": "",
+            "ttsVoice": "bIHbv24MWmeRgasZH58o",
+            "audioFileId": "__platform:will/error_technical_difficulty",
+            "audioSource": "file",
+            "autoRestart": false,
+            "transitions": {
+                "end_of_stream": "nq_hangup_2"
+            },
+            "durationSeconds": 0,
+            "interruptDigits": "",
+            "leadInSilenceMs": 0,
+            "rememberPosition": false,
+            "startOffsetSeconds": 0,
+            "periodicAnnouncements": [
+            ],
+            "periodicAnnouncementIntervalSeconds": 30
+        },
+        "nq_get_elite": {
+            "_pos": {
+                "x": 0,
+                "y": 0
+            },
+            "type": "tf_get_sip_header",
+            "label": "Read X-Elite",
+            "headerName": "X-Elite",
+            "transitions": {
+                "default": "nq_answer"
+            },
+            "variableName": "is_elite"
+        },
+        "nq_logged_in": {
+            "_pos": {
+                "x": 0,
+                "y": 640
+            },
+            "type": "tf_check_agent_availability",
+            "check": "logged_in",
+            "label": "Any Agent Logged In?",
+            "campaignId": "",
+            "transitions": {
+                "available": "nq_elite_branch",
+                "unavailable": "nq_techdiff"
+            }
+        },
+        "nq_on_answer": {
+            "_pos": {
+                "x": 1420,
+                "y": 0
+            },
+            "type": "tf_on_agent_answer",
+            "label": "Agent Answer",
+            "transitions": {
+                "default": "nq_record"
+            }
+        },
+        "nq_script_pop": {
+            "_pos": {
+                "x": 1100,
+                "y": 160
+            },
+            "type": "tf_script_pop",
+            "label": "Script Pop",
+            "flowId": "",
+            "transitions": {
+                "default": "nq_whisper"
+            }
+        },
+        "nq_on_selected": {
+            "_pos": {
+                "x": 1100,
+                "y": 0
+            },
+            "type": "tf_on_agent_selected",
+            "label": "Agent Selected",
+            "transitions": {
+                "default": "nq_script_pop"
+            }
+        },
+        "nq_queue_elite": {
+            "_pos": {
+                "x": 220,
+                "y": 960
+            },
+            "type": "tf_route_to_queue",
+            "label": "Queue (Elite only)",
+            "transitions": {
+                "default": "nq_busy_msg",
+                "on_timeout": "nq_timeout_msg"
+            },
+            "agentGroupId": "a1b2c3d4-0163-4000-9000-00000000e117",
+            "agentExtension": ""
+        },
+        "nq_timeout_msg": {
+            "_pos": {
+                "x": 640,
+                "y": 1120
+            },
+            "type": "tf_play",
+            "label": "Queue Timeout Message",
+            "ttsText": "",
+            "ttsVoice": "bIHbv24MWmeRgasZH58o",
+            "audioFileId": "__platform:will/hold_high_call_volume",
+            "audioSource": "file",
+            "autoRestart": false,
+            "transitions": {
+                "end_of_stream": "nq_hangup_3"
+            },
+            "durationSeconds": 0,
+            "interruptDigits": "",
+            "leadInSilenceMs": 0,
+            "rememberPosition": false,
+            "startOffsetSeconds": 0,
+            "periodicAnnouncements": [
+            ],
+            "periodicAnnouncementIntervalSeconds": 30
+        },
+        "nq_elite_branch": {
+            "_pos": {
+                "x": 0,
+                "y": 800
+            },
+            "type": "tf_branch",
+            "label": "Elite Call?",
+            "condition": "{{flow.is_elite}} contains \"true\"",
+            "transitions": {
+                "true": "nq_queue_elite",
+                "false": "nq_queue"
+            }
+        }
+    },
+    "flow_type": "telephony",
+    "entry_node": "nq_get_elite"
+}
