@@ -108,7 +108,7 @@ ContactConnection records `CallRecord.RoutedTierLabel` ("Alpha") for exactly thi
 
 ## Built (S164) — draft, not published
 
-- **CRM flow "NeuroQ - V1 (from CRMPro, draft)"** — 125 nodes, inactive, in `tenant_test_tenant`
+- **CRM flow "NeuroQ - V1 (from CRMPro, draft)"** — 152 nodes (auto-laid-out top-to-bottom; jump-backs routed up the left margin), inactive, in `tenant_test_tenant`
   (`4fe3b048-47d6-5e3f-bb0c-cf33045fad5d`); exported to `neuroq-v1-crm-flow.json`. Generated from
   the V1 sources: every ScriptBox's text verbatim (RTF → HTML, formatting and colours kept), `<* *>`
   code replaced by `{{variables}}` or split into per-case nodes (one objection rebuttal per
