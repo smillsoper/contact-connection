@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import EmailComposeFields from './EmailComposeFields'
+import { findPathsBackBeforeCommit } from '../../utils/commitCheck'
 import type { Node, Edge } from '@xyflow/react'
 import type { NodeData, ContactConnectionNodeType } from '../../types/designer'
 import ScriptContentEditor from './ScriptContentEditor'
@@ -1159,6 +1160,50 @@ export default function NodePropertiesPanel({
               </>
             )}
           </>
+        )
+      }
+
+      case 'commit': {
+        const sections = nodes.filter((n) => n.type === 'section')
+        const allowed = new Set((data.allowedSectionIds as string[] | undefined) ?? [])
+        const back = findPathsBackBeforeCommit(node.id, edges)
+        const nameOf = (id: string) => (nodes.find((n) => n.id === id)?.data.label as string) || id
+        return (
+          <div className="flex flex-col gap-3">
+            <p className="text-xs text-gray-500 leading-snug">
+              Once a call passes this node it cannot go back: the engine refuses jumps to any earlier
+              section (only the ones checked below stay available) and records a commitment event on
+              the call record. Place it right after the action that can't be undone — e.g. the order
+              API's success.
+            </p>
+            {field('eventName', 'Event name', input('eventName', 'order_submitted'))}
+            {field('lockLabel', 'Message shown to the agent', input('lockLabel', 'Order submitted — finalize this call as an order'))}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-400">Sections still jumpable afterwards</label>
+              {sections.length === 0 && <p className="text-xs text-gray-600">No sections in this flow.</p>}
+              {sections.map((s) => (
+                <label key={s.id} className="flex items-center gap-2 text-xs text-gray-300">
+                  <input
+                    type="checkbox"
+                    checked={allowed.has(s.id)}
+                    onChange={(e) => {
+                      const next = new Set(allowed)
+                      if (e.target.checked) next.add(s.id); else next.delete(s.id)
+                      onUpdate(node.id, { allowedSectionIds: [...next] } as Partial<NodeData>)
+                    }}
+                  />
+                  {(s.data.label as string) || s.id}
+                </label>
+              ))}
+            </div>
+            {back.length > 0 && (
+              <div className="rounded border border-amber-700 bg-amber-950/40 px-2 py-1.5 text-xs text-amber-300">
+                <p className="font-medium mb-1">These connections lead back before the commit point:</p>
+                {back.map((e) => <p key={e.id} className="font-mono text-[11px]">{nameOf(e.source)} → {nameOf(e.target)}</p>)}
+                <p className="mt-1 text-amber-400/80">Jumps are blocked after a commit, but wired connections are part of the script — remove or reroute them.</p>
+              </div>
+            )}
+          </div>
         )
       }
 

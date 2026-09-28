@@ -521,6 +521,13 @@ export default function NodeDisplay({ node, onAdvance, onJump, advancing, valida
 
   return (
     <div className="flex flex-col gap-6 p-6 max-w-2xl mx-auto">
+      {/* Commit point passed — earlier sections are closed (engine-enforced) */}
+      {node.commitLabel && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-950/50 border border-amber-700 text-amber-200 text-sm">
+          <span>🔒</span>
+          <span className="font-medium">{node.commitLabel}</span>
+        </div>
+      )}
       {/* Section bar — shown when inside a named section */}
       {node.currentSectionName && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-800/60 border border-gray-700">
@@ -1161,7 +1168,7 @@ export default function NodeDisplay({ node, onAdvance, onJump, advancing, valida
       )}
 
       {/* Script node — just a Next button */}
-      {(node.nodeType === 'script' || node.nodeType === 'branch' || node.nodeType === 'set_variable' || node.nodeType === 'api_call' || node.nodeType === 'set_custom_field' || node.nodeType === 'get_custom_field' || node.nodeType === 'store_value' || node.nodeType === 'get_value' || node.nodeType === 'add_to_cart' || node.nodeType === 'remove_cart_item' || node.nodeType === 'reset_cart' || node.nodeType === 'authorize_payment' || node.nodeType === 'void_payment' || node.nodeType === 'send_email') && (
+      {(node.nodeType === 'script' || node.nodeType === 'branch' || node.nodeType === 'set_variable' || node.nodeType === 'api_call' || node.nodeType === 'set_custom_field' || node.nodeType === 'get_custom_field' || node.nodeType === 'store_value' || node.nodeType === 'get_value' || node.nodeType === 'add_to_cart' || node.nodeType === 'remove_cart_item' || node.nodeType === 'reset_cart' || node.nodeType === 'authorize_payment' || node.nodeType === 'void_payment' || node.nodeType === 'send_email' || node.nodeType === 'commit') && (
         <div className="flex flex-col items-start gap-1.5">
           <button
             onClick={() => onAdvance()}

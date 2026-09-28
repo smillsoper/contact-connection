@@ -180,6 +180,10 @@ public class FlowNodeState
     /// <summary>Sections visible in the jump dropdown for this node.</summary>
     public List<JumpTarget>? JumpTargets { get; set; }
 
+    /// <summary>Set once the flow has passed a commit point — the agent UI shows it as a banner;
+    /// jumps back are refused by the engine (only the commit point's allowed sections remain).</summary>
+    public string? CommitLabel { get; set; }
+
     /// <summary>
     /// When set, names a trigger_telephony_event eventName this node is waiting on — the agent UI
     /// disables manual advance and auto-advances the instant that event's telephony branch reaches

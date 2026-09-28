@@ -17,6 +17,7 @@ export type ContactConnectionNodeType =
   | 'store_value'
   | 'get_value'
   | 'send_email'
+  | 'commit'
   | 'add_to_cart'
   | 'remove_cart_item'
   | 'reset_cart'
@@ -317,6 +318,12 @@ export const NODE_META: Record<
     description: 'Read a stored value back into a flow variable',
     handles: 'single',
   },
+  commit: {
+    label: 'Commit Point',
+    color: '#b45309',
+    description: 'Point of no return — after this, the agent cannot jump back to earlier sections',
+    handles: 'single',
+  },
   send_email: {
     label: 'Send Email',
     color: '#be185d',
@@ -403,6 +410,8 @@ export function defaultNodeData(type: ContactConnectionNodeType): NodeData {
       return { label: 'Store Value', scope: 'campaign', keyName: '', value: '', retention: 'forever' }
     case 'get_value':
       return { label: 'Get Value', scope: 'campaign', keyName: '', outputVariable: '' }
+    case 'commit':
+      return { label: 'Commit Point', eventName: 'order_submitted', lockLabel: '', allowedSectionIds: [] }
     case 'send_email':
       return { label: 'Send Email', emailTo: '', emailCc: '', emailBcc: '', emailFromName: '', emailReplyTo: '', emailSubject: '', emailBodyHtml: '' }
     case 'add_to_cart':

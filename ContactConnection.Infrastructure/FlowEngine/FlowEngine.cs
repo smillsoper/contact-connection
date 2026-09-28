@@ -49,7 +49,7 @@ public class FlowEngine : IFlowEngine
         ["branch", "set_variable", "section", "execute_flow", "transition_to_flow", "api_call", "scheduled_callback",
          "set_custom_field", "get_custom_field", "store_value", "get_value",
          "add_to_cart", "remove_cart_item", "reset_cart",
-         "authorize_payment", "void_payment", "send_email"];
+         "authorize_payment", "void_payment", "send_email", "commit"];
 
     private static readonly TimeSpan SessionTtl = TimeSpan.FromHours(12);
 
@@ -189,6 +189,8 @@ public class FlowEngine : IFlowEngine
 
             if (sectionNode is null)
                 throw new InvalidOperationException($"Section node '{request.JumpToSectionNodeId}' not found.");
+
+            EnsureJumpAllowed(ctx, request.JumpToSectionNodeId);
 
             // Unwind call stack: remove the target frame and all frames deeper than it
             if (unwindToStackIndex.HasValue)
@@ -374,6 +376,18 @@ public class FlowEngine : IFlowEngine
         };
     }
 
+    /// <summary>Commit point: nothing before the point of no return can be revisited. Enforced here in
+    /// the engine, not just by hiding the dropdown, so a stale UI or a direct API call can't get round
+    /// it. Only the commit node's allowed sections stay reachable.</summary>
+    internal static void EnsureJumpAllowed(FlowExecutionContext ctx, string sectionNodeId)
+    {
+        if (ctx.IsCommitted && !ctx.CommitAllowedSections.Contains(sectionNodeId))
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(ctx.CommitLabel)
+                    ? "This call has passed a commit point \u2014 earlier sections can no longer be changed."
+                    : ctx.CommitLabel);
+    }
+
     private static bool ReferencesCart(JsonObject node) =>
         node.ToJsonString().Contains("{{cart.", StringComparison.OrdinalIgnoreCase);
 
@@ -532,9 +546,16 @@ public class FlowEngine : IFlowEngine
     {
         state.CurrentSectionName = ctx.CurrentSectionName;
         state.SectionLocked      = ctx.CurrentSectionLocked;
+        if (ctx.IsCommitted)
+            state.CommitLabel = string.IsNullOrWhiteSpace(ctx.CommitLabel) ? "Committed — no further changes" : ctx.CommitLabel;
 
         if (HasAnySections(ctx))
-            state.JumpTargets = BuildJumpTargets(ctx);
+        {
+            var targets = BuildJumpTargets(ctx);
+            if (ctx.IsCommitted)
+                targets = targets.Where(t => ctx.CommitAllowedSections.Contains(t.SectionNodeId)).ToList();
+            state.JumpTargets = targets;
+        }
     }
 
     private static bool HasAnySections(FlowExecutionContext ctx)

@@ -222,6 +222,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.GetCustomFieldNodeHandler>();
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.StoreValueNodeHandler>();
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.SendEmailNodeHandler>();
+        services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.CommitNodeHandler>();
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.GetValueNodeHandler>();
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.AddToCartNodeHandler>();
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.RemoveCartItemNodeHandler>();

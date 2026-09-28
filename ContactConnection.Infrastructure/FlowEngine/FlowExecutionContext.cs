@@ -45,6 +45,14 @@ public class FlowExecutionContext
     // (even unfinished) sections visible in the jump dropdown.
     public HashSet<string> EncounteredSectionNodeIds { get; init; } = [];
 
+    // Commit point (ARCHITECTURE §21 commitment events) — set by CommitNodeHandler. Once set, the
+    // engine refuses section jumps (server-side) except to CommitAllowedSections, so nothing before
+    // the point of no return (e.g. a submitted order) can be revisited.
+    public string? CommitEventName { get; set; }
+    public string? CommitLabel { get; set; }
+    public HashSet<string> CommitAllowedSections { get; set; } = [];
+    public bool IsCommitted => !string.IsNullOrEmpty(CommitEventName);
+
     // Baseline data populated from call record and agent at session start
     public Dictionary<string, string> CallRecord { get; init; } = [];
 
@@ -83,6 +91,7 @@ public class FlowExecutionContext
             CompletedSectionNodeIds,
             EncounteredSectionNodeIds,
             CallStack,
+            CommitEventName, CommitLabel, CommitAllowedSections,
         });
 
     public string SerializeExecutionHistory() =>
@@ -124,6 +133,9 @@ public class FlowExecutionContext
             CompletedSectionNodeIds   = varStore.CompletedSectionNodeIds,
             EncounteredSectionNodeIds = varStore.EncounteredSectionNodeIds,
             CallStack                 = varStore.CallStack,
+            CommitEventName           = varStore.CommitEventName,
+            CommitLabel               = varStore.CommitLabel,
+            CommitAllowedSections     = varStore.CommitAllowedSections ?? [],
             CallRecord              = callRecord,
             Caller                  = caller,
             Agent                   = agent,
@@ -141,7 +153,11 @@ public class FlowExecutionContext
         bool CurrentSectionLocked,
         HashSet<string> CompletedSectionNodeIds,
         HashSet<string> EncounteredSectionNodeIds,
-        List<FlowCallFrame> CallStack)
+        List<FlowCallFrame> CallStack,
+        // Added S164 — absent in sessions stored before; nullable so old JSON still deserializes.
+        string? CommitEventName = null,
+        string? CommitLabel = null,
+        HashSet<string>? CommitAllowedSections = null)
     {
         public VariableStore() : this([], [], [], null, null, false, [], [], []) { }
     }

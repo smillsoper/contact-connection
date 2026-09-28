@@ -15,7 +15,7 @@ export interface FlowNodeState {
   sessionId: string
   callRecordId: string
   nodeId: string
-  nodeType: 'script' | 'input' | 'email' | 'phone' | 'address' | 'branch' | 'set_variable' | 'api_call' | 'end' | 'section' | 'execute_flow' | 'transition_to_flow' | 'set_custom_field' | 'get_custom_field' | 'store_value' | 'get_value' | 'add_to_cart' | 'remove_cart_item' | 'reset_cart' | 'authorize_payment' | 'void_payment' | 'send_email'
+  nodeType: 'script' | 'input' | 'email' | 'phone' | 'address' | 'branch' | 'set_variable' | 'api_call' | 'end' | 'section' | 'execute_flow' | 'transition_to_flow' | 'set_custom_field' | 'get_custom_field' | 'store_value' | 'get_value' | 'add_to_cart' | 'remove_cart_item' | 'reset_cart' | 'authorize_payment' | 'void_payment' | 'send_email' | 'commit'
   label: string
   flowName?: string
   content?: string
@@ -44,6 +44,8 @@ export interface FlowNodeState {
   // section state
   currentSectionName?: string
   sectionLocked?: boolean
+  /** Set once the flow passed a commit point — shown as a banner; earlier sections can't be revisited. */
+  commitLabel?: string | null
   jumpTargets?: JumpTarget[]
   // auto-advance when the named trigger_telephony_event branch reaches its own tf_end (closes
   // the trigger_telephony_event fire-and-continue race — see project_shared_call_variables)

@@ -40,6 +40,7 @@ import ScheduledCallbackNode from '../components/designer/nodes/ScheduledCallbac
 import SetCustomFieldNode from '../components/designer/nodes/SetCustomFieldNode'
 import GetCustomFieldNode from '../components/designer/nodes/GetCustomFieldNode'
 import SendEmailNode from '../components/designer/nodes/SendEmailNode'
+import CommitNode from '../components/designer/nodes/CommitNode'
 import StoreValueNode from '../components/designer/nodes/StoreValueNode'
 import GetValueNode from '../components/designer/nodes/GetValueNode'
 import AddToCartNode from '../components/designer/nodes/AddToCartNode'
@@ -71,6 +72,7 @@ const nodeTypes = {
   get_custom_field: GetCustomFieldNode,
   store_value: StoreValueNode,
   send_email: SendEmailNode,
+  commit: CommitNode,
   get_value: GetValueNode,
   add_to_cart: AddToCartNode,
   remove_cart_item: RemoveCartItemNode,
