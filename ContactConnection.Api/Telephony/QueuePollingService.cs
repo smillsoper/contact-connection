@@ -273,7 +273,7 @@ public sealed class QueuePollingService : BackgroundService
         var offer = await ranker.GetOfferSetAsync(
             db, placeholder.TenantId, placeholder.CampaignId, SecondsWaited(placeholder, now),
             excludeAgentIds: claimedThisTick, restrictGroupId: QueueOffer.RestrictGroupId(placeholder.Vars), ct: ct);
-        await PublishOfferTierAsync(placeholder, offer, ct);
+        await PublishOfferTierAsync(placeholder, offer, db, ranker, ct);
 
         foreach (var candidate in offer.Agents.Take(MaxAutoAnswerAttempts))
         {
@@ -315,7 +315,7 @@ public sealed class QueuePollingService : BackgroundService
         var offer = await ranker.GetOfferSetAsync(
             db, session.TenantId, session.CampaignId, SecondsWaited(session, now),
             excludeAgentIds: exclude, restrictGroupId: QueueOffer.RestrictGroupId(session.Vars), ct: ct);
-        await PublishOfferTierAsync(session, offer, ct);
+        await PublishOfferTierAsync(session, offer, db, ranker, ct);
 
         var attemptedDelivery = false;
         foreach (var candidate in offer.Agents.Take(MaxAutoAnswerAttempts))
@@ -433,7 +433,7 @@ public sealed class QueuePollingService : BackgroundService
             eligible.Count, string.Join(", ", eligible.Select(r => r.AgentId)));
 
         await WithdrawStaleOffersAsync(session, eligible, ct);
-        await PublishOfferTierAsync(session, offer, ct);
+        await PublishOfferTierAsync(session, offer, db, ranker, ct);
 
         foreach (var candidate in eligible)
         {
@@ -497,11 +497,18 @@ public sealed class QueuePollingService : BackgroundService
     }
 
     /// <summary>Records which tier a queued call is currently offered to (Queued Calls dashboard
-    /// widget) and, only when that changed, pushes ReceiveQueueOfferChanged to supervisors.</summary>
-    private async Task PublishOfferTierAsync(TelephonyCallSession session, OfferSet offer, CancellationToken ct)
+    /// widget) and, only when that changed, pushes ReceiveQueueOfferChanged to supervisors. When
+    /// nobody is offered, also whether anyone who could take the call is logged in at all — the
+    /// "no agents logged in" alert a manager on duty answers by assigning an agent (the ranker reads
+    /// assignments fresh every tick, so a newly assigned Available agent is offered the call on the
+    /// next poll).</summary>
+    private async Task PublishOfferTierAsync(
+        TelephonyCallSession session, OfferSet offer, TenantDbContext db, EligibleAgentRanker ranker, CancellationToken ct)
     {
+        var noneLoggedIn = offer.Agents.Count == 0
+            && !await ranker.AnyLoggedInAsync(db, session.TenantId, session.CampaignId, QueueOffer.RestrictGroupId(session.Vars), ct);
         var key = QueueOffer.OfferTierKey(session.ChannelUuid);
-        var snapshot = QueueOffer.FormatOfferTier(offer);
+        var snapshot = QueueOffer.FormatOfferTier(offer, noneLoggedIn);
         if (await _sessionStore.GetKeyAsync(key, ct) == snapshot) return;
 
         await _sessionStore.SetKeyAsync(key, snapshot, OfferKeyTtl, ct);

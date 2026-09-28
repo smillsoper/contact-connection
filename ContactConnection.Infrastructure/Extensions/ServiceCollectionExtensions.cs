@@ -221,6 +221,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.SetCustomFieldNodeHandler>();
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.GetCustomFieldNodeHandler>();
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.StoreValueNodeHandler>();
+        services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.SendEmailNodeHandler>();
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.GetValueNodeHandler>();
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.AddToCartNodeHandler>();
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.RemoveCartItemNodeHandler>();
@@ -270,6 +271,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ITelephonyNodeHandler, Telephony.NodeHandlers.SetCustomFieldNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, Telephony.NodeHandlers.GetCustomFieldNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, Telephony.NodeHandlers.StoreValueNodeHandler>();
+        services.AddScoped<ITelephonyNodeHandler, Telephony.NodeHandlers.SendEmailNodeHandler>();
         services.AddScoped<ITelephonyNodeHandler, Telephony.NodeHandlers.GetValueNodeHandler>();
 
         // Call session store (singleton — Redis operations are inherently stateless)

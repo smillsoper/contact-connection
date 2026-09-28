@@ -31,6 +31,7 @@ const INBOUND_NODES: TelephonyNodeType[] = [
   'tf_get_custom_field',
   'tf_store_value',
   'tf_get_value',
+  'tf_send_email',
   'tf_end',
   // Event listener nodes (independent entry points)
   'tf_on_agent_selected',
@@ -59,6 +60,7 @@ const OUTBOUND_NODES: TelephonyNodeType[] = [
   'tf_get_custom_field',
   'tf_store_value',
   'tf_get_value',
+  'tf_send_email',
   'tf_end',
 ]
 
@@ -80,6 +82,7 @@ const OUTBOUND_MANUAL_NODES: TelephonyNodeType[] = [
   'tf_get_custom_field',
   'tf_store_value',
   'tf_get_value',
+  'tf_send_email',
   'tf_end',
 ]
 

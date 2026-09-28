@@ -47,7 +47,7 @@ public class CheckAgentAvailabilityNodeHandler : ITelephonyNodeHandler
         // check: "available" (default) — someone could take the call right now; "logged_in" —
         // anyone eligible is signed in at all (busy counts), i.e. the call will be answered eventually.
         var ok = node["check"]?.GetValue<string>() == "logged_in"
-            ? await _ranker.AnyLoggedInAsync(db, ctx.TenantId, campaignId, ct)
+            ? await _ranker.AnyLoggedInAsync(db, ctx.TenantId, campaignId, ct: ct)
             : (await _ranker.GetRankedEligibleAgentsAsync(db, ctx.TenantId, campaignId, ct: ct)).Count > 0;
 
         var transition = ok ? "available" : "unavailable";

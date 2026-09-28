@@ -92,15 +92,22 @@ NeuroQ); definition exported to `neuroq-telephony-flow.json` (its `agentGroupId`
 "NeuroQ Elite" group — remap for production). Groups created alongside, no members yet: **Alpha
 Sales** (NeuroQ tier 10, label "Alpha") and **NeuroQ Elite** (tier 0, label "Elite").
 
-`X-Elite` header → answer → block list (TTS "not currently active") → maintenance window
-(placeholder date — set the real schedule) → **any agent logged in?** (new `check: logged_in` mode
-of tf_check_agent_availability; busy counts) → Elite? → `tf_route_to_queue` pinned to NeuroQ Elite,
-or unpinned (parallel queuing: Alpha first, regular pool, re-offered to Alpha) → "all reps busy" →
-music with a periodic hold message. Event branches: agent selected → script pop → whisper
-"NeuroQ"; agent answer → start recording. Queue timeout → high-call-volume message → hang up
-(CXone had no timeout — confirm the wanted behavior).
+`X-Elite` header → answer → block list (TTS "not currently active" → hang up — the one deliberate
+reject) → **any agent logged in?** (`check: logged_in`; busy counts) → if nobody: **`tf_send_email`
+to the MOD and queue anyway** → Elite? → `tf_route_to_queue` pinned to NeuroQ Elite, or unpinned
+(parallel queuing: Alpha first, regular pool, re-offered to Alpha) → "all reps busy" → music with a
+periodic hold message. Event branches: agent selected → script pop → whisper "NeuroQ"; agent
+answer → start recording.
+
+**Deliberate departures from CXone (Stephen, S163):** no hang-up when nobody is logged in — the MOD
+is emailed and the supervisor dashboard's Queued Calls widget raises a "no agents logged in" alert
+with an **Assign agent** action (assignments are read every 1-second poll, so the call goes to the
+newly assigned agent once Available). The maintenance-hours hang-up is dropped (rarely used; a
+contact center answers calls). NeuroQ runs with **no queue size limit and no queue timeout**
+(campaign MaxQueueSize = QueueTimeoutSeconds = 0) — Life Seasons wants every call answered. The MOD
+email's To is left blank for Clint to fill in.
 
 Gaps from the list above now closed: tiered routing (1), Elite without a second campaign (2),
 "Alpha Sales!" cue = the agent's tier badge + `CallRecord.RoutedTierLabel` for commissions (4).
-Still open: email alert when nobody is logged in (3), hold-message resume-at-position (5), and the
-real audio (TTS/platform phrases stand in).
+Also closed: the "nobody logged in" alert (3) — email node + dashboard alert. Still open:
+hold-message resume-at-position (5); real audio is Clint's to drop in.

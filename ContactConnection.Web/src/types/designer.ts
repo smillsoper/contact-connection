@@ -16,6 +16,7 @@ export type ContactConnectionNodeType =
   | 'get_custom_field'
   | 'store_value'
   | 'get_value'
+  | 'send_email'
   | 'add_to_cart'
   | 'remove_cart_item'
   | 'reset_cart'
@@ -316,6 +317,12 @@ export const NODE_META: Record<
     description: 'Read a stored value back into a flow variable',
     handles: 'single',
   },
+  send_email: {
+    label: 'Send Email',
+    color: '#be185d',
+    description: 'Send a templated email and continue (not shown to the agent)',
+    handles: 'single',
+  },
   add_to_cart: {
     label: 'Add to Cart',
     color: '#059669',
@@ -396,6 +403,8 @@ export function defaultNodeData(type: ContactConnectionNodeType): NodeData {
       return { label: 'Store Value', scope: 'campaign', keyName: '', value: '', retention: 'forever' }
     case 'get_value':
       return { label: 'Get Value', scope: 'campaign', keyName: '', outputVariable: '' }
+    case 'send_email':
+      return { label: 'Send Email', emailTo: '', emailCc: '', emailBcc: '', emailFromName: '', emailReplyTo: '', emailSubject: '', emailBodyHtml: '' }
     case 'add_to_cart':
       return { label: 'Add to Cart', offerId: '', offerDisplayName: '', quantity: 1, mode: 'add', replacesOfferIds: [], replacesOfferNames: [] }
     case 'remove_cart_item':

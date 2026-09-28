@@ -188,6 +188,7 @@ export function computeAncestorVars(
       case 'transition_to_flow':
       case 'set_custom_field':
       case 'store_value':
+      case 'send_email':
         break
     }
   }

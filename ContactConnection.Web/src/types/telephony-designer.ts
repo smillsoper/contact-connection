@@ -21,6 +21,7 @@ export type TelephonyNodeType =
   | 'tf_get_custom_field'
   | 'tf_store_value'
   | 'tf_get_value'
+  | 'tf_send_email'
   // Signal / media actions
   | 'tf_dtmf'
   | 'tf_ivr_menu'
@@ -419,6 +420,12 @@ export const TELEPHONY_NODE_META: Record<
     description: 'Read a stored value back into a flow variable',
     handles: 'single',
   },
+  tf_send_email: {
+    label: 'Send Email',
+    color: '#be185d',
+    description: 'Send a templated email (e.g. alert a manager) and continue',
+    handles: 'single',
+  },
   tf_dtmf: {
     label: 'Send DTMF',
     color: '#ca8a04',
@@ -601,6 +608,8 @@ export function defaultTelNodeData(type: TelephonyNodeType): TelNodeData {
       return { label: 'Store Value', scope: 'campaign', keyName: '', value: '', retention: 'forever' }
     case 'tf_get_value':
       return { label: 'Get Value', scope: 'campaign', keyName: '', variableName: '' }
+    case 'tf_send_email':
+      return { label: 'Send Email', emailTo: '', emailCc: '', emailBcc: '', emailFromName: '', emailReplyTo: '', emailSubject: '', emailBodyHtml: '' }
     case 'tf_dtmf':
       return { label: 'Send DTMF', digits: '', durationMs: 100, interDigitGapMs: 50, waitForCompletion: true }
     case 'tf_ivr_menu':

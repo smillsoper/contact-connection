@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import EmailComposeFields from './EmailComposeFields'
 import type { Node, Edge } from '@xyflow/react'
 import type { NodeData, ContactConnectionNodeType } from '../../types/designer'
 import ScriptContentEditor from './ScriptContentEditor'
@@ -1160,6 +1161,24 @@ export default function NodePropertiesPanel({
           </>
         )
       }
+
+      case 'send_email':
+        return (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs text-gray-500 leading-snug">
+              Sends the email and moves on — the agent never sees this node. Not the "Email" node,
+              which collects an email address from the caller.
+            </p>
+            <EmailComposeFields
+              data={data}
+              onChange={(patch) => onUpdate(node.id, patch as Partial<NodeData>)}
+              prefix="email"
+              vars={['{{caller.phone}}', '{{caller.first_name}}', '{{call_record.id}}', '{{agent.name}}']}
+              inputCls="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-sky-500"
+              labelCls="block text-xs text-gray-400 mb-1"
+            />
+          </div>
+        )
 
       case 'store_value':
       case 'get_value': {

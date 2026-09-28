@@ -195,11 +195,13 @@ public class EligibleAgentRankerTierTests
         var offer = new OfferSet([
             new RankedAgent(Guid.NewGuid(), 50, DateTimeOffset.UtcNow, 10, Guid.NewGuid(), "Alpha"),
             new RankedAgent(Guid.NewGuid(), 50, DateTimeOffset.UtcNow, 10, Guid.NewGuid(), "Alpha")], 10, null);
-        Assert.Equal(((int?)10, "Alpha", (int?)null, 2), QueueOffer.ParseOfferTier(QueueOffer.FormatOfferTier(offer)));
+        Assert.Equal(((int?)10, "Alpha", (int?)null, 2, false), QueueOffer.ParseOfferTier(QueueOffer.FormatOfferTier(offer)));
 
         var held = new OfferSet([], null, 10);
-        Assert.Equal(((int?)null, (string?)null, (int?)10, 0), QueueOffer.ParseOfferTier(QueueOffer.FormatOfferTier(held)));
-        Assert.Equal(((int?)null, (string?)null, (int?)null, 0), QueueOffer.ParseOfferTier(null));
+        Assert.Equal(((int?)null, (string?)null, (int?)10, 0, false), QueueOffer.ParseOfferTier(QueueOffer.FormatOfferTier(held)));
+        Assert.Equal(((int?)null, (string?)null, (int?)null, 0, true),
+            QueueOffer.ParseOfferTier(QueueOffer.FormatOfferTier(new OfferSet([], null, null), noneLoggedIn: true)));
+        Assert.Equal(((int?)null, (string?)null, (int?)null, 0, false), QueueOffer.ParseOfferTier(null));
     }
 
     [Fact]
@@ -213,5 +215,23 @@ public class EligibleAgentRankerTierTests
 
         Assert.Null((await EligibleAgentRanker.ResolveRouteAsync(db, campaignId, agent))!.TierLabel);
         Assert.Equal("Elite", (await EligibleAgentRanker.ResolveRouteAsync(db, campaignId, agent, eliteGroup))!.TierLabel);
+    }
+
+    /// <summary>The "assign an agent while the call waits" path: assignments are read fresh on
+    /// every evaluation, so an agent assigned after the call queued is offered it on the next poll.</summary>
+    [Fact]
+    public async Task AgentAssignedWhileCallQueued_IsOfferedOnNextEvaluation()
+    {
+        await using var db = NewDb();
+        var (campaignId, agent) = (Guid.NewGuid(), Guid.NewGuid());
+        var ranker = new EligibleAgentRanker(AllAvailable().Object);
+
+        Assert.False(await ranker.AnyLoggedInAsync(db, Guid.NewGuid(), campaignId));
+        Assert.Empty((await ranker.GetOfferSetAsync(db, Guid.NewGuid(), campaignId, 120)).Agents);
+
+        db.AgentCampaignAssignments.Add(AgentCampaignAssignment.Create(agent, campaignId));
+        await db.SaveChangesAsync();
+
+        Assert.Equal([agent], (await ranker.GetOfferSetAsync(db, Guid.NewGuid(), campaignId, 121)).Agents.Select(a => a.AgentId));
     }
 }

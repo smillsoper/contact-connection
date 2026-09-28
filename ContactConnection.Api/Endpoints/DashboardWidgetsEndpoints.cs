@@ -174,7 +174,7 @@ public static class DashboardWidgetsEndpoints
             var rows = new List<object>();
             foreach (var s in queued.OrderBy(s => s.Vars.GetValueOrDefault("_in_queue_at") ?? ""))
             {
-                var (tier, labels, heldFor, agentCount) =
+                var (tier, labels, heldFor, agentCount, noneLoggedIn) =
                     QueueOffer.ParseOfferTier(await sessions.GetKeyAsync(QueueOffer.OfferTierKey(s.ChannelUuid), ct));
                 var restrict = QueueOffer.RestrictGroupId(s.Vars);
                 rows.Add(new
@@ -187,6 +187,8 @@ public static class DashboardWidgetsEndpoints
                     is_queue_callback = s.Vars.GetValueOrDefault("_queue_callback") == "true",
                     in_menu           = !ContactConnection.Api.Telephony.QueuePollingService.IsDeliverable(s),
                     pinned_group      = restrict is { } rg ? groupNames.GetValueOrDefault(rg, rg.ToString()) : null,
+                    pinned_group_id   = restrict,
+                    none_logged_in    = noneLoggedIn,
                     offer_tier        = tier,
                     offer_labels      = labels,
                     held_for_tier     = heldFor,

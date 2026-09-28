@@ -106,9 +106,10 @@ public class EligibleAgentRanker(IAgentStateStore stateStore)
     /// <summary>Whether any agent with a route to the campaign is logged in at all (any state but
     /// logged_out — available, on a call, in ACW, on break…). CXone's "CheckAgents" step: nobody
     /// logged in means nobody will ever answer, unlike "nobody available right now".</summary>
-    public async Task<bool> AnyLoggedInAsync(TenantDbContext db, Guid tenantId, Guid campaignId, CancellationToken ct = default)
+    public async Task<bool> AnyLoggedInAsync(
+        TenantDbContext db, Guid tenantId, Guid campaignId, Guid? restrictGroupId = null, CancellationToken ct = default)
     {
-        foreach (var agentId in (await LoadRoutesAsync(db, campaignId, null, onlyAgentId: null, ct)).Keys)
+        foreach (var agentId in (await LoadRoutesAsync(db, campaignId, restrictGroupId, onlyAgentId: null, ct)).Keys)
         {
             var state = await stateStore.GetAsync(tenantId, agentId, ct);
             if (state is not null && state.Code != AgentStateCodes.LoggedOut) return true;

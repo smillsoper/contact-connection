@@ -36,7 +36,7 @@
             "label": "Blocked ANI?",
             "transitions": {
                 "blocked": "nq_inactive",
-                "not_blocked": "nq_hours"
+                "not_blocked": "nq_logged_in"
             }
         },
         "nq_end_1": {
@@ -59,28 +59,6 @@
             "transitions": {
             }
         },
-        "nq_hours": {
-            "_pos": {
-                "x": 0,
-                "y": 480
-            },
-            "type": "tf_time_of_day",
-            "label": "Maintenance Window",
-            "windows": [
-                {
-                    "end": "00:01",
-                    "date": "2000-01-01",
-                    "name": "maintenance",
-                    "start": "00:00",
-                    "windowType": "date"
-                }
-            ],
-            "timezone": "America/New_York",
-            "transitions": {
-                "no_match": "nq_logged_in",
-                "maintenance": "nq_techdiff"
-            }
-        },
         "nq_queue": {
             "_pos": {
                 "x": -220,
@@ -89,8 +67,7 @@
             "type": "tf_route_to_queue",
             "label": "Queue (Alpha → Regular)",
             "transitions": {
-                "default": "nq_busy_msg",
-                "on_timeout": "nq_timeout_msg"
+                "default": "nq_busy_msg"
             },
             "agentExtension": ""
         },
@@ -169,26 +146,6 @@
             "transitions": {
             }
         },
-        "nq_hangup_2": {
-            "_pos": {
-                "x": 420,
-                "y": 800
-            },
-            "type": "tf_hangup",
-            "label": "Hang Up",
-            "transitions": {
-            }
-        },
-        "nq_hangup_3": {
-            "_pos": {
-                "x": 640,
-                "y": 1280
-            },
-            "type": "tf_hangup",
-            "label": "Hang Up",
-            "transitions": {
-            }
-        },
         "nq_inactive": {
             "_pos": {
                 "x": 420,
@@ -213,29 +170,23 @@
             ],
             "periodicAnnouncementIntervalSeconds": 30
         },
-        "nq_techdiff": {
+        "nq_alert_mod": {
             "_pos": {
                 "x": 420,
-                "y": 640
+                "y": 480
             },
-            "type": "tf_play",
-            "label": "Technical Difficulties (TechDiff.wav)",
-            "ttsText": "",
-            "ttsVoice": "bIHbv24MWmeRgasZH58o",
-            "audioFileId": "__platform:will/error_technical_difficulty",
-            "audioSource": "file",
-            "autoRestart": false,
+            "type": "tf_send_email",
+            "label": "Email MOD — No Agents Logged In",
+            "emailCc": "",
+            "emailTo": "",
+            "emailBcc": "",
             "transitions": {
-                "end_of_stream": "nq_hangup_2"
+                "default": "nq_elite_branch"
             },
-            "durationSeconds": 0,
-            "interruptDigits": "",
-            "leadInSilenceMs": 0,
-            "rememberPosition": false,
-            "startOffsetSeconds": 0,
-            "periodicAnnouncements": [
-            ],
-            "periodicAnnouncementIntervalSeconds": 30
+            "emailReplyTo": "",
+            "emailSubject": "NeuroQ call waiting — no agents logged in ({{caller.ani}})",
+            "emailBodyHtml": "<p>A NeuroQ call from <strong>{{caller.ani}}</strong> to {{call.did}} is waiting in queue and no agent who can take it is logged in.</p><p>Assign an agent from the supervisor dashboard (Queued Calls widget) to get it answered.</p>",
+            "emailFromName": "NeuroQ Phone Line"
         },
         "nq_get_elite": {
             "_pos": {
@@ -253,7 +204,7 @@
         "nq_logged_in": {
             "_pos": {
                 "x": 0,
-                "y": 640
+                "y": 480
             },
             "type": "tf_check_agent_availability",
             "check": "logged_in",
@@ -261,7 +212,7 @@
             "campaignId": "",
             "transitions": {
                 "available": "nq_elite_branch",
-                "unavailable": "nq_techdiff"
+                "unavailable": "nq_alert_mod"
             }
         },
         "nq_on_answer": {
@@ -306,35 +257,10 @@
             "type": "tf_route_to_queue",
             "label": "Queue (Elite only)",
             "transitions": {
-                "default": "nq_busy_msg",
-                "on_timeout": "nq_timeout_msg"
+                "default": "nq_busy_msg"
             },
             "agentGroupId": "a1b2c3d4-0163-4000-9000-00000000e117",
             "agentExtension": ""
-        },
-        "nq_timeout_msg": {
-            "_pos": {
-                "x": 640,
-                "y": 1120
-            },
-            "type": "tf_play",
-            "label": "Queue Timeout Message",
-            "ttsText": "",
-            "ttsVoice": "bIHbv24MWmeRgasZH58o",
-            "audioFileId": "__platform:will/hold_high_call_volume",
-            "audioSource": "file",
-            "autoRestart": false,
-            "transitions": {
-                "end_of_stream": "nq_hangup_3"
-            },
-            "durationSeconds": 0,
-            "interruptDigits": "",
-            "leadInSilenceMs": 0,
-            "rememberPosition": false,
-            "startOffsetSeconds": 0,
-            "periodicAnnouncements": [
-            ],
-            "periodicAnnouncementIntervalSeconds": 30
         },
         "nq_elite_branch": {
             "_pos": {

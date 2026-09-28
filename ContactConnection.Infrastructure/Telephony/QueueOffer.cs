@@ -11,19 +11,21 @@ public static class QueueOffer
 {
     public const string RestrictGroupVar = "_restrict_group_id";
 
-    /// <summary>Redis key holding a queued call's current offer, "tier|labels|heldForTier|agentCount"
-    /// (empty tier = nobody offered) — written by QueuePollingService, read by the Queued Calls widget.</summary>
+    /// <summary>Redis key holding a queued call's current offer, "tier|labels|heldForTier|agentCount|noneLoggedIn"
+    /// (empty tier = nobody offered; noneLoggedIn "1" = nobody who could ever take it is signed in —
+    /// the supervisor alert) — written by QueuePollingService, read by the Queued Calls widget.</summary>
     public static string OfferTierKey(string channelUuid) => $"queue_offer_tier:{channelUuid}";
 
-    public static string FormatOfferTier(OfferSet offer) =>
+    public static string FormatOfferTier(OfferSet offer, bool noneLoggedIn = false) =>
         $"{offer.OfferTier}|{string.Join("/", offer.Agents.Select(a => a.TierLabel).Where(l => !string.IsNullOrEmpty(l)).Distinct())}" +
-        $"|{offer.HeldForTier}|{offer.Agents.Count}";
+        $"|{offer.HeldForTier}|{offer.Agents.Count}|{(noneLoggedIn ? "1" : "")}";
 
-    public static (int? Tier, string? Labels, int? HeldForTier, int AgentCount) ParseOfferTier(string? raw)
+    public static (int? Tier, string? Labels, int? HeldForTier, int AgentCount, bool NoneLoggedIn) ParseOfferTier(string? raw)
     {
         var parts = (raw ?? "").Split('|');
         int? Int(int i) => parts.Length > i && int.TryParse(parts[i], out var v) ? v : null;
-        return (Int(0), parts.Length > 1 && parts[1] != "" ? parts[1] : null, Int(2), Int(3) ?? 0);
+        return (Int(0), parts.Length > 1 && parts[1] != "" ? parts[1] : null, Int(2), Int(3) ?? 0,
+            parts.Length > 4 && parts[4] == "1");
     }
 
     public static Guid? RestrictGroupId(IReadOnlyDictionary<string, string> vars) =>

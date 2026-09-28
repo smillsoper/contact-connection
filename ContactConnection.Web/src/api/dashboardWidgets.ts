@@ -49,6 +49,9 @@ export interface QueuedCallRow {
   in_menu: boolean
   /** "Only offer to this group" (e.g. Elite) — the group's name. */
   pinned_group: string | null
+  pinned_group_id: string | null
+  /** Nobody who could take this call is logged in — the manager-on-duty alert. */
+  none_logged_in: boolean
   /** Routing tier the call is offered to right now; null = nobody available. */
   offer_tier: number | null
   offer_labels: string | null

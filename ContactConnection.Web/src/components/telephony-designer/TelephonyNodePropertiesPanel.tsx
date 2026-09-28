@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Node } from '@xyflow/react'
 import type { TelNodeData, TelephonyNodeType, TimeWindow, TelVariableAssignment } from '../../types/telephony-designer'
 import { TELEPHONY_NODE_META } from '../../types/telephony-designer'
@@ -12,7 +12,7 @@ import { listAdminAgents, type AgentRecord } from '../../api/adminAgents'
 import { listAgentGroups, listCampaigns, listSipGateways } from '../../api/telephony'
 import { api } from '../../api/client'
 import SearchableSelect from '../SearchableSelect'
-import RichTextEditor, { type RichTextEditorHandle } from '../designer/RichTextEditor'
+import EmailComposeFields from '../designer/EmailComposeFields'
 
 // Node types that need one or more of the shared name→id dropdowns (agents, flows, campaigns, gateways).
 const NEEDS_PICKERS: TelephonyNodeType[] = [
@@ -462,6 +462,23 @@ export default function TelephonyNodePropertiesPanel({
 
       {type === 'tf_voicemail' && (
         <VoicemailNodeEditor data={data} onChange={(patch) => onChange(node.id, patch)} />
+      )}
+
+      {type === 'tf_send_email' && (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs text-gray-500 leading-snug">
+            Sends the email and continues right away — the caller never waits on it. Use it for alerts,
+            e.g. telling the manager on duty that a call is queued with nobody logged in.
+          </p>
+          <EmailComposeFields
+            data={data}
+            onChange={(patch) => onChange(node.id, patch as Partial<TelNodeData>)}
+            prefix="email"
+            vars={['{{caller.ani}}', '{{call.did}}', '{{call.id}}', '{{now.time}}']}
+            inputCls="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-pink-500"
+            labelCls="block text-xs text-gray-400 mb-1"
+          />
+        </div>
       )}
 
       {type === 'tf_scheduled_callback' && (
@@ -1406,7 +1423,6 @@ function VoicemailNodeEditor({
 }) {
   const inputCls = 'w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-100 text-sm focus:outline-none focus:border-purple-500'
   const labelCls = 'block text-xs text-gray-400 mb-1'
-  const bodyRef = useRef<RichTextEditorHandle>(null)
   const emailOn = (data.deliveryEmailEnabled as boolean) ?? false
 
   const VARS = ['{{caller.phone}}', '{{caller.name}}', '{{caller.first_name}}', '{{call_record.id}}', '{{call_record.dnis}}']
@@ -1476,74 +1492,15 @@ function VoicemailNodeEditor({
 
         {emailOn && (
           <div className="flex flex-col gap-2 mt-2">
-            <div>
-              <label className={labelCls}>To</label>
-              <input className={`${inputCls} font-mono text-xs`} placeholder="ops@client.com, {{flow.queue_email}}"
-                value={(data.deliveryEmailTo as string) ?? ''}
-                onChange={(e) => onChange({ deliveryEmailTo: e.target.value })} />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className={labelCls}>Cc</label>
-                <input className={`${inputCls} font-mono text-xs`}
-                  value={(data.deliveryEmailCc as string) ?? ''}
-                  onChange={(e) => onChange({ deliveryEmailCc: e.target.value })} />
-              </div>
-              <div>
-                <label className={labelCls}>Bcc</label>
-                <input className={`${inputCls} font-mono text-xs`}
-                  value={(data.deliveryEmailBcc as string) ?? ''}
-                  onChange={(e) => onChange({ deliveryEmailBcc: e.target.value })} />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className={labelCls}>From name</label>
-                <input className={inputCls} placeholder="Support Voicemail"
-                  value={(data.deliveryEmailFromName as string) ?? ''}
-                  onChange={(e) => onChange({ deliveryEmailFromName: e.target.value })} />
-              </div>
-              <div>
-                <label className={labelCls}>Reply-to</label>
-                <input className={`${inputCls} font-mono text-xs`} placeholder="team@client.com"
-                  value={(data.deliveryEmailReplyTo as string) ?? ''}
-                  onChange={(e) => onChange({ deliveryEmailReplyTo: e.target.value })} />
-              </div>
-            </div>
-            <p className="text-[10px] text-gray-500 leading-snug -mt-1">
-              The sending address stays the platform sender (Resend needs a verified domain); the
-              From name and Reply-to are yours to set.
-            </p>
-            <div>
-              <label className={labelCls}>Subject</label>
-              <input className={`${inputCls} text-xs`}
-                value={(data.deliveryEmailSubject as string) ?? ''}
-                onChange={(e) => onChange({ deliveryEmailSubject: e.target.value })} />
-            </div>
-
-            <div>
-              <label className={labelCls}>Body</label>
-              <div className="flex flex-wrap gap-1 mb-1">
-                {VARS.map((v) => (
-                  <button key={v} type="button"
-                    onClick={() => bodyRef.current?.insert(v)}
-                    className="text-[10px] font-mono bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-purple-300 hover:border-purple-500">
-                    {v}
-                  </button>
-                ))}
-              </div>
-              <RichTextEditor
-                ref={bodyRef}
-                dark
-                value={(data.deliveryEmailBodyHtml as string) ?? ''}
-                onChange={(html) => onChange({ deliveryEmailBodyHtml: html })}
-              />
-              <p className="text-[10px] text-gray-500 mt-1 leading-snug">
-                Same <span className="font-mono">{'{{variable}}'}</span> tags as the script editor —
-                <span className="font-mono"> {'{{caller.*}}'}</span>, <span className="font-mono">{'{{call_record.*}}'}</span>,
-                <span className="font-mono"> {'{{flow.*}}'}</span> — resolved when the email is sent.
-              </p>
-            </div>
+            <EmailComposeFields
+              data={data}
+              onChange={(patch) => onChange(patch as Partial<TelNodeData>)}
+              prefix="deliveryEmail"
+              vars={VARS}
+              inputCls={inputCls}
+              labelCls={labelCls}
+              fromNamePlaceholder="Support Voicemail"
+            />
 
             <label className="flex items-center gap-2 text-xs text-gray-300">
               <input type="checkbox" checked={(data.deliveryAttachAudio as boolean) ?? true}
