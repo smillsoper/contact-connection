@@ -3,6 +3,7 @@ using ContactConnection.Api.Hubs;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Domain.Entities;
 using ContactConnection.Infrastructure.Data;
+using ContactConnection.Infrastructure.Telephony;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
@@ -87,8 +88,24 @@ public class QueuedCallDeliveryService(
             "Delivery: call {CallRecordId} → agent {AgentId} (ext {Ext}), callerUuid={CallerUuid}",
             callRecordId, agentId, agent.SipExtension, callerUuid);
 
+        // Parallel queuing: the route this agent wins the call through (group / tier / label) is
+        // stamped on the record for commission reporting. A call restricted to one group (Elite)
+        // is refused to anyone outside it — a stale screen-pop click can't pull it out of the group.
+        var restrictGroupId = preSession is null ? null : QueueOffer.RestrictGroupId(preSession.Vars);
+        var route = record.CampaignId == Guid.Empty
+            ? null
+            : await EligibleAgentRanker.ResolveRouteAsync(db, record.CampaignId, agentId, restrictGroupId, ct);
+        if (restrictGroupId is not null && route is null)
+        {
+            logger.LogInformation(
+                "Delivery: call {CallRecordId} → agent {AgentId} refused — call is restricted to group {GroupId}",
+                callRecordId, agentId, restrictGroupId);
+            return new DeliveryResult(false, "This call is reserved for another agent group.");
+        }
+
         // Assign this agent to the call record and create the interaction
         record.SetAgent(agentId);
+        record.SetRoutedTier(route?.GroupId, route?.Tier ?? 0, route?.TierLabel);
         var interaction = record.AddInteraction(InteractionType.CustomerService);
         db.CallInteractions.Add(interaction);
         await db.SaveChangesAsync(ct);

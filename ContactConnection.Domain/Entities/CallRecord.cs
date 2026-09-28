@@ -27,6 +27,12 @@ public class CallRecord
     public string? Dnis { get; private set; }             // dialed number (telephony calls only)
     /// <summary>Who delivered the call — the NumberProvider of the number it arrived on.</summary>
     public Guid? NumberProviderId { get; private set; }
+    /// <summary>How the call was won by an agent (parallel queuing): the agent group and tier it was
+    /// delivered through (tier 0 / null group = the regular pool) and the tier's label ("Alpha",
+    /// "Elite") — what commission reporting keys on.</summary>
+    public Guid? RoutedGroupId { get; private set; }
+    public int? RoutedTier { get; private set; }
+    public string? RoutedTierLabel { get; private set; }
     /// <summary>For calls delivered by a routing platform: the public number the caller actually
     /// dialed (Dnis is then our delivery number / pseudo-DNIS). Null for hosted numbers.</summary>
     public string? ClientNumber { get; private set; }
@@ -303,6 +309,14 @@ public class CallRecord
     {
         Addresses = addresses;
         UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void SetRoutedTier(Guid? groupId, int tier, string? tierLabel)
+    {
+        RoutedGroupId   = groupId;
+        RoutedTier      = tier;
+        RoutedTierLabel = tierLabel;
+        UpdatedAt       = DateTimeOffset.UtcNow;
     }
 
     public void SetNumberProvider(Guid? providerId, string? clientNumber)

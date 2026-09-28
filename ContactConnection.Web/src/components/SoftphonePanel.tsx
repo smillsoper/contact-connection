@@ -123,7 +123,7 @@ export default function SoftphonePanel() {
   }
   const {
     callStatus, callerNumber, destinationNumber, isMuted, isOnHold,
-    callStartedAt, campaignId, callRecordId,
+    callStartedAt, campaignId, callRecordId, tierLabel,
     transferState, transferTarget, transferTargetLabel,
     secureCollect, playingGreeting,
     setRinging, setDialing, setOnCall, setMuted, setOnHold,
@@ -714,6 +714,7 @@ export default function SoftphonePanel() {
           </div>
           <div className="text-center">
             <p className="text-xs text-amber-400 font-medium mb-1">Inbound queue call</p>
+            {tierLabel && <span className="inline-block mb-1 px-2 py-0.5 rounded-full bg-fuchsia-600/30 text-fuchsia-300 text-[10px] font-semibold uppercase tracking-wide">{tierLabel}</span>}
             <p className="text-white font-semibold text-sm truncate">{callerNumber ?? 'Unknown'}</p>
             {destinationNumber && <p className="text-gray-400 text-xs font-mono truncate">→ {destinationNumber}</p>}
           </div>
@@ -762,6 +763,7 @@ export default function SoftphonePanel() {
             <p className="text-xs text-indigo-400 font-medium mb-1">
               {playingGreeting ? 'Playing greeting… hold off' : 'Connecting you…'}
             </p>
+            {tierLabel && <span className="inline-block mb-1 px-2 py-0.5 rounded-full bg-fuchsia-600/30 text-fuchsia-300 text-[10px] font-semibold uppercase tracking-wide">{tierLabel}</span>}
             <p className="text-white font-semibold text-sm truncate">{callerNumber ?? 'Unknown'}</p>
             {destinationNumber && <p className="text-gray-400 text-xs font-mono truncate">→ {destinationNumber}</p>}
           </div>
@@ -781,6 +783,7 @@ export default function SoftphonePanel() {
           </div>
           <div className="text-center">
             <p className="text-xs text-gray-500 mb-1">Incoming call</p>
+            {tierLabel && <span className="inline-block mb-1 px-2 py-0.5 rounded-full bg-fuchsia-600/30 text-fuchsia-300 text-[10px] font-semibold uppercase tracking-wide">{tierLabel}</span>}
             <p className="text-white font-semibold text-sm truncate">{callerNumber ?? 'Unknown'}</p>
             {destinationNumber && <p className="text-gray-400 text-xs font-mono truncate">→ {destinationNumber}</p>}
           </div>
@@ -816,6 +819,7 @@ export default function SoftphonePanel() {
           </div>
           <div className="text-center">
             <p className="text-xs text-gray-500 mb-1">Calling…</p>
+            {tierLabel && <span className="inline-block mb-1 px-2 py-0.5 rounded-full bg-fuchsia-600/30 text-fuchsia-300 text-[10px] font-semibold uppercase tracking-wide">{tierLabel}</span>}
             <p className="text-white font-semibold text-sm truncate">{callerNumber ?? 'Unknown'}</p>
           </div>
           <div className="flex justify-center mt-1">
@@ -846,6 +850,7 @@ export default function SoftphonePanel() {
 
           {/* Caller identity */}
           <div className="text-center">
+            {tierLabel && <span className="inline-block mb-1 px-2 py-0.5 rounded-full bg-fuchsia-600/30 text-fuchsia-300 text-[10px] font-semibold uppercase tracking-wide">{tierLabel}</span>}
             <p className="text-white text-sm font-semibold truncate">{callerNumber ?? 'Unknown'}</p>
             {destinationNumber && <p className="text-gray-400 text-xs font-mono truncate">→ {destinationNumber}</p>}
           </div>

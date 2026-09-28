@@ -80,16 +80,32 @@ public class RouteToQueueNodeHandler : ITelephonyNodeHandler
         // ring/claim mechanics as RingAll otherwise, just a restricted candidate set. RingAll and
         // AutoAnswerBestAgent (delivered by QueuePollingService's arbitration pass, not here)
         // both get the full ranked list.
-        var ranked = await _ranker.GetRankedEligibleAgentsAsync(db, ctx.TenantId, ctx.CampaignId, ct: ct);
+        // Optional "only offer to this agent group" (parallel queuing — e.g. Elite calls flagged by
+        // an external router): the queue engine offers the call to that group's eligible members
+        // only, with no fallback to other agents. See docs/design/parallel-queuing.md.
+        Guid? restrictGroupId = Guid.TryParse(node["agentGroupId"]?.GetValue<string>(), out var g) ? g : null;
+
+        // Parallel queuing: only the highest routing tier with anyone available is offered the call
+        // (an exclusive window can hold it for a higher tier) — QueuePollingService re-evaluates
+        // every tick and moves the offer up if a higher-tier agent frees. Within the tier: ranked
+        // proficiency DESC, longest-idle tie-break; RingTopNByProficiency truncates to the top N.
+        var offer = await _ranker.GetOfferSetAsync(
+            db, ctx.TenantId, ctx.CampaignId, secondsWaited: 0, restrictGroupId: restrictGroupId, ct: ct);
         var eligible = campaign?.RingStrategy == CampaignRingStrategy.RingTopNByProficiency
-            ? ranked.Take(campaign.RingTopN)
-            : ranked;
+            ? offer.Agents.Take(campaign.RingTopN).ToList()
+            : offer.Agents;
         var availableAgentIds = eligible.Select(r => r.AgentId).ToList();
 
         // Store the eligible agent IDs so the caller's CHANNEL_HANGUP can clean up,
         // and so the screen pop is targeted.
         ctx.Vars["_queued"] = "true";
+
+        if (restrictGroupId is { } rg)
+            ctx.Vars["_restrict_group_id"] = rg.ToString();
+        else
+            ctx.RemoveSessionVar("_restrict_group_id");   // a later un-restricted queue node clears it
         ctx.Vars["_eligible_agents"] = string.Join(",", availableAgentIds);
+        ctx.Vars["_eligible_tier_labels"] = QueueOffer.FormatLabels(eligible);
 
         // Stashed so a later abandon at hangup can compute in-queue wait time without a DB round trip.
         var enteredQueueAt = DateTimeOffset.UtcNow;

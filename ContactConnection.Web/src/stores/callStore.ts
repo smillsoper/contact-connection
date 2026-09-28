@@ -25,6 +25,10 @@ interface CallState {
   callStartedAt: number | null  // Date.now() timestamp when call was answered
   callRecordId: string | null
   campaignId: string | null
+  // Parallel queuing — the routing tier this call was offered to this agent through (e.g. "Alpha",
+  // "Elite"); null for the regular pool. Kept from the pop through ringing/on-call so the agent
+  // sees which book of business the call is for (commissions differ by tier).
+  tierLabel: string | null
 
   // Warm-transfer consultation leg
   transferState: TransferState
@@ -54,11 +58,14 @@ interface CallState {
   // advance()/jump()/startSession() call already happening in this same browser tab.
   cartVersion: number
 
-  setQueued: (callerNumber: string, callerName: string, callRecordId: string, destinationNumber?: string, campaignId?: string) => void
+  setQueued: (callerNumber: string, callerName: string, callRecordId: string, destinationNumber?: string, campaignId?: string, tierLabel?: string | null) => void
+  // The queue engine withdrew this call's offer (it moved to a higher tier, or this agent is no
+  // longer eligible) — drop the pop if it's still the one on screen.
+  withdrawOffer: (callRecordId: string) => void
   // RingStrategy.AutoAnswerBestAgent — server picked this agent, no click required. Pushed via
   // receiveAutoConnecting before the whisper/bridge INVITE arrives, so SoftphonePanel can arm
   // auto-answer proactively (see its useEffect on callStatus === 'auto-connecting').
-  setAutoConnecting: (callerNumber: string, callerName: string, callRecordId: string, destinationNumber?: string, campaignId?: string) => void
+  setAutoConnecting: (callerNumber: string, callerName: string, callRecordId: string, destinationNumber?: string, campaignId?: string, tierLabel?: string | null) => void
   setPlayingGreeting: (playing: boolean) => void
   setRinging: (callerNumber: string, callerName: string) => void
   setDialing: (dialedNumber: string) => void
@@ -101,6 +108,7 @@ export const useCallStore = create<CallState>((set) => ({
   callStartedAt: null,
   callRecordId: null,
   campaignId: null,
+  tierLabel: null,
   transferState: 'idle',
   transferTarget: null,
   transferTargetLabel: null,
@@ -109,11 +117,16 @@ export const useCallStore = create<CallState>((set) => ({
   playingGreeting: false,
   cartVersion: 0,
 
-  setQueued: (callerNumber, callerName, callRecordId, destinationNumber, campaignId) =>
-    set({ callStatus: 'queued', callerNumber, callerName, destinationNumber: destinationNumber ?? null, callRecordId, isMuted: false, callStartedAt: null, campaignId: campaignId || null, secureCollect: null, lastTelephonyEventEnded: null, playingGreeting: false, ...TRANSFER_RESET }),
+  setQueued: (callerNumber, callerName, callRecordId, destinationNumber, campaignId, tierLabel) =>
+    set({ callStatus: 'queued', callerNumber, callerName, destinationNumber: destinationNumber ?? null, callRecordId, isMuted: false, callStartedAt: null, campaignId: campaignId || null, tierLabel: tierLabel || null, secureCollect: null, lastTelephonyEventEnded: null, playingGreeting: false, ...TRANSFER_RESET }),
 
-  setAutoConnecting: (callerNumber, callerName, callRecordId, destinationNumber, campaignId) =>
-    set({ callStatus: 'auto-connecting', callerNumber, callerName, destinationNumber: destinationNumber ?? null, callRecordId, isMuted: false, callStartedAt: null, campaignId: campaignId || null, secureCollect: null, lastTelephonyEventEnded: null, playingGreeting: false, ...TRANSFER_RESET }),
+  withdrawOffer: (callRecordId) =>
+    set((state) => state.callStatus === 'queued' && state.callRecordId === callRecordId
+      ? { callStatus: 'idle', callerNumber: null, callerName: null, destinationNumber: null, callRecordId: null, campaignId: null, tierLabel: null }
+      : {}),
+
+  setAutoConnecting: (callerNumber, callerName, callRecordId, destinationNumber, campaignId, tierLabel) =>
+    set({ callStatus: 'auto-connecting', callerNumber, callerName, destinationNumber: destinationNumber ?? null, callRecordId, isMuted: false, callStartedAt: null, campaignId: campaignId || null, tierLabel: tierLabel || null, secureCollect: null, lastTelephonyEventEnded: null, playingGreeting: false, ...TRANSFER_RESET }),
 
   setPlayingGreeting: (playing) => set({ playingGreeting: playing }),
 
@@ -128,6 +141,7 @@ export const useCallStore = create<CallState>((set) => ({
       callStartedAt: null,
       callRecordId: state.callStatus === 'queued' ? state.callRecordId : null,
       campaignId: null,
+      tierLabel: state.callStatus === 'queued' || state.callStatus === 'auto-connecting' ? state.tierLabel : null,
       secureCollect: null,
       lastTelephonyEventEnded: null,
       playingGreeting: false,
@@ -135,7 +149,7 @@ export const useCallStore = create<CallState>((set) => ({
     })),
 
   setDialing: (dialedNumber) =>
-    set({ callStatus: 'dialing', callerNumber: dialedNumber, callerName: null, isMuted: false, callStartedAt: null, callRecordId: null, campaignId: null, secureCollect: null, lastTelephonyEventEnded: null, playingGreeting: false, ...TRANSFER_RESET }),
+    set({ callStatus: 'dialing', callerNumber: dialedNumber, callerName: null, isMuted: false, callStartedAt: null, callRecordId: null, campaignId: null, tierLabel: null, secureCollect: null, lastTelephonyEventEnded: null, playingGreeting: false, ...TRANSFER_RESET }),
 
   setOnCall: () =>
     set({ callStatus: 'on-call', callStartedAt: Date.now(), secureCollect: null, lastTelephonyEventEnded: null, playingGreeting: false }),
@@ -181,5 +195,5 @@ export const useCallStore = create<CallState>((set) => ({
   bumpCartVersion: () => set((state) => ({ cartVersion: state.cartVersion + 1 })),
 
   reset: () =>
-    set({ callStatus: 'idle', callerNumber: null, callerName: null, destinationNumber: null, isMuted: false, callStartedAt: null, callRecordId: null, campaignId: null, secureCollect: null, lastTelephonyEventEnded: null, playingGreeting: false, ...TRANSFER_RESET }),
+    set({ callStatus: 'idle', callerNumber: null, callerName: null, destinationNumber: null, isMuted: false, callStartedAt: null, callRecordId: null, campaignId: null, tierLabel: null, secureCollect: null, lastTelephonyEventEnded: null, playingGreeting: false, ...TRANSFER_RESET }),
 }))

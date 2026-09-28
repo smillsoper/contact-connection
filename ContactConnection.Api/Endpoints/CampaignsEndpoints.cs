@@ -37,6 +37,7 @@ public static class CampaignsEndpoints
         group.MapPost("{id:guid}/groups",                         AssignGroup);
         group.MapPut("{id:guid}/groups/{groupId:guid}",           UpdateGroupProficiency);
         group.MapDelete("{id:guid}/groups/{groupId:guid}",        RemoveGroup);
+        group.MapPut("{id:guid}/groups/{groupId:guid}/routing",   SetGroupRouting).RequireAuthorization("TenantAdmin");
 
         return app;
     }
@@ -444,6 +445,8 @@ public static class CampaignsEndpoints
             return Results.Conflict(new { error = "Group is already assigned to this campaign." });
 
         var assignment = GroupCampaignAssignment.Create(req.GroupId, id, req.Proficiency);
+        try { assignment.SetRouting(req.RoutingTier, req.ExclusiveWindowSeconds, req.TierLabel); }
+        catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
         await repo.AddGroupAssignmentAsync(assignment, ct);
         await repo.SaveChangesAsync(ct);
         return Results.Created("", ToGroupAssignmentResponse(assignment));
@@ -458,6 +461,21 @@ public static class CampaignsEndpoints
         if (assignment is null) return Results.NotFound(new { error = "Group assignment not found." });
 
         assignment.SetProficiency(req.Proficiency);
+        await repo.SaveChangesAsync(ct);
+        return Results.Ok(ToGroupAssignmentResponse(assignment));
+    }
+
+    // ── PUT /api/v1/campaigns/{id}/groups/{groupId}/routing ─────────────────
+    // Parallel-queuing tier for this group on this campaign — see GroupCampaignAssignment.RoutingTier.
+    private static async Task<IResult> SetGroupRouting(
+        Guid id, Guid groupId, SetGroupRoutingRequest req,
+        ICampaignRepository repo, TenantContext ctx, CancellationToken ct)
+    {
+        if (!ctx.HasTenant) return Results.Unauthorized();
+        var assignment = await repo.GetGroupAssignmentAsync(id, groupId, ct);
+        if (assignment is null) return Results.NotFound(new { error = "Group assignment not found." });
+        try { assignment.SetRouting(req.RoutingTier, req.ExclusiveWindowSeconds, req.TierLabel); }
+        catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
         await repo.SaveChangesAsync(ct);
         return Results.Ok(ToGroupAssignmentResponse(assignment));
     }
@@ -515,6 +533,7 @@ public static class CampaignsEndpoints
 
     private static object ToGroupAssignmentResponse(GroupCampaignAssignment a) => new
     { a.Id, a.GroupId, a.CampaignId, a.Proficiency, a.IsActive, a.AssignedAt,
+      a.RoutingTier, a.ExclusiveWindowSeconds, a.TierLabel,
       Group = a.Group is null ? null : new { a.Group.Id, a.Group.Name } };
 }
 
@@ -550,5 +569,7 @@ public record SetCampaignFlowRequest(Guid FlowId);
 public record AssignAgentRequest(Guid AgentId, int Proficiency = 50);
 public record BulkAssignAgentsRequest(List<BulkAgentEntry> Agents);
 public record BulkAgentEntry(Guid AgentId, int Proficiency = 50);
-public record AssignGroupRequest(Guid GroupId, int Proficiency = 50);
+public record AssignGroupRequest(Guid GroupId, int Proficiency = 50,
+    int RoutingTier = 0, int? ExclusiveWindowSeconds = null, string? TierLabel = null);
+public record SetGroupRoutingRequest(int RoutingTier, int? ExclusiveWindowSeconds = null, string? TierLabel = null);
 public record SetProficiencyRequest(int Proficiency);

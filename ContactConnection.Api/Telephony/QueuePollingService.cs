@@ -40,6 +40,7 @@ public sealed class QueuePollingService : BackgroundService
     private static readonly TimeSpan PollInterval  = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan RingKeyTtl    = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan AgentClaimTtl = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan OfferKeyTtl   = TimeSpan.FromHours(2);
     private const int MaxAutoAnswerAttempts = 3;
 
     private readonly ITelephonyCallSessionStore _sessionStore;
@@ -178,7 +179,7 @@ public sealed class QueuePollingService : BackgroundService
         foreach (var placeholder in placeholders)
             await TryDeliverQueueCallbackAsync(
                 placeholder, tenantId, tenantSchema, tenantSubdomain: placeholder.TenantSubdomain,
-                db, ranker, queueCallbackDelivery, claimedThisTick, ct);
+                db, ranker, queueCallbackDelivery, claimedThisTick, now, ct);
 
         // ── AutoAnswerBestAgent — highest effective priority first ──────────────────────────
         var autoAnswerCandidates = activeSessions
@@ -189,7 +190,7 @@ public sealed class QueuePollingService : BackgroundService
         foreach (var (session, _, _) in autoAnswerQueue)
             await TryAutoAnswerDeliverAsync(
                 session, tenantId, tenantSchema, db, ranker, deliveryService, claimedThisTick,
-                callStateRecorder, telephonyFlowEngine, config, ct);
+                callStateRecorder, telephonyFlowEngine, config, now, ct);
 
         // ── RingAll / RingTopNByProficiency — click-based, unchanged mechanics ──────────────
         foreach (var session in activeSessions)
@@ -197,7 +198,7 @@ public sealed class QueuePollingService : BackgroundService
             if (!campaigns.TryGetValue(session.CampaignId, out var campaign)) continue;
             if (campaign.RingStrategy == CampaignRingStrategy.AutoAnswerBestAgent) continue; // handled above
 
-            await NotifyEligibleAgentsAsync(session, campaign, db, ranker, claimedThisTick, ct);
+            await NotifyEligibleAgentsAsync(session, campaign, db, ranker, claimedThisTick, now, ct);
         }
     }
 
@@ -267,12 +268,13 @@ public sealed class QueuePollingService : BackgroundService
     private async Task TryDeliverQueueCallbackAsync(
         TelephonyCallSession placeholder, Guid tenantId, string tenantSchema, string tenantSubdomain,
         TenantDbContext db, EligibleAgentRanker ranker, QueueCallbackDeliveryService queueCallbackDelivery,
-        HashSet<Guid> claimedThisTick, CancellationToken ct)
+        HashSet<Guid> claimedThisTick, DateTimeOffset now, CancellationToken ct)
     {
-        var ranked = await ranker.GetRankedEligibleAgentsAsync(
-            db, placeholder.TenantId, placeholder.CampaignId, excludeAgentIds: claimedThisTick, ct: ct);
+        var offer = await ranker.GetOfferSetAsync(
+            db, placeholder.TenantId, placeholder.CampaignId, SecondsWaited(placeholder, now),
+            excludeAgentIds: claimedThisTick, restrictGroupId: QueueOffer.RestrictGroupId(placeholder.Vars), ct: ct);
 
-        foreach (var candidate in ranked.Take(MaxAutoAnswerAttempts))
+        foreach (var candidate in offer.Agents.Take(MaxAutoAnswerAttempts))
         {
             var claimKey = AgentClaimKey(tenantId, candidate.AgentId);
             if (!await _sessionStore.TrySetKeyAsync(claimKey, placeholder.ChannelUuid, AgentClaimTtl, ct))
@@ -302,18 +304,19 @@ public sealed class QueuePollingService : BackgroundService
         TelephonyCallSession session, Guid tenantId, string tenantSchema, TenantDbContext db,
         EligibleAgentRanker ranker, QueuedCallDeliveryService deliveryService,
         HashSet<Guid> claimedThisTick, ICallStateHistoryRecorder callStateRecorder,
-        ITelephonyFlowEngine telephonyFlowEngine, IConfiguration config, CancellationToken ct)
+        ITelephonyFlowEngine telephonyFlowEngine, IConfiguration config, DateTimeOffset now, CancellationToken ct)
     {
         // A re-queued queue-callback caller (agent bridge failed after the callback connected)
         // carries a per-call exclusion list — the softphone(s) that already failed the bridge.
         var exclude = new HashSet<Guid>(claimedThisTick);
         exclude.UnionWith(ParseExcludedAgents(session));
 
-        var ranked = await ranker.GetRankedEligibleAgentsAsync(
-            db, session.TenantId, session.CampaignId, excludeAgentIds: exclude, ct: ct);
+        var offer = await ranker.GetOfferSetAsync(
+            db, session.TenantId, session.CampaignId, SecondsWaited(session, now),
+            excludeAgentIds: exclude, restrictGroupId: QueueOffer.RestrictGroupId(session.Vars), ct: ct);
 
         var attemptedDelivery = false;
-        foreach (var candidate in ranked.Take(MaxAutoAnswerAttempts))
+        foreach (var candidate in offer.Agents.Take(MaxAutoAnswerAttempts))
         {
             var claimKey = AgentClaimKey(tenantId, candidate.AgentId);
             var claimed = await _sessionStore.TrySetKeyAsync(claimKey, session.ChannelUuid, AgentClaimTtl, ct);
@@ -332,7 +335,7 @@ public sealed class QueuePollingService : BackgroundService
             // ReceiveAutoConnectFailed below tells the client to drop the "Connecting…" state.
             await _hub.Clients.Group($"agent:{candidate.AgentId}").ReceiveAutoConnecting(
                 session.CallRecordId.ToString(), session.CallerNumber, session.CallerNumber,
-                session.DestinationNumber, session.CampaignId.ToString());
+                session.DestinationNumber, session.CampaignId.ToString(), candidate.TierLabel);
 
             var result = await deliveryService.DeliverAsync(
                 tenantId, tenantSchema, session.TenantSubdomain, session.CallRecordId, candidate.AgentId, ct);
@@ -399,7 +402,7 @@ public sealed class QueuePollingService : BackgroundService
 
     private async Task NotifyEligibleAgentsAsync(
         TelephonyCallSession session, Campaign campaign, TenantDbContext db, EligibleAgentRanker ranker,
-        HashSet<Guid> claimedThisTick, CancellationToken ct)
+        HashSet<Guid> claimedThisTick, DateTimeOffset now, CancellationToken ct)
     {
         _logger.LogInformation(
             "QueuePoller: processing queued session {Uuid} — campaign={CampaignId} tenant={TenantId} schema={Schema}",
@@ -408,22 +411,30 @@ public sealed class QueuePollingService : BackgroundService
         var exclude = new HashSet<Guid>(claimedThisTick);
         exclude.UnionWith(ParseExcludedAgents(session));   // re-queued queue-callback: skip the failed softphone(s)
 
-        var ranked = await ranker.GetRankedEligibleAgentsAsync(
-            db, session.TenantId, session.CampaignId, excludeAgentIds: exclude, ct: ct);
+        // Parallel queuing: only the highest routing tier with anyone available (see
+        // EligibleAgentRanker.SelectOffer), recomputed every tick.
+        var offer = await ranker.GetOfferSetAsync(
+            db, session.TenantId, session.CampaignId, SecondsWaited(session, now),
+            excludeAgentIds: exclude, restrictGroupId: QueueOffer.RestrictGroupId(session.Vars), ct: ct);
 
         // RingTopNByProficiency truncates to the top N here too, so a re-poll (an agent newly
         // going Available mid-queue) still only offers the call to the same restricted set the
         // initial RouteToQueueNodeHandler pass would have.
         var eligible = campaign.RingStrategy == CampaignRingStrategy.RingTopNByProficiency
-            ? ranked.Take(campaign.RingTopN).ToList()
-            : ranked;
+            ? offer.Agents.Take(campaign.RingTopN).ToList()
+            : offer.Agents;
 
         _logger.LogInformation(
-            "QueuePoller: {Uuid} — {Count} ranked eligible agent(s): [{Agents}]",
-            session.ChannelUuid, eligible.Count, string.Join(", ", eligible.Select(r => r.AgentId)));
+            "QueuePoller: {Uuid} — tier {Tier}{Held}: {Count} ranked eligible agent(s): [{Agents}]",
+            session.ChannelUuid, offer.OfferTier?.ToString() ?? "-",
+            offer.HeldForTier is { } held ? $" (held for tier {held})" : "",
+            eligible.Count, string.Join(", ", eligible.Select(r => r.AgentId)));
 
-        foreach (var agentId in eligible.Select(r => r.AgentId))
+        await WithdrawStaleOffersAsync(session, eligible, ct);
+
+        foreach (var candidate in eligible)
         {
+            var agentId = candidate.AgentId;
             // Per-agent ring key — prevents duplicate pops within the TTL window.
             // After 30 seconds the key expires and the call is re-offered automatically.
             var ringKey = RingKey(session.ChannelUuid, agentId);
@@ -441,7 +452,8 @@ public sealed class QueuePollingService : BackgroundService
                     session.CallerNumber,
                     session.CallerNumber,
                     session.DestinationNumber,
-                    session.CampaignId.ToString());
+                    session.CampaignId.ToString(),
+                    candidate.TierLabel);
 
             await _sessionStore.SetKeyAsync(ringKey, "1", RingKeyTtl, ct);
 
@@ -449,6 +461,36 @@ public sealed class QueuePollingService : BackgroundService
                 "QueuePoller: notified agent {AgentId} of queued call {CallRecordId} (channel {Uuid})",
                 agentId, session.CallRecordId, session.ChannelUuid);
         }
+    }
+
+    /// <summary>
+    /// Parallel queuing — "re-evaluated until answered": agents offered this call last tick who
+    /// aren't in this tick's offer (it moved up to a higher tier, or they went unavailable / were
+    /// claimed for another call) get their screen pop withdrawn and ring key cleared. The offered
+    /// set lives in its own Redis key (not the session) so this never races the flow engine's
+    /// session writes; the very first offer (EslBackgroundService's pop at queue entry) is read
+    /// from the session's _eligible_agents.
+    /// </summary>
+    private async Task WithdrawStaleOffersAsync(
+        TelephonyCallSession session, IReadOnlyList<RankedAgent> offered, CancellationToken ct)
+    {
+        var offerKey = OfferKey(session.ChannelUuid);
+        var previousRaw = await _sessionStore.GetKeyAsync(offerKey, ct)
+                          ?? session.Vars.GetValueOrDefault("_eligible_agents");
+        var previous = QueueOffer.ParseAgentIds(previousRaw);
+        var current = offered.Select(r => r.AgentId).ToHashSet();
+
+        foreach (var agentId in previous.Where(a => !current.Contains(a)))
+        {
+            await _hub.Clients.Group($"agent:{agentId}").ReceiveOfferWithdrawn(session.CallRecordId.ToString());
+            await _sessionStore.DeleteKeyAsync(RingKey(session.ChannelUuid, agentId), ct);
+            _logger.LogInformation(
+                "QueuePoller: withdrew call {CallRecordId} offer from agent {AgentId} (channel {Uuid})",
+                session.CallRecordId, agentId, session.ChannelUuid);
+        }
+
+        if (!previous.SetEquals(current) || previousRaw is null)
+            await _sessionStore.SetKeyAsync(offerKey, string.Join(",", current), OfferKeyTtl, ct);
     }
 
     /// <summary>The AutoAnswerBestAgent arbitration order: highest effective priority first
@@ -498,6 +540,11 @@ public sealed class QueuePollingService : BackgroundService
         session.Vars.TryGetValue("_in_queue_at", out var iso) && DateTimeOffset.TryParse(iso, out var parsed)
             ? parsed
             : fallback;
+
+    private static double SecondsWaited(TelephonyCallSession session, DateTimeOffset now) =>
+        (now - ParseInQueueAt(session, now)).TotalSeconds;
+
+    private static string OfferKey(string channelUuid) => $"queue_offer:{channelUuid}";
 
     private static string RingKey(string channelUuid, Guid agentId) =>
         $"queue_ring:{channelUuid}:{agentId}";

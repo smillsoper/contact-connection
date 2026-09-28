@@ -288,7 +288,7 @@ function TabBar({ sessions, activeSessionId, onSelect }: TabBarProps) {
 
 export default function FlowPanel() {
   const { token, tenantSubdomain } = useAuthStore()
-  const { setQueued, setAutoConnecting, reset: resetCall, callStatus, callRecordId, setCallRecordId, clearCallRecordId, bumpCartVersion } = useCallStore()
+  const { setQueued, setAutoConnecting, withdrawOffer, reset: resetCall, callStatus, callRecordId, setCallRecordId, clearCallRecordId, bumpCartVersion } = useCallStore()
   const { sessions, activeSessionId, addSession, removeSession, setActiveSession } = useFlowSessionsStore()
   const setAgentStateCode = useAgentStateStore((s) => s.setAgentStateCode)
   const [hub, setHub] = useState<signalR.HubConnection | null>(null)
@@ -324,17 +324,24 @@ export default function FlowPanel() {
       .build()
 
     // ESL screen pop — inbound call queued for this agent (DID route → telephony flow → tf_route_to_queue)
-    connection.on('receiveIncomingCall', (callRecordId: string, callerNumber: string, callerName: string, destinationNumber: string, campaignId: string) => {
-      console.log('[SignalR] receiveIncomingCall', { callRecordId, callerNumber, callerName, destinationNumber, campaignId })
-      setQueued(callerNumber, callerName, callRecordId, destinationNumber, campaignId)
+    connection.on('receiveIncomingCall', (callRecordId: string, callerNumber: string, callerName: string, destinationNumber: string, campaignId: string, tierLabel?: string | null) => {
+      console.log('[SignalR] receiveIncomingCall', { callRecordId, callerNumber, callerName, destinationNumber, campaignId, tierLabel })
+      setQueued(callerNumber, callerName, callRecordId, destinationNumber, campaignId, tierLabel)
+    })
+
+    // Parallel queuing — the offer moved to a higher routing tier (or this agent is no longer
+    // eligible for it): drop the pop so the agent can't reach for a call that's no longer theirs.
+    connection.on('receiveOfferWithdrawn', (callRecordId: string) => {
+      console.log('[SignalR] receiveOfferWithdrawn', { callRecordId })
+      withdrawOffer(callRecordId)
     })
 
     // RingStrategy.AutoAnswerBestAgent — the system picked this agent, no click required.
     // SoftphonePanel arms auto-answer off of callStatus === 'auto-connecting'; the actual
     // whisper/bridge INVITE follows shortly after this push.
-    connection.on('receiveAutoConnecting', (callRecordId: string, callerNumber: string, callerName: string, destinationNumber: string, campaignId: string) => {
-      console.log('[SignalR] receiveAutoConnecting', { callRecordId, callerNumber, callerName, destinationNumber, campaignId })
-      setAutoConnecting(callerNumber, callerName, callRecordId, destinationNumber, campaignId)
+    connection.on('receiveAutoConnecting', (callRecordId: string, callerNumber: string, callerName: string, destinationNumber: string, campaignId: string, tierLabel?: string | null) => {
+      console.log('[SignalR] receiveAutoConnecting', { callRecordId, callerNumber, callerName, destinationNumber, campaignId, tierLabel })
+      setAutoConnecting(callerNumber, callerName, callRecordId, destinationNumber, campaignId, tierLabel)
     })
 
     // Follows receiveAutoConnecting when delivery didn't pan out (e.g. softphone unreachable) —

@@ -15,6 +15,9 @@ public class GroupCampaignAssignmentConfiguration : IEntityTypeConfiguration<Gro
         builder.Property(a => a.GroupId).HasColumnName("group_id").IsRequired();
         builder.Property(a => a.CampaignId).HasColumnName("campaign_id").IsRequired();
         builder.Property(a => a.Proficiency).HasColumnName("proficiency");
+        builder.Property(a => a.RoutingTier).HasColumnName("routing_tier").HasDefaultValue(0);
+        builder.Property(a => a.ExclusiveWindowSeconds).HasColumnName("exclusive_window_seconds");
+        builder.Property(a => a.TierLabel).HasColumnName("tier_label").HasMaxLength(50);
         builder.Property(a => a.IsActive).HasColumnName("is_active");
         builder.Property(a => a.AssignedAt).HasColumnName("assigned_at");
         builder.Property(a => a.UpdatedAt).HasColumnName("updated_at");

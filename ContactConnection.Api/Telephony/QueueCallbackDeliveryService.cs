@@ -214,7 +214,7 @@ public sealed class QueueCallbackDeliveryService(
         if (autoAnswer)
         {
             await hub.Clients.Group($"agent:{agentId}").ReceiveAutoConnecting(
-                record.Id.ToString(), ani, ani, placeholder.DestinationNumber, record.CampaignId.ToString());
+                record.Id.ToString(), ani, ani, placeholder.DestinationNumber, record.CampaignId.ToString(), null);
         }
 
         logger.LogInformation(

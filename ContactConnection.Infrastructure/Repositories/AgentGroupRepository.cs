@@ -42,4 +42,21 @@ public class AgentGroupRepository : IAgentGroupRepository
 
     public Task SaveChangesAsync(CancellationToken ct = default) =>
         Db.SaveChangesAsync(ct);
+
+    public Task<List<GroupCampaignAssignment>> GetActiveCampaignAssignmentsAsync(Guid groupId, CancellationToken ct = default)
+        => Db.GroupCampaignAssignments.Where(a => a.GroupId == groupId && a.IsActive).ToListAsync(ct);
+
+    public Task<List<AgentGroupMemberCampaignExclusion>> GetMemberExclusionsAsync(Guid groupId, CancellationToken ct = default)
+        => Db.AgentGroupMemberCampaignExclusions.Where(e => e.GroupId == groupId).ToListAsync(ct);
+
+    public async Task SetMemberExclusionsAsync(
+        Guid groupId, Guid agentId, IReadOnlyCollection<Guid> excludedCampaignIds, CancellationToken ct = default)
+    {
+        var existing = await Db.AgentGroupMemberCampaignExclusions
+            .Where(e => e.GroupId == groupId && e.AgentId == agentId).ToListAsync(ct);
+        var wanted = excludedCampaignIds.ToHashSet();
+        Db.AgentGroupMemberCampaignExclusions.RemoveRange(existing.Where(e => !wanted.Contains(e.CampaignId)));
+        foreach (var campaignId in wanted.Where(c => existing.All(e => e.CampaignId != c)))
+            await Db.AgentGroupMemberCampaignExclusions.AddAsync(AgentGroupMemberCampaignExclusion.Create(groupId, agentId, campaignId), ct);
+    }
 }

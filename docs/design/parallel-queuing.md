@@ -23,10 +23,10 @@ Source of the requirements: Stephen (built the CXone equivalent at TMS) and the 
   - `ExclusiveWindowSeconds` (int?, default null = pure priority)
   - `CommissionTier` / label (string?, e.g. "Alpha") — what the call is tagged with when won through
     this assignment
-- **New `AgentGroupMemberCampaign`** (group, agent, campaign) — *which of the group's campaigns each
-  member may take* (CXone's per-agent routing attributes). When a member is added they get all of the
-  group's campaigns; admins uncheck. A member with no rows for a campaign isn't eligible for it
-  through that group.
+- **New `AgentGroupMemberCampaignExclusion`** (group, agent, campaign) — *which of the group's
+  campaigns a member may NOT take* (CXone's per-agent routing attributes). Stored as exclusions, not
+  an allow-list, so new members and newly assigned campaigns need no re-syncing: a member takes all of
+  the group's campaigns until an admin unchecks one. (Built S163 — the original draft had an allow-list.)
 - **`CallRecord`** gains `RoutedGroupId`, `RoutedTier`, `RoutedTierLabel` (e.g. "Alpha", "Elite") —
   what commission reporting keys on.
 - Direct `AgentCampaignAssignment` stays tier 0 (regular).
@@ -46,6 +46,14 @@ Source of the requirements: Stephen (built the CXone equivalent at TMS) and the 
   guarantees only one agent can win a race.
 - On delivery: stamp the call record's routed group/tier/label/campaign (single write alongside the
   existing delivery bookkeeping).
+
+**As built (S163):** `EligibleAgentRanker.GetOfferSetAsync` / `SelectOffer` (tier → proficiency →
+longest idle; exclusive windows ignored when a group restriction applies); `QueuePollingService`
+uses it for ring, auto-answer and queue-callback delivery, tracks the offered set in Redis
+`queue_offer:{channel}` and pushes `ReceiveOfferWithdrawn` to agents who drop out of it (tier moved
+up, or they went unavailable); `ReceiveIncomingCall` / `ReceiveAutoConnecting` carry the tier label
+for the agent's badge; `QueuedCallDeliveryService` stamps `SetRoutedTier` via
+`EligibleAgentRanker.ResolveRouteAsync` and refuses a click from outside a restricted group.
 
 ## Flow side
 

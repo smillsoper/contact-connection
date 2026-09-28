@@ -499,6 +499,7 @@ public sealed class EslBackgroundService : BackgroundService
         if (ctx.Vars.TryGetValue("_queued", out _) && ctx.Vars.TryGetValue("_eligible_agents", out var agentList))
         {
             var agentIds = agentList.Split(',', StringSplitOptions.RemoveEmptyEntries);
+            var tierLabels = QueueOffer.ParseLabels(ctx.Vars.GetValueOrDefault("_eligible_tier_labels"));
             _logger.LogInformation(
                 "CHANNEL_PARK DID {Uuid}: notifying {Count} immediately-available agent(s): [{Agents}]",
                 channelUuid, agentIds.Length, agentList);
@@ -508,7 +509,8 @@ public sealed class EslBackgroundService : BackgroundService
                 if (!Guid.TryParse(agentIdStr.Trim(), out var agentId)) continue;
                 await _hub.Clients
                     .Group($"agent:{agentId}")
-                    .ReceiveIncomingCall(record.Id.ToString(), callerNumber, callerName, destinationNumber, ctx.CampaignId.ToString());
+                    .ReceiveIncomingCall(record.Id.ToString(), callerNumber, callerName, destinationNumber, ctx.CampaignId.ToString(),
+                        tierLabels.GetValueOrDefault(agentId));
                 notified.Add(agentId.ToString());
             }
             // Set per-agent ring keys so the QueuePollingService doesn't duplicate within 30s
@@ -560,7 +562,7 @@ public sealed class EslBackgroundService : BackgroundService
 
             await _hub.Clients
                 .Group($"agent:{agent.Id}")
-                .ReceiveIncomingCall(record.Id.ToString(), callerNumber, callerName, agentExtension, "");
+                .ReceiveIncomingCall(record.Id.ToString(), callerNumber, callerName, agentExtension, "", null);
 
             _logger.LogInformation(
                 "CHANNEL_PARK {Uuid}: agent {Ext} → CallRecord {RecordId}",

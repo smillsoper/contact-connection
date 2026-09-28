@@ -59,8 +59,15 @@ public interface IFlowHubClient
     /// <summary>Push error notification (e.g. commitment lock violation).</summary>
     Task ReceiveError(string message);
 
-    /// <summary>ESL screen pop — inbound call parked for this agent.</summary>
-    Task ReceiveIncomingCall(string callRecordId, string callerNumber, string callerName, string destinationNumber, string campaignId);
+    /// <summary>ESL screen pop — inbound call parked for this agent. <paramref name="tierLabel"/> is the
+    /// parallel-queuing tier the call is offered to this agent through (e.g. "Alpha"), null for the
+    /// regular pool.</summary>
+    Task ReceiveIncomingCall(string callRecordId, string callerNumber, string callerName, string destinationNumber, string campaignId, string? tierLabel);
+
+    /// <summary>A queued call's screen pop is withdrawn from this agent — the offer moved to a
+    /// higher routing tier, or this agent is no longer eligible for it (parallel queuing, see
+    /// docs/design/parallel-queuing.md). The agent UI drops the pop for that callRecordId.</summary>
+    Task ReceiveOfferWithdrawn(string callRecordId);
 
     /// <summary>Server-initiated delivery (RingStrategy.AutoAnswerBestAgent) — the system picked
     /// this agent (no click required). Pushed BEFORE the originate call, not after: the softphone
@@ -68,7 +75,7 @@ public interface IFlowHubClient
     /// could receive that INVITE before the flag is set and fall back to a manual ring. A push
     /// this early can therefore still be followed by ReceiveAutoConnectFailed if delivery
     /// doesn't pan out (e.g. the softphone turns out to be unreachable).</summary>
-    Task ReceiveAutoConnecting(string callRecordId, string callerNumber, string callerName, string destinationNumber, string campaignId);
+    Task ReceiveAutoConnecting(string callRecordId, string callerNumber, string callerName, string destinationNumber, string campaignId, string? tierLabel);
 
     /// <summary>Follows a ReceiveAutoConnecting push when the delivery it preceded didn't
     /// succeed — lets the agent's UI drop the "Connecting…" state instead of getting stuck in it,

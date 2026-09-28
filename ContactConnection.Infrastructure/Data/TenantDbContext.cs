@@ -46,6 +46,7 @@ public class TenantDbContext : DbContext
     public DbSet<AgentCampaignAssignment> AgentCampaignAssignments => Set<AgentCampaignAssignment>();
     public DbSet<AgentGroup> AgentGroups => Set<AgentGroup>();
     public DbSet<AgentGroupMember> AgentGroupMembers => Set<AgentGroupMember>();
+    public DbSet<AgentGroupMemberCampaignExclusion> AgentGroupMemberCampaignExclusions => Set<AgentGroupMemberCampaignExclusion>();
     public DbSet<GroupCampaignAssignment> GroupCampaignAssignments => Set<GroupCampaignAssignment>();
     public DbSet<CampaignExternalNumber> CampaignExternalNumbers => Set<CampaignExternalNumber>();
     public DbSet<BlockListEntry> BlockListEntries => Set<BlockListEntry>();
@@ -93,6 +94,7 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new CampaignConfiguration());
         modelBuilder.ApplyConfiguration(new PhoneNumberConfiguration());
         modelBuilder.ApplyConfiguration(new NumberProviderConfiguration());
+        modelBuilder.ApplyConfiguration(new AgentGroupMemberCampaignExclusionConfiguration());
         modelBuilder.ApplyConfiguration(new AgentCampaignAssignmentConfiguration());
         modelBuilder.ApplyConfiguration(new AgentGroupConfiguration());
         modelBuilder.ApplyConfiguration(new AgentGroupMemberConfiguration());
