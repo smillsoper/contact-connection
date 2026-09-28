@@ -56,6 +56,10 @@ public class CommitNodeHandler(IVariableResolver resolver, ICallRecordRepository
                     LockLabel  = label,
                     OccurredAt = DateTimeOffset.UtcNow,
                 });
+                // Nothing before this point can change, so a captured card is no longer needed for
+                // re-authorization (PaymentService keeps it until now).
+                if (!string.IsNullOrEmpty(record.SensitiveData))
+                    record.WipeSensitiveData("committed");
                 await callRecords.SaveChangesAsync(ct);
             }
         }

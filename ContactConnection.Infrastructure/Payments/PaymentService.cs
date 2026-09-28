@@ -28,9 +28,43 @@ public class PaymentService(
         var record = await callRecords.GetByIdAsync(callRecordId, ct)
             ?? throw new InvalidOperationException($"Call record {callRecordId} not found.");
 
+        var amount = fixedAmount ?? record.Cart?.CartTotal ?? 0m;
+        if (amount <= 0)
+            return new PaymentAuthResult(false, PaymentTransactionStatus.Error, null, null, null,
+                "No amount to authorize — cart is empty and no fixed amount was configured.");
+
+        // The node can be reached again after an order change. A live authorization for this exact
+        // amount on the same card capture needs nothing; anything else is voided first so the caller
+        // is never holding two authorizations.
+        var action = PaymentAuthAction.Authorized;
+        var existing = await transactions.GetMostRecentApprovedAsync(callRecordId, ct);
+        if (existing is not null)
+        {
+            var cardRecaptured = record.SensitiveDataStoredAt is { } storedAt && storedAt > existing.CreatedAt;
+            if (!cardRecaptured && existing.Amount == amount)
+                return new PaymentAuthResult(true, PaymentTransactionStatus.Approved, existing.Id,
+                    existing.GatewayTransactionId, existing.AuthCode, "Already authorized for this amount.",
+                    existing.OrderNumber, PaymentAuthAction.AlreadyAuthorized, existing.Amount, existing.CardLast4);
+
+            var voidResult = await gatewayClients.Resolve(existing.Gateway)
+                .VoidAsync(existing.CampaignId, existing.ClientId, existing.GatewayTransactionId!, ct);
+            if (!voidResult.Succeeded)
+                return new PaymentAuthResult(false, PaymentTransactionStatus.Error, existing.Id,
+                    existing.GatewayTransactionId, existing.AuthCode,
+                    $"Could not void the previous authorization ({voidResult.ResponseReasonText}) — not re-authorizing, " +
+                    "so the caller's card isn't held twice.",
+                    existing.OrderNumber, PaymentAuthAction.Reauthorized, existing.Amount, existing.CardLast4);
+            existing.MarkVoided();
+            await transactions.SaveChangesAsync(ct);
+            action = PaymentAuthAction.Reauthorized;
+        }
+
         if (string.IsNullOrEmpty(record.SensitiveData))
             return new PaymentAuthResult(false, PaymentTransactionStatus.Error, null, null, null,
-                "No card data has been captured on this call yet.");
+                action == PaymentAuthAction.Reauthorized
+                    ? "The previous authorization was voided, but the card is no longer on file — capture the card again."
+                    : "No card data has been captured on this call yet.",
+                Action: action);
 
         Dictionary<string, string>? fields;
         try
@@ -41,7 +75,7 @@ public class PaymentService(
         catch (Exception ex)
         {
             return new PaymentAuthResult(false, PaymentTransactionStatus.Error, null, null, null,
-                $"Could not read captured card data: {ex.Message}");
+                $"Could not read captured card data: {ex.Message}", Action: action);
         }
 
         if (fields is null
@@ -49,14 +83,10 @@ public class PaymentService(
             || !fields.TryGetValue(expField, out var expirationMMYY)
             || !fields.TryGetValue(cvvField, out var cvv))
             return new PaymentAuthResult(false, PaymentTransactionStatus.Error, null, null, null,
-                "Captured card data is missing one or more configured fields.");
+                "Captured card data is missing one or more configured fields.", Action: action);
 
         var zip = !string.IsNullOrEmpty(zipOverride) ? zipOverride
             : zipField is not null && fields.TryGetValue(zipField, out var zipValue) ? zipValue : null;
-        var amount = fixedAmount ?? record.Cart?.CartTotal ?? 0m;
-        if (amount <= 0)
-            return new PaymentAuthResult(false, PaymentTransactionStatus.Error, null, null, null,
-                "No amount to authorize — cart is empty and no fixed amount was configured.");
 
         var client = gatewayClients.Resolve(provider);
         var orderNumber = await orderNumbers.GetOrAssignAsync(record, ct);
@@ -85,19 +115,13 @@ public class PaymentService(
         await transactions.AddAsync(transaction, ct);
         await transactions.SaveChangesAsync(ct);
 
-        // Definitive gateway response (approved or declined) — the card data has served its purpose.
-        // On "error" (network/timeout/malformed response — unclear whether the gateway ever saw the
-        // card), deliberately leave it in place so a script's retry loop doesn't force the caller
-        // through another guided-DTMF capture.
-        if (result.Status is PaymentTransactionStatus.Approved or PaymentTransactionStatus.Declined)
-        {
-            record.WipeSensitiveData("api_processed");
-            await callRecords.SaveChangesAsync(ct);
-        }
+        // The card is deliberately NOT wiped here any more (S164): a changed order re-authorizes, and a
+        // decline after fixing the billing address retries, without the caller re-keying it. It's wiped
+        // at the Commit Point, when the flow session completes, or by the retention job.
 
         return new PaymentAuthResult(
             result.Succeeded, result.Status, transaction.Id, result.GatewayTransactionId,
-            result.AuthCode, result.ResponseReasonText, orderNumber);
+            result.AuthCode, result.ResponseReasonText, orderNumber, action, amount, result.CardLast4);
     }
 
     public async Task<PaymentVoidResult> VoidMostRecentAsync(Guid callRecordId, CancellationToken ct = default)

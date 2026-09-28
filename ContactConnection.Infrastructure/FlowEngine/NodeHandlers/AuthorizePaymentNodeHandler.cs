@@ -35,7 +35,13 @@ namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 /// {{flow.outputVariable.gatewayTransactionId}} (the Authorize.Net transaction id — this is the one
 /// field a future Order API submission step will need), {{flow.outputVariable.authCode}},
 /// {{flow.outputVariable.orderNumber}} (the call's order number, empty if the client has no
-/// order-number sequence — also exposed as {{call_record.order_number}} once assigned).
+/// order-number sequence — also exposed as {{call_record.order_number}} once assigned),
+/// {{flow.outputVariable.action}} (authorized | reauthorized | already_authorized),
+/// {{flow.outputVariable.amount}}, {{flow.outputVariable.cardLast4}}.
+///
+/// Safe to reach more than once: same amount and card capture → no gateway call ("approved",
+/// already_authorized); different amount or a newly captured card → the old authorization is voided
+/// first, then a new one requested (a failed void stops there — "error" — rather than holding twice).
 /// </summary>
 public class AuthorizePaymentNodeHandler(IVariableResolver resolver, IPaymentService payments)
     : NodeHandlerBase(resolver), INodeHandler
@@ -91,6 +97,9 @@ public class AuthorizePaymentNodeHandler(IVariableResolver resolver, IPaymentSer
             ctx.FlowVars[$"{outputVariable}.authCode"] = result.AuthCode ?? "";
             ctx.FlowVars[$"{outputVariable}.responseReasonText"] = result.ResponseReasonText ?? "";
             ctx.FlowVars[$"{outputVariable}.orderNumber"] = result.OrderNumber ?? "";
+            ctx.FlowVars[$"{outputVariable}.action"] = result.Action;
+            ctx.FlowVars[$"{outputVariable}.amount"] = result.Amount?.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) ?? "";
+            ctx.FlowVars[$"{outputVariable}.cardLast4"] = result.CardLast4 ?? "";
         }
 
         // The authorization may have just assigned the call's order number — make it visible to

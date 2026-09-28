@@ -1468,7 +1468,17 @@ export default function NodePropertiesPanel({
               is the value an order-submission API call will need;{' '}
               <span className="font-mono">{'{{flow.outputVariable.orderNumber}}'}</span> is the call's
               order number (also <span className="font-mono">{'{{call_record.order_number}}'}</span>) when the
-              client has order numbers turned on.
+              client has order numbers turned on; <span className="font-mono">{'{{flow.outputVariable.cardLast4}}'}</span>{' '}
+              and <span className="font-mono">{'{{flow.outputVariable.amount}}'}</span> for a read-back;{' '}
+              <span className="font-mono">{'{{flow.outputVariable.action}}'}</span> says what happened.
+            </p>
+            <p className="text-[10px] text-gray-500 leading-snug">
+              Safe to reach again after the order changes: same amount on the same card does nothing
+              (<span className="font-mono">already_authorized</span>, Approved); a different amount or a newly
+              captured card voids the previous authorization first, then authorizes the new amount
+              (<span className="font-mono">reauthorized</span>). If that void fails it stops on Error rather
+              than hold the card twice. The card stays on file (encrypted) until the flow&apos;s Commit Point or
+              the end of the flow.
             </p>
 
             <p className="text-[10px] text-gray-500 leading-snug">

@@ -7,15 +7,36 @@ public record PaymentAuthResult(
     string? GatewayTransactionId,
     string? AuthCode,
     string? ResponseReasonText,
-    string? OrderNumber = null);
+    string? OrderNumber = null,
+    // S164: what the node actually did (PaymentAuthAction), the amount now authorized, and the card's
+    // last 4 (safe to show — lets a closing read-back confirm the card without the agent seeing it).
+    string Action = PaymentAuthAction.Authorized,
+    decimal? Amount = null,
+    string? CardLast4 = null);
+
+/// <summary>What AuthorizeAsync did on this pass — an authorize_payment node can be reached more than
+/// once (an agent going back to change the order after a successful auth).</summary>
+public static class PaymentAuthAction
+{
+    /// <summary>No live authorization existed — a new one was requested.</summary>
+    public const string Authorized = "authorized";
+    /// <summary>A live authorization existed for a different amount (or a newly captured card) — it
+    /// was voided and a new one requested.</summary>
+    public const string Reauthorized = "reauthorized";
+    /// <summary>A live authorization for this exact amount and card capture already exists — nothing
+    /// was sent to the gateway.</summary>
+    public const string AlreadyAuthorized = "already_authorized";
+}
 
 public record PaymentVoidResult(bool Succeeded, string? ResponseReasonText);
 
 /// <summary>
 /// The orchestrator every node handler calls (mirrors how node handlers call ICartService, never
 /// touch inventory/pricing internals directly) — resolves the gateway client via
-/// IPaymentGatewayClientFactory, persists a PaymentTransaction, and wipes CallRecord.SensitiveData
-/// on a definitive result. See PaymentTransaction/IPaymentGatewayClient for the rest of the design.
+/// IPaymentGatewayClientFactory and persists a PaymentTransaction. The captured card is kept (still
+/// encrypted) after an authorization so a changed order can be re-authorized without the caller
+/// re-keying it; it is wiped at the flow's Commit Point, when the flow session completes, or by the
+/// sensitive-data retention job — whichever comes first. See PaymentTransaction/IPaymentGatewayClient for the rest of the design.
 /// </summary>
 public interface IPaymentService
 {

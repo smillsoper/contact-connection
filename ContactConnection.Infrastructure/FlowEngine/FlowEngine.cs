@@ -530,6 +530,15 @@ public class FlowEngine : IFlowEngine
 
         // Remove from Redis
         await _redis.KeyDeleteAsync(RedisKey(ctx.SessionId));
+
+        // A captured card is kept after authorization for re-auth on an order change (see
+        // PaymentService); the script is done with it now.
+        var record = await _callRecords.GetByIdAsync(ctx.CallRecordId, ct);
+        if (record is not null && !string.IsNullOrEmpty(record.SensitiveData))
+        {
+            record.WipeSensitiveData("flow_completed");
+            await _callRecords.SaveChangesAsync(ct);
+        }
     }
 
     private static JsonObject? GetNode(JsonObject definition, string nodeId) =>
