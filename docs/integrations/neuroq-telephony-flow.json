@@ -30,13 +30,13 @@
         "nq_block": {
             "_pos": {
                 "x": 0,
-                "y": 320
+                "y": 160
             },
             "type": "tf_check_block_list",
             "label": "Blocked ANI?",
             "transitions": {
-                "blocked": "nq_inactive",
-                "not_blocked": "nq_logged_in"
+                "blocked": "nq_reject",
+                "not_blocked": "nq_answer"
             }
         },
         "nq_end_1": {
@@ -74,12 +74,12 @@
         "nq_answer": {
             "_pos": {
                 "x": 0,
-                "y": 160
+                "y": 320
             },
             "type": "tf_answer",
             "label": "Answer",
             "transitions": {
-                "default": "nq_block"
+                "default": "nq_logged_in"
             },
             "leadInSilenceMs": 400
         },
@@ -96,6 +96,17 @@
                 "default": "nq_end_2"
             },
             "recordLimitSeconds": 0
+        },
+        "nq_reject": {
+            "_pos": {
+                "x": 420,
+                "y": 160
+            },
+            "type": "tf_reject",
+            "cause": "declined",
+            "label": "Reject Call",
+            "transitions": {
+            }
         },
         "nq_whisper": {
             "_pos": {
@@ -136,40 +147,6 @@
             ],
             "periodicAnnouncementIntervalSeconds": 30
         },
-        "nq_hangup_1": {
-            "_pos": {
-                "x": 420,
-                "y": 480
-            },
-            "type": "tf_hangup",
-            "label": "Hang Up",
-            "transitions": {
-            }
-        },
-        "nq_inactive": {
-            "_pos": {
-                "x": 420,
-                "y": 320
-            },
-            "type": "tf_play",
-            "label": "Number Not Active (Inactive.wav)",
-            "ttsText": "Sorry, this number is not currently active. Goodbye.",
-            "ttsVoice": "bIHbv24MWmeRgasZH58o",
-            "audioFileId": "",
-            "audioSource": "tts",
-            "autoRestart": false,
-            "transitions": {
-                "end_of_stream": "nq_hangup_1"
-            },
-            "durationSeconds": 0,
-            "interruptDigits": "",
-            "leadInSilenceMs": 0,
-            "rememberPosition": false,
-            "startOffsetSeconds": 0,
-            "periodicAnnouncements": [
-            ],
-            "periodicAnnouncementIntervalSeconds": 30
-        },
         "nq_alert_mod": {
             "_pos": {
                 "x": 420,
@@ -197,7 +174,7 @@
             "label": "Read X-Elite",
             "headerName": "X-Elite",
             "transitions": {
-                "default": "nq_answer"
+                "default": "nq_block"
             },
             "variableName": "is_elite"
         },

@@ -92,8 +92,8 @@ NeuroQ); definition exported to `neuroq-telephony-flow.json` (its `agentGroupId`
 "NeuroQ Elite" group — remap for production). Groups created alongside, no members yet: **Alpha
 Sales** (NeuroQ tier 10, label "Alpha") and **NeuroQ Elite** (tier 0, label "Elite").
 
-`X-Elite` header → answer → block list (TTS "not currently active" → hang up — the one deliberate
-reject) → **any agent logged in?** (`check: logged_in`; busy counts) → if nobody: **`tf_send_email`
+`X-Elite` header → block list → blocked: **`tf_reject` before answering** (the one deliberate
+reject — no media, call never committed; CXone answered and played Inactive.wav) → answer → **any agent logged in?** (`check: logged_in`; busy counts) → if nobody: **`tf_send_email`
 to the MOD and queue anyway** → Elite? → `tf_route_to_queue` pinned to NeuroQ Elite, or unpinned
 (parallel queuing: Alpha first, regular pool, re-offered to Alpha) → "all reps busy" → music with a
 periodic hold message. Event branches: agent selected → script pop → whisper "NeuroQ"; agent
