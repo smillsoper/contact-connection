@@ -9,6 +9,9 @@ public interface IPaymentTransactionRepository
     /// so no explicit node-reference config is needed).</summary>
     Task<PaymentTransaction?> GetMostRecentApprovedAsync(Guid callRecordId, CancellationToken ct = default);
 
+    /// <summary>Every gateway call on the call, oldest first (call detail view).</summary>
+    Task<IReadOnlyList<PaymentTransaction>> GetByCallRecordAsync(Guid callRecordId, CancellationToken ct = default);
+
     Task AddAsync(PaymentTransaction transaction, CancellationToken ct = default);
     Task SaveChangesAsync(CancellationToken ct = default);
 }

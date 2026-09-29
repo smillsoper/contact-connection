@@ -61,6 +61,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IFlowRepository, FlowRepository>();
         services.AddScoped<IDashboardRepository, DashboardRepository>();
         services.AddScoped<IFlowSessionRepository, FlowSessionRepository>();
+        services.AddScoped<ICallRecordAuditRepository, CallRecordAuditRepository>();
         services.AddScoped<IProductRepository, ProductRepository>();
         services.AddScoped<IProductCategoryRepository, ProductCategoryRepository>();
         services.AddScoped<IProductAttributeRepository, ProductAttributeRepository>();

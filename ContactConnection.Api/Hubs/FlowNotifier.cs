@@ -13,6 +13,15 @@ public class FlowNotifier(IHubContext<FlowHub, IFlowHubClient> hubContext) : IFl
     public Task PushNodeStateAsync(Guid sessionId, FlowNodeState state, CancellationToken ct = default) =>
         hubContext.Clients.Group($"session:{sessionId}").ReceiveNodeState(state);
 
+    public Task PushSessionUpdatedAsync(Guid sessionId, FlowNodeState state, string message, CancellationToken ct = default) =>
+        hubContext.Clients.Group($"session:{sessionId}").ReceiveSessionUpdated(state, message);
+
+    public Task PushAgentSessionsChangedAsync(Guid tenantId, Guid agentId, CancellationToken ct = default) =>
+        hubContext.Clients.Group($"supervisor:{tenantId}").ReceiveAgentSessionsChanged(agentId.ToString());
+
+    public Task PushCallChangedAsync(Guid callRecordId, CancellationToken ct = default) =>
+        hubContext.Clients.Group($"call:{callRecordId}").ReceiveCallChanged(callRecordId.ToString());
+
     public Task PushErrorAsync(Guid sessionId, string message, CancellationToken ct = default) =>
         hubContext.Clients.Group($"session:{sessionId}").ReceiveError(message);
 }

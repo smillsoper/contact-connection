@@ -21,9 +21,9 @@ import ServiceLevelThresholdWidget from '../components/dashboard/widgets/Service
 import QueuedCallsWidget from '../components/dashboard/widgets/QueuedCallsWidget'
 import {
   DashboardLiveContext, DashboardCallStateLiveContext, DashboardRegistrationLiveContext,
-  DashboardScheduledCallbackLiveContext, DashboardQueueOfferLiveContext,
+  DashboardScheduledCallbackLiveContext, DashboardQueueOfferLiveContext, DashboardAgentSessionsLiveContext,
   type AgentStateEvent, type CallStateEvent, type AgentRegistrationEvent,
-  type ScheduledCallbackEvent, type QueueOfferEvent,
+  type ScheduledCallbackEvent, type QueueOfferEvent, type AgentSessionsEvent,
 } from '../components/dashboard/DashboardLiveContext'
 
 const GridLayoutWithWidth = WidthProvider(GridLayout)
@@ -78,6 +78,7 @@ export default function DashboardBuilderPage() {
   const [liveRegEvent, setLiveRegEvent] = useState<AgentRegistrationEvent | null>(null)
   const [liveScbEvent, setLiveScbEvent] = useState<ScheduledCallbackEvent | null>(null)
   const [liveOfferEvent, setLiveOfferEvent] = useState<QueueOfferEvent | null>(null)
+  const [liveSessionsEvent, setLiveSessionsEvent] = useState<AgentSessionsEvent | null>(null)
   // Opening an existing dashboard defaults to view-only, even for a manager — most visits are
   // "just looking," not editing, and a blank canvas has nothing to view, so it starts in edit
   // mode instead. editMode (not isEditing alone) is what every edit-affordance below actually
@@ -168,6 +169,10 @@ export default function DashboardBuilderPage() {
 
     connection.on('receiveQueueOfferChanged', (campaignId: string) => {
       setLiveOfferEvent({ campaignId })
+    })
+
+    connection.on('receiveAgentSessionsChanged', (agentId: string) => {
+      setLiveSessionsEvent({ agentId, at: Date.now() })
     })
 
     // SignalR groups are tied to the connection id — an automatic reconnect (network blip, or
@@ -389,6 +394,7 @@ export default function DashboardBuilderPage() {
           <DashboardRegistrationLiveContext.Provider value={liveRegEvent}>
           <DashboardScheduledCallbackLiveContext.Provider value={liveScbEvent}>
           <DashboardQueueOfferLiveContext.Provider value={liveOfferEvent}>
+          <DashboardAgentSessionsLiveContext.Provider value={liveSessionsEvent}>
             <GridLayoutWithWidth
               className="layout"
               layout={layout}
@@ -425,6 +431,7 @@ export default function DashboardBuilderPage() {
                 {editMode ? 'Drag a widget from the palette above to get started.' : 'This dashboard has no widgets yet.'}
               </div>
             )}
+          </DashboardAgentSessionsLiveContext.Provider>
           </DashboardQueueOfferLiveContext.Provider>
           </DashboardScheduledCallbackLiveContext.Provider>
           </DashboardRegistrationLiveContext.Provider>

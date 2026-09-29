@@ -61,6 +61,7 @@ public static class Permission
 
     public const string CallsView   = "calls.view";
     public const string CallsExport = "calls.export";
+    public const string CallsManage = "calls.manage"; // edit a call's data after the fact + re-run its API calls (order resubmit)
 
     public const string IntegrationsView   = "integrations.view";
     public const string IntegrationsManage = "integrations.manage";
@@ -78,7 +79,7 @@ public static class Permission
         AgentsView, AgentsManage, RolesManage,
         FlowsView, FlowsManage, FlowsPublish,
         TelephonyView, TelephonyManage,
-        CallsView, CallsExport,
+        CallsView, CallsExport, CallsManage,
         IntegrationsView, IntegrationsManage,
         SupervisorMonitor, SupervisorOverride,
         ReportsView, ReportsManage,

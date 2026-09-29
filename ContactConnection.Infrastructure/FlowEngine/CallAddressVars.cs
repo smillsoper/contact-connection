@@ -15,6 +15,18 @@ public static class CallAddressVars
     public const string Email = "email";
     public const string BillingPhone  = "billing_phone";
     public const string ShippingPhone = "shipping_phone";
+    public const string FirstName = "first_name";
+    public const string LastName  = "last_name";
+
+    /// <summary>The customer name just saved to the call record — {{call_record.first_name}} /
+    /// {{caller.first_name}} (and last_name, and {{caller.name}}) for the rest of the flow.</summary>
+    public static void ApplyName(FlowExecutionContext ctx, string key, string value)
+    {
+        ctx.CallRecord[key] = value;
+        ctx.Caller[key] = value;
+        ctx.Caller["name"] = string.Join(" ", new[] { ctx.Caller.GetValueOrDefault(FirstName), ctx.Caller.GetValueOrDefault(LastName) }
+            .Where(n => !string.IsNullOrWhiteSpace(n)));
+    }
 
     public static void ApplyPhone(FlowExecutionContext ctx, string role, string phone)
     {

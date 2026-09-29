@@ -22,7 +22,68 @@ public interface IFlowEngine
     /// Returns the current node state for an active session (e.g. on reconnect).
     /// </summary>
     Task<FlowNodeState?> GetCurrentStateAsync(Guid sessionId, CancellationToken ct = default);
+
+    // ── Post-call review (Call Records admin) ───────────────────────────────
+
+    /// <summary>A session's variables and its API-call nodes' last results, for the call detail
+    /// view. Null when the session doesn't exist.</summary>
+    Task<FlowSessionSnapshot?> GetSessionSnapshotAsync(Guid sessionId, CancellationToken ct = default);
+
+    /// <summary>Sets (or, for a null value, removes) flow variables on a session — live or
+    /// finished — so a correction is what a re-run API call sends. Returns each changed key's
+    /// previous value (null = wasn't set), for the audit trail.</summary>
+    Task<IReadOnlyDictionary<string, string?>> UpdateSessionVariablesAsync(
+        Guid sessionId, IReadOnlyDictionary<string, string?> changes, CancellationToken ct = default);
+
+    /// <summary>Runs one of the session's api_call nodes again, exactly as the flow would — same
+    /// endpoint, template, output variable and oncePerCall guard (an order that already posted
+    /// replays instead of posting twice) — against the call's current data. The flow does not
+    /// move on; only the node's output variables change.</summary>
+    Task<ApiCallRerunResult> RerunApiCallNodeAsync(Guid sessionId, string nodeId, CancellationToken ct = default);
+
+    /// <summary>If an agent still has this session open: reload its call data from the call record
+    /// (so {{caller.*}} / {{call_record.*}} show a correction made elsewhere) and push the refreshed
+    /// current node to the agent with <paramref name="message"/>. False when the session isn't live.</summary>
+    Task<bool> PushLiveUpdateAsync(Guid sessionId, string message, CancellationToken ct = default);
+
+    /// <summary>The CRM scripts these agents have open right now (live in Redis), whether or not
+    /// they're on a phone call — the supervisor Agent List links each to its call's review page.</summary>
+    Task<IReadOnlyList<LiveFlowSession>> GetLiveSessionsForAgentsAsync(
+        IReadOnlyCollection<Guid> agentIds, CancellationToken ct = default);
 }
+
+public record LiveFlowSession(Guid AgentId, Guid SessionId, Guid CallRecordId, string? FlowName, DateTimeOffset StartedAt);
+
+public class FlowSessionSnapshot
+{
+    public required Guid SessionId { get; init; }
+    /// <summary>True while an agent still has the script open (its state is live in Redis).</summary>
+    public bool IsLive { get; init; }
+    public Dictionary<string, string> FlowVars { get; init; } = [];
+    public Dictionary<string, string> Inputs { get; init; } = [];
+    public string? CommitLabel { get; init; }
+    public List<ApiCallNodeSummary> ApiCalls { get; init; } = [];
+}
+
+/// <summary>One api_call node reachable from the session's flow (sub-flows included).</summary>
+public class ApiCallNodeSummary
+{
+    public required string NodeId { get; init; }
+    public required string Label { get; init; }
+    public string? OutputVariable { get; init; }
+    public bool OncePerCall { get; init; }
+    /// <summary>Times this node ran on the call (execution history).</summary>
+    public int RunCount { get; init; }
+    public DateTimeOffset? LastRunAt { get; init; }
+    /// <summary>"true"/"false" from {output}.success, or null if it never ran / has no output variable.</summary>
+    public string? Success { get; init; }
+    public string? StatusCode { get; init; }
+    public string? Error { get; init; }
+    public string? Response { get; init; }
+}
+
+public record ApiCallRerunResult(
+    bool Success, string Transition, string? StatusCode, string? Error, string? Response, bool Replayed);
 
 public class StartFlowRequest
 {

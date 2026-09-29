@@ -107,28 +107,7 @@ public class FlowEngine : IFlowEngine
 
         var ctx = BuildContext(session, definition, request);
 
-        // Populate agent context from database so {{agent.*}} tags resolve correctly
-        var agent = await _agents.GetByIdAsync(request.AgentId, ct);
-        if (agent is not null)
-        {
-            ctx.Agent["id"]         = agent.Id.ToString();
-            ctx.Agent["first_name"] = agent.FirstName;
-            ctx.Agent["last_name"]  = agent.LastName;
-            ctx.Agent["full_name"]  = agent.FullName;
-            ctx.Agent["email"]      = agent.Email;
-            ctx.Agent["extension"]  = agent.SipExtension ?? string.Empty;
-            ctx.Agent["role"]       = agent.Role;
-        }
-
-        // Populate tenant context so {{tenant.*}} tags resolve correctly
-        if (_tenantContext.Current is { } tenant)
-        {
-            ctx.Tenant["id"]        = tenant.Id.ToString();
-            ctx.Tenant["name"]      = tenant.Name;
-            ctx.Tenant["subdomain"] = tenant.Subdomain;
-            ctx.Tenant["timezone"]  = tenant.Timezone;
-            ctx.Tenant["plan_tier"] = tenant.PlanTier;
-        }
+        await PopulateAgentAndTenantAsync(ctx, request.AgentId, ct);
 
         // Populate call_record/caller context from the call record so {{call_record.*}} and
         // {{caller.*}} tags resolve correctly — previously always empty (never wired up).
@@ -151,9 +130,14 @@ public class FlowEngine : IFlowEngine
         if (state.IsTerminal)
             await CompleteSession(ctx, ct);
         else
+        {
             await SaveToRedis(ctx, ct);
+            await PersistProgressAsync(ctx, ct);
+        }
 
         await _notifier.PushNodeStateAsync(session.Id, state, ct);
+        await NotifyAgentSessionsChangedAsync(ctx, ct);
+        await NotifyCallChangedAsync(ctx.CallRecordId, ct);
         return state;
     }
 
@@ -225,9 +209,13 @@ public class FlowEngine : IFlowEngine
         if (state.IsTerminal)
             await CompleteSession(ctx, ct);
         else
+        {
             await SaveToRedis(ctx, ct);
+            await PersistProgressAsync(ctx, ct);
+        }
 
         await _notifier.PushNodeStateAsync(request.SessionId, state, ct);
+        await NotifyCallChangedAsync(ctx.CallRecordId, ct);
         return state;
     }
 
@@ -246,6 +234,254 @@ public class FlowEngine : IFlowEngine
         if (ReferencesCart(node)) await RefreshCartVarsAsync(ctx, ct);
         var result = await handler.ExecuteAsync(node, ctx, agentInput: null, agentTransition: "default", ct);
         return result.State;
+    }
+
+    // ── Post-call review (Call Records admin) ───────────────────────────────
+
+    public async Task<FlowSessionSnapshot?> GetSessionSnapshotAsync(Guid sessionId, CancellationToken ct = default)
+    {
+        var loaded = await LoadForReviewAsync(sessionId, ct);
+        if (loaded is null) return null;
+        var (ctx, _, isLive) = loaded.Value;
+
+        var apiCalls = new List<ApiCallNodeSummary>();
+        foreach (var (nodeId, node) in await CollectApiCallNodesAsync(ctx.FlowDefinition, ct))
+        {
+            var output = node["outputVariable"]?.GetValue<string>()?.Trim();
+            var runs = ctx.ExecutionHistory.Where(h => h.NodeId == nodeId && h.NodeType == "api_call").ToList();
+            string? Var(string key) =>
+                !string.IsNullOrEmpty(output) && ctx.FlowVars.TryGetValue($"{output}.{key}", out var v) ? v : null;
+            apiCalls.Add(new ApiCallNodeSummary
+            {
+                NodeId         = nodeId,
+                Label          = node["label"]?.GetValue<string>() ?? nodeId,
+                OutputVariable = output,
+                OncePerCall    = node["oncePerCall"]?.GetValue<bool>() == true,
+                RunCount       = runs.Count,
+                LastRunAt      = runs.Count > 0 ? runs[^1].EnteredAt : null,
+                Success        = Var("success"),
+                StatusCode     = Var("status_code"),
+                Error          = Var("error"),
+                Response       = Var("response"),
+            });
+        }
+
+        return new FlowSessionSnapshot
+        {
+            SessionId   = sessionId,
+            IsLive      = isLive,
+            FlowVars    = new(ctx.FlowVars),
+            Inputs      = new(ctx.Inputs),
+            CommitLabel = ctx.CommitLabel,
+            ApiCalls    = apiCalls,
+        };
+    }
+
+    public async Task<IReadOnlyDictionary<string, string?>> UpdateSessionVariablesAsync(
+        Guid sessionId, IReadOnlyDictionary<string, string?> changes, CancellationToken ct = default)
+    {
+        var (ctx, session, isLive) = await LoadForReviewAsync(sessionId, ct)
+            ?? throw new InvalidOperationException($"Flow session {sessionId} not found.");
+
+        var previous = new Dictionary<string, string?>();
+        foreach (var (rawKey, value) in changes)
+        {
+            var key = rawKey.Trim();
+            if (key.Length == 0) continue;
+            previous[key] = ctx.FlowVars.TryGetValue(key, out var old) ? old : null;
+            if (value is null) ctx.FlowVars.Remove(key);
+            else ctx.FlowVars[key] = value;
+        }
+
+        await SaveReviewedAsync(ctx, session, isLive, ct);
+        return previous;
+    }
+
+    public async Task<ApiCallRerunResult> RerunApiCallNodeAsync(Guid sessionId, string nodeId, CancellationToken ct = default)
+    {
+        var (ctx, session, isLive) = await LoadForReviewAsync(sessionId, ct)
+            ?? throw new InvalidOperationException($"Flow session {sessionId} not found.");
+
+        var (node, definition) = await FindNodeAsync(ctx.FlowDefinition, nodeId, ct)
+            ?? throw new InvalidOperationException($"Node '{nodeId}' is not in this call's flow.");
+        if (node["type"]?.GetValue<string>() != "api_call")
+            throw new InvalidOperationException($"Node '{nodeId}' is not an API Call node.");
+        if (!_handlers.TryGetValue("api_call", out var handler))
+            throw new InvalidOperationException("No handler registered for node type 'api_call'.");
+
+        var output = node["outputVariable"]?.GetValue<string>()?.Trim();
+        string? Var(string key) =>
+            !string.IsNullOrEmpty(output) && ctx.FlowVars.TryGetValue($"{output}.{key}", out var v) ? v : null;
+        // oncePerCall + already succeeded = the handler replays the stored result, sends nothing.
+        var replayed = node["oncePerCall"]?.GetValue<bool>() == true && Var("success") == "true";
+
+        // Fresh call data — the whole point is to send what was corrected since the call.
+        ctx.CallRecord.Clear();
+        ctx.Caller.Clear();
+        await PopulateAgentAndTenantAsync(ctx, ctx.AgentId, ct);
+        await PopulateCallContextAsync(ctx, ctx.CallRecordId, ctx.InteractionId, ct);
+        ctx.SharedVars = await _sharedVars.GetAllAsync(ctx.CallRecordId, ct);
+        if (ReferencesCart(node)) await RefreshCartVarsAsync(ctx, ct);
+
+        // Run the node where it lives, then put the session back exactly where it was — the
+        // flow doesn't move on, only the node's output variables (and history) change.
+        var (savedNodeId, savedDefinition) = (ctx.CurrentNodeId, ctx.FlowDefinition);
+        ctx.CurrentNodeId  = nodeId;
+        ctx.FlowDefinition = definition;
+        var result = await handler.ExecuteAsync(node, ctx, agentInput: null, agentTransition: "default", ct);
+        ctx.CurrentNodeId  = savedNodeId;
+        ctx.FlowDefinition = savedDefinition;
+
+        await SaveReviewedAsync(ctx, session, isLive, ct);
+
+        var transition = Var("timed_out") == "true" ? "timeout" : Var("success") == "true" ? "success" : "error";
+        _logger.LogInformation(
+            "Re-ran api_call {NodeId} on session {SessionId} (call {CallRecordId}): {Transition} -> {Next}",
+            nodeId, sessionId, ctx.CallRecordId, transition, result.NextNodeId);
+
+        return new ApiCallRerunResult(
+            Success: transition == "success",
+            Transition: transition,
+            StatusCode: Var("status_code"),
+            Error: Var("error"),
+            Response: Var("response"),
+            Replayed: replayed);
+    }
+
+    public async Task<bool> PushLiveUpdateAsync(Guid sessionId, string message, CancellationToken ct = default)
+    {
+        var ctx = await LoadFromRedis(sessionId, ct);
+        if (ctx is null) return false;
+
+        // The live session holds its own copy of the call data, loaded when the script started.
+        // Overlay a fresh read so later nodes (and the pushed node below) see the correction; keys a
+        // flow set itself that the call record doesn't carry (e.g. caller.* extras) are kept.
+        var fresh = new FlowExecutionContext { CallRecordId = ctx.CallRecordId };
+        await PopulateCallContextAsync(fresh, ctx.CallRecordId, ctx.InteractionId, ct);
+        foreach (var (k, v) in fresh.CallRecord) ctx.CallRecord[k] = v;
+        foreach (var (k, v) in fresh.Caller) ctx.Caller[k] = v;
+        await SaveToRedis(ctx, ct);
+
+        ctx.SharedVars = await _sharedVars.GetAllAsync(ctx.CallRecordId, ct);
+        var node = GetNode(ctx.FlowDefinition, ctx.CurrentNodeId);
+        var nodeType = node?["type"]?.GetValue<string>() ?? "script";
+        if (node is null || !_handlers.TryGetValue(nodeType, out var handler)) return false;
+
+        // Same re-render the agent UI gets on reconnect — the node the agent is on is always a
+        // stopping node (input/script/...), whose handler only builds display state on a pass
+        // with no input. The session was already saved above, so nothing this re-render touches
+        // (e.g. history) is persisted.
+        if (ReferencesCart(node)) await RefreshCartVarsAsync(ctx, ct);
+        var result = await handler.ExecuteAsync(node, ctx, agentInput: null, agentTransition: "default", ct);
+        var state = result.State;
+        state.FlowName = (await _flows.GetByIdAsync(ctx.FlowId, ct))?.Name;
+        AttachSectionInfo(ctx, state);
+
+        await _notifier.PushSessionUpdatedAsync(sessionId, state, message, ct);
+        return true;
+    }
+
+    public async Task<IReadOnlyList<LiveFlowSession>> GetLiveSessionsForAgentsAsync(
+        IReadOnlyCollection<Guid> agentIds, CancellationToken ct = default)
+    {
+        // Redis holds a live session for SessionTtl after its last step, and every step now writes
+        // through to flow_sessions.updated_at — so anything older can't still be live.
+        var candidates = await _sessions.GetActiveForAgentsAsync(agentIds, DateTimeOffset.UtcNow - SessionTtl, ct);
+        var live = new List<LiveFlowSession>();
+        var flowNames = new Dictionary<Guid, string?>();
+        foreach (var s in candidates)
+        {
+            if (!await _redis.KeyExistsAsync(RedisKey(s.Id))) continue;
+            if (!flowNames.TryGetValue(s.FlowId, out var name))
+                flowNames[s.FlowId] = name = (await _flows.GetByIdAsync(s.FlowId, ct))?.Name;
+            live.Add(new LiveFlowSession(s.AgentId, s.Id, s.CallRecordId, name, s.StartedAt));
+        }
+        return live;
+    }
+
+    /// <summary>Best effort — tells an open Call Records page for this call to refresh.</summary>
+    private async Task NotifyCallChangedAsync(Guid callRecordId, CancellationToken ct)
+    {
+        try { await _notifier.PushCallChangedAsync(callRecordId, ct); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Call changed push failed for call {CallRecordId}", callRecordId); }
+    }
+
+    /// <summary>Best effort — a dashboard refresh must never break the agent's own flow.</summary>
+    private async Task NotifyAgentSessionsChangedAsync(FlowExecutionContext ctx, CancellationToken ct)
+    {
+        try { await _notifier.PushAgentSessionsChangedAsync(ctx.TenantId, ctx.AgentId, ct); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Agent sessions push failed for session {SessionId}", ctx.SessionId); }
+    }
+
+    /// <summary>The session's state — from Redis while an agent still has it open (that copy is the
+    /// newer one), otherwise from flow_sessions.</summary>
+    private async Task<(FlowExecutionContext Ctx, FlowSession Session, bool IsLive)?> LoadForReviewAsync(
+        Guid sessionId, CancellationToken ct)
+    {
+        var session = await _sessions.GetByIdAsync(sessionId, ct);
+        if (session is null) return null;
+
+        var live = await LoadFromRedis(sessionId, ct);
+        if (live is not null) return (live, session, true);
+
+        var flow = await _flows.GetByIdAsync(session.FlowId, ct);
+        var ctx = FlowExecutionContext.Deserialize(
+            sessionId, session.FlowId, session.FlowVersion,
+            session.CallRecordId, session.InteractionId, session.AgentId, session.TenantId,
+            session.CurrentNodeId, flow?.Definition ?? "{}",
+            session.VariableStore, session.ExecutionHistory,
+            callRecord: [], caller: [], agent: [], tenant: []);
+        return (ctx, session, false);
+    }
+
+    private async Task SaveReviewedAsync(FlowExecutionContext ctx, FlowSession session, bool isLive, CancellationToken ct)
+    {
+        if (isLive) await SaveToRedis(ctx, ct);
+        session.ReplaceState(ctx.SerializeVariableStore(), ctx.SerializeExecutionHistory());
+        await _sessions.SaveChangesAsync(ct);
+    }
+
+    /// <summary>A node by id in the flow or any flow it calls (execute_flow / transition_to_flow),
+    /// with the definition that holds it.</summary>
+    private async Task<(JsonObject Node, JsonObject Definition)?> FindNodeAsync(
+        JsonObject definition, string nodeId, CancellationToken ct)
+    {
+        foreach (var def in await ReachableDefinitionsAsync(definition, ct))
+            if (GetNode(def, nodeId) is { } node) return (node, def);
+        return null;
+    }
+
+    private async Task<List<(string NodeId, JsonObject Node)>> CollectApiCallNodesAsync(
+        JsonObject definition, CancellationToken ct)
+    {
+        var found = new List<(string, JsonObject)>();
+        foreach (var def in await ReachableDefinitionsAsync(definition, ct))
+            if (def["nodes"] is JsonObject nodes)
+                foreach (var (id, n) in nodes)
+                    if (n is JsonObject obj && obj["type"]?.GetValue<string>() == "api_call")
+                        found.Add((id, obj));
+        return found;
+    }
+
+    /// <summary>The flow plus every flow reachable through execute_flow / transition_to_flow
+    /// (capped — a guard against a pathological chain, not a real limit).</summary>
+    private async Task<List<JsonObject>> ReachableDefinitionsAsync(JsonObject root, CancellationToken ct)
+    {
+        var result = new List<JsonObject> { root };
+        var seen = new HashSet<Guid>();
+        for (var i = 0; i < result.Count && result.Count < 20; i++)
+        {
+            if (result[i]["nodes"] is not JsonObject nodes) continue;
+            foreach (var (_, n) in nodes)
+            {
+                if (n?["type"]?.GetValue<string>() is not ("execute_flow" or "transition_to_flow")) continue;
+                if (!Guid.TryParse(n["targetFlowId"]?.GetValue<string>(), out var flowId) || !seen.Add(flowId)) continue;
+                var flow = await _flows.GetByIdAsync(flowId, ct);
+                if (flow is not null && JsonNode.Parse(flow.Definition) is JsonObject def)
+                    result.Add(def);
+            }
+        }
+        return result;
     }
 
     // ── Internal engine loop ────────────────────────────────────────────────
@@ -352,6 +588,31 @@ public class FlowEngine : IFlowEngine
 
     // ── Context build/persist ───────────────────────────────────────────────
 
+    /// <summary>{{agent.*}} from the agent's row, {{tenant.*}} from the resolved tenant.</summary>
+    private async Task PopulateAgentAndTenantAsync(FlowExecutionContext ctx, Guid agentId, CancellationToken ct)
+    {
+        var agent = await _agents.GetByIdAsync(agentId, ct);
+        if (agent is not null)
+        {
+            ctx.Agent["id"]         = agent.Id.ToString();
+            ctx.Agent["first_name"] = agent.FirstName;
+            ctx.Agent["last_name"]  = agent.LastName;
+            ctx.Agent["full_name"]  = agent.FullName;
+            ctx.Agent["email"]      = agent.Email;
+            ctx.Agent["extension"]  = agent.SipExtension ?? string.Empty;
+            ctx.Agent["role"]       = agent.Role;
+        }
+
+        if (_tenantContext.Current is { } tenant)
+        {
+            ctx.Tenant["id"]        = tenant.Id.ToString();
+            ctx.Tenant["name"]      = tenant.Name;
+            ctx.Tenant["subdomain"] = tenant.Subdomain;
+            ctx.Tenant["timezone"]  = tenant.Timezone;
+            ctx.Tenant["plan_tier"] = tenant.PlanTier;
+        }
+    }
+
     private static FlowExecutionContext BuildContext(
         FlowSession session, JsonObject definition, StartFlowRequest request)
     {
@@ -436,6 +697,8 @@ public class FlowEngine : IFlowEngine
         ctx.CallRecord["account_number"] = record.AccountNumber ?? string.Empty;
         ctx.CallRecord["order_number"] = record.OrderNumber ?? string.Empty;
         ctx.CallRecord[CallAddressVars.Email]         = record.Email ?? string.Empty;
+        ctx.CallRecord[CallAddressVars.FirstName]     = record.FirstName ?? string.Empty;
+        ctx.CallRecord[CallAddressVars.LastName]      = record.LastName ?? string.Empty;
         ctx.CallRecord[CallAddressVars.BillingPhone]  = record.BillingPhone ?? string.Empty;
         ctx.CallRecord[CallAddressVars.ShippingPhone] = record.ShippingPhone ?? string.Empty;
         // Address objects (same shape as an address node's output) — {{call_record.shipping_address.city}}
@@ -488,6 +751,20 @@ public class FlowEngine : IFlowEngine
         await _redis.StringSetAsync(key, value, SessionTtl);
     }
 
+    /// <summary>
+    /// Write-through of the live state to flow_sessions on every step (S165). Redis stays the
+    /// working copy, but it expires 12h after the last step — a script the agent never finished
+    /// (closed the tab, dropped call) used to lose its variables entirely, leaving nothing to
+    /// review or correct afterwards (e.g. resubmitting a rejected order).
+    /// </summary>
+    private async Task PersistProgressAsync(FlowExecutionContext ctx, CancellationToken ct)
+    {
+        var session = await _sessions.GetByIdAsync(ctx.SessionId, ct);
+        if (session is null) return;
+        session.AdvanceTo(ctx.CurrentNodeId, ctx.SerializeVariableStore(), ctx.SerializeExecutionHistory());
+        await _sessions.SaveChangesAsync(ct);
+    }
+
     private async Task<FlowExecutionContext?> LoadFromRedis(Guid sessionId, CancellationToken ct)
     {
         var key  = RedisKey(sessionId);
@@ -530,6 +807,7 @@ public class FlowEngine : IFlowEngine
 
         // Remove from Redis
         await _redis.KeyDeleteAsync(RedisKey(ctx.SessionId));
+        await NotifyAgentSessionsChangedAsync(ctx, ct);
 
         // A captured card is kept after authorization for re-auth on an order change (see
         // PaymentService); the script is done with it now.

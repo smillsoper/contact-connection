@@ -20,6 +20,23 @@ public class FlowSessionRepository : IFlowSessionRepository
         Db.FlowSessions.FirstOrDefaultAsync(
             s => s.CallRecordId == callRecordId && s.Status == FlowSessionStatus.Active, ct);
 
+    public async Task<IReadOnlyList<FlowSession>> GetByCallRecordAsync(Guid callRecordId, CancellationToken ct = default) =>
+        await Db.FlowSessions
+            .Where(s => s.CallRecordId == callRecordId)
+            .OrderBy(s => s.StartedAt)
+            .ToListAsync(ct);
+
+    public async Task<IReadOnlyList<FlowSession>> GetActiveForAgentsAsync(
+        IReadOnlyCollection<Guid> agentIds, DateTimeOffset updatedSince, CancellationToken ct = default)
+    {
+        if (agentIds.Count == 0) return [];
+        var ids = agentIds.ToArray();
+        return await Db.FlowSessions.AsNoTracking()
+            .Where(s => ids.Contains(s.AgentId) && s.Status == FlowSessionStatus.Active && s.UpdatedAt >= updatedSince)
+            .OrderBy(s => s.StartedAt)
+            .ToListAsync(ct);
+    }
+
     public async Task AddAsync(FlowSession session, CancellationToken ct = default) =>
         await Db.FlowSessions.AddAsync(session, ct);
 

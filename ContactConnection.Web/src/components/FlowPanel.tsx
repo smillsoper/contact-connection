@@ -59,6 +59,28 @@ function FlowSessionView({ entry, hub, onEnd }: FlowSessionViewProps) {
     return () => { hub.invoke('LeaveSession', entry.sessionId).catch(console.error) }
   }, [hub, entry.sessionId])
 
+  // Call Records (S165): a supervisor corrected this call's data (or resubmitted its order) while
+  // the agent is still in the script — show the refreshed node, refetch the cart, and say who
+  // changed what. Same nodeId keeps whatever the agent is typing in an input (NodeDisplay only
+  // resets its input on a node change); script text re-resolves with the corrected values.
+  const [liveNotice, setLiveNotice] = useState<string | null>(null)
+  useEffect(() => {
+    if (!hub) return
+    const handler = (node: FlowNodeState, message: string) => {
+      if (node.sessionId !== entry.sessionId) return
+      setState((prev) => (prev.phase === 'running' ? { phase: 'running', node } : prev))
+      bumpCartVersion()
+      setLiveNotice(message)
+    }
+    hub.on('receiveSessionUpdated', handler)
+    return () => { hub.off('receiveSessionUpdated', handler) }
+  }, [hub, entry.sessionId, bumpCartVersion])
+  useEffect(() => {
+    if (!liveNotice) return
+    const timer = setTimeout(() => setLiveNotice(null), 10000)
+    return () => clearTimeout(timer)
+  }, [liveNotice])
+
   // Detect end node → transition to ending phase
   useEffect(() => {
     if (state.phase === 'running' && state.node.nodeType === 'end') {
@@ -223,6 +245,12 @@ function FlowSessionView({ entry, hub, onEnd }: FlowSessionViewProps) {
 
   return (
     <div className="relative h-full">
+      {liveNotice && (
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 max-w-[90%] bg-sky-950/95 border border-sky-700 text-sky-100 text-xs rounded-lg px-3 py-2 shadow-lg flex items-start gap-3">
+          <span className="break-words">{liveNotice}</span>
+          <button onClick={() => setLiveNotice(null)} className="text-sky-400 hover:text-white shrink-0" aria-label="Dismiss">✕</button>
+        </div>
+      )}
       {validationModal && (
         <AddressValidationModal
           result={validationModal.result}

@@ -18,14 +18,34 @@ public static class CallRecordsEndpoints
         group.MapPost("manual", CreateManual);
         group.MapGet("{id:guid}", GetById);
         group.MapGet("{id:guid}/cart", GetCart);
-        group.MapPut("{id:guid}/cart", SetCart);
-        group.MapPost("{id:guid}/cart/items", AddCartItem);
-        group.MapPatch("{id:guid}/cart/items/{itemIndex:int}", UpdateCartItemQuantity);
-        group.MapDelete("{id:guid}/cart/items/{itemIndex:int}", RemoveCartItem);
-        group.MapPost("{id:guid}/payments/authorize", AuthorizePayment);
-        group.MapPost("{id:guid}/payments/void", VoidPayment);
+        // Changes made from the agent's screen outside a flow step — an open Call Records page for
+        // the call refreshes after each successful one (S165).
+        group.MapPut("{id:guid}/cart", SetCart).AddEndpointFilter(NotifyCallChanged);
+        group.MapPost("{id:guid}/cart/items", AddCartItem).AddEndpointFilter(NotifyCallChanged);
+        group.MapPatch("{id:guid}/cart/items/{itemIndex:int}", UpdateCartItemQuantity).AddEndpointFilter(NotifyCallChanged);
+        group.MapDelete("{id:guid}/cart/items/{itemIndex:int}", RemoveCartItem).AddEndpointFilter(NotifyCallChanged);
+        group.MapPost("{id:guid}/payments/authorize", AuthorizePayment).AddEndpointFilter(NotifyCallChanged);
+        group.MapPost("{id:guid}/payments/void", VoidPayment).AddEndpointFilter(NotifyCallChanged);
 
         return app;
+    }
+
+    private static async ValueTask<object?> NotifyCallChanged(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+    {
+        var result = await next(context);
+        // The IResult hasn't written its status yet at this point — read it off the result itself.
+        var failed = result is Microsoft.AspNetCore.Http.IStatusCodeHttpResult { StatusCode: >= 400 };
+        if (!failed
+            && context.HttpContext.GetRouteValue("id") is string idText && Guid.TryParse(idText, out var callRecordId))
+        {
+            try
+            {
+                await context.HttpContext.RequestServices.GetRequiredService<IFlowNotifier>()
+                    .PushCallChangedAsync(callRecordId, context.HttpContext.RequestAborted);
+            }
+            catch { /* a review-page refresh must never fail the agent's own action */ }
+        }
+        return result;
     }
 
     // ── POST /api/v1/call-records/inbound ───────────────────────────────────

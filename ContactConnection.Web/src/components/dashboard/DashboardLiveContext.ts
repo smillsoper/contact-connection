@@ -68,3 +68,16 @@ export const DashboardQueueOfferLiveContext = createContext<QueueOfferEvent | nu
 export function useDashboardLiveQueueOffer() {
   return useContext(DashboardQueueOfferLiveContext)
 }
+
+export interface AgentSessionsEvent {
+  agentId: string
+  at: number
+}
+
+// An agent opened or finished a CRM script (FlowEngine start/complete) — the Agent List widget
+// refetches to update that agent's live-call links.
+export const DashboardAgentSessionsLiveContext = createContext<AgentSessionsEvent | null>(null)
+
+export function useDashboardLiveAgentSessions() {
+  return useContext(DashboardAgentSessionsLiveContext)
+}

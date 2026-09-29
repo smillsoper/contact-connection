@@ -64,12 +64,14 @@ public class TenantDbContext : DbContext
     public DbSet<StoredValue> StoredValues => Set<StoredValue>();
     public DbSet<PaymentTransaction> PaymentTransactions => Set<PaymentTransaction>();
     public DbSet<OrderNumberSequence> OrderNumberSequences => Set<OrderNumberSequence>();
+    public DbSet<CallRecordAuditEntry> CallRecordAuditEntries => Set<CallRecordAuditEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfiguration(new RoleConfiguration());
         modelBuilder.ApplyConfiguration(new AgentConfiguration());
         modelBuilder.ApplyConfiguration(new CallRecordConfiguration());
+        modelBuilder.ApplyConfiguration(new CallRecordAuditEntryConfiguration());
         modelBuilder.ApplyConfiguration(new CallInteractionConfiguration());
         modelBuilder.ApplyConfiguration(new ScreenRecordingConfiguration());
         modelBuilder.ApplyConfiguration(new RecordingMergeJobConfiguration());

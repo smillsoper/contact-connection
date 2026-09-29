@@ -48,6 +48,19 @@ public class CallAddressService(ICallRecordRepository callRecords, ICartService 
         await callRecords.SaveChangesAsync(ct);
     }
 
+    public async Task SetNameAsync(Guid callRecordId, string? firstName, string? lastName, CancellationToken ct = default)
+    {
+        firstName = string.IsNullOrWhiteSpace(firstName) ? null : firstName.Trim();
+        lastName  = string.IsNullOrWhiteSpace(lastName) ? null : lastName.Trim();
+        if (firstName is null && lastName is null) return;
+
+        var record = await callRecords.GetByIdAsync(callRecordId, ct)
+            ?? throw new InvalidOperationException($"Call record {callRecordId} not found.");
+        record.SetCallerIdentity(firstName ?? record.FirstName, lastName ?? record.LastName,
+            record.Email, record.Phone, record.AccountNumber);
+        await callRecords.SaveChangesAsync(ct);
+    }
+
     public async Task SetPhoneAsync(Guid callRecordId, string role, string phone, CancellationToken ct = default)
     {
         if (role == CallAddressRole.None || string.IsNullOrWhiteSpace(phone)) return;

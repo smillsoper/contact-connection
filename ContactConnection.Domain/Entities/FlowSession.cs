@@ -72,6 +72,15 @@ public class FlowSession
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    /// <summary>Rewrites the stored state without moving the session — a post-call correction
+    /// (edited variables, a re-run API call) on a session that may already be complete.</summary>
+    public void ReplaceState(string variableStore, string executionHistory)
+    {
+        VariableStore = variableStore;
+        ExecutionHistory = executionHistory;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
     public void Complete(string variableStore, string executionHistory)
     {
         Status = FlowSessionStatus.Complete;

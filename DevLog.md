@@ -174,6 +174,7 @@
 | 162 | 2026-09-26 | 6:49 PM PDT | 8:10 PM PDT | 81 min | ~17988 min |
 | 163 | 2026-09-27 | 9:44 AM PDT | 6:20 PM PDT | 516 min | ~18504 min |
 | 164 | 2026-09-28 | 10:26 AM PDT | 5:10 PM PDT | 404 min | ~18908 min |
+| 165 | 2026-09-29 | 12:55 PM PDT | 3:14 PM PDT | 139 min | ~19047 min |
 
 ---
 
@@ -10616,4 +10617,87 @@ source deleted.
 - Remaining Life Seasons scripts (SF TV, My Best Heart, JF - Healthy Aging) with the same tools.
 - Commissions (rule found above); output/export processes (CRMPro export definitions in the dump).
 - Parked: pre-queue test-call issue until real numbers.
+
+## Session 165
+
+**Date:** 2026-09-29
+**Start:** 12:55 PM PDT
+**End:** 3:14 PM PDT
+**Duration:** 139 minutes
+**Total Duration:** ~19047 minutes
+
+### Focus
+
+Telephony status first: Bandwidth isn't viable (800k-1M min/month minimum); Stephen chose SignalWire
+(existing account, 2 numbers) — the account is suspended (likely inactivity), support ticket open.
+Then Stephen added a Life Seasons item and asked to push on: a call detail view where admins / roled
+users edit a call's data and resubmit an order that failed to post (the NeuroQ flow emails a reviewer
+on order failure). Built it, then extended it through the session at Stephen's direction.
+
+### Built — Call Records (Admin → Calls → Call Records)
+
+- **List** `/admin/calls` — search by date / campaign / phone (caller ID or either contact phone) /
+  customer name / order # / "failed API call only" (an api_call node's `{output}.success = false`
+  in a session's variables, via SQL over `flow_sessions.variable_store`); API-failed badge, billing /
+  shipping phone column.
+- **Detail** `/admin/calls/{id}` — header (client, campaign, agent, caller ID, phones, DNIS);
+  **API calls** panel (status, HTTP code, error, response, **Resubmit**); editable **Customer**,
+  **Billing / Shipping address** (shipping re-prices tax), **Cart** (qty / remove), **Custom fields**
+  (every field in the call's campaign scope, typed editors; values under fields that no longer apply
+  shown read-only — the existing lookup silently dropped them), **Flow variables** (agent answers
+  read-only); payments; dispositions; **Change history**.
+- **Resubmit** re-runs the flow's own api_call node (`IFlowEngine.RerunApiCallNodeAsync`) against the
+  call's current data — same endpoint, Liquid template, output variable; oncePerCall replays instead
+  of double-posting. Works on a finished session (from `flow_sessions`) or a live one (Redis); the
+  session doesn't move. Stephen chose this over a CRMPro-style pre-filled script relaunch (replaying
+  the script would re-run authorization with the card already wiped, and the Commit Point blocks it).
+- Warning when the cart total no longer matches the authorized amount.
+- **Permission** `calls.manage` ("Edit Calls & Resubmit Orders") — edit + resubmit; view = calls.view
+  or calls.manage. Added to Administrator in both dev tenants (SQL). **Audit** table
+  `call_record_audit_entries` (migration `AddCallRecordAuditEntries`, applied to both dev schemas).
+- **Flows can save the customer name**: set_variable `{{call_record.first_name}}` / `last_name` (or
+  `caller.*`) persist to the call record (`ICallAddressService.SetNameAsync`); blank never wipes.
+
+### Built — live, both directions
+
+- **Review → agent:** every review change reloads the live session's call data (a running script held
+  its own copy from start, so corrections didn't reach script text) and pushes the refreshed node
+  (`receiveSessionUpdated`) with an "Updated by <name>: <change>" notice; cart refetched; the agent's
+  in-progress typing kept.
+- **Agent → review:** the detail page joins `call:{id}` (`FlowHub.JoinCallReview`, permission-checked)
+  and re-reads on `receiveCallChanged` — pushed on script start / step / finish, agent-side cart /
+  payment endpoints, and review edits. Unsaved edits survive refreshes (`useDraft`), with a note when
+  the agent changed the same data. Badge: "Live — agent in script" / "Script finished" (fixed after
+  Stephen's browser test showed "Live" after completion — it had been reporting the connection).
+- **Supervisor dashboard:** Agent List widget "Call" column — an Open ↗ link (new tab) per CRM script
+  the agent has open, on a phone call or not; refreshed by `receiveAgentSessionsChanged` on script
+  start / finish.
+
+### Fixed
+
+- Flow sessions only reached Postgres on completion — 89 unfinished dev sessions had empty variables,
+  so an abandoned script left nothing to review. Every step now writes through to `flow_sessions`.
+
+### Verification
+
+`dotnet build` clean; full suite **1298 tests pass** (Domain 204, Application 20, Infrastructure 967,
+Api 107) — new: FlowSessionReviewTests (rerun, replay, sub-flow, variables, snapshot, live push, live
+sessions), CallRecordNameTests. `tsc -b` clean. Endpoints exercised against real data (resubmit
+against the inactive Life Seasons definition — refused before sending); SignalR pushes verified with
+a node probe. **Stephen verified the whole feature in the browser** (review page, change history,
+live updates both ways, dashboard links). Not verified: a real Order API failure → resubmit (no
+credentials yet).
+
+### Housekeeping
+
+Docker Desktop/WSL restarted mid-session (all containers exited 255 together); restarted postgres,
+redis, nginx, mailhog, freeswitch (no rebuild). `cc_timesync` loops on a stale chronyd pid —
+left alone; `docker compose up -d --force-recreate timesync` should clear it.
+
+### Next
+
+- Stephen: add a link to the NeuroQ order-failure email — `https://<tenant host>/admin/calls/{{call_record.id}}`;
+  add set_variable name assignments to the V1 flow.
+- Commissions (Alpha 10% / else 1%); remaining Life Seasons scripts; export processes.
+- SignalWire reinstatement → gateway + numbers → live tests (parallel queuing, pre-queue issue).
 

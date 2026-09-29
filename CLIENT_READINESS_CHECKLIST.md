@@ -356,6 +356,47 @@ Nothing else matters if an agent can't take an order and get paid on a call.
           needs the user's visual confirmation (open 2+ tabs, switch between them, confirm the cart
           strip follows).
 
+- [x] **Call detail view + order correction & resubmit (added S165, built S165).** Stephen: a view of a call's
+      details, and a way for admins / roled users to edit a call's data and submit its order through
+      the order API — for orders that failed to post. The NeuroQ flow already emails a contact on
+      "Order post keeps failing"; that person reviews the error, fixes the data, and re-submits.
+      - Calls list (search/filter — incl. "order failed to post") → call detail (caller, addresses,
+        phones/email, cart, payment/auth, order-post attempts + errors, custom fields, disposition).
+      - Edit the order-relevant data (addresses, phones, email, cart) with an audit trail.
+      - Resubmit through the same Order API endpoint the flow used, with the same template model;
+        success marks the order posted (once-per-call cache) so it can't double-post.
+      - Permission-gated (roled users), not just tenant admins.
+      - **S165 built:** Admin → Calls → **Call Records** (`/admin/calls`, `/admin/calls/{id}`);
+        API `/api/v1/call-review/calls` (`CallReviewEndpoints`). Search by date / campaign / phone /
+        name / order # / "failed API call only". Detail: header, API calls panel (status, HTTP code,
+        error, response, **Resubmit** — re-runs the flow's own api_call node via
+        `IFlowEngine.RerunApiCallNodeAsync` against current call data; oncePerCall replays instead of
+        double-posting), editable customer / billing + shipping address (shipping re-prices tax) /
+        cart qty + remove / flow variables, payments, dispositions, **change history**
+        (`call_record_audit_entries`). Custom fields section: every field in the call's campaign scope with
+        its stored value (editable by type, audited), plus values stored under fields that no longer
+        apply (read-only). Billing/shipping phones in the list + header. Flows can now save the
+        customer name: set_variable `{{call_record.first_name}}` / `last_name` (or `caller.*`). **Live push:**
+        every change made here (edits, resubmit) refreshes any agent still in the script on that call —
+        call data reloaded into the live session, current node re-pushed (`receiveSessionUpdated`), cart
+        refetched, "Updated by <name>: <change>" notice; the agent's in-progress typing is kept. **Supervisor dashboard:** Agent List widget has a
+        "Call" column (calls.view/manage only) — an "Open ↗" link per CRM script the agent has open (live in
+        Redis, on a phone call or not) to that call's review page in a new tab; refreshed by
+        `receiveAgentSessionsChanged` pushed on script start/finish. **Detail page is live:** joins `call:{id}` (FlowHub.JoinCallReview,
+        calls.view/manage) and re-reads the call on `receiveCallChanged` — pushed after every script
+        start/step/finish, agent-side cart/payment endpoints, and review edits (debounced 400ms). Unsaved edits
+        in a section are kept through refreshes, with a note when the agent changed the same data underneath. New permission `calls.manage` (edit + resubmit; view = calls.view
+        or calls.manage) — added to Administrator in both dev tenants (log out/in to pick it up);
+        existing tenants' custom roles need it ticked. Warning shown when the cart total no longer
+        matches the authorized amount (card data is gone after the call, so there is no re-auth here).
+      - **S165 also fixed:** flow sessions only reached Postgres on completion — an unfinished script
+        lost its variables when Redis expired (12h), leaving nothing to correct. Every step now writes
+        through to `flow_sessions`.
+      - Not built: adding a new offer to the cart from this page (quantity/remove only); relaunching
+        the script pre-filled (CRMPro-style) — see S165 DevLog for why edit-and-resubmit was chosen.
+      - To wire the loop end to end: put a link in the flow's failure email —
+        `https://<tenant host>/admin/calls/{{call_record.id}}`.
+
 - [ ] **Parallel queuing — Alpha priority tier + Elite routing + RingSquared (added S163).** How
       NeuroQ sells: a premium **Alpha** agent group (higher commission) is offered calls on NeuroQ
       TV / SF TV / My Best Heart / Joint Food before the regular pool, re-offered to Alpha as they
@@ -588,7 +629,16 @@ return), re-entrant authorize_payment (no-op / void + re-auth), `{{cart.*}}` / `
 campaign (previews inherit it). **Commission rule recovered from V1:** Alpha Sales 10% of (total −
 shipping − tax), otherwise 1% — feeds the Commissions item.
 
-**Next up (S164):** Clint's feedback on V1; convert SF TV / My Best Heart / JF - Healthy Aging with
+**Session 165 (2026-09-29): Call Records built** — call list / detail, edit + resubmit a failed
+order (re-runs the flow's own API node), custom fields, change history, `calls.manage` permission,
+live both ways (supervisor edits refresh the agent's script; the page follows the agent), Agent List
+"Open ↗" links. Browser-verified by Stephen. Telephony: SignalWire chosen, account suspended —
+ticket open.
+
+**Next up (S165):** order-failure email link + name assignments in the V1 flow (Stephen); Commissions;
+remaining LS scripts; export processes; SignalWire once reinstated.
+
+**Earlier next up (S164):** Clint's feedback on V1; convert SF TV / My Best Heart / JF - Healthy Aging with
 `tools/crmpro-script-import`; Commissions; then output/export processes (CRMPro export definitions
 live in the dump, now at `C:\Users\Stephen\Documents\CRMPro_DB`). Pre-queue test-call issue parked
 until real numbers.

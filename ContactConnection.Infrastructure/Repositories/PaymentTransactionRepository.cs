@@ -23,6 +23,12 @@ public class PaymentTransactionRepository : IPaymentTransactionRepository
             .OrderByDescending(t => t.CreatedAt)
             .FirstOrDefaultAsync(ct);
 
+    public async Task<IReadOnlyList<PaymentTransaction>> GetByCallRecordAsync(Guid callRecordId, CancellationToken ct = default)
+        => await Ctx.PaymentTransactions.AsNoTracking()
+            .Where(t => t.CallRecordId == callRecordId)
+            .OrderBy(t => t.CreatedAt)
+            .ToListAsync(ct);
+
     public async Task AddAsync(PaymentTransaction transaction, CancellationToken ct = default)
         => await Ctx.PaymentTransactions.AddAsync(transaction, ct);
 

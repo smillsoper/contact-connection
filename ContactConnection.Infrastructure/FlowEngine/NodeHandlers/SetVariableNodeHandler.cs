@@ -16,6 +16,8 @@ namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 /// {{call_record.billing_phone}} / {{call_record.shipping_phone}} work the same way for phone
 /// nodes' output (or any phone string) — saved as digits on the call record — and
 /// {{call_record.email}} for an email node's output (the customer email, also {{caller.email}}).
+/// {{call_record.first_name}} / {{call_record.last_name}} (or the same keys under caller.) save the
+/// customer's name onto the call record — what the call detail view and order templates read.
 /// Transparent to the agent; executes and advances immediately.
 /// Commonly used to extract and store api_call response fields for later use.
 ///
@@ -67,6 +69,21 @@ public class SetVariableNodeHandler(
                     var key = targetKey[(dotIndex + 1)..];
                     switch (ns)
                     {
+                        case "caller" or "call_record" when key.Equals(CallAddressVars.FirstName, StringComparison.OrdinalIgnoreCase)
+                                                        || key.Equals(CallAddressVars.LastName, StringComparison.OrdinalIgnoreCase):
+                            // The customer name — persisted to the call record (a blank value is
+                            // ignored rather than wiping a name captured earlier).
+                            if (!string.IsNullOrWhiteSpace(resolvedValue))
+                            {
+                                var nameKey = key.ToLowerInvariant();
+                                var name = resolvedValue.Trim();
+                                if (nameKey == CallAddressVars.FirstName)
+                                    await callAddresses.SetNameAsync(ctx.CallRecordId, name, null, ct);
+                                else
+                                    await callAddresses.SetNameAsync(ctx.CallRecordId, null, name, ct);
+                                CallAddressVars.ApplyName(ctx, nameKey, name);
+                            }
+                            break;
                         case "caller": ctx.Caller[key]   = resolvedValue; break;
                         case "agent":  ctx.Agent[key]    = resolvedValue; break;
                         case "tenant": ctx.Tenant[key]   = resolvedValue; break;

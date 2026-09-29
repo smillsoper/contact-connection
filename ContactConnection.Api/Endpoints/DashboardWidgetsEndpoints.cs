@@ -58,6 +58,7 @@ public static class DashboardWidgetsEndpoints
             IAgentRepository agents,
             IAgentStateStore stateStore,
             IAgentRegistrationStore registrationStore,
+            IFlowEngine flowEngine,
             TenantContext tenantContext,
             CancellationToken ct) =>
         {
@@ -65,6 +66,15 @@ public static class DashboardWidgetsEndpoints
             var tenantId = tenantContext.Current.Id;
 
             var agentIds = await ResolveAgentIdsAsync(campaignId, clientId, groupId, campaigns, agentGroups, agents, ct);
+
+            // CRM scripts each agent has open right now — on a phone call or not (S165: links to the
+            // call's review page, where a supervisor can correct data live).
+            var liveByAgent = (await flowEngine.GetLiveSessionsForAgentsAsync(agentIds.ToList(), ct))
+                .GroupBy(s => s.AgentId)
+                .ToDictionary(g => g.Key, g => g
+                    .GroupBy(s => s.CallRecordId)
+                    .Select(c => new { call_record_id = c.Key, flow_name = c.First().FlowName, started_at = c.Min(s => s.StartedAt) })
+                    .ToList());
 
             var result = new List<object>();
             foreach (var agentId in agentIds)
@@ -90,6 +100,7 @@ public static class DashboardWidgetsEndpoints
                     since             = state?.SetAt,
                     registered        = reg is not null,
                     registered_since  = reg?.Since,
+                    live_calls        = liveByAgent.GetValueOrDefault(agent.Id) ?? [],
                 });
             }
 

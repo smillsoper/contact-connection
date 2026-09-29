@@ -31,6 +31,8 @@ import TelephonyPage from './pages/admin/TelephonyPage'
 import SipGatewaysPage from './pages/admin/SipGatewaysPage'
 import AdminBlockListPage from './pages/admin/AdminBlockListPage'
 import CampaignDetailPage from './pages/admin/CampaignDetailPage'
+import AdminCallsPage from './pages/admin/AdminCallsPage'
+import AdminCallDetailPage from './pages/admin/AdminCallDetailPage'
 import PortalApiDefinitionsPage from './pages/portal/PortalApiDefinitionsPage'
 import PortalApiDefinitionDetailPage from './pages/portal/PortalApiDefinitionDetailPage'
 import PortalCredentialsPage from './pages/portal/PortalCredentialsPage'
@@ -51,7 +53,7 @@ function RequirePortalAuth({ children }: { children: React.ReactNode }) {
   return token ? <>{children}</> : <Navigate to={isAdminSubdomain ? '/login' : '/portal/login'} replace />
 }
 
-const ADMIN_PERMISSIONS = ['agents.view', 'agents.manage', 'roles.manage', 'flows.view', 'flows.manage', 'telephony.view', 'telephony.manage', 'integrations.view', 'integrations.manage', 'reports.view', 'supervisor.monitor', 'blocklist.view', 'blocklist.manage']
+const ADMIN_PERMISSIONS = ['agents.view', 'agents.manage', 'roles.manage', 'flows.view', 'flows.manage', 'telephony.view', 'telephony.manage', 'integrations.view', 'integrations.manage', 'reports.view', 'supervisor.monitor', 'blocklist.view', 'blocklist.manage', 'calls.manage']
 
 function RequireAdminAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -67,6 +69,14 @@ function RequireAdminAuth({ children }: { children: React.ReactNode }) {
 // /admin (itself RequireAdminAuth-gated) rather than /agent, so a user who still has some other
 // admin permission lands on the dashboard instead of being bounced all the way out of the admin
 // area for lacking just this one permission.
+// Call Records: viewing needs calls.view or calls.manage (calls.view alone is also held by agents,
+// who are kept out by RequireAdminAuth around it).
+function RequireCallsAccess({ children }: { children: React.ReactNode }) {
+  const hasPermission = useAuthStore((s) => s.hasPermission)
+  if (hasPermission('calls.view') || hasPermission('calls.manage')) return <>{children}</>
+  return <Navigate to="/admin" replace />
+}
+
 function RequirePermission({ permission, children }: { permission: string; children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
   const hasPermission = useAuthStore((s) => s.hasPermission)
@@ -314,6 +324,26 @@ export default function App() {
           element={
             <RequireAdminAuth>
               <AdminBlockListPage />
+            </RequireAdminAuth>
+          }
+        />
+        <Route
+          path="/admin/calls"
+          element={
+            <RequireAdminAuth>
+              <RequireCallsAccess>
+                <AdminCallsPage />
+              </RequireCallsAccess>
+            </RequireAdminAuth>
+          }
+        />
+        <Route
+          path="/admin/calls/:id"
+          element={
+            <RequireAdminAuth>
+              <RequireCallsAccess>
+                <AdminCallDetailPage />
+              </RequireCallsAccess>
             </RequireAdminAuth>
           }
         />

@@ -15,6 +15,8 @@ export interface AgentListRow {
   /** SIP softphone registered with FreeSWITCH — distinct from state_code (agent status). */
   registered: boolean
   registered_since: string | null
+  /** CRM scripts the agent has open right now (on a phone call or not), one per call record. */
+  live_calls: { call_record_id: string; flow_name: string | null; started_at: string }[]
 }
 
 export interface CampaignStateCountRow {

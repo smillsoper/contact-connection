@@ -40,6 +40,21 @@ public class FlowHub : Hub<IFlowHubClient>
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"session:{sessionId}");
     }
 
+    /// <summary>Call Records detail page (S165) joins to hear ReceiveCallChanged for the call it
+    /// shows, so it refreshes while the agent works the call. Needs calls.view or calls.manage.</summary>
+    public async Task JoinCallReview(string callRecordId)
+    {
+        var permissions = (Context.User?.FindFirst("permissions")?.Value ?? "").Split(',');
+        if (!permissions.Contains("calls.view") && !permissions.Contains("calls.manage"))
+            throw new HubException("Viewing call records requires the calls.view permission.");
+        await Groups.AddToGroupAsync(Context.ConnectionId, $"call:{callRecordId}");
+    }
+
+    public async Task LeaveCallReview(string callRecordId)
+    {
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"call:{callRecordId}");
+    }
+
     /// <summary>Supervisor joins to observe all active sessions for a tenant.</summary>
     public async Task JoinSupervisorView(string tenantId)
     {
@@ -58,6 +73,19 @@ public interface IFlowHubClient
 
     /// <summary>Push error notification (e.g. commitment lock violation).</summary>
     Task ReceiveError(string message);
+
+    /// <summary>The session's call was changed from Call Records (supervisor correction or order
+    /// resubmit) — <paramref name="state"/> is the refreshed current node; <paramref name="message"/>
+    /// is shown to the agent as a brief notice.</summary>
+    Task ReceiveSessionUpdated(FlowNodeState state, string message);
+
+    /// <summary>Supervisor dashboards: an agent opened or finished a CRM script — the Agent List
+    /// widget refetches to update that agent's live-call links.</summary>
+    Task ReceiveAgentSessionsChanged(string agentId);
+
+    /// <summary>Call Records detail page: something on this call changed (a script step, the cart,
+    /// a payment, another reviewer's edit) — the page re-reads the call.</summary>
+    Task ReceiveCallChanged(string callRecordId);
 
     /// <summary>ESL screen pop — inbound call parked for this agent. <paramref name="tierLabel"/> is the
     /// parallel-queuing tier the call is offered to this agent through (e.g. "Alpha"), null for the

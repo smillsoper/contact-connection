@@ -9,7 +9,8 @@ interface NavCard {
   path?: string
   onClick?: () => void
   live: boolean
-  /** Card is hidden entirely (not just disabled) unless the current user holds this permission.
+  /** Card is hidden entirely (not just disabled) unless the current user holds this permission
+   * ("a|b" = any of them).
    * Omit for cards that should stay visible to any admin — the existing/default behavior for
    * every card that predates per-permission gating. */
   requiredPermission?: string
@@ -43,6 +44,12 @@ const NAV_SECTIONS: NavSection[] = [
       { title: 'Agent Portal', desc: 'Open the agent workspace — softphone, live flow, and chat.', path: '/agent', live: true },
       { title: 'Call Trace', desc: 'Watch calls flow through telephony and script nodes in real time.', onClick: () => openCallTrace(), live: true },
       { title: 'Custom Fields', desc: 'Define fields flows can save call-record data into for reporting.', path: '/admin/custom-field-definitions', live: true },
+    ],
+  },
+  {
+    heading: 'Calls',
+    cards: [
+      { title: 'Call Records', desc: 'Find a past call, review what was captured, correct its data and resubmit a failed order.', path: '/admin/calls', live: true, requiredPermission: 'calls.view|calls.manage' },
     ],
   },
   {
@@ -87,7 +94,7 @@ export default function TenantAdminPage() {
   const visibleSections = NAV_SECTIONS
     .map((section) => ({
       ...section,
-      cards: section.cards.filter((c) => !c.requiredPermission || hasPermission(c.requiredPermission)),
+      cards: section.cards.filter((c) => !c.requiredPermission || c.requiredPermission.split('|').some(hasPermission)),
     }))
     .filter((section) => section.cards.length > 0)
 

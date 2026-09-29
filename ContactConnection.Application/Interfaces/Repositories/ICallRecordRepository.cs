@@ -7,6 +7,14 @@ public interface ICallRecordRepository
     Task<CallRecord?> GetByIdAsync(Guid id, CancellationToken ct = default);
     Task<CallRecord?> GetByIdWithInteractionsAsync(Guid id, CancellationToken ct = default);
     Task<CallRecord?> GetByContactIdExternalAsync(string contactIdExternal, CancellationToken ct = default);
+    /// <summary>Call Records admin list — newest first, filtered; see CallRecordSearchCriteria.</summary>
+    Task<CallRecordSearchPage> SearchAsync(CallRecordSearchCriteria criteria, CancellationToken ct = default);
+
+    /// <summary>Which of these calls have a flow API call whose last result was a failure (an
+    /// api_call node's <c>{output}.success</c> = "false" in a session's variables) — e.g. an order
+    /// the Order API rejected. Clears once a re-run succeeds.</summary>
+    Task<IReadOnlySet<Guid>> FindWithFailedApiCallsAsync(IReadOnlyCollection<Guid> callRecordIds, CancellationToken ct = default);
+
     Task AddAsync(CallRecord record, CancellationToken ct = default);
     Task SaveChangesAsync(CancellationToken ct = default);
 
@@ -24,3 +32,19 @@ public interface ICallRecordRepository
     /// </summary>
     Task<IReadOnlyList<Guid>> FindWithSensitiveDataOldestFirstAsync(int limit, CancellationToken ct = default);
 }
+
+/// <summary>Filters for the Call Records admin list. Phone matches the caller ID or either contact
+/// phone (digits); Name matches first/last name (contains, case-insensitive).</summary>
+public record CallRecordSearchCriteria(
+    DateTimeOffset? From = null,
+    DateTimeOffset? To = null,
+    Guid? CampaignId = null,
+    string? Phone = null,
+    string? OrderNumber = null,
+    string? Name = null,
+    bool FailedApiCallsOnly = false,
+    int Skip = 0,
+    int Take = 50);
+
+public record CallRecordSearchPage(IReadOnlyList<CallRecord> Items, int Total);
+

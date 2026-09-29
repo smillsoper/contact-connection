@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { dashboardWidgetsApi, type AgentListRow } from '../../../api/dashboardWidgets'
 import type { WidgetFilterConfig } from '../../../types/dashboard'
-import { useDashboardLiveAgentState, useDashboardLiveRegistration } from '../DashboardLiveContext'
+import { useDashboardLiveAgentState, useDashboardLiveRegistration, useDashboardLiveAgentSessions } from '../DashboardLiveContext'
+import { useAuthStore } from '../../../stores/authStore'
 
 type SortColumn = 'name' | 'state' | 'time'
 type SortDirection = 'asc' | 'desc'
@@ -38,6 +39,8 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
   const liveEvent = useDashboardLiveAgentState()
   const liveReg = useDashboardLiveRegistration()
+  const liveSessions = useDashboardLiveAgentSessions()
+  const canOpenCalls = useAuthStore((s) => s.hasPermission('calls.view') || s.hasPermission('calls.manage'))
   const knownIdsRef = useRef<Set<string>>(new Set())
   const refetchRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -92,6 +95,14 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
     refetchIfUnknown(liveReg.agentId)
   }, [liveReg, refetchIfUnknown])
 
+  // An agent opened or finished a script — the live-call links come from the server, so refetch
+  // (debounced: a script that ends and a new one that starts land as two pushes).
+  useEffect(() => {
+    if (!liveSessions) return
+    if (refetchRef.current) clearTimeout(refetchRef.current)
+    refetchRef.current = setTimeout(load, 250)
+  }, [liveSessions, load])
+
   function handleSort(column: SortColumn) {
     if (sortColumn === column) {
       setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'))
@@ -131,9 +142,10 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
               State<SortArrow active={sortColumn === 'state'} direction={sortDirection} />
             </th>
             <th className="py-1 pr-2 font-medium select-none" title="SIP softphone registration">Phone</th>
-            <th className="py-1 font-medium cursor-pointer select-none hover:text-gray-300" onClick={() => handleSort('time')}>
+            <th className="py-1 pr-2 font-medium cursor-pointer select-none hover:text-gray-300" onClick={() => handleSort('time')}>
               Time<SortArrow active={sortColumn === 'time'} direction={sortDirection} />
             </th>
+            {canOpenCalls && <th className="py-1 font-medium select-none" title="Open the call the agent's script is on — review, correct data, resubmit an order (new tab)">Call</th>}
           </tr>
         </thead>
         <tbody>
@@ -162,12 +174,28 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
                   </span>
                 )}
               </td>
-              <td className="py-1.5 text-gray-500">{formatDuration(r.since)}</td>
+              <td className="py-1.5 pr-2 text-gray-500">{formatDuration(r.since)}</td>
+              {canOpenCalls && (
+                <td className="py-1.5 whitespace-nowrap">
+                  {(r.live_calls ?? []).map((c, i) => (
+                    <a
+                      key={c.call_record_id}
+                      href={`/admin/calls/${c.call_record_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={`${c.flow_name ?? 'Script'} · open ${formatDuration(c.started_at)} — review / correct this call (new tab)`}
+                      className="text-indigo-400 hover:text-indigo-300 mr-2"
+                    >
+                      {(r.live_calls ?? []).length > 1 ? `Call ${i + 1}` : 'Open'} ↗
+                    </a>
+                  ))}
+                </td>
+              )}
             </tr>
           ))}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={4} className="py-4 text-center text-gray-600">No agents match this filter.</td>
+              <td colSpan={canOpenCalls ? 5 : 4} className="py-4 text-center text-gray-600">No agents match this filter.</td>
             </tr>
           )}
         </tbody>

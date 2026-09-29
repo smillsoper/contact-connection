@@ -35,4 +35,9 @@ public interface ICallAddressService
     /// <summary>Saves the customer's email onto the call record (CallRecord.Email — the value
     /// behind {{caller.email}}). A blank email is a no-op.</summary>
     Task SetEmailAsync(Guid callRecordId, string email, CancellationToken ct = default);
+
+    /// <summary>Saves the customer's first and/or last name onto the call record
+    /// (CallRecord.FirstName/LastName — behind {{caller.first_name}} / {{call_record.first_name}}).
+    /// A null or blank part is left as it is.</summary>
+    Task SetNameAsync(Guid callRecordId, string? firstName, string? lastName, CancellationToken ct = default);
 }

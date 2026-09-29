@@ -22,6 +22,8 @@ const STATIC_NAMESPACES: StaticNamespace[] = [
       { key: 'billing_address' }, { key: 'shipping_address' },
       { key: 'shipping_address.state' }, { key: 'shipping_address.zip' },
       { key: 'billing_phone' }, { key: 'shipping_phone' }, { key: 'email' },
+      // Customer name — settable from set_variable (saves to the call record).
+      { key: 'first_name' }, { key: 'last_name' },
     ],
   },
   {
