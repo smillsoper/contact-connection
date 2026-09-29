@@ -581,7 +581,19 @@ queuing** sprint — see its Tier 1 item. Also fixed: shared dashboards were edi
 anyone with `reports.manage` but only saveable by the creator (403) — now owner or tenant admin, others
 get "Save as my copy".
 
-**Next up (S163):** blocked on a PSTN provider for any live call testing (Bandwidth call 2026-09-29).
+**Session 164 (2026-09-28): NeuroQ - V1 CRM script converted** from CRMPro into a draft CRM flow
+(`docs/integrations/neuroq-v1-crm-script.md`) — Stephen has refined it in the designer and sent it to
+Clint to review. New platform pieces it needed: Commit Point node (engine-enforced point of no
+return), re-entrant authorize_payment (no-op / void + re-auth), `{{cart.*}}` / `{{now.*}}`, flow home
+campaign (previews inherit it). **Commission rule recovered from V1:** Alpha Sales 10% of (total −
+shipping − tax), otherwise 1% — feeds the Commissions item.
+
+**Next up (S164):** Clint's feedback on V1; convert SF TV / My Best Heart / JF - Healthy Aging with
+`tools/crmpro-script-import`; Commissions; then output/export processes (CRMPro export definitions
+live in the dump, now at `C:\Users\Stephen\Documents\CRMPro_DB`). Pre-queue test-call issue parked
+until real numbers.
+
+**Earlier next up (S163):** blocked on a PSTN provider for any live call testing (Bandwidth call 2026-09-29).
 Meanwhile: investigate the NeuroQ test call stuck in pre-queue + the missing terminal call-state row
 on a pre-queue hang-up; then Commissions (the tier label is now on the call). Previous pointer kept
 below for history.

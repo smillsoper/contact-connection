@@ -173,6 +173,7 @@
 | 161 | 2026-09-24 – 2026-09-25 | 6:24 PM PDT (9/24) | 5:17 PM PDT (9/25) | 383 min (156 min 9/24 6:24–9:00 PM + gap, resumed 9/25 1:30 PM, 227 min to 5:17 PM) | ~17907 min |
 | 162 | 2026-09-26 | 6:49 PM PDT | 8:10 PM PDT | 81 min | ~17988 min |
 | 163 | 2026-09-27 | 9:44 AM PDT | 6:20 PM PDT | 516 min | ~18504 min |
+| 164 | 2026-09-28 | 10:26 AM PDT | 5:10 PM PDT | 404 min | ~18908 min |
 
 ---
 
@@ -10530,4 +10531,89 @@ set, but no terminal `call_state_history` row was ever written. Cleaned up by ha
   publish the NeuroQ flow.
 - Not built: hold-message resume-at-position.
 - Carried over: Avalara sandbox + Authorize.Net sandbox verification; Life Seasons order credentials.
+
+## Session 164
+
+**Date:** 2026-09-28
+**Start:** 10:26 AM PDT
+**End:** 5:10 PM PDT
+**Duration:** 404 minutes
+**Total Duration:** ~18908 minutes
+
+### Focus
+
+Stephen chose to convert the Life Seasons **NeuroQ - V1** CRMPro script into a ContactConnection CRM
+flow rather than start Commissions. The pre-queue test-call issue from S163 is parked until real
+numbers are available (internal softphone dials aren't a valid test).
+
+### Locating the script
+
+- Restored only `Clients`, `Scripts`, `CallTypes`, `Dispositions`, `Script_CallTypes`,
+  `Script_Dispositions` from the CRMPro dump into a throwaway `postgres:18` container (X: is a mapped
+  drive Docker can't mount — `docker cp` instead; Git Bash needs `MSYS_NO_PATHCONV=1`).
+- `Scripts.ScriptFiles` = base64 BinaryFormatter `List(Of String)`. "NeuroQ - V1" (active, rev 10.5,
+  2026-07-09) → `SCRIPT_PROD_NEUROQ -INBOUND.exe` (+ .vb / .DESIGNER.VB / .DESIGNER.RESOURCES), all
+  dated Jul 9. Also: SF TV → `SCRIPT_PROD_NEUROQ - SF TV.*`, My Best Heart → `SCRIPT_PROD_MY BEST
+  HEART LATEST.*`, JF - Healthy Aging (client Nordic Healthy Living) → `SCRIPT_PROD_JOINT FOOD
+  INBOUND.*` — all present on X:. S162's contract work used the older TV script; Stephen confirmed
+  it's the same API set.
+
+### Analysis (docs/integrations/neuroq-v1-crm-script.md)
+
+- 8-tab form (Opening, Offer, Customer Info, Payment, Upsell, C/S Message, Web Order, Closing); C/S
+  Message and Web Order unreachable. Script text = 60 RTF ScriptBoxes in the binary .resources
+  (parsed with a custom ResourceReader); combo items + branching in the .vb.
+- Orders post via `SubmitLifeSeasonsOrder()` (after 9/4/2024; OrderLogix before). Dead `SubmitOrder`
+  holds plaintext Konnective credentials — not used or copied.
+- Catalog: 15 offers (SKUs, prices, S/H, AutoShip interval, Cannella SKU flag). **Commission rule:**
+  Alpha Sales skill → `COMMISSION` 10% of (total − shipping − tax), else `ORDER-COMMISSION` 1%.
+- Live call types: Order, All Other Calls (14 dispositions), Junk (8).
+
+### Built
+
+- **Draft CRM flow "NeuroQ - V1 (from CRMPro)"** — generated (verbatim script text, code tags →
+  `{{variables}}` or per-case nodes: one rebuttal per objection, DHA/Sleep Now per package tier),
+  keypad secure capture (Stephen's choice), auth + Order API once-per-call, call type/disposition to
+  custom fields (Stephen's choice: interim until first-class dispositions). 15 products/offers and
+  `disposition_reason`/`sms_consent` fields seeded; the NeuroQ telephony draft got the `cc_capture`
+  branch. **Layered auto-layout** (crossings 681 → 80; per-item cart-failure notes and per-ending
+  wrap-ups remove long edges; jump-backs routed up the left margin). Stephen has since edited it in
+  the designer (Cancel Order section, sections, closing wording, shipping phone) — the DB copy is
+  the source of truth now. Tools saved in `tools/crmpro-script-import/`.
+- **`{{cart.*}}`** (total, subtotal, shipping, tax, fees, first_payment, items_summary — refreshed
+  before any node that uses it) and **`{{now.iso|date|time}}`** in CRM scripts.
+- **Commit Point node** — engine-enforced point of no return: refuses section jumps except to
+  allowed sections, hides the rest of the dropdown, lock banner, CommitmentEvent on the call record,
+  designer warning for wired paths back. Section locks were verified insufficient first (still
+  jumpable; Continue replays side-effecting nodes incl. re-authorization; direct edges bypass).
+- **authorize_payment re-entrant** — same amount + same card capture → no-op; different amount or a
+  recaptured card → void, then authorize; failed void stops on error. Card now kept (encrypted)
+  until the Commit Point / flow completion / retention job (Stephen's choice). Outputs action,
+  amount, cardLast4.
+- **Flow home campaign** — editable on the Flows page (Shared / client / campaign); agent-portal
+  previews give the stub call the flow's campaign; sub-flows inherit the caller's call record.
+- Agent-portal flow launcher lists CRM flows only. Fixed my seed bug (products `InStock` → the valid
+  `Available`) that made add-to-cart fail.
+- Stephen confirmed the closing's two separate recorded verbal confirmations (AutoShip terms;
+  transaction "signature") are intentional; recording retention/required stay tenant decisions.
+
+### Verification
+
+`dotnet build` clean; full suite **1286 tests pass** (Domain 204, Application 20, Infrastructure 955,
+Api 107); `tsc -b` clean. Flow structure validated by the generator (all targets/options wired,
+all nodes reachable); Stephen walked the flow in the agent portal. Not verified against Authorize.Net
+sandbox / Avalara / Order API (no credentials) or on a live call.
+
+### Housekeeping
+
+CRMPro dump copied to `C:\Users\Stephen\Documents\CRMPro_DB\CRMPro.sql` (faster than X: for the
+upcoming export-definition work); throwaway container + volume removed; scratch copies of the V1
+source deleted.
+
+### Next
+
+- Clint reviews the V1 flow (Stephen sent him bypass instructions).
+- Remaining Life Seasons scripts (SF TV, My Best Heart, JF - Healthy Aging) with the same tools.
+- Commissions (rule found above); output/export processes (CRMPro export definitions in the dump).
+- Parked: pre-queue test-call issue until real numbers.
 
