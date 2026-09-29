@@ -9,6 +9,9 @@ export interface FlowSummary {
   flow_type: string
   flow_direction?: string
   flow_sub_type?: string
+  /** Home client/campaign (optional; both null = shared) — see FlowScopeSelect. */
+  client_id?: string | null
+  campaign_id?: string | null
   is_active: boolean
   version: number
   created_at: string
@@ -81,6 +84,10 @@ export interface CustomFieldDefinitionSummary {
 export const flowsApi = {
   // Agent panel — published flows only
   list: () => api.get<FlowSummary[]>('/api/v1/flows'),
+
+  setScope: (id: string, clientId: string | null, campaignId: string | null) =>
+    api.put<{ id: string; client_id: string | null; campaign_id: string | null }>(
+      `/api/v1/flows/${id}/scope`, { clientId, campaignId }),
 
   // Flows management page — all flows including drafts
   listAll: () => api.get<FlowSummary[]>('/api/v1/flows/all'),

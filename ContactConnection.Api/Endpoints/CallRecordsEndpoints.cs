@@ -96,10 +96,15 @@ public static class CallRecordsEndpoints
     // just a stub record so call-record-scoped features (cart, custom fields, etc.) have
     // something to attach to while previewing a flow.
 
+    // Optional body { flowId }: the stub takes on that flow's home campaign/client (Flow.CampaignId),
+    // so a preview is taxed, numbered and credentialed like a real call on that campaign. A shared
+    // flow (no campaign) gets a campaign-less stub, as before.
     private static async Task<IResult> CreateManual(
         System.Security.Claims.ClaimsPrincipal user,
         ICallRecordRepository callRecords,
+        IFlowRepository flows,
         TenantContext tenantContext,
+        HttpRequest http,
         CancellationToken ct)
     {
         if (tenantContext.Current is null) return Results.Unauthorized();
@@ -108,6 +113,14 @@ public static class CallRecordsEndpoints
         if (!Guid.TryParse(agentIdClaim, out var agentId)) return Results.Unauthorized();
 
         var record = CallRecord.CreateManual(tenantContext.Current.Id, agentId);
+
+        CreateManualRequest? req = null;
+        if (http.ContentLength is > 0)
+            try { req = await http.ReadFromJsonAsync<CreateManualRequest>(ct); } catch { /* empty/invalid body = no flow */ }
+        if (req?.FlowId is { } flowId
+            && await flows.GetByIdAsync(flowId, ct) is { CampaignId: { } campaignId, ClientId: { } clientId } flow
+            && flow.TenantId == tenantContext.Current.Id)
+            record.SetCampaign(campaignId, clientId);
 
         await callRecords.AddAsync(record, ct);
         await callRecords.SaveChangesAsync(ct);
@@ -366,3 +379,5 @@ public record UpdateCartItemQuantityRequest(int Quantity);
 public record AuthorizePaymentRequest(
     string? Provider, string? CardNumberField, string? ExpField, string? CvvField, string? ZipField,
     string? ZipOverride, decimal? FixedAmount);
+
+public record CreateManualRequest(Guid? FlowId);

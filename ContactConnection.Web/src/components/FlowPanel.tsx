@@ -436,7 +436,9 @@ export default function FlowPanel() {
       // something to attach to, same as a real inbound/outbound call would provide.
       let recordId = callRecordId
       if (!recordId) {
-        const stub = await api.post<{ id: string }>('/api/v1/call-records/manual', {})
+        // The stub takes on the flow's home campaign (if any) so tax, order numbers, payment
+        // credentials and campaign-scoped fields behave like a real call on that campaign.
+        const stub = await api.post<{ id: string }>('/api/v1/call-records/manual', { flowId: selectedFlowId })
         recordId = stub.id
         setCallRecordId(recordId)
       }

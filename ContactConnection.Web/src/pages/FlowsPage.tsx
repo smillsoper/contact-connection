@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { flowsApi, type FlowSummary } from '../api/flows'
 import { openCallTrace } from '../components/calltrace/openCallTrace'
+import FlowScopeSelect from '../components/FlowScopeSelect'
+import { listCampaigns, type Campaign } from '../api/telephony'
 
 function designerPath(flow: FlowSummary): string {
   return flow.flow_type === 'telephony'
@@ -21,6 +23,7 @@ interface FlowExportEnvelope {
 export default function FlowsPage() {
   const navigate = useNavigate()
   const [flows, setFlows] = useState<FlowSummary[]>([])
+  const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [publishingId, setPublishingId] = useState<string | null>(null)
@@ -57,6 +60,7 @@ export default function FlowsPage() {
   }
 
   useEffect(() => { load() }, [])
+  useEffect(() => { listCampaigns().then(setCampaigns).catch(() => {}) }, [])
 
   async function handlePublish(id: string) {
     setPublishingId(id)
@@ -290,6 +294,7 @@ export default function FlowsPage() {
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide">Name</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide">Type</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide">Direction / Sub-type</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide">Campaign</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide">Status</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide">Version</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide">Updated</th>
@@ -334,6 +339,13 @@ export default function FlowsPage() {
                       ) : (
                         <span className="text-xs text-gray-600">—</span>
                       )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <FlowScopeSelect
+                        flow={flow}
+                        campaigns={campaigns}
+                        onChanged={(u) => setFlows((prev) => prev.map((f) => (f.id === flow.id ? { ...f, ...u } : f)))}
+                      />
                     </td>
                     <td className="px-4 py-3">
                       {flow.is_active ? (

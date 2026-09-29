@@ -89,6 +89,21 @@ public class Flow
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    /// <summary>
+    /// The flow's home client/campaign — optional (both null = shared, e.g. a sub-flow reused by
+    /// several campaigns). Never decides a live call's campaign (that always comes from the call);
+    /// it scopes the flow and gives previews started from the agent portal a realistic campaign.
+    /// A campaign without its client is invalid.
+    /// </summary>
+    public void SetScope(Guid? clientId, Guid? campaignId)
+    {
+        if (campaignId is not null && clientId is null)
+            throw new ArgumentException("A campaign scope needs its client.", nameof(clientId));
+        ClientId   = clientId;
+        CampaignId = campaignId;
+        UpdatedAt  = DateTimeOffset.UtcNow;
+    }
+
     public void UpdateMetadata(string? flowDirection, string? flowSubType)
     {
         if (FlowType != Entities.FlowType.Telephony) return;

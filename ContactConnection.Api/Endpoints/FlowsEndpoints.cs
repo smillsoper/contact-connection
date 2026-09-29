@@ -103,6 +103,36 @@ public static class FlowsEndpoints
         });
 
         // Version history — newest first
+        // Home client/campaign (optional) — not part of the definition, so it doesn't bump the
+        // version. A campaign implies its client; clearing both makes the flow shared.
+        group.MapPut("/{id:guid}/scope", async (
+            Guid id,
+            SetFlowScopeRequest req,
+            IFlowRepository flows,
+            ICampaignRepository campaigns,
+            IClientRepository clients,
+            TenantContext tenantContext,
+            CancellationToken ct) =>
+        {
+            if (tenantContext.Current is null) return Results.Unauthorized();
+            var flow = await flows.GetByIdAsync(id, ct);
+            if (flow is null || flow.TenantId != tenantContext.Current.Id) return Results.NotFound();
+
+            Guid? clientId = req.ClientId, campaignId = req.CampaignId;
+            if (campaignId is { } cid)
+            {
+                var campaign = await campaigns.GetByIdAsync(cid, ct);
+                if (campaign is null) return Results.BadRequest(new { error = "Campaign not found." });
+                clientId = campaign.ClientId;
+            }
+            else if (clientId is { } clid && await clients.GetByIdAsync(clid, ct) is null)
+                return Results.BadRequest(new { error = "Client not found." });
+
+            flow.SetScope(clientId, campaignId);
+            await flows.SaveChangesAsync(ct);
+            return Results.Ok(new { id = flow.Id, client_id = flow.ClientId, campaign_id = flow.CampaignId });
+        });
+
         group.MapGet("/{id:guid}/versions", async (
             Guid id,
             IFlowRepository flows,
@@ -314,3 +344,5 @@ public record GeneralApiEndpointSummary(
     string DefinitionName,
     string? Provider,
     string Scope);
+
+public record SetFlowScopeRequest(Guid? ClientId, Guid? CampaignId);
