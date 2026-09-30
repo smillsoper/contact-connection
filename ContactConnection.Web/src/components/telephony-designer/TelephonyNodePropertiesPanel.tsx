@@ -777,6 +777,21 @@ export default function TelephonyNodePropertiesPanel({
                 onChange={(e) => set('timeoutSeconds', Number(e.target.value) || 30)}
               />
             </div>
+            <label className="flex items-start gap-2 text-sm text-gray-300 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={(data.releasesCardData as boolean) ?? false}
+                onChange={(e) => set('releasesCardData', e.target.checked)}
+              />
+              <span>
+                Order submission — release card data
+                <span className="block text-xs text-gray-500 leading-snug">
+                  When this call succeeds, the captured card is wiped (for campaigns that keep card data until the
+                  order is submitted).
+                </span>
+              </span>
+            </label>
             <p className="text-xs text-gray-500 leading-snug">
               Response is stored as {'{{flow.'}{(data.outputVariable as string) || 'variable'}{'}}'} — reference
               pieces of it with {'{{flow.'}{(data.outputVariable as string) || 'variable'}{'.response.field}}'}.

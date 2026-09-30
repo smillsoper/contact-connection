@@ -2,9 +2,12 @@ import { useEffect, useState } from 'react'
 import AdminShell from '../../components/admin/AdminShell'
 import { listAdminAgents, resetAgentPassword, updateAgent, inviteUsers, type AgentRecord, type InviteResult } from '../../api/adminAgents'
 import { rolesApi, type Role } from '../../api/roles'
+import { agentLockApi } from '../../api/agentLock'
+import { useAuthStore } from '../../stores/authStore'
 import { TIMEZONE_GROUPS } from '../../utils/timezones'
 
 export default function AdminAgentsPage() {
+  const canUnlock = useAuthStore((s) => s.hasPermission('agents.manage'))
   const [agents, setAgents] = useState<AgentRecord[]>([])
   const [roles, setRoles] = useState<Role[]>([])
   const [loading, setLoading] = useState(true)
@@ -88,6 +91,20 @@ export default function AdminAgentsPage() {
     setShowInvite(false)
     setInviteEmails('')
     setInviteResult(null)
+  }
+
+  async function handleUnlock(agent: AgentRecord) {
+    setUpdatingId(agent.id)
+    try {
+      const lock = await agentLockApi.unlock(agent.id)
+      setAgents((prev) => prev.map((a) => a.id === agent.id
+        ? { ...a, statusLocked: lock.statusLocked, signInLocked: lock.signInLocked, statusLockedByName: null, statusLockReason: null }
+        : a))
+    } catch {
+      // swallow — no global error UI for quick actions
+    } finally {
+      setUpdatingId(null)
+    }
   }
 
   async function handleToggleActive(agent: AgentRecord) {
@@ -234,6 +251,18 @@ export default function AdminAgentsPage() {
                     >
                       <td className="px-4 py-3 text-white font-medium">
                         {agent.firstName} {agent.lastName}
+                        {agent.statusLocked && (
+                          <div className="mt-1 flex items-center gap-2 font-normal">
+                            <span className="text-xs text-red-300"
+                              title={`Locked by ${agent.statusLockedByName ?? 'a supervisor'}${agent.statusLockReason ? `: ${agent.statusLockReason}` : ''}`}>
+                              🔒 {agent.signInLocked ? 'Sign-in locked' : 'Status locked'}
+                            </span>
+                            {canUnlock && (
+                              <button onClick={() => handleUnlock(agent)} disabled={updatingId === agent.id}
+                                className="text-xs text-indigo-400 hover:text-indigo-300 disabled:opacity-50">Unlock</button>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-gray-300">{agent.email}</td>
                       <td className="px-4 py-3">

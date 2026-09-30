@@ -136,6 +136,19 @@ public class GeneralApiCallNodeHandler(
             }
         }
 
+        // "releasesCardData": the order submission — wipe the captured card once it succeeds (same
+        // as the CRM api_call node; see CardDataRetentionMode.UntilOrderSubmitted).
+        if (transitionKey == "success" && node["releasesCardData"]?.GetValue<bool>() == true)
+        {
+            await using var db = tenantDbFactory.Create(ctx.TenantSchemaName);
+            var record = await db.CallRecords.FirstOrDefaultAsync(r => r.Id == ctx.CallRecordId, ct);
+            if (record is not null && !string.IsNullOrEmpty(record.SensitiveData))
+            {
+                record.WipeSensitiveData(ContactConnection.Infrastructure.Payments.CardDataRetentionService.OrderSubmittedReason);
+                await db.SaveChangesAsync(ct);
+            }
+        }
+
         if (!string.IsNullOrEmpty(outputVariable))
         {
             // Masked BEFORE it ever reaches flow variables — see the identical comment in

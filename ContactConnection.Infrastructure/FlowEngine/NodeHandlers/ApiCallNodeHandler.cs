@@ -25,6 +25,7 @@ namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 ///   "outputVariable": "statsApi",
 ///   "timeoutSeconds": 30,
 ///   "oncePerCall": true,   // optional — see below
+///   "releasesCardData": true, // optional — the order submission: wipe the captured card on success
 ///   "transitions": { "success": "node_x", "error": "node_y", "timeout": "node_z" }
 /// }
 ///
@@ -51,7 +52,8 @@ public class ApiCallNodeHandler(
     IApiDefinitionExecutor executor,
     ILiquidTemplateRenderer liquid,
     IApiTemplateModelBuilder templateModel,
-    IApiResponseCacheStore responseCache)
+    IApiResponseCacheStore responseCache,
+    ICardDataRetentionService cardRetention)
     : NodeHandlerBase(resolver), INodeHandler
 {
     public string NodeType => "api_call";
@@ -168,6 +170,12 @@ public class ApiCallNodeHandler(
                         JsonSerializer.Serialize(ResponseFieldMasker.Mask(result, targetSensitiveFields)), ct);
             }
         }
+
+        // The order submission: once it has gone through, the captured card has served its purpose
+        // (CardDataRetentionMode.UntilOrderSubmitted keeps it until exactly here). A replayed
+        // once-per-call success counts too.
+        if (transitionKey == "success" && node["releasesCardData"]?.GetValue<bool>() == true)
+            await cardRetention.ReleaseAfterOrderSubmittedAsync(ctx.CallRecordId, ct);
 
         if (!string.IsNullOrEmpty(outputVariable))
         {

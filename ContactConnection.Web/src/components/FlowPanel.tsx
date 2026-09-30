@@ -407,6 +407,18 @@ export default function FlowPanel() {
       } catch { /* ignore malformed payload */ }
     })
 
+    // Supervisor lock (Call Records "Finalize") — disable / re-enable the status picker.
+    connection.on('receiveAgentLockChanged', (locked: boolean, message: string | null) => {
+      const agentState = useAgentStateStore.getState()
+      agentState.setLockMessage(locked ? (message ?? 'Locked by supervisor') : null)
+      agentState.setAgentStateCode('unavailable')
+    })
+
+    // Sign-in lock: sign out now. AgentShell owns the sign-out (it clears SIP + auth).
+    connection.on('receiveForceSignOut', (message: string) => {
+      window.dispatchEvent(new CustomEvent('cc:force-signout', { detail: message }))
+    })
+
     // Server-side agent state change (on_call at pickup, acw on hangup, available after acw)
     connection.on('receiveAgentStateChange', (code: string, _label: string, expiresAtIso: string | null) => {
       const expiresAt = expiresAtIso ? new Date(expiresAtIso) : null

@@ -153,6 +153,11 @@ public static class CampaignsEndpoints
         if (campaign is null) return Results.NotFound();
 
         campaign.SetSensitiveDataRetentionMinutes(req.SensitiveDataRetentionMinutes);
+        if (req.CardDataRetention is { } mode)
+        {
+            try { campaign.SetCardDataRetention(mode); }
+            catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        }
 
         await repo.SaveChangesAsync(ct);
         return Results.Ok(ToSummaryResponse(campaign));
@@ -533,7 +538,7 @@ public static class CampaignsEndpoints
         c.RingStrategy, c.RingTopN,
         c.RecordingMode, c.ConsentModel, c.RecordingRequired, c.RecordStereo,
         c.RecordingBeepEnabled, c.AutoMaskOnHold, c.RecordingRetentionDays,
-        c.SensitiveDataRetentionMinutes,
+        c.SensitiveDataRetentionMinutes, c.CardDataRetention,
         c.TaxProvider, TaxSettings = ParseTaxSettings(c.TaxSettings),
         c.ExternalRoutingAcceptMode, c.ExternalRoutingLimit,
         Client = c.Client is null ? null : new { c.Client.Id, c.Client.Name },
@@ -549,7 +554,7 @@ public static class CampaignsEndpoints
         c.RingStrategy, c.RingTopN,
         c.RecordingMode, c.ConsentModel, c.RecordingRequired, c.RecordStereo,
         c.RecordingBeepEnabled, c.AutoMaskOnHold, c.RecordingRetentionDays,
-        c.SensitiveDataRetentionMinutes,
+        c.SensitiveDataRetentionMinutes, c.CardDataRetention,
         c.TaxProvider, TaxSettings = ParseTaxSettings(c.TaxSettings),
         c.ExternalRoutingAcceptMode, c.ExternalRoutingLimit,
         Client = c.Client is null ? null : new { c.Client.Id, c.Client.Name },
@@ -594,7 +599,7 @@ public record UpdateCampaignRecordingRequest(
     bool RecordingBeepEnabled = false,
     bool AutoMaskOnHold = false,
     int RecordingRetentionDays = 90);
-public record UpdateCampaignSensitiveDataRetentionRequest(int? SensitiveDataRetentionMinutes = null);
+public record UpdateCampaignSensitiveDataRetentionRequest(int? SensitiveDataRetentionMinutes = null, string? CardDataRetention = null);
 public record UpdateCampaignExternalRoutingRequest(string? AcceptMode, int? Limit = null);
 public record UpdateCampaignTaxRequest(string? TaxProvider, System.Text.Json.JsonElement? TaxSettings = null);
 public record SetCampaignFlowRequest(Guid FlowId);

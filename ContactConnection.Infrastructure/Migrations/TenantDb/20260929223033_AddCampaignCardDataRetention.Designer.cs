@@ -3,6 +3,7 @@ using System;
 using ContactConnection.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace ContactConnection.Infrastructure.Migrations.TenantDb
 {
     [DbContext(typeof(TenantDbContext))]
-    partial class TenantDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260929223033_AddCampaignCardDataRetention")]
+    partial class AddCampaignCardDataRetention
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -84,12 +87,6 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .HasColumnType("uuid")
                         .HasColumnName("role_id");
 
-                    b.Property<bool>("SignInLocked")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(false)
-                        .HasColumnName("sign_in_locked");
-
                     b.Property<string>("SipA1Hash")
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)")
@@ -99,20 +96,6 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)")
                         .HasColumnName("sip_extension");
-
-                    b.Property<string>("StatusLockReason")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)")
-                        .HasColumnName("status_lock_reason");
-
-                    b.Property<DateTimeOffset?>("StatusLockedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("status_locked_at");
-
-                    b.Property<string>("StatusLockedByName")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)")
-                        .HasColumnName("status_locked_by_name");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
@@ -619,24 +602,6 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                         .HasMaxLength(254)
                         .HasColumnType("character varying(254)")
                         .HasColumnName("email");
-
-                    b.Property<string>("FinalizeReason")
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)")
-                        .HasColumnName("finalize_reason");
-
-                    b.Property<DateTimeOffset?>("FinalizedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("finalized_at");
-
-                    b.Property<Guid?>("FinalizedById")
-                        .HasColumnType("uuid")
-                        .HasColumnName("finalized_by_id");
-
-                    b.Property<string>("FinalizedByName")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)")
-                        .HasColumnName("finalized_by_name");
 
                     b.Property<string>("FirstName")
                         .HasMaxLength(100)

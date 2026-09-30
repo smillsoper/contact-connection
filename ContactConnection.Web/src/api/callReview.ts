@@ -73,6 +73,10 @@ export interface CallAddress {
 
 export interface ApiCallNodeSummary {
   nodeId: string
+  /** 'api_call' | 'authorize_payment' */
+  nodeType: string
+  /** API call marked as the order submission — wipes the card on success. */
+  releasesCardData: boolean
   label: string
   outputVariable: string | null
   oncePerCall: boolean
@@ -154,12 +158,42 @@ export interface CallDetail {
   addresses: { billing: CallAddress | null; shipping: CallAddress | null } | null
   cart: CartDocument | null
   authorizedAmount: number | null
+  cardData: {
+    onFile: boolean
+    storedAt: string | null
+    wipedAt: string | null
+    wipeReason: string | null
+    retention: string
+    /** When the retention sweep would wipe it (null when nothing is on file). */
+    expiresAt: string | null
+  }
   payments: CallPayment[]
   customFields: CallCustomField[]
   commitmentEvents: { eventName?: string; timestamp?: string; [k: string]: unknown }[]
   dispositions: { interactionNumber: number; type: string; disposition: string | null; status: string; startedAt: string; completedAt: string | null }[]
   sessions: CallSessionView[]
   audit: CallAuditEntry[]
+  /** A caller still connected (live telephony channel); null when not. */
+  liveCall: { connected: boolean; withAgent: boolean; callerNumber: string } | null
+  finalized: { at: string; byName: string | null; reason: string | null } | null
+  /** Something is still open (a script, a connected caller, or no end time) — Finalize is offered. */
+  canFinalize: boolean
+  /** The call's agent's supervisor lock. */
+  agentLock: { statusLocked: boolean; signInLocked: boolean; lockedBy: string | null; reason: string | null } | null
+}
+
+export interface FinalizeCallRequest {
+  reason: string
+  agentLock: 'none' | 'status' | 'sign_in'
+  lockReason: string | null
+  confirmLiveCall: boolean
+}
+
+export interface FinalizeCallResult {
+  hungUp: boolean
+  hangupError: string | null
+  scriptsClosed: number
+  lockedAgents: string[]
 }
 
 export interface CallCustomField {
@@ -184,6 +218,7 @@ export interface ApiCallRerunResult {
   error: string | null
   response: string | null
   replayed: boolean
+  nodeType: string
 }
 
 export interface UpdateContactRequest {
@@ -224,6 +259,8 @@ export const callReviewApi = {
 
   updateVariables: (id: string, sessionId: string, changes: Record<string, string | null>) =>
     api.put<void>(`${base}/${id}/sessions/${sessionId}/variables`, { changes }),
+
+  finalize: (id: string, req: FinalizeCallRequest) => api.post<FinalizeCallResult>(`${base}/${id}/finalize`, req),
 
   rerunApiCall: (id: string, sessionId: string, nodeId: string) =>
     api.post<ApiCallRerunResult>(`${base}/${id}/sessions/${sessionId}/api-calls/${encodeURIComponent(nodeId)}/rerun`),

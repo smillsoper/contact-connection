@@ -73,6 +73,10 @@ public static class AuthEndpoints
         if (agent is null || !hasher.Verify(request.Password, agent.PasswordHash))
             return Results.Unauthorized();
 
+        // Supervisor sign-in lock (Call Records "Finalize") — told only after a correct password.
+        if (agent.SignInLocked)
+            return Results.Json(new { error = AgentLockEndpoints.SignInLockedMessage, locked = true }, statusCode: StatusCodes.Status403Forbidden);
+
         var mfaRequirement = tenant.Settings.MfaRequirement;
 
         // Determine if MFA challenge is needed

@@ -20,6 +20,7 @@ public class ApiCallNodeHandlerLiquidTests
         public readonly TenantApiEndpoint Endpoint;
         public readonly Mock<IApiDefinitionExecutor> Executor = new();
         public readonly Mock<IApiResponseCacheStore> Cache = new();
+        public readonly Mock<ICardDataRetentionService> CardRetention = new();
         public readonly FlowExecutionContext Ctx = new()
         {
             SessionId = Guid.NewGuid(), FlowId = Guid.NewGuid(), FlowVersion = 1, CallRecordId = Guid.NewGuid(),
@@ -50,13 +51,13 @@ public class ApiCallNodeHandlerLiquidTests
                 .ReturnsAsync(ApiTemplateModelBuilder.Sample());
             return new ApiCallNodeHandler(new VariableResolver(), defs.Object, Mock.Of<IPortalApiDefinitionRepository>(),
                 endpoints.Object, Mock.Of<IPortalApiEndpointRepository>(), Mock.Of<ITenantCredentialStore>(),
-                Mock.Of<IPortalCredentialStore>(), Executor.Object, new FluidLiquidTemplateRenderer(), model.Object, Cache.Object);
+                Mock.Of<IPortalCredentialStore>(), Executor.Object, new FluidLiquidTemplateRenderer(), model.Object, Cache.Object, CardRetention.Object);
         }
 
-        public JsonObject Node(bool oncePerCall = false) => new()
+        public JsonObject Node(bool oncePerCall = false, bool releasesCardData = false) => new()
         {
             ["type"] = "api_call", ["apiEndpointId"] = Endpoint.Id.ToString(), ["apiDefinitionScope"] = "tenant",
-            ["outputVariable"] = "order", ["oncePerCall"] = oncePerCall,
+            ["outputVariable"] = "order", ["oncePerCall"] = oncePerCall, ["releasesCardData"] = releasesCardData,
             ["transitions"] = new JsonObject { ["success"] = "n_ok", ["error"] = "n_err" },
         };
     }
@@ -116,6 +117,30 @@ public class ApiCallNodeHandlerLiquidTests
         Assert.Equal("n_ok", second.NextNodeId);
         h.Executor.Verify(e => e.ExecuteAsync(It.IsAny<ApiDefinitionExecutionRequest>(), It.IsAny<CancellationToken>()), Times.Once);
         Assert.Equal("true", h.Ctx.FlowVars["order.success"]);  // output variables restored from the replay
+    }
+
+    // S166 — the order submission releases the captured card (CardDataRetentionMode.UntilOrderSubmitted).
+    [Fact]
+    public async Task ReleasesCardData_OnSuccess_WipesTheCard()
+    {
+        var h = new Harness("{}");
+        await h.Handler().ExecuteAsync(h.Node(releasesCardData: true), h.Ctx, null, "");
+        h.CardRetention.Verify(c => c.ReleaseAfterOrderSubmittedAsync(h.Ctx.CallRecordId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ReleasesCardData_NotOnFailure_NorWhenUnmarked()
+    {
+        var failing = new Harness("{}", """{"rules":[{"path":"success","value":"true"}]}""");
+        failing.Executor.Setup(e => e.ExecuteAsync(It.IsAny<ApiDefinitionExecutionRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ApiDefinitionExecutionResult(true, 200, "OK", new(), """{"success":false}""", false, null));
+        await failing.Handler().ExecuteAsync(failing.Node(releasesCardData: true), failing.Ctx, null, "");
+
+        var unmarked = new Harness("{}");
+        await unmarked.Handler().ExecuteAsync(unmarked.Node(), unmarked.Ctx, null, "");
+
+        failing.CardRetention.VerifyNoOtherCalls();
+        unmarked.CardRetention.VerifyNoOtherCalls();
     }
 
     [Fact]

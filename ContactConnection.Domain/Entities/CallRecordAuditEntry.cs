@@ -9,6 +9,7 @@ public static class CallAuditAction
     public const string CartEdited       = "cart_edited";
     public const string CustomFieldEdited = "custom_field_edited";
     public const string ApiCallRerun     = "api_call_rerun";
+    public const string Finalized        = "finalized";
 }
 
 /// <summary>

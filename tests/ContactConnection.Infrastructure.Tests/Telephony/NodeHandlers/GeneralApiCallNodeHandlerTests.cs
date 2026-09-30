@@ -76,6 +76,46 @@ public class GeneralApiCallNodeHandlerTests
         return executor;
     }
 
+    // ── Order submission releases the captured card (S166) ──────────────────────
+
+    [Theory]
+    [InlineData(true, true, null)]                 // marked + succeeded → wiped
+    [InlineData(true, false, "ciphertext")]        // marked but failed → kept for a resubmit
+    [InlineData(false, true, "ciphertext")]        // not the order submission → kept
+    public async Task ReleasesCardData_WipesOnlyOnASuccessfulMarkedCall(bool marked, bool succeeds, string? expected)
+    {
+        // A fresh context per Create() over one in-memory store — the handler disposes what it opens.
+        var dbName = Guid.NewGuid().ToString();
+        TenantDbContext Open() => new(new DbContextOptionsBuilder<TenantDbContext>().UseInMemoryDatabase(dbName).Options);
+        var ctx = Ctx();
+        var (def, endpoint) = MakeTenantTarget();
+        await using (var seed = Open())
+        {
+            seed.TenantApiDefinitions.Add(def);
+            seed.TenantApiEndpoints.Add(endpoint);
+            var record = CallRecord.Create(ctx.TenantId, Guid.NewGuid(), ctx.CampaignId);
+            typeof(CallRecord).GetProperty(nameof(CallRecord.Id))!.SetValue(record, ctx.CallRecordId);
+            record.StoreSensitiveData("ciphertext");
+            seed.CallRecords.Add(record);
+            await seed.SaveChangesAsync();
+        }
+        var factory = new Mock<ITenantDbContextFactory>();
+        factory.Setup(f => f.Create(It.IsAny<string>())).Returns(Open);
+        await using var portalDb = NewPortalDb();
+        var executor = MockExecutor(new ApiDefinitionExecutionResult(succeeds, succeeds ? 200 : 500, "x", new(), "{}", false, succeeds ? null : "boom"));
+        var handler = new GeneralApiCallNodeHandler(factory.Object, portalDb, Mock.Of<ITenantCredentialStore>(),
+            Mock.Of<IPortalCredentialStore>(), executor.Object, new FluidLiquidTemplateRenderer());
+        var node = Node(endpoint.Id.ToString());
+        node["releasesCardData"] = marked;
+
+        await handler.ExecuteAsync(node, ctx);
+
+        await using var check = Open();
+        var saved = await check.CallRecords.SingleAsync();
+        Assert.Equal(expected, saved.SensitiveData);
+        if (expected is null) Assert.Equal("order_submitted", saved.SensitiveWipeReason);
+    }
+
     // ── Configuration guards ────────────────────────────────────────────────────
 
     [Fact]

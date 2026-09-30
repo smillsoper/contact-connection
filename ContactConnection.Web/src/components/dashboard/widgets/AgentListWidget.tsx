@@ -3,6 +3,7 @@ import { dashboardWidgetsApi, type AgentListRow } from '../../../api/dashboardWi
 import type { WidgetFilterConfig } from '../../../types/dashboard'
 import { useDashboardLiveAgentState, useDashboardLiveRegistration, useDashboardLiveAgentSessions } from '../DashboardLiveContext'
 import { useAuthStore } from '../../../stores/authStore'
+import { agentLockApi } from '../../../api/agentLock'
 
 type SortColumn = 'name' | 'state' | 'time'
 type SortDirection = 'asc' | 'desc'
@@ -41,6 +42,17 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
   const liveReg = useDashboardLiveRegistration()
   const liveSessions = useDashboardLiveAgentSessions()
   const canOpenCalls = useAuthStore((s) => s.hasPermission('calls.view') || s.hasPermission('calls.manage'))
+  const canUnlock = useAuthStore((s) => s.hasPermission('agents.manage') || s.hasPermission('calls.manage') || s.hasPermission('supervisor.override'))
+  const [unlocking, setUnlocking] = useState<string | null>(null)
+
+  async function unlock(agentId: string) {
+    setUnlocking(agentId)
+    try {
+      await agentLockApi.unlock(agentId)
+      setRows((prev) => prev.map((r) => r.agent_id === agentId ? { ...r, status_locked: false, sign_in_locked: false } : r))
+    } catch { /* the row stays locked — nothing to undo */ }
+    finally { setUnlocking(null) }
+  }
   const knownIdsRef = useRef<Set<string>>(new Set())
   const refetchRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -151,7 +163,19 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
         <tbody>
           {sortedRows.map((r) => (
             <tr key={r.agent_id} className="border-b border-gray-800/60 last:border-0">
-              <td className="py-1.5 pr-2 text-gray-200 truncate max-w-[9rem]">{r.name}</td>
+              <td className="py-1.5 pr-2 text-gray-200 max-w-[11rem]">
+                <span className="truncate block">{r.name}</span>
+                {r.status_locked && (
+                  <span className="flex items-center gap-1.5 text-[10px] text-red-300"
+                    title={`Locked by ${r.locked_by ?? 'a supervisor'}${r.lock_reason ? `: ${r.lock_reason}` : ''}`}>
+                    🔒 {r.sign_in_locked ? 'sign-in locked' : 'locked'}
+                    {canUnlock && (
+                      <button onClick={() => unlock(r.agent_id)} disabled={unlocking === r.agent_id}
+                        className="text-indigo-400 hover:text-indigo-300 disabled:opacity-50">Unlock</button>
+                    )}
+                  </span>
+                )}
+              </td>
               <td className="py-1.5 pr-2">
                 <span className="inline-flex items-center gap-1.5 text-gray-300">
                   <span className={`w-2 h-2 rounded-full shrink-0 ${STATE_DOT[r.state_code] ?? 'bg-gray-500'}`} />

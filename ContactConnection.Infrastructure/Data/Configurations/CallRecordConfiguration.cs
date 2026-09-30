@@ -63,6 +63,10 @@ public class CallRecordConfiguration : IEntityTypeConfiguration<CallRecord>
         builder.Property(r => r.TaxAmount).HasColumnName("tax_amount").HasPrecision(10, 2);
         builder.Property(r => r.PaymentStatus).HasColumnName("payment_status").HasMaxLength(30);
         builder.Property(r => r.OrderNumber).HasColumnName("order_number").HasMaxLength(20);
+        builder.Property(r => r.FinalizedAt).HasColumnName("finalized_at");
+        builder.Property(r => r.FinalizedById).HasColumnName("finalized_by_id");
+        builder.Property(r => r.FinalizedByName).HasColumnName("finalized_by_name").HasMaxLength(200);
+        builder.Property(r => r.FinalizeReason).HasColumnName("finalize_reason").HasMaxLength(1000);
         builder.Property(r => r.NumberProviderId).HasColumnName("number_provider_id");
         builder.Property(r => r.RoutedGroupId).HasColumnName("routed_group_id");
         builder.Property(r => r.RoutedTier).HasColumnName("routed_tier");

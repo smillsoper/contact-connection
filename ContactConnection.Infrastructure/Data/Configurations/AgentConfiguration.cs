@@ -51,5 +51,10 @@ public class AgentConfiguration : IEntityTypeConfiguration<Agent>
             .HasDatabaseName("idx_agents_sip_extension");
 
         builder.Property(a => a.Timezone).HasColumnName("timezone").HasMaxLength(64);
+        builder.Property(a => a.StatusLockedAt).HasColumnName("status_locked_at");
+        builder.Property(a => a.StatusLockedByName).HasColumnName("status_locked_by_name").HasMaxLength(200);
+        builder.Property(a => a.StatusLockReason).HasColumnName("status_lock_reason").HasMaxLength(500);
+        builder.Property(a => a.SignInLocked).HasColumnName("sign_in_locked").HasDefaultValue(false);
+        builder.Ignore(a => a.IsStatusLocked);
     }
 }

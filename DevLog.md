@@ -175,6 +175,7 @@
 | 163 | 2026-09-27 | 9:44 AM PDT | 6:20 PM PDT | 516 min | ~18504 min |
 | 164 | 2026-09-28 | 10:26 AM PDT | 5:10 PM PDT | 404 min | ~18908 min |
 | 165 | 2026-09-29 | 12:55 PM PDT | 3:14 PM PDT | 139 min | ~19047 min |
+| 166 | 2026-09-29 | 3:21 PM PDT | 4:59 PM PDT | 98 min | ~19145 min |
 
 ---
 
@@ -10700,4 +10701,74 @@ left alone; `docker compose up -d --force-recreate timesync` should clear it.
   add set_variable name assignments to the V1 flow.
 - Commissions (Alpha 10% / else 1%); remaining Life Seasons scripts; export processes.
 - SignalWire reinstatement → gateway + numbers → live tests (parallel queuing, pre-queue issue).
+
+## Session 166
+
+**Date:** 2026-09-29
+**Start:** 3:21 PM PDT
+**End:** 4:59 PM PDT
+**Duration:** 98 minutes
+**Total Duration:** ~19145 minutes
+
+### Focus
+
+Two Call Records extensions, both Stephen's ideas: keep card data until the order is submitted (so a
+reviewer can re-authorize a corrected order), and a supervisor **Finalize call** with an optional
+agent lock (orphaned scripts; relieving / terminating an agent mid-call).
+
+### Built — campaign card data retention
+
+- Campaign setting `CardDataRetention` (migration `AddCampaignCardDataRetention`): "wipe when the script
+  finishes" (default, all existing campaigns) or "keep until the order is submitted". In the latter the
+  script end and Commit Point leave the card; the campaign's existing retention period backstops.
+- API Call nodes (CRM `api_call` + telephony `tf_general_api_call`) get **"Order submission — release
+  card data"** (`releasesCardData`): a success wipes the card (`order_submitted`), including a Call
+  Records resubmit (same node). Chosen over a campaign-level node pick — campaigns span several flows.
+- Call Records: card-on-file line (captured / wipe-by time / wipe reason) and **Re-authorize** —
+  `IFlowEngine.RerunNodeAsync` (renamed from RerunApiCallNodeAsync) now re-runs `authorize_payment`
+  too (void + re-auth on a changed total, no-op if unchanged). `ICardDataRetentionService`.
+
+### Built — Finalize call + agent lock
+
+- **Finalize** (calls.manage): required reason; a still-connected caller is hung up only after an
+  explicit confirmation — both legs (`_bridged_peer_uuid`/`_agent_uuid`), `park_after_bridge` cleared
+  first; open scripts finish on the agent's screen (`FinalizeSessionAsync`: end-node push → checkmark,
+  tab closes; orphans just completed); call marked complete with who/when/why (migration
+  `AddAgentLockAndCallFinalization`); audited. Offered (and allowed) only while something is open — an
+  active script, a connected caller, or no end time (Stephen caught it showing on a normally-ended call).
+- **Agent lock** on the agent row: status lock (held Unavailable — enforced in `AgentStateStore.SetAsync`
+  against every status change; softphone shows "🔒 Unavailable — locked … contact your supervisor";
+  survives re-login) or sign-in lock (signed out now via `receiveForceSignOut`, existing tokens rejected
+  in JWT `OnTokenValidated`, login refused "Your login has been locked — please contact your
+  supervisor" — only after a correct password). `IAgentLockReader` (30s memory cache). Unlock from
+  **Users** (agents.manage) or the dashboard **Agent List** (calls.manage / supervisor.override) →
+  plain Unavailable.
+
+### Fixed
+
+- **Worker hadn't compiled since the S165 commit** — `NoOpFlowNotifier` lacked the S165 notifier
+  methods; `dotnet test` only built the test projects, so it went unnoticed. Always `dotnet build
+  ContactConnection.slnx` before committing.
+- `PUT /agent-state` now returns the state actually stored (a locked agent's request is overridden).
+
+### Verification
+
+`dotnet build ContactConnection.slnx` clean (Worker included); **1315 tests pass** (Domain 204,
+Application 20, Infrastructure 984, Api 107) — new: CardDataRetentionServiceTests, release on
+success/failure (CRM + telephony), payment re-run, AgentLockTests (store enforcement, lock/unlock,
+Finalize domain), engine finalize (live + orphan). `tsc -b` clean. Live against the dev DB: finalize +
+status lock, lock held against "available", sign-in lock → token 401 → unlock → 200, 403 without
+permission, dashboard lock fields, finished-call refusal. **Stephen verified everything in the
+browser** except what needs a live call.
+
+### Not verified (needs a live test number)
+
+Secure capture → re-authorize → resubmit with card release; the live-caller hang-up.
+
+### Follow-ups
+
+- Preview calls end "incomplete": `DeriveOverallStatus` keys off completed CallInteractions, which a
+  finished script never creates/completes — check on a real call; affects reporting.
+- `cc_timesync` restart loop (stale chronyd pid) still open.
+- Next: Commissions; remaining Life Seasons scripts; export processes; SignalWire once reinstated.
 

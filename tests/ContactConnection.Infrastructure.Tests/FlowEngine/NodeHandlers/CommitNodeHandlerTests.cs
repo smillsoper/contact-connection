@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using ContactConnection.Application.Interfaces.Repositories;
+using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Domain.Entities;
 using ContactConnection.Infrastructure.FlowEngine;
 using ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
@@ -35,7 +36,7 @@ public class CommitNodeHandlerTests
         var record = CallRecord.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
         var repo = new Mock<ICallRecordRepository>();
         repo.Setup(r => r.GetByIdAsync(record.Id, It.IsAny<CancellationToken>())).ReturnsAsync(record);
-        return (new CommitNodeHandler(new VariableResolver(), repo.Object), record, repo);
+        return (new CommitNodeHandler(new VariableResolver(), repo.Object, Mock.Of<ICardDataRetentionService>()), record, repo);
     }
 
     [Fact]

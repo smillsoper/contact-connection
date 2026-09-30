@@ -1,4 +1,5 @@
 import { useCallback, useEffect } from 'react'
+import { LOGIN_NOTICE_KEY } from '../api/agentLock'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import { useSipStore } from '../stores/sipStore'
@@ -40,6 +41,19 @@ export default function AgentShell() {
     clearAuth()
     clearSip()
     navigate('/login', { replace: true })
+  }, [clearAuth, clearSip, navigate])
+
+  // Supervisor sign-in lock (FlowPanel relays receiveForceSignOut): the server has already recorded
+  // the sign-out and rejects this token, so just drop the session and explain on the login page.
+  useEffect(() => {
+    const onForced = (e: Event) => {
+      try { sessionStorage.setItem(LOGIN_NOTICE_KEY, (e as CustomEvent<string>).detail) } catch { /* private mode */ }
+      clearAuth()
+      clearSip()
+      navigate('/login', { replace: true })
+    }
+    window.addEventListener('cc:force-signout', onForced)
+    return () => window.removeEventListener('cc:force-signout', onForced)
   }, [clearAuth, clearSip, navigate])
 
   const { showWarning, secondsLeft, keepAlive } = useSessionTimeout(handleLogout)

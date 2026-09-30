@@ -26,6 +26,15 @@ public class Agent
     /// <summary>IANA timezone ID (e.g. "America/Chicago"). Null means use the tenant's timezone.</summary>
     public string? Timezone { get; private set; }
 
+    // Supervisor lock (S166) — set from Call Records "Finalize" (relieve / terminate an agent).
+    // Status lock: held Unavailable, can't change status or be offered calls. SignInLocked adds:
+    // signed out now, existing tokens rejected, sign-in refused — until someone unlocks.
+    public DateTimeOffset? StatusLockedAt { get; private set; }
+    public string? StatusLockedByName { get; private set; }
+    public string? StatusLockReason { get; private set; }
+    public bool SignInLocked { get; private set; }
+    public bool IsStatusLocked => StatusLockedAt is not null;
+
     // Required by EF Core
     private Agent() { }
 
@@ -76,6 +85,24 @@ public class Agent
     }
 
     public void SetTimezone(string? ianaTimezoneId) => Timezone = ianaTimezoneId;
+
+    /// <summary>Locks the agent's status (and, with <paramref name="signIn"/>, their sign-in). A
+    /// second lock can only escalate to a sign-in lock, never relax one.</summary>
+    public void Lock(string byName, string? reason, bool signIn)
+    {
+        StatusLockedAt     = DateTimeOffset.UtcNow;
+        StatusLockedByName = byName;
+        StatusLockReason   = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
+        SignInLocked       = SignInLocked || signIn;
+    }
+
+    public void Unlock()
+    {
+        StatusLockedAt     = null;
+        StatusLockedByName = null;
+        StatusLockReason   = null;
+        SignInLocked       = false;
+    }
 
     public string FullName => $"{FirstName} {LastName}".Trim();
 }

@@ -188,6 +188,11 @@ public static class AdminAgentsEndpoints
         a.LastLoginAt,
         a.Timezone,
         a.SipExtension,
+        StatusLocked = a.IsStatusLocked,
+        a.SignInLocked,
+        a.StatusLockedAt,
+        a.StatusLockedByName,
+        a.StatusLockReason,
     };
 }
 

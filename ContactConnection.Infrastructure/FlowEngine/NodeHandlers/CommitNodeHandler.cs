@@ -24,7 +24,7 @@ namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 /// Passing a second commit point keeps the first event name and can only narrow the allowed
 /// sections (intersection) — a later commit never reopens anything. In practice flows have one.
 /// </summary>
-public class CommitNodeHandler(IVariableResolver resolver, ICallRecordRepository callRecords)
+public class CommitNodeHandler(IVariableResolver resolver, ICallRecordRepository callRecords, ICardDataRetentionService cardRetention)
     : NodeHandlerBase(resolver), INodeHandler
 {
     public string NodeType => "commit";
@@ -57,8 +57,10 @@ public class CommitNodeHandler(IVariableResolver resolver, ICallRecordRepository
                     OccurredAt = DateTimeOffset.UtcNow,
                 });
                 // Nothing before this point can change, so a captured card is no longer needed for
-                // re-authorization (PaymentService keeps it until now).
-                if (!string.IsNullOrEmpty(record.SensitiveData))
+                // re-authorization (PaymentService keeps it until now) — unless the campaign keeps it
+                // until the order is submitted, for a post-call correction + re-auth.
+                if (!string.IsNullOrEmpty(record.SensitiveData)
+                    && !await cardRetention.HoldsUntilOrderSubmittedAsync(record.CampaignId, ct))
                     record.WipeSensitiveData("committed");
                 await callRecords.SaveChangesAsync(ct);
             }

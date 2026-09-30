@@ -22,6 +22,12 @@ public class FlowNotifier(IHubContext<FlowHub, IFlowHubClient> hubContext) : IFl
     public Task PushCallChangedAsync(Guid callRecordId, CancellationToken ct = default) =>
         hubContext.Clients.Group($"call:{callRecordId}").ReceiveCallChanged(callRecordId.ToString());
 
+    public Task PushAgentLockChangedAsync(Guid agentId, bool locked, string? message, CancellationToken ct = default) =>
+        hubContext.Clients.Group($"agent:{agentId}").ReceiveAgentLockChanged(locked, message);
+
+    public Task PushForceSignOutAsync(Guid agentId, string message, CancellationToken ct = default) =>
+        hubContext.Clients.Group($"agent:{agentId}").ReceiveForceSignOut(message);
+
     public Task PushErrorAsync(Guid sessionId, string message, CancellationToken ct = default) =>
         hubContext.Clients.Group($"session:{sessionId}").ReceiveError(message);
 }

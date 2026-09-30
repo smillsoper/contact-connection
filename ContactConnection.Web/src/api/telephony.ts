@@ -54,6 +54,8 @@ export interface Campaign {
   // the platform default (SensitiveData:Retention:TtlMinutes on the Worker). A campaign running a
   // daily/weekly secure export needs this longer than the default safety-net window.
   sensitiveDataRetentionMinutes?: number | null
+  /** 'until_script_ends' (default) | 'until_order_submitted' */
+  cardDataRetention?: string
   taxProvider?: TaxProviderKey
   taxSettings?: CampaignTaxSettings | null
   /** How this campaign answers external routers — see updateCampaignExternalRouting. */
@@ -329,8 +331,8 @@ export interface CampaignTaxSettings {
 export const updateCampaignTax = (id: string, taxProvider: TaxProviderKey, taxSettings: CampaignTaxSettings | null) =>
   api.put<Campaign>(`/api/v1/campaigns/${id}/tax`, { taxProvider, taxSettings })
 
-export const updateCampaignSensitiveDataRetention = (id: string, sensitiveDataRetentionMinutes: number | null) =>
-  api.put<Campaign>(`/api/v1/campaigns/${id}/sensitive-data-retention`, { sensitiveDataRetentionMinutes })
+export const updateCampaignSensitiveDataRetention = (id: string, sensitiveDataRetentionMinutes: number | null, cardDataRetention?: string) =>
+  api.put<Campaign>(`/api/v1/campaigns/${id}/sensitive-data-retention`, { sensitiveDataRetentionMinutes, cardDataRetention })
 
 export const setCampaignFlow = (id: string, flowId: string) =>
   api.put<Campaign>(`/api/v1/campaigns/${id}/flow`, { flowId })

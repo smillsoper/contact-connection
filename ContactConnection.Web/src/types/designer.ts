@@ -176,6 +176,8 @@ export interface ContactConnectionNodeDef {
   timeoutSeconds?: number
   /** api_call: replay a prior success on this call instead of calling again. */
   oncePerCall?: boolean
+  /** Order submission: wipe the captured card when this call succeeds (campaign card retention). */
+  releasesCardData?: boolean
   definitionId?: string
   definitionFieldName?: string
   definitionDisplayLabel?: string

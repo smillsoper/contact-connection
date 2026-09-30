@@ -1,0 +1,30 @@
+﻿using Microsoft.EntityFrameworkCore.Migrations;
+
+#nullable disable
+
+namespace ContactConnection.Infrastructure.Migrations.TenantDb
+{
+    /// <inheritdoc />
+    public partial class AddCampaignCardDataRetention : Migration
+    {
+        /// <inheritdoc />
+        protected override void Up(MigrationBuilder migrationBuilder)
+        {
+            migrationBuilder.AddColumn<string>(
+                name: "card_data_retention",
+                table: "campaigns",
+                type: "character varying(30)",
+                maxLength: 30,
+                nullable: false,
+                defaultValue: "until_script_ends");
+        }
+
+        /// <inheritdoc />
+        protected override void Down(MigrationBuilder migrationBuilder)
+        {
+            migrationBuilder.DropColumn(
+                name: "card_data_retention",
+                table: "campaigns");
+        }
+    }
+}

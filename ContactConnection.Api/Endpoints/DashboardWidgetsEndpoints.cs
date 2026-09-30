@@ -101,6 +101,10 @@ public static class DashboardWidgetsEndpoints
                     registered        = reg is not null,
                     registered_since  = reg?.Since,
                     live_calls        = liveByAgent.GetValueOrDefault(agent.Id) ?? [],
+                    status_locked     = agent.IsStatusLocked,
+                    sign_in_locked    = agent.SignInLocked,
+                    lock_reason       = agent.StatusLockReason,
+                    locked_by         = agent.StatusLockedByName,
                 });
             }
 

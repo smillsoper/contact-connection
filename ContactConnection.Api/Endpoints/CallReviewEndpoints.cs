@@ -36,6 +36,7 @@ public static class CallReviewEndpoints
         group.MapPut("{id:guid}/custom-fields/{definitionId:guid}", UpdateCustomField);
         group.MapPut("{id:guid}/sessions/{sessionId:guid}/variables", UpdateVariables);
         group.MapPost("{id:guid}/sessions/{sessionId:guid}/api-calls/{nodeId}/rerun", RerunApiCall);
+        group.MapPost("{id:guid}/finalize", FinalizeCall);
 
         return app;
     }
@@ -113,6 +114,7 @@ public static class CallReviewEndpoints
         ICustomFieldService customFields,
         ICustomFieldValueRepository customFieldValues,
         ICustomFieldDefinitionRepository customFieldDefinitions,
+        ITelephonyCallSessionStore telephonySessions,
         TenantContext tenantContext,
         CancellationToken ct)
     {
@@ -127,7 +129,9 @@ public static class CallReviewEndpoints
         var agent = r.AgentId is { } agentId ? await agents.GetByIdAsync(agentId, ct) : null;
 
         var sessionViews = new List<object>();
-        foreach (var s in await sessions.GetByCallRecordAsync(id, ct))
+        var callSessionRows = await sessions.GetByCallRecordAsync(id, ct);
+        var anyOpenScript = callSessionRows.Any(s => s.Status == FlowSessionStatus.Active);
+        foreach (var s in callSessionRows)
         {
             var flow = await flows.GetByIdAsync(s.FlowId, ct);
             var snapshot = await engine.GetSessionSnapshotAsync(s.Id, ct);
@@ -148,6 +152,7 @@ public static class CallReviewEndpoints
             });
         }
 
+        var liveCall = await LiveCallAsync(id, telephonySessions, ct);
         var txns = await payments.GetByCallRecordAsync(id, ct);
         var authorized = txns.LastOrDefault(t => t.Status == PaymentTransactionStatus.Approved && t.VoidedAt is null);
 
@@ -184,6 +189,19 @@ public static class CallReviewEndpoints
             r.Addresses,
             r.Cart,
             authorizedAmount = authorized?.Amount,
+            // Card on file (never the data itself) — decides whether a re-authorization is possible.
+            cardData = new
+            {
+                onFile = !string.IsNullOrEmpty(r.SensitiveData),
+                storedAt = r.SensitiveDataStoredAt,
+                wipedAt = r.SensitiveDataWipedAt,
+                wipeReason = r.SensitiveWipeReason,
+                retention = campaign?.CardDataRetention ?? CardDataRetentionMode.UntilScriptEnds,
+                // When the Worker's sweep would wipe it: campaign override, else the platform default.
+                expiresAt = string.IsNullOrEmpty(r.SensitiveData) || r.SensitiveDataStoredAt is null ? (DateTimeOffset?)null
+                    : r.SensitiveDataStoredAt.Value.AddMinutes(campaign?.SensitiveDataRetentionMinutes
+                        ?? http.RequestServices.GetRequiredService<IConfiguration>().GetValue("SensitiveData:Retention:TtlMinutes", 60)),
+            },
             payments = txns.Select(t => new
             {
                 t.Id,
@@ -201,6 +219,20 @@ public static class CallReviewEndpoints
             }),
             customFields = await CustomFieldViewsAsync(id, customFields, customFieldValues, customFieldDefinitions, ct),
             r.CommitmentEvents,
+            // A caller still connected on this call (live telephony channel) — Finalize warns first.
+            liveCall = liveCall,
+            // Finalize is for closing out what's still open — a script, a connected caller, or a call
+            // that never ended. A call that ended normally has nothing to finalize.
+            canFinalize = r.FinalizedAt is null
+                && (liveCall is not null || r.CallEndAt is null || anyOpenScript),
+            finalized = r.FinalizedAt is null ? null : new { at = r.FinalizedAt, byName = r.FinalizedByName, reason = r.FinalizeReason },
+            agentLock = agent is null ? null : new
+            {
+                statusLocked = agent.IsStatusLocked,
+                agent.SignInLocked,
+                lockedBy = agent.StatusLockedByName,
+                reason = agent.StatusLockReason,
+            },
             dispositions = r.Interactions.OrderBy(i => i.InteractionNumber)
                 .Select(i => new { i.InteractionNumber, i.Type, i.Disposition, i.Status, i.StartedAt, i.CompletedAt }),
             sessions = sessionViews,
@@ -485,19 +517,134 @@ public static class CallReviewEndpoints
         if (session is null || session.CallRecordId != id) return Results.NotFound();
 
         ApiCallRerunResult result;
-        try { result = await engine.RerunApiCallNodeAsync(sessionId, nodeId, ct); }
+        try { result = await engine.RerunNodeAsync(sessionId, nodeId, ct); }
         catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
 
-        var summary = result.Replayed
-            ? "API call re-run: already succeeded on this call — replayed, nothing sent"
-            : result.Success
-                ? $"API call re-run: succeeded ({result.StatusCode})"
-                : $"API call re-run: {result.Transition} — {Truncate(result.Error, 200)}";
+        var isPayment = result.NodeType == "authorize_payment";
+        var summary = isPayment
+            ? result.Success
+                ? $"Payment re-authorized: {result.Response}"
+                : $"Payment re-authorization {result.Transition} — {Truncate(result.Error, 200)}"
+            : result.Replayed
+                ? "API call re-run: already succeeded on this call — replayed, nothing sent"
+                : result.Success
+                    ? $"API call re-run: succeeded ({result.StatusCode})"
+                    : $"API call re-run: {result.Transition} — {Truncate(result.Error, 200)}";
         await Audit(audit, id, CallAuditAction.ApiCallRerun, summary,
             new { sessionId, nodeId, result.Success, result.Transition, result.StatusCode, result.Error, result.Replayed },
             actor, ct, http);
 
         return Results.Ok(result);
+    }
+
+    // ── POST /api/v1/call-review/calls/{id}/finalize ────────────────────────
+    // Supervisor closes the call out: hangs up a still-connected caller (only once confirmed),
+    // finishes any open script on the agent's screen (checkmark, tab closes), marks the call
+    // complete with who/when/why, and optionally locks the agent (status, or sign-in = signed out).
+
+    private static async Task<IResult> FinalizeCall(
+        Guid id,
+        FinalizeCallRequest req,
+        HttpContext http,
+        ICallRecordRepository callRecords,
+        IFlowSessionRepository sessions,
+        IFlowEngine engine,
+        ITelephonyCallSessionStore telephonySessions,
+        IEslCommanderFactory eslFactory,
+        ICallRecordAuditRepository audit,
+        TenantContext tenantContext,
+        ILoggerFactory loggerFactory,
+        CancellationToken ct)
+    {
+        if (!tenantContext.HasTenant) return Results.Unauthorized();
+        if (!CanManage(http, out var actor)) return Results.Forbid();
+        var reason = req.Reason?.Trim();
+        if (string.IsNullOrEmpty(reason)) return Results.BadRequest(new { error = "A reason is required to finalize a call." });
+        var agentLock = req.AgentLock ?? "none";
+        if (agentLock is not ("none" or "status" or "sign_in"))
+            return Results.BadRequest(new { error = "agentLock must be none, status or sign_in." });
+
+        var record = await callRecords.GetByIdAsync(id, ct);
+        if (record is null) return Results.NotFound();
+        if (record.FinalizedAt is not null)
+            return Results.Conflict(new { error = $"Already finalized by {record.FinalizedByName} ({record.FinalizeReason})." });
+
+        // 1. A caller still on the line: only with the supervisor's explicit confirmation.
+        var live = (await telephonySessions.GetAllAsync(ct)).Where(s => s.CallRecordId == id).ToList();
+        var callSessions = await sessions.GetByCallRecordAsync(id, ct);
+        if (live.Count == 0 && record.CallEndAt is not null && callSessions.All(s => s.Status != FlowSessionStatus.Active))
+            return Results.Conflict(new { error = "This call already ended normally — there's nothing open to finalize." });
+        if (live.Count > 0 && !req.ConfirmLiveCall)
+            return Results.Conflict(new { error = "The caller is still connected on this call. Confirm to hang up and finalize.", liveCall = true });
+
+        var logger = loggerFactory.CreateLogger(nameof(CallReviewEndpoints));
+        string? hangupError = null;
+        if (live.Count > 0)
+        {
+            try
+            {
+                await using var esl = await eslFactory.CreateAsync(ct);
+                foreach (var s in live)
+                {
+                    // The agent leg is bridged as an independently-parked channel — kill it too, and
+                    // clear park_after_bridge first on both so neither leg is re-parked instead of
+                    // ending (the phantom-call trap, see project_phantom_call_park_after_bridge).
+                    var peer = s.Vars.GetValueOrDefault("_bridged_peer_uuid") ?? s.Vars.GetValueOrDefault("_agent_uuid");
+                    foreach (var uuid in new[] { s.ChannelUuid, peer }.Where(u => !string.IsNullOrEmpty(u)).Distinct())
+                    {
+                        try { await esl.SetChannelVarAsync(uuid!, "park_after_bridge", "false", ct); } catch { /* leg may already be gone */ }
+                    }
+                    await esl.HangupChannelAsync(s.ChannelUuid, ct);
+                    if (!string.IsNullOrEmpty(peer)) await esl.HangupChannelAsync(peer, ct);
+                }
+            }
+            catch (Exception ex)
+            {
+                hangupError = ex.Message;
+                logger.LogError(ex, "Finalize: hanging up call {CallRecordId} failed", id);
+            }
+        }
+
+        // 2. Close every open script on the call (the agent sees it finish).
+        var message = $"Call finalized by {actor.Name}: {reason}";
+        var closed = 0;
+        foreach (var s in callSessions.Where(s => s.Status == FlowSessionStatus.Active))
+            if (await engine.FinalizeSessionAsync(s.Id, message, ct)) closed++;
+
+        // 3. The record itself (re-read: finishing a script may have saved it).
+        record = await callRecords.GetByIdAsync(id, ct) ?? record;
+        record.Finalize(actor.Id, actor.Name, reason);
+        await callRecords.SaveChangesAsync(ct);
+
+        // 4. Optional agent lock — the call's agent plus anyone whose script was on it.
+        var lockedAgents = new List<string>();
+        if (agentLock != "none")
+        {
+            var agentIds = callSessions.Select(s => s.AgentId).Append(record.AgentId ?? Guid.Empty)
+                .Where(a => a != Guid.Empty).Distinct();
+            foreach (var agentId in agentIds)
+                if (await AgentLockEndpoints.LockAsync(http, agentId, agentLock == "sign_in", req.LockReason ?? reason, actor, ct) is { } locked)
+                    lockedAgents.Add(locked.FullName);
+        }
+
+        var parts = new List<string> { $"Call finalized: {reason}" };
+        if (live.Count > 0) parts.Add(hangupError is null ? "caller hung up" : $"hang-up FAILED ({hangupError})");
+        if (closed > 0) parts.Add($"{closed} script{(closed == 1 ? "" : "s")} closed");
+        if (lockedAgents.Count > 0)
+            parts.Add($"{string.Join(", ", lockedAgents)} {(agentLock == "sign_in" ? "signed out and locked" : "status locked")}");
+        await Audit(audit, id, CallAuditAction.Finalized, string.Join(" \u00b7 ", parts),
+            new { reason, hungUp = live.Count > 0 && hangupError is null, hangupError, scriptsClosed = closed, agentLock, lockedAgents }, actor, ct, http);
+
+        return Results.Ok(new { hungUp = live.Count > 0 && hangupError is null, hangupError, scriptsClosed = closed, lockedAgents });
+    }
+
+    /// <summary>Live telephony channel(s) for the call — Redis sessions exist only while connected.</summary>
+    private static async Task<object?> LiveCallAsync(Guid callRecordId, ITelephonyCallSessionStore store, CancellationToken ct)
+    {
+        var live = (await store.GetAllAsync(ct)).Where(s => s.CallRecordId == callRecordId).ToList();
+        if (live.Count == 0) return null;
+        var bridged = live.Any(s => !string.IsNullOrEmpty(s.Vars.GetValueOrDefault("_bridged_peer_uuid") ?? s.Vars.GetValueOrDefault("_agent_uuid")));
+        return new { connected = true, withAgent = bridged, callerNumber = live[0].CallerNumber };
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────
@@ -570,4 +717,5 @@ public record UpdateCallContactRequest(
 public record ReviewAddCartItemRequest(Guid OfferId, int Quantity);
 public record ReviewUpdateCartItemRequest(int Quantity);
 public record UpdateCustomFieldRequest(string? Value);
+public record FinalizeCallRequest(string? Reason, string? AgentLock, string? LockReason, bool ConfirmLiveCall);
 public record UpdateSessionVariablesRequest(Dictionary<string, string?>? Changes);

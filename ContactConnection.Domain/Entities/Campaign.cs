@@ -83,6 +83,10 @@ public class Campaign
     // zip, etc.) before the safety net wipes it need a longer window here than the default.
     public int? SensitiveDataRetentionMinutes { get; private set; }
 
+    // When a captured card is wiped (S166) — see CardDataRetentionMode. SensitiveDataRetentionMinutes
+    // above stays the backstop in both modes.
+    public string CardDataRetention { get; private set; } = CardDataRetentionMode.UntilScriptEnds;
+
     // Sales tax — which ITaxProvider prices this campaign's carts (TaxProviderKey.*), and that
     // provider's campaign-level settings as JSON (flat rate: {"rate":0.0725}; Avalara: tax codes,
     // company code, ship-from address — see AvalaraTaxSettings). Credentials are NOT here; they
@@ -214,6 +218,14 @@ public class Campaign
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    public void SetCardDataRetention(string mode)
+    {
+        if (!CardDataRetentionMode.All.Contains(mode))
+            throw new ArgumentException($"Unknown card data retention mode '{mode}'.", nameof(mode));
+        CardDataRetention = mode;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
     public void SetExternalRouting(string acceptMode, int? limit)
     {
         if (!Entities.ExternalRoutingAcceptMode.IsValid(acceptMode))
@@ -333,3 +345,21 @@ public static class CampaignRingStrategy
     public static bool IsValid(string value) =>
         value is RingAll or AutoAnswerBestAgent or RingTopNByProficiency;
 }
+
+/// <summary>
+/// When a captured card (CallRecord.SensitiveData) is wiped. PCI: kept only while needed.
+/// </summary>
+public static class CardDataRetentionMode
+{
+    /// <summary>Default: wiped when the script finishes or passes a Commit Point.</summary>
+    public const string UntilScriptEnds = "until_script_ends";
+
+    /// <summary>Kept past the script until an API Call node marked "releases card data" (the order
+    /// submission — in the CRM flow, the telephony flow, or a Call Records resubmit) succeeds, so a
+    /// reviewer can re-authorize a corrected order. The campaign's retention period still wipes it
+    /// if the order is never submitted.</summary>
+    public const string UntilOrderSubmitted = "until_order_submitted";
+
+    public static readonly IReadOnlyList<string> All = [UntilScriptEnds, UntilOrderSubmitted];
+}
+

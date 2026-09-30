@@ -27,14 +27,24 @@ public static class AgentStateEndpoints
     private static async Task<IResult> GetState(
         HttpContext http,
         IAgentStateStore store,
+        IAgentLockReader locks,
         CancellationToken ct)
     {
         if (!TryGetAgentClaims(http, out var tenantId, out var agentId))
             return Results.Unauthorized();
 
-        var state = await store.GetAsync(tenantId, agentId, ct);
-        return Results.Ok(state ?? new AgentStateEntry(
-            AgentStateCodes.Unavailable, "Unavailable", null, DateTimeOffset.UtcNow));
+        var state = await store.GetAsync(tenantId, agentId, ct) ?? new AgentStateEntry(
+            AgentStateCodes.Unavailable, "Unavailable", null, DateTimeOffset.UtcNow);
+        var schema = http.User.FindFirst("tenant_schema")?.Value;
+        var lockInfo = string.IsNullOrEmpty(schema) ? null : await locks.GetAsync(schema, agentId, ct);
+        return Results.Ok(new
+        {
+            state.Code, state.Label, state.CustomCodeId, state.SetAt,
+            // Supervisor status lock — the softphone disables the picker and shows this.
+            locked = lockInfo is not null,
+            lockMessage = lockInfo is null ? null
+                : $"Locked by {lockInfo.ByName}" + (string.IsNullOrEmpty(lockInfo.Reason) ? "" : $": {lockInfo.Reason}"),
+        });
     }
 
     // ── PUT /api/v1/agent-state ──────────────────────────────────────────────
@@ -64,7 +74,8 @@ public static class AgentStateEndpoints
 
         var entry = new AgentStateEntry(req.Code, label, req.CustomCodeId, DateTimeOffset.UtcNow);
         await store.SetAsync(tenantId, agentId, tenantSchema, entry, ct);
-        return Results.Ok(entry);
+        // Return what was actually stored — a supervisor-locked agent is held Unavailable.
+        return Results.Ok(await store.GetAsync(tenantId, agentId, ct) ?? entry);
     }
 
     // ── GET /api/v1/unavailable-codes ────────────────────────────────────────

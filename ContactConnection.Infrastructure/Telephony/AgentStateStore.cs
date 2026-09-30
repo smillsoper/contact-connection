@@ -11,12 +11,18 @@ public sealed class AgentStateStore : IAgentStateStore
     private readonly IConnectionMultiplexer _redis;
     private readonly IAgentStateHistoryRepository _history;
     private readonly IDashboardNotifier _dashboardNotifier;
+    private readonly IAgentLockReader _locks;
 
-    public AgentStateStore(IConnectionMultiplexer redis, IAgentStateHistoryRepository history, IDashboardNotifier dashboardNotifier)
+    /// <summary>Label a supervisor-locked agent is held at, whatever was requested.</summary>
+    public const string LockedLabel = "Unavailable - Locked by supervisor";
+
+    public AgentStateStore(IConnectionMultiplexer redis, IAgentStateHistoryRepository history, IDashboardNotifier dashboardNotifier,
+        IAgentLockReader locks)
     {
         _redis             = redis;
         _history           = history;
         _dashboardNotifier = dashboardNotifier;
+        _locks             = locks;
     }
 
     private static string Key(Guid tenantId, Guid agentId) =>
@@ -33,6 +39,11 @@ public sealed class AgentStateStore : IAgentStateStore
 
     public async Task SetAsync(Guid tenantId, Guid agentId, string tenantSchemaName, AgentStateEntry state, CancellationToken ct = default)
     {
+        // A supervisor-locked agent stays Unavailable whatever asks otherwise — the agent's own
+        // picker, ACW expiry, a queue delivery releasing them. Signing out is still recorded.
+        if (state.Code != AgentStateCodes.LoggedOut && await _locks.GetAsync(tenantSchemaName, agentId, ct) is not null)
+            state = new AgentStateEntry(AgentStateCodes.Unavailable, LockedLabel, null, state.SetAt);
+
         var db   = _redis.GetDatabase();
         var json = JsonSerializer.Serialize(state,
             new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });

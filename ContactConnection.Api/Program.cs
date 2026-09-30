@@ -124,7 +124,19 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
                     context.Token = accessToken;
                 return Task.CompletedTask;
-            }
+            },
+            // Sign-in lock (S166, Call Records "Finalize"): a locked agent's existing tokens stop
+            // working at once instead of living out their 8-hour lifetime. Portal tokens carry no
+            // tenant_schema and are skipped. IAgentLockReader caches, so this isn't a DB hit per request.
+            OnTokenValidated = async context =>
+            {
+                var principal = context.Principal;
+                var schema = principal?.FindFirst("tenant_schema")?.Value;
+                if (string.IsNullOrEmpty(schema) || !Guid.TryParse(principal?.FindFirst("sub")?.Value, out var agentId)) return;
+                var locks = context.HttpContext.RequestServices.GetRequiredService<ContactConnection.Application.Interfaces.Services.IAgentLockReader>();
+                if ((await locks.GetAsync(schema, agentId, context.HttpContext.RequestAborted))?.SignInLocked == true)
+                    context.Fail(ContactConnection.Api.Endpoints.AgentLockEndpoints.SignInLockedMessage);
+            },
         };
     });
 
@@ -191,6 +203,7 @@ app.MapAgentsEndpoints();
 app.MapTenantsEndpoints();
 app.MapCallRecordsEndpoints();
 app.MapCallReviewEndpoints();
+app.MapAgentLockEndpoints();
 app.MapCallRecordingsEndpoints();
 app.MapScreenRecordingsEndpoints();
 app.MapVoicemailsEndpoints();

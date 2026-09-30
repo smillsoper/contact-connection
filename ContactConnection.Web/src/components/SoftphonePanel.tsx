@@ -95,14 +95,18 @@ export default function SoftphonePanel() {
   type AgentStateCode = 'unavailable' | 'available' | 'unavailable_break' | 'unavailable_lunch' | 'on_call' | string
   type CustomCode = { id: string; name: string }
 
-  const { agentStateCode: agentState, agentStateExpiresAt, setAgentStateCode } = useAgentStateStore()
+  const { agentStateCode: agentState, agentStateExpiresAt, setAgentStateCode, lockMessage, setLockMessage } = useAgentStateStore()
   const [stateOpen, setStateOpen]   = useState(false)
   const [customCodes, setCustomCodes] = useState<CustomCode[]>([])
   const [acwCountdown, setAcwCountdown] = useState<number | null>(null)
 
   useEffect(() => {
     api.get<CustomCode[]>('/api/v1/unavailable-codes').then(setCustomCodes).catch(() => {})
-  }, [])
+    // A supervisor status lock survives sign-out / sign-in — pick it up on load.
+    api.get<{ locked: boolean; lockMessage: string | null }>('/api/v1/agent-state')
+      .then((s) => setLockMessage(s.locked ? (s.lockMessage ?? 'Locked by supervisor') : null))
+      .catch(() => {})
+  }, [setLockMessage])
 
   // ACW countdown timer — ticks every second while in ACW with an expiry
   useEffect(() => {
@@ -647,6 +651,18 @@ export default function SoftphonePanel() {
         const currentLabel = agentState === 'acw' && acwCountdown !== null
           ? `${current.label} (${acwCountdown}s)`
           : current.label
+
+        if (lockMessage) {
+          return (
+            <div className="rounded-lg px-3 py-2 bg-red-950/40 border border-red-900" title={lockMessage}>
+              <div className="flex items-center gap-2">
+                <span className="text-xs">🔒</span>
+                <span className="text-xs font-medium text-red-300 flex-1">Unavailable — locked</span>
+              </div>
+              <p className="text-[10px] text-red-200/80 mt-1 leading-snug">{lockMessage}. Contact your supervisor.</p>
+            </div>
+          )
+        }
 
         return (
           <div className="relative">

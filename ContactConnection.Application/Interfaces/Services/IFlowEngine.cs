@@ -35,16 +35,26 @@ public interface IFlowEngine
     Task<IReadOnlyDictionary<string, string?>> UpdateSessionVariablesAsync(
         Guid sessionId, IReadOnlyDictionary<string, string?> changes, CancellationToken ct = default);
 
-    /// <summary>Runs one of the session's api_call nodes again, exactly as the flow would — same
-    /// endpoint, template, output variable and oncePerCall guard (an order that already posted
-    /// replays instead of posting twice) — against the call's current data. The flow does not
-    /// move on; only the node's output variables change.</summary>
-    Task<ApiCallRerunResult> RerunApiCallNodeAsync(Guid sessionId, string nodeId, CancellationToken ct = default);
+    /// <summary>Runs one of the session's api_call or authorize_payment nodes again, exactly as the
+    /// flow would, against the call's current data:
+    ///   api_call — same endpoint, template, output variable and oncePerCall guard (an order that
+    ///     already posted replays instead of posting twice);
+    ///   authorize_payment — re-authorizes the (possibly corrected) cart total from the card still on
+    ///     file: no-op if unchanged, else void + re-authorize (needs the campaign's card retention to
+    ///     have kept the card — CardDataRetentionMode.UntilOrderSubmitted).
+    /// The flow does not move on; only the node's output variables change.</summary>
+    Task<ApiCallRerunResult> RerunNodeAsync(Guid sessionId, string nodeId, CancellationToken ct = default);
 
     /// <summary>If an agent still has this session open: reload its call data from the call record
     /// (so {{caller.*}} / {{call_record.*}} show a correction made elsewhere) and push the refreshed
     /// current node to the agent with <paramref name="message"/>. False when the session isn't live.</summary>
     Task<bool> PushLiveUpdateAsync(Guid sessionId, string message, CancellationToken ct = default);
+
+    /// <summary>Closes a session out (Call Records "Finalize"): an open script shows the agent its
+    /// finished checkmark with <paramref name="message"/> and closes, exactly like reaching an end
+    /// node; an orphaned one (agent's screen long gone) is just marked complete. Card data follows
+    /// the campaign's retention rule, as on any script end. False if it was already finished.</summary>
+    Task<bool> FinalizeSessionAsync(Guid sessionId, string message, CancellationToken ct = default);
 
     /// <summary>The CRM scripts these agents have open right now (live in Redis), whether or not
     /// they're on a phone call — the supervisor Agent List links each to its call's review page.</summary>
@@ -65,17 +75,23 @@ public class FlowSessionSnapshot
     public List<ApiCallNodeSummary> ApiCalls { get; init; } = [];
 }
 
-/// <summary>One api_call node reachable from the session's flow (sub-flows included).</summary>
+/// <summary>One api_call or authorize_payment node reachable from the session's flow (sub-flows
+/// included).</summary>
 public class ApiCallNodeSummary
 {
     public required string NodeId { get; init; }
+    /// <summary>"api_call" or "authorize_payment".</summary>
+    public string NodeType { get; init; } = "api_call";
+    /// <summary>api_call marked as the order submission — wipes the captured card on success.</summary>
+    public bool ReleasesCardData { get; init; }
     public required string Label { get; init; }
     public string? OutputVariable { get; init; }
     public bool OncePerCall { get; init; }
     /// <summary>Times this node ran on the call (execution history).</summary>
     public int RunCount { get; init; }
     public DateTimeOffset? LastRunAt { get; init; }
-    /// <summary>"true"/"false" from {output}.success, or null if it never ran / has no output variable.</summary>
+    /// <summary>"true"/"false" from {output}.success (authorize_payment: .succeeded), or null if it
+    /// never ran / has no output variable.</summary>
     public string? Success { get; init; }
     public string? StatusCode { get; init; }
     public string? Error { get; init; }
@@ -83,7 +99,8 @@ public class ApiCallNodeSummary
 }
 
 public record ApiCallRerunResult(
-    bool Success, string Transition, string? StatusCode, string? Error, string? Response, bool Replayed);
+    bool Success, string Transition, string? StatusCode, string? Error, string? Response, bool Replayed,
+    string NodeType = "api_call");
 
 public class StartFlowRequest
 {

@@ -200,13 +200,18 @@ export default function AdminCallDetailPage() {
         {amountMismatch && (
           <div className="bg-amber-950/40 border border-amber-800 text-amber-200 rounded-lg px-4 py-3 text-sm">
             The cart total ({money(cartTotal)}) no longer matches the authorized payment ({money(call.authorizedAmount)}).
-            An order resubmitted now reports the authorized amount as the payment — confirm with the client that this is
-            acceptable, or have the customer's card re-authorized.
+            {call.cardData.onFile
+              ? ' Re-authorize the card (below) before resubmitting the order.'
+              : " The card is no longer on file, so an order resubmitted now reports the authorized amount — confirm with the client that this is acceptable, or have the customer's card re-authorized."}
           </div>
         )}
 
+        <FinalizePanel call={call} canManage={canManage} onChanged={load} />
+
+        <CardOnFileNote call={call} />
+
         {call.sessions.map((s) => (
-          <ApiCallsPanel key={s.id} callId={call.id} session={s} canManage={canManage} onChanged={load} />
+          <ApiCallsPanel key={s.id} call={call} session={s} canManage={canManage} onChanged={load} />
         ))}
 
         <ContactPanel call={call} canManage={canManage} onChanged={load} />
@@ -240,9 +245,172 @@ function statusBadge(a: ApiCallNodeSummary) {
   return <span className="bg-gray-800 text-gray-400 border border-gray-700 rounded px-1.5 py-0.5 text-xs">Not run</span>
 }
 
-function ApiCallsPanel({ callId, session, canManage, onChanged }: {
-  callId: string; session: CallSessionView; canManage: boolean; onChanged: () => void
+// ── Finalize ───────────────────────────────────────────────────────────────
+
+/**
+ * Supervisor close-out (S166): the agent's script went away and the call needs closing out, or an
+ * agent has to be relieved / terminated mid-call. Hangs up a still-connected caller (only once the
+ * supervisor ticks the confirmation), closes any open script on the agent's screen (checkmark, tab
+ * closes), marks the call complete with who/when/why, and can lock the agent.
+ */
+function FinalizePanel({ call, canManage, onChanged }: { call: CallDetail; canManage: boolean; onChanged: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [reason, setReason] = useState('')
+  const [lock, setLock] = useState<'none' | 'status' | 'sign_in'>('none')
+  const [lockReason, setLockReason] = useState('')
+  const [confirmLive, setConfirmLive] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+
+  if (call.finalized) {
+    return (
+      <div className="bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-sm">
+        <span className="text-gray-200 font-medium">Finalized</span>
+        <span className="text-gray-400"> by {call.finalized.byName ?? 'a supervisor'} · {fmtDate(call.finalized.at)}</span>
+        {call.finalized.reason && <p className="text-gray-300 mt-1">{call.finalized.reason}</p>}
+        {call.agentLock?.statusLocked && (
+          <p className="text-red-300 text-xs mt-1">
+            🔒 {call.agentName ?? 'The agent'} is {call.agentLock.signInLocked ? 'signed out and sign-in locked' : 'status locked'} — unlock from Users or the dashboard's Agent List.
+          </p>
+        )}
+      </div>
+    )
+  }
+  if (!canManage || !call.canFinalize) return null
+  const hasOpenScript = call.sessions.some((s) => s.status === 'active')
+  if (!open) {
+    return (
+      <div className="flex items-center justify-between bg-gray-900 border border-gray-800 rounded-lg px-4 py-2.5">
+        <span className="text-sm text-gray-400">
+          {call.liveCall ? <span className="text-amber-300">Caller still connected. </span> : null}
+          {hasOpenScript ? 'A script is still open on this call.' : 'Close this call out with a reason.'}
+        </span>
+        <button onClick={() => setOpen(true)} className="border border-red-800 text-red-300 hover:bg-red-950/50 rounded-lg px-3 py-1.5 text-sm font-medium">
+          Finalize call…
+        </button>
+      </div>
+    )
+  }
+
+  const agentName = call.agentName ?? 'the agent'
+  const canSubmit = reason.trim().length > 0 && (!call.liveCall || confirmLive) && !busy
+
+  async function submit() {
+    setBusy(true)
+    setMsg(null)
+    try {
+      const r = await callReviewApi.finalize(call.id, {
+        reason: reason.trim(), agentLock: lock, lockReason: lockReason.trim() || null, confirmLiveCall: confirmLive,
+      })
+      if (r.hangupError) setMsg(`Finalized, but hanging up failed: ${r.hangupError}`)
+      setOpen(false)
+      onChanged()
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Finalize failed.')
+      onChanged()   // e.g. the caller connected meanwhile — show the live warning
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="bg-gray-900 border border-red-900/70 rounded-xl p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-white text-sm font-semibold">Finalize call</h2>
+        <button className={btnGhost} onClick={() => { setOpen(false); setMsg(null) }}>Cancel</button>
+      </div>
+
+      {call.liveCall && (
+        <div className="bg-red-950/50 border border-red-800 rounded-lg px-4 py-3 mb-4">
+          <p className="text-red-200 text-sm font-medium">
+            The caller ({fmtPhone(call.liveCall.callerNumber)}) is still connected{call.liveCall.withAgent ? ` and on the line with ${agentName}` : ''}.
+          </p>
+          <label className="flex items-center gap-2 text-sm text-red-100 mt-2 cursor-pointer">
+            <input type="checkbox" checked={confirmLive} onChange={(e) => setConfirmLive(e.target.checked)} />
+            Hang up the call and finalize
+          </label>
+        </div>
+      )}
+
+      <p className="text-gray-400 text-xs mb-3">
+        Correct the call's details and dispositions above first — finalizing closes any open script on the agent's
+        screen and marks the call complete.
+      </p>
+
+      <Field label="Reason (required — recorded on the call)">
+        <textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)} className={inputCls}
+          placeholder="e.g. Agent's script closed unexpectedly — order confirmed with the customer by phone" />
+      </Field>
+
+      <div className="mt-4">
+        <p className="text-gray-500 text-xs mb-1.5">Agent{call.agentName ? ` (${call.agentName})` : ''}</p>
+        <div className="space-y-1.5">
+          {([
+            ['none', 'Leave the agent as they are'],
+            ['status', `Lock ${agentName} as Unavailable — can't change status or take calls until unlocked`],
+            ['sign_in', `Sign ${agentName} out now and lock their sign-in — until unlocked they're told to contact their supervisor`],
+          ] as const).map(([value, label]) => (
+            <label key={value} className="flex items-start gap-2 text-sm text-gray-300 cursor-pointer">
+              <input type="radio" name="finalize-lock" className="mt-1" checked={lock === value} onChange={() => setLock(value)} />
+              <span className={value === 'sign_in' ? 'text-red-200' : undefined}>{label}</span>
+            </label>
+          ))}
+        </div>
+        {lock !== 'none' && (
+          <div className="mt-2">
+            <Field label="Lock note (shown to the agent and on Users — defaults to the reason)">
+              <input value={lockReason} onChange={(e) => setLockReason(e.target.value)} className={inputCls} />
+            </Field>
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center gap-3 mt-5">
+        <button disabled={!canSubmit} onClick={submit}
+          className="bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white rounded-lg px-4 py-2 text-sm font-medium">
+          {busy ? 'Finalizing…' : call.liveCall ? 'Hang up & finalize' : 'Finalize call'}
+        </button>
+        {msg && <span className="text-red-300 text-xs">{msg}</span>}
+      </div>
+    </section>
+  )
+}
+
+const WIPE_REASONS: Record<string, string> = {
+  flow_completed: 'when the script finished',
+  committed: 'at the Commit Point',
+  order_submitted: 'when the order was submitted',
+  retention_expired: 'by the retention period',
+}
+
+/** Whether a card is still on file (never the card itself) — decides if re-authorization is possible. */
+function CardOnFileNote({ call }: { call: CallDetail }) {
+  const c = call.cardData
+  if (c.onFile) {
+    return (
+      <div className="bg-gray-900 border border-gray-800 rounded-lg px-4 py-2.5 text-sm text-gray-300 flex flex-wrap gap-x-4 gap-y-1">
+        <span className="text-emerald-400 font-medium">Card on file</span>
+        <span className="text-gray-400">captured {fmtDate(c.storedAt)}</span>
+        {c.expiresAt && <span className="text-gray-400">wiped by {fmtDate(c.expiresAt)} if the order isn't submitted</span>}
+        <span className="text-gray-500">— re-authorization is available below.</span>
+      </div>
+    )
+  }
+  if (!c.wipedAt) return null
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-lg px-4 py-2.5 text-sm text-gray-400">
+      Card data wiped {c.wipeReason ? (WIPE_REASONS[c.wipeReason] ?? `(${c.wipeReason})`) : ''} · {fmtDate(c.wipedAt)}
+      {c.retention !== 'until_order_submitted' && c.wipeReason !== 'order_submitted' && (
+        <span className="text-gray-500"> — to keep cards for post-call re-authorization, set the campaign's card data retention to "when the order is submitted".</span>
+      )}
+    </div>
+  )
+}
+
+function ApiCallsPanel({ call, session, canManage, onChanged }: {
+  call: CallDetail; session: CallSessionView; canManage: boolean; onChanged: () => void
 }) {
+  const callId = call.id
   const [confirming, setConfirming] = useState<string | null>(null)
   const [running, setRunning] = useState<string | null>(null)
   const [results, setResults] = useState<Record<string, ApiCallRerunResult | string>>({})
@@ -265,7 +433,7 @@ function ApiCallsPanel({ callId, session, canManage, onChanged }: {
   }
 
   return (
-    <Section title={`API calls — ${session.flowName ?? 'flow'}`} right={
+    <Section title={`Payment & API calls — ${session.flowName ?? 'flow'}`} right={
       <span className="text-xs text-gray-500">Session {session.status}{session.isLive ? ' · agent still in script' : ''}</span>
     }>
       {session.isLive && (
@@ -275,12 +443,16 @@ function ApiCallsPanel({ callId, session, canManage, onChanged }: {
       )}
       <div className="space-y-3">
         {session.apiCalls.map((a) => {
-          const posted = a.oncePerCall && a.success === 'true'
+          const isPayment = a.nodeType === 'authorize_payment'
+          const posted = !isPayment && a.oncePerCall && a.success === 'true'
+          const noCard = isPayment && !call.cardData.onFile
           const r = results[a.nodeId]
           return (
             <div key={a.nodeId} className="border border-gray-800 rounded-lg p-4">
               <div className="flex flex-wrap items-center gap-3">
                 <span className="text-white text-sm font-medium">{a.label}</span>
+                {isPayment && <span className="text-gray-500 text-xs">payment authorization</span>}
+                {a.releasesCardData && <span className="text-gray-500 text-xs" title="Wipes the captured card when it succeeds">order submission</span>}
                 {statusBadge(a)}
                 {a.statusCode && <span className="text-gray-500 text-xs">HTTP {a.statusCode}</span>}
                 <span className="text-gray-600 text-xs">
@@ -290,20 +462,28 @@ function ApiCallsPanel({ callId, session, canManage, onChanged }: {
                   <div className="ml-auto flex items-center gap-2">
                     {confirming === a.nodeId ? (
                       <>
-                        <span className="text-gray-300 text-xs">Send it again with the call's current data?</span>
+                        <span className="text-gray-300 text-xs">
+                          {isPayment
+                            ? `Re-authorize ${money(call.cart?.cartTotal)} on the card on file? A different amount voids the current authorization first.`
+                            : "Send it again with the call's current data?"}
+                        </span>
                         <button className={btnGhost} onClick={() => setConfirming(null)}>Cancel</button>
                         <button className="bg-red-600 hover:bg-red-500 text-white rounded-lg px-3 py-1.5 text-sm font-medium" onClick={() => rerun(a.nodeId)}>
-                          Yes, resubmit
+                          {isPayment ? 'Yes, re-authorize' : 'Yes, resubmit'}
                         </button>
                       </>
                     ) : (
                       <button
                         className={btnPrimary}
-                        disabled={posted || running !== null}
-                        title={posted ? 'Already succeeded — this node is set to run once per call, so a resubmit would only replay the stored result.' : undefined}
+                        disabled={posted || noCard || running !== null}
+                        title={posted ? 'Already succeeded — this node is set to run once per call, so a resubmit would only replay the stored result.'
+                          : noCard ? 'No card on file — it has been wiped (see the note above).' : undefined}
                         onClick={() => setConfirming(a.nodeId)}
                       >
-                        {running === a.nodeId ? 'Submitting…' : posted ? 'Already posted' : a.runCount === 0 ? 'Submit' : 'Resubmit'}
+                        {running === a.nodeId ? (isPayment ? 'Authorizing…' : 'Submitting…')
+                          : posted ? 'Already posted'
+                          : isPayment ? (a.runCount === 0 ? 'Authorize' : 'Re-authorize')
+                          : a.runCount === 0 ? 'Submit' : 'Resubmit'}
                       </button>
                     )}
                   </div>
@@ -318,6 +498,12 @@ function ApiCallsPanel({ callId, session, canManage, onChanged }: {
                 <p className={`text-sm mt-2 ${typeof r !== 'string' && r.success ? 'text-emerald-300' : 'text-red-300'}`}>
                   {typeof r === 'string'
                     ? r
+                    : r.nodeType === 'authorize_payment'
+                      ? r.success
+                        ? r.replayed
+                          ? `Already authorized for this amount — nothing sent (${r.response ?? ''}).`
+                          : `Authorized — ${r.response ?? ''}.`
+                        : `Authorization ${r.transition}: ${r.error ?? ''}`
                     : r.replayed
                       ? 'Already succeeded on this call — the stored result was replayed; nothing was sent.'
                       : r.success
@@ -326,7 +512,9 @@ function ApiCallsPanel({ callId, session, canManage, onChanged }: {
                 </p>
               )}
 
-              {a.response && (
+              {isPayment && a.response && <p className="text-gray-400 text-xs mt-2">{a.response}</p>}
+
+              {!isPayment && a.response && (
                 <div className="mt-2">
                   <button className="text-indigo-400 hover:text-indigo-300 text-xs"
                     onClick={() => setShowResponse((p) => ({ ...p, [a.nodeId]: !p[a.nodeId] }))}>
@@ -343,7 +531,8 @@ function ApiCallsPanel({ callId, session, canManage, onChanged }: {
       </div>
       <p className="text-gray-600 text-xs mt-3">
         Resubmit runs the flow's own API Call node against the call's current customer details, addresses,
-        cart and flow variables — correct those below first.
+        cart and flow variables — correct those below first. If the cart total changed, re-authorize before
+        resubmitting so the order carries the new authorization.
       </p>
     </Section>
   )

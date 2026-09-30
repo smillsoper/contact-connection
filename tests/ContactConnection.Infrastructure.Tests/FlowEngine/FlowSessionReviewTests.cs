@@ -49,7 +49,8 @@ public class FlowSessionReviewTests
         return new CrmFlowEngine(
             _flows.Object, _sessions.Object, new Mock<IAgentRepository>().Object, _callRecords.Object,
             mux.Object, new TenantContext(), notifier, new Mock<ICallTraceRecorder>().Object,
-            shared.Object, [_apiHandler, .. extraHandlers], NullLogger<CrmFlowEngine>.Instance);
+            shared.Object, [_apiHandler, .. extraHandlers], NullLogger<CrmFlowEngine>.Instance,
+            Mock.Of<ICardDataRetentionService>());
     }
 
     private static JsonObject Definition(params (string Id, JsonObject Node)[] nodes)
@@ -93,7 +94,7 @@ public class FlowSessionReviewTests
         var session = AddCompletedSession(flow, new() { ["order_response.success"] = "false", ["order_response.error"] = "Invalid ZIP" });
         _apiHandler.Succeed = true;
 
-        var result = await Engine().RerunApiCallNodeAsync(session.Id, "n_order");
+        var result = await Engine().RerunNodeAsync(session.Id, "n_order");
 
         Assert.True(result.Success);
         Assert.Equal("success", result.Transition);
@@ -116,7 +117,7 @@ public class FlowSessionReviewTests
         var session = AddCompletedSession(flow, new() { ["order_response.success"] = "false" });
         _apiHandler.Succeed = false;
 
-        var result = await Engine().RerunApiCallNodeAsync(session.Id, "n_order");
+        var result = await Engine().RerunNodeAsync(session.Id, "n_order");
 
         Assert.False(result.Success);
         Assert.Equal("error", result.Transition);
@@ -130,7 +131,7 @@ public class FlowSessionReviewTests
         var session = AddCompletedSession(flow, new() { ["order_response.success"] = "true" });
         _apiHandler.Succeed = true;
 
-        var result = await Engine().RerunApiCallNodeAsync(session.Id, "n_order");
+        var result = await Engine().RerunNodeAsync(session.Id, "n_order");
 
         Assert.True(result.Replayed);
     }
@@ -145,7 +146,7 @@ public class FlowSessionReviewTests
         var session = AddCompletedSession(main, new() { ["order_response.success"] = "false" });
         _apiHandler.Succeed = true;
 
-        var result = await Engine().RerunApiCallNodeAsync(session.Id, "sub_order");
+        var result = await Engine().RerunNodeAsync(session.Id, "sub_order");
 
         Assert.True(result.Success);
         var snapshot = await Engine().GetSessionSnapshotAsync(session.Id);
@@ -158,8 +159,8 @@ public class FlowSessionReviewTests
         var flow = AddFlow(Definition(("n_order", ApiNode()), ("end_1", EndNode())));
         var session = AddCompletedSession(flow, []);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => Engine().RerunApiCallNodeAsync(session.Id, "end_1"));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => Engine().RerunApiCallNodeAsync(session.Id, "nope"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Engine().RerunNodeAsync(session.Id, "end_1"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Engine().RerunNodeAsync(session.Id, "nope"));
     }
 
     [Fact]
@@ -253,6 +254,91 @@ public class FlowSessionReviewTests
 
         var only = Assert.Single(live);
         Assert.Equal((agent, open.Id, _record.Id, "NeuroQ"), (only.AgentId, only.SessionId, only.CallRecordId, only.FlowName));
+    }
+
+    [Fact]
+    public async Task Rerun_AuthorizePaymentNode_ReportsTheReauthorization()
+    {
+        var payNode = new JsonObject
+        {
+            ["type"] = "authorize_payment", ["label"] = "Authorize card", ["outputVariable"] = "payment",
+            ["transitions"] = new JsonObject { ["approved"] = "n_order", ["declined"] = "end_1", ["error"] = "end_1" },
+        };
+        var flow = AddFlow(Definition(("n_pay", payNode), ("n_order", ApiNode()), ("end_1", EndNode())));
+        var session = AddCompletedSession(flow, new() { ["payment.succeeded"] = "True", ["payment.amount"] = "139.90" });
+
+        var result = await Engine(new Mock<IFlowNotifier>().Object, new RecordingPaymentHandler()).RerunNodeAsync(session.Id, "n_pay");
+
+        Assert.True(result.Success);
+        Assert.Equal(("approved", "authorize_payment", false), (result.Transition, result.NodeType, result.Replayed));
+        Assert.Contains("$142.15", result.Response);
+        Assert.Contains("reauthorized", result.Response);
+        var snapshot = await Engine(new Mock<IFlowNotifier>().Object, new RecordingPaymentHandler()).GetSessionSnapshotAsync(session.Id);
+        var pay = Assert.Single(snapshot!.ApiCalls, a => a.NodeType == "authorize_payment");
+        Assert.Equal(("true", "approved"), (pay.Success, pay.StatusCode));
+    }
+
+    /// <summary>Stands in for AuthorizePaymentNodeHandler: a void + re-authorization of a corrected total.</summary>
+    private sealed class RecordingPaymentHandler : INodeHandler
+    {
+        public string NodeType => "authorize_payment";
+
+        public Task<NodeResult> ExecuteAsync(JsonObject node, FlowExecutionContext ctx, string? agentInput, string agentTransition, CancellationToken ct = default)
+        {
+            ctx.FlowVars["payment.succeeded"] = "True";
+            ctx.FlowVars["payment.status"] = "approved";
+            ctx.FlowVars["payment.amount"] = "142.15";
+            ctx.FlowVars["payment.cardLast4"] = "1111";
+            ctx.FlowVars["payment.gatewayTransactionId"] = "60012345";
+            ctx.FlowVars["payment.action"] = "reauthorized";
+            ctx.ExecutionHistory.Add(new NodeExecutionRecord(ctx.CurrentNodeId, "authorize_payment", "Authorize card", DateTimeOffset.UtcNow, null, "approved"));
+            var state = new FlowNodeState
+            {
+                SessionId = ctx.SessionId, CallRecordId = ctx.CallRecordId, NodeId = ctx.CurrentNodeId, NodeType = "authorize_payment", Label = "x",
+            };
+            return Task.FromResult(new NodeResult(state, "n_order"));
+        }
+    }
+
+    [Fact]
+    public async Task Finalize_LiveSession_ShowsTheAgentTheEnd_AndCompletesIt()
+    {
+        var flow = AddFlow(Definition(("n_name", new JsonObject { ["type"] = "input", ["label"] = "Name" }), ("end_1", EndNode())));
+        var session = FlowSession.Create(_tenantId, flow.Id, 1, _record.Id, Guid.NewGuid(), Guid.NewGuid(), "n_name");
+        _sessions.Setup(s => s.GetByIdAsync(session.Id, It.IsAny<CancellationToken>())).ReturnsAsync(session);
+        var entry = new JsonObject
+        {
+            ["FlowId"] = flow.Id.ToString(), ["FlowVersion"] = 1, ["CallRecordId"] = _record.Id.ToString(),
+            ["InteractionId"] = Guid.NewGuid().ToString(), ["AgentId"] = session.AgentId.ToString(), ["TenantId"] = _tenantId.ToString(),
+            ["CurrentNodeId"] = "n_name", ["DefinitionJson"] = flow.Definition, ["VariableStoreJson"] = "{}", ["ExecutionHistoryJson"] = "[]",
+            ["CallRecord"] = new JsonObject(), ["Caller"] = new JsonObject(), ["Agent"] = new JsonObject(), ["Tenant"] = new JsonObject(),
+        };
+        _redis.Setup(r => r.StringGetAsync(It.Is<RedisKey>(k => k.ToString().Contains(session.Id.ToString())), It.IsAny<CommandFlags>()))
+            .ReturnsAsync((RedisValue)entry.ToJsonString());
+        var notifier = new Mock<IFlowNotifier>();
+
+        Assert.True(await Engine(notifier.Object).FinalizeSessionAsync(session.Id, "Call finalized by Sue: relieved"));
+
+        notifier.Verify(n => n.PushSessionUpdatedAsync(session.Id,
+            It.Is<FlowNodeState>(st => st.NodeType == "end" && st.IsTerminal), "Call finalized by Sue: relieved", It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal(FlowSessionStatus.Complete, session.Status);
+        _redis.Verify(r => r.KeyDeleteAsync(It.Is<RedisKey>(k => k.ToString().Contains(session.Id.ToString())), It.IsAny<CommandFlags>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Finalize_OrphanedSession_JustCompletes_AndAFinishedOneIsANoOp()
+    {
+        var flow = AddFlow(Definition(("n_order", ApiNode()), ("end_1", EndNode())));
+        var orphan = FlowSession.Create(_tenantId, flow.Id, 1, _record.Id, Guid.NewGuid(), Guid.NewGuid(), "n_order");
+        _sessions.Setup(s => s.GetByIdAsync(orphan.Id, It.IsAny<CancellationToken>())).ReturnsAsync(orphan);
+        var finished = AddCompletedSession(flow, []);
+        var notifier = new Mock<IFlowNotifier>();
+
+        Assert.True(await Engine(notifier.Object).FinalizeSessionAsync(orphan.Id, "x"));
+        Assert.Equal(FlowSessionStatus.Complete, orphan.Status);
+        notifier.Verify(n => n.PushSessionUpdatedAsync(It.IsAny<Guid>(), It.IsAny<FlowNodeState>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        Assert.False(await Engine(notifier.Object).FinalizeSessionAsync(finished.Id, "x"));
     }
 
     private sealed class RecordingInputHandler : INodeHandler

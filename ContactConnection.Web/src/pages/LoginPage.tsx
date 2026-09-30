@@ -1,4 +1,5 @@
 import { useState, useEffect, type FormEvent } from 'react'
+import { LOGIN_NOTICE_KEY } from '../api/agentLock'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore, getLandingRoute } from '../stores/authStore'
 import { useSipStore } from '../stores/sipStore'
@@ -15,7 +16,14 @@ export default function LoginPage() {
   const [tenantName, setTenantName] = useState<string | null>(null)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  // A forced sign-out (supervisor sign-in lock) leaves its explanation here for one showing.
+  const [error, setError] = useState<string | null>(() => {
+    try {
+      const notice = sessionStorage.getItem(LOGIN_NOTICE_KEY)
+      if (notice) sessionStorage.removeItem(LOGIN_NOTICE_KEY)
+      return notice
+    } catch { return null }
+  })
   const [loading, setLoading] = useState(false)
 
   // Splash: 'splash' → 'fading' (CSS transition) → 'done'
@@ -56,8 +64,10 @@ export default function LoginPage() {
       if (res.sipExtension && res.sipPassword)
         setSipCredentials(res.sipExtension, res.sipPassword)
       navigate(getLandingRoute(res.landingPage ?? null), { replace: true })
-    } catch {
-      setError('Invalid credentials. Please try again.')
+    } catch (e) {
+      // A supervisor sign-in lock says so (only after a correct password); anything else stays generic.
+      const message = e instanceof Error ? e.message : ''
+      setError(message.includes('locked') ? message : 'Invalid credentials. Please try again.')
     } finally {
       setLoading(false)
     }

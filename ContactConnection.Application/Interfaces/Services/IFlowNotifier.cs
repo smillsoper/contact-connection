@@ -23,6 +23,14 @@ public interface IFlowNotifier
     /// refresh (group "call:{callRecordId}", see FlowHub.JoinCallReview).</summary>
     Task PushCallChangedAsync(Guid callRecordId, CancellationToken ct = default);
 
+    /// <summary>The agent's supervisor lock changed — their softphone disables / re-enables the
+    /// status picker (group "agent:{agentId}").</summary>
+    Task PushAgentLockChangedAsync(Guid agentId, bool locked, string? message, CancellationToken ct = default);
+
+    /// <summary>Sign the agent out now (sign-in lock) — their UI clears the session and shows
+    /// <paramref name="message"/> on the login page.</summary>
+    Task PushForceSignOutAsync(Guid agentId, string message, CancellationToken ct = default);
+
     /// <summary>Push an error to the agent's connection.</summary>
     Task PushErrorAsync(Guid sessionId, string message, CancellationToken ct = default);
 }

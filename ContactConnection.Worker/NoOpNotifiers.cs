@@ -27,6 +27,21 @@ internal sealed class NoOpFlowNotifier : IFlowNotifier
 
     public Task PushErrorAsync(Guid sessionId, string message, CancellationToken ct = default) =>
         Task.CompletedTask;
+
+    public Task PushSessionUpdatedAsync(Guid sessionId, FlowNodeState state, string message, CancellationToken ct = default) =>
+        Task.CompletedTask;
+
+    public Task PushAgentSessionsChangedAsync(Guid tenantId, Guid agentId, CancellationToken ct = default) =>
+        Task.CompletedTask;
+
+    public Task PushCallChangedAsync(Guid callRecordId, CancellationToken ct = default) =>
+        Task.CompletedTask;
+
+    public Task PushAgentLockChangedAsync(Guid agentId, bool locked, string? message, CancellationToken ct = default) =>
+        Task.CompletedTask;
+
+    public Task PushForceSignOutAsync(Guid agentId, string message, CancellationToken ct = default) =>
+        Task.CompletedTask;
 }
 
 internal sealed class NoOpCallTraceNotifier : ICallTraceNotifier

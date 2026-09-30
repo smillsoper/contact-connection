@@ -1,6 +1,11 @@
 import { api } from './client'
 
 export interface AgentRecord {
+  /** Supervisor lock (Call Records "Finalize"). */
+  statusLocked?: boolean
+  signInLocked?: boolean
+  statusLockedByName?: string | null
+  statusLockReason?: string | null
   id: string
   firstName: string
   lastName: string

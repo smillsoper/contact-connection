@@ -351,6 +351,25 @@ public class CallRecord
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    // Supervisor finalization (S166, Call Records) — who closed the call out, when and why.
+    public DateTimeOffset? FinalizedAt { get; private set; }
+    public Guid? FinalizedById { get; private set; }
+    public string? FinalizedByName { get; private set; }
+    public string? FinalizeReason { get; private set; }
+
+    /// <summary>A supervisor closed this call out (orphaned script, or relieving an agent mid-call).
+    /// Marks it complete like a normal end, keeping the existing end time if the call already ended.</summary>
+    public void Finalize(Guid byId, string byName, string reason)
+    {
+        FinalizedAt     = DateTimeOffset.UtcNow;
+        FinalizedById   = byId;
+        FinalizedByName = byName;
+        FinalizeReason  = reason.Trim();
+        OverallStatus   = CallRecordStatus.Complete;
+        CallEndAt     ??= FinalizedAt;
+        UpdatedAt       = DateTimeOffset.UtcNow;
+    }
+
     public void MarkIncomplete()
     {
         OverallStatus = CallRecordStatus.Incomplete;

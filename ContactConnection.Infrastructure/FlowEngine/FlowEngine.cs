@@ -34,6 +34,7 @@ public class FlowEngine : IFlowEngine
     private readonly IFlowNotifier _notifier;
     private readonly ICallTraceRecorder _traceRecorder;
     private readonly ISharedCallVariableStore _sharedVars;
+    private readonly ICardDataRetentionService _cardRetention;
     private readonly Dictionary<string, INodeHandler> _handlers;
     private readonly ILogger<FlowEngine> _logger;
 
@@ -64,8 +65,10 @@ public class FlowEngine : IFlowEngine
         ICallTraceRecorder traceRecorder,
         ISharedCallVariableStore sharedVars,
         IEnumerable<INodeHandler> handlers,
-        ILogger<FlowEngine> logger)
+        ILogger<FlowEngine> logger,
+        ICardDataRetentionService cardRetention)
     {
+        _cardRetention = cardRetention;
         _flows         = flows;
         _sessions      = sessions;
         _agents        = agents;
@@ -247,22 +250,27 @@ public class FlowEngine : IFlowEngine
         var apiCalls = new List<ApiCallNodeSummary>();
         foreach (var (nodeId, node) in await CollectApiCallNodesAsync(ctx.FlowDefinition, ct))
         {
+            var type = node["type"]?.GetValue<string>() ?? "api_call";
             var output = node["outputVariable"]?.GetValue<string>()?.Trim();
-            var runs = ctx.ExecutionHistory.Where(h => h.NodeId == nodeId && h.NodeType == "api_call").ToList();
+            var runs = ctx.ExecutionHistory.Where(h => h.NodeId == nodeId && h.NodeType == type).ToList();
             string? Var(string key) =>
                 !string.IsNullOrEmpty(output) && ctx.FlowVars.TryGetValue($"{output}.{key}", out var v) ? v : null;
+            var isPayment = type == "authorize_payment";
+            var paymentOk = Var("succeeded")?.ToLowerInvariant();
             apiCalls.Add(new ApiCallNodeSummary
             {
-                NodeId         = nodeId,
-                Label          = node["label"]?.GetValue<string>() ?? nodeId,
-                OutputVariable = output,
-                OncePerCall    = node["oncePerCall"]?.GetValue<bool>() == true,
-                RunCount       = runs.Count,
-                LastRunAt      = runs.Count > 0 ? runs[^1].EnteredAt : null,
-                Success        = Var("success"),
-                StatusCode     = Var("status_code"),
-                Error          = Var("error"),
-                Response       = Var("response"),
+                NodeId           = nodeId,
+                NodeType         = type,
+                ReleasesCardData = node["releasesCardData"]?.GetValue<bool>() == true,
+                Label            = node["label"]?.GetValue<string>() ?? nodeId,
+                OutputVariable   = output,
+                OncePerCall      = node["oncePerCall"]?.GetValue<bool>() == true,
+                RunCount         = runs.Count,
+                LastRunAt        = runs.Count > 0 ? runs[^1].EnteredAt : null,
+                Success          = isPayment ? paymentOk : Var("success"),
+                StatusCode       = isPayment ? Var("status") : Var("status_code"),
+                Error            = isPayment ? (paymentOk == "true" ? null : Var("responseReasonText")) : Var("error"),
+                Response         = isPayment ? PaymentSummary(Var("amount"), Var("cardLast4"), Var("gatewayTransactionId"), Var("action")) : Var("response"),
             });
         }
 
@@ -297,23 +305,25 @@ public class FlowEngine : IFlowEngine
         return previous;
     }
 
-    public async Task<ApiCallRerunResult> RerunApiCallNodeAsync(Guid sessionId, string nodeId, CancellationToken ct = default)
+    public async Task<ApiCallRerunResult> RerunNodeAsync(Guid sessionId, string nodeId, CancellationToken ct = default)
     {
         var (ctx, session, isLive) = await LoadForReviewAsync(sessionId, ct)
             ?? throw new InvalidOperationException($"Flow session {sessionId} not found.");
 
         var (node, definition) = await FindNodeAsync(ctx.FlowDefinition, nodeId, ct)
             ?? throw new InvalidOperationException($"Node '{nodeId}' is not in this call's flow.");
-        if (node["type"]?.GetValue<string>() != "api_call")
-            throw new InvalidOperationException($"Node '{nodeId}' is not an API Call node.");
-        if (!_handlers.TryGetValue("api_call", out var handler))
-            throw new InvalidOperationException("No handler registered for node type 'api_call'.");
+        var nodeType = node["type"]?.GetValue<string>();
+        if (nodeType is not ("api_call" or "authorize_payment"))
+            throw new InvalidOperationException($"Node '{nodeId}' is not an API Call or Authorize Payment node.");
+        if (!_handlers.TryGetValue(nodeType, out var handler))
+            throw new InvalidOperationException($"No handler registered for node type '{nodeType}'.");
+        var isPayment = nodeType == "authorize_payment";
 
         var output = node["outputVariable"]?.GetValue<string>()?.Trim();
         string? Var(string key) =>
             !string.IsNullOrEmpty(output) && ctx.FlowVars.TryGetValue($"{output}.{key}", out var v) ? v : null;
         // oncePerCall + already succeeded = the handler replays the stored result, sends nothing.
-        var replayed = node["oncePerCall"]?.GetValue<bool>() == true && Var("success") == "true";
+        var replayed = !isPayment && node["oncePerCall"]?.GetValue<bool>() == true && Var("success") == "true";
 
         // Fresh call data — the whole point is to send what was corrected since the call.
         ctx.CallRecord.Clear();
@@ -334,11 +344,25 @@ public class FlowEngine : IFlowEngine
 
         await SaveReviewedAsync(ctx, session, isLive, ct);
 
-        var transition = Var("timed_out") == "true" ? "timeout" : Var("success") == "true" ? "success" : "error";
         _logger.LogInformation(
-            "Re-ran api_call {NodeId} on session {SessionId} (call {CallRecordId}): {Transition} -> {Next}",
-            nodeId, sessionId, ctx.CallRecordId, transition, result.NextNodeId);
+            "Re-ran {NodeType} {NodeId} on session {SessionId} (call {CallRecordId}) -> {Next}",
+            nodeType, nodeId, sessionId, ctx.CallRecordId, result.NextNodeId);
 
+        if (isPayment)
+        {
+            // The handler records its transition key (approved / declined / error) in history.
+            var paymentTransition = ctx.ExecutionHistory.LastOrDefault(h => h.NodeId == nodeId)?.TransitionTaken ?? "error";
+            return new ApiCallRerunResult(
+                Success: paymentTransition == "approved",
+                Transition: paymentTransition,
+                StatusCode: Var("status"),
+                Error: paymentTransition == "approved" ? null : Var("responseReasonText"),
+                Response: PaymentSummary(Var("amount"), Var("cardLast4"), Var("gatewayTransactionId"), Var("action")),
+                Replayed: Var("action") == "already_authorized",
+                NodeType: nodeType);
+        }
+
+        var transition = Var("timed_out") == "true" ? "timeout" : Var("success") == "true" ? "success" : "error";
         return new ApiCallRerunResult(
             Success: transition == "success",
             Transition: transition,
@@ -346,6 +370,19 @@ public class FlowEngine : IFlowEngine
             Error: Var("error"),
             Response: Var("response"),
             Replayed: replayed);
+    }
+
+    /// <summary>One line for the Call Records view: "$139.90 · card …1234 · txn 60012345 · authorized".</summary>
+    private static string? PaymentSummary(string? amount, string? last4, string? txn, string? action)
+    {
+        var parts = new[]
+        {
+            string.IsNullOrEmpty(amount) ? null : $"${amount}",
+            string.IsNullOrEmpty(last4) ? null : $"card \u2026{last4}",
+            string.IsNullOrEmpty(txn) ? null : $"txn {txn}",
+            string.IsNullOrEmpty(action) ? null : action.Replace('_', ' '),
+        }.Where(p => p is not null).ToList();
+        return parts.Count == 0 ? null : string.Join(" \u00b7 ", parts);
     }
 
     public async Task<bool> PushLiveUpdateAsync(Guid sessionId, string message, CancellationToken ct = default)
@@ -378,6 +415,37 @@ public class FlowEngine : IFlowEngine
         AttachSectionInfo(ctx, state);
 
         await _notifier.PushSessionUpdatedAsync(sessionId, state, message, ct);
+        return true;
+    }
+
+    public async Task<bool> FinalizeSessionAsync(Guid sessionId, string message, CancellationToken ct = default)
+    {
+        var session = await _sessions.GetByIdAsync(sessionId, ct);
+        if (session is null || session.Status != FlowSessionStatus.Active) return false;
+
+        var loaded = await LoadForReviewAsync(sessionId, ct);
+        if (loaded is null) return false;
+        var (ctx, _, isLive) = loaded.Value;
+
+        if (isLive)
+        {
+            // The agent's screen treats an "end" node as finished — checkmark, then the tab closes.
+            var state = new FlowNodeState
+            {
+                SessionId    = sessionId,
+                CallRecordId = ctx.CallRecordId,
+                NodeId       = ctx.CurrentNodeId,
+                NodeType     = "end",
+                Label        = "Finalized by supervisor",
+                IsTerminal   = true,
+                FlowName     = (await _flows.GetByIdAsync(ctx.FlowId, ct))?.Name,
+            };
+            try { await _notifier.PushSessionUpdatedAsync(sessionId, state, message, ct); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Finalize push failed for session {SessionId}", sessionId); }
+        }
+
+        await CompleteSession(ctx, ct);
+        await NotifyCallChangedAsync(ctx.CallRecordId, ct);
         return true;
     }
 
@@ -458,7 +526,7 @@ public class FlowEngine : IFlowEngine
         foreach (var def in await ReachableDefinitionsAsync(definition, ct))
             if (def["nodes"] is JsonObject nodes)
                 foreach (var (id, n) in nodes)
-                    if (n is JsonObject obj && obj["type"]?.GetValue<string>() == "api_call")
+                    if (n is JsonObject obj && obj["type"]?.GetValue<string>() is "api_call" or "authorize_payment")
                         found.Add((id, obj));
         return found;
     }
@@ -810,9 +878,11 @@ public class FlowEngine : IFlowEngine
         await NotifyAgentSessionsChangedAsync(ctx, ct);
 
         // A captured card is kept after authorization for re-auth on an order change (see
-        // PaymentService); the script is done with it now.
+        // PaymentService); the script is done with it now — unless the campaign keeps it until the
+        // order is submitted (CardDataRetentionMode.UntilOrderSubmitted; retention sweep backstops).
         var record = await _callRecords.GetByIdAsync(ctx.CallRecordId, ct);
-        if (record is not null && !string.IsNullOrEmpty(record.SensitiveData))
+        if (record is not null && !string.IsNullOrEmpty(record.SensitiveData)
+            && !await _cardRetention.HoldsUntilOrderSubmittedAsync(record.CampaignId, ct))
         {
             record.WipeSensitiveData("flow_completed");
             await _callRecords.SaveChangesAsync(ct);

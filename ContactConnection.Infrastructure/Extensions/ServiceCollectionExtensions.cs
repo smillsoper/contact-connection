@@ -62,6 +62,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IDashboardRepository, DashboardRepository>();
         services.AddScoped<IFlowSessionRepository, FlowSessionRepository>();
         services.AddScoped<ICallRecordAuditRepository, CallRecordAuditRepository>();
+        services.AddScoped<ICardDataRetentionService, ContactConnection.Infrastructure.Payments.CardDataRetentionService>();
         services.AddScoped<IProductRepository, ProductRepository>();
         services.AddScoped<IProductCategoryRepository, ProductCategoryRepository>();
         services.AddScoped<IProductAttributeRepository, ProductAttributeRepository>();
@@ -295,6 +296,8 @@ public static class ServiceCollectionExtensions
         // every transition to agent_state_history, so its repository must be singleton too
         // (a singleton cannot depend on a scoped service).
         services.AddSingleton<IAgentStateHistoryRepository, AgentStateHistoryRepository>();
+        services.AddMemoryCache();
+        services.AddSingleton<IAgentLockReader, AgentLockReader>();
         services.AddSingleton<IAgentStateStore, AgentStateStore>();
 
         // SIP registration presence per agent extension — in-memory, seeded + kept live from

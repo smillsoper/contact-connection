@@ -1084,6 +1084,22 @@ export default function NodePropertiesPanel({
                 </span>
               </span>
             </label>
+            <label className="flex items-start gap-2 text-sm text-gray-300 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={(data.releasesCardData as boolean) ?? false}
+                onChange={(e) => onUpdate(node.id, { releasesCardData: e.target.checked })}
+              />
+              <span>
+                Order submission — release card data
+                <span className="block text-[10px] text-gray-500 leading-snug">
+                  When this call succeeds, the captured card is wiped. For campaigns set to keep card data until
+                  the order is submitted, this is the point it's no longer needed — also when a reviewer
+                  resubmits from Call Records.
+                </span>
+              </span>
+            </label>
             <p className="text-[10px] text-gray-500 leading-snug">
               Response is stored as {'{{flow.'}{(data.outputVariable as string) || 'variable'}{'}}'}  — reference
               pieces of it with {'{{flow.'}{(data.outputVariable as string) || 'variable'}{'.response.field}}'},

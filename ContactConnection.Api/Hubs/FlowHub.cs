@@ -87,6 +87,13 @@ public interface IFlowHubClient
     /// a payment, another reviewer's edit) — the page re-reads the call.</summary>
     Task ReceiveCallChanged(string callRecordId);
 
+    /// <summary>The agent's supervisor lock changed — the softphone disables / re-enables the status
+    /// picker; <paramref name="message"/> says who locked them and why.</summary>
+    Task ReceiveAgentLockChanged(bool locked, string? message);
+
+    /// <summary>Sign-in lock: the agent UI signs out immediately and shows the message at login.</summary>
+    Task ReceiveForceSignOut(string message);
+
     /// <summary>ESL screen pop — inbound call parked for this agent. <paramref name="tierLabel"/> is the
     /// parallel-queuing tier the call is offered to this agent through (e.g. "Alpha"), null for the
     /// regular pool.</summary>

@@ -580,6 +580,7 @@ const SENSITIVE_DATA_RETENTION_MAX_MINUTES = 43200 // 30 days — matches the ba
 function SensitiveDataRetentionForm({ campaign, onSaved }: SensitiveDataRetentionFormProps) {
   const [useOverride, setUseOverride] = useState(campaign.sensitiveDataRetentionMinutes != null)
   const [minutes, setMinutes] = useState(campaign.sensitiveDataRetentionMinutes ?? 1440)
+  const [cardMode, setCardMode] = useState(campaign.cardDataRetention ?? 'until_script_ends')
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
@@ -590,7 +591,7 @@ function SensitiveDataRetentionForm({ campaign, onSaved }: SensitiveDataRetentio
   async function handleSave() {
     setSaving(true); setSaveError(null); setSaved(false)
     try {
-      const updated = await updateCampaignSensitiveDataRetention(campaign.id, useOverride ? minutes : null)
+      const updated = await updateCampaignSensitiveDataRetention(campaign.id, useOverride ? minutes : null, cardMode)
       onSaved({ ...campaign, ...updated })
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
@@ -610,6 +611,26 @@ function SensitiveDataRetentionForm({ campaign, onSaved }: SensitiveDataRetentio
         export (FTPS, PGP, encrypted zip, etc.), set a window long enough for that job to run before the wipe —
         otherwise the platform default applies.
       </p>
+
+      <div className="mb-5">
+        <p className={labelCls}>Card data is wiped…</p>
+        <div className="space-y-2">
+          {[
+            { value: 'until_script_ends', title: 'When the script finishes (default)',
+              desc: 'Wiped when the agent finishes the script or passes a Commit Point — the card is only kept while the call can still re-authorize.' },
+            { value: 'until_order_submitted', title: 'When the order is submitted',
+              desc: 'Kept past the script until an API Call node marked "Order submission — release card data" succeeds — in the CRM flow, the telephony flow, or a resubmit from Call Records — so a reviewer can re-authorize a corrected order. The retention period below still wipes it if the order is never submitted; set it long enough for your review turnaround.' },
+          ].map((o) => (
+            <label key={o.value} className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer ${cardMode === o.value ? 'border-indigo-600 bg-indigo-950/30' : 'border-gray-800 hover:border-gray-700'}`}>
+              <input type="radio" name="cardDataRetention" className="mt-1" checked={cardMode === o.value} onChange={() => setCardMode(o.value)} />
+              <span>
+                <span className="text-sm text-gray-200 font-medium">{o.title}</span>
+                <span className="block text-xs text-gray-500 mt-0.5 leading-snug">{o.desc}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="flex items-start gap-3">
@@ -648,7 +669,7 @@ function SensitiveDataRetentionForm({ campaign, onSaved }: SensitiveDataRetentio
           disabled={saving}
           className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg px-5 py-2 text-sm font-medium transition-colors"
         >
-          {saving ? 'Saving…' : 'Save retention override'}
+          {saving ? 'Saving…' : 'Save retention settings'}
         </button>
         {saved && <span className="text-emerald-400 text-sm">Saved</span>}
         {saveError && <span className="text-red-400 text-sm">{saveError}</span>}

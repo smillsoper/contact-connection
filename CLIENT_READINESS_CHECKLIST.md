@@ -635,7 +635,20 @@ live both ways (supervisor edits refresh the agent's script; the page follows th
 "Open ↗" links. Browser-verified by Stephen. Telephony: SignalWire chosen, account suspended —
 ticket open.
 
-**Next up (S165):** order-failure email link + name assignments in the V1 flow (Stephen); Commissions;
+**Session 166 (2026-09-29): Call Records extended** — (1) **campaign card data retention**:
+"wipe when the script finishes" (default) or "keep until the order is submitted" (API Call nodes get an
+"Order submission — release card data" checkbox, CRM + telephony; the retention period backstops);
+Call Records can **re-authorize** by re-running the flow's authorize_payment node. (2) **Finalize call**
+(calls.manage): required reason, hangs up a still-connected caller only after confirmation (both legs,
+park_after_bridge cleared first), closes open scripts on the agent's screen, marks the call complete
+with who/when/why, optional **agent lock** — status (held Unavailable, enforced in AgentStateStore) or
+sign-in (signed out now, existing tokens rejected, login refused "contact your supervisor"); unlock from
+Users (agents.manage) or the dashboard Agent List. Finalize is offered only while something is open
+(active script, connected caller, no end time). Browser-verified by Stephen; hang-up + re-auth await a
+live test number. Follow-up: preview calls end "incomplete" (no completed CallInteraction) — check on a
+real call.
+
+**Earlier next up (S165):** order-failure email link + name assignments in the V1 flow (Stephen); Commissions;
 remaining LS scripts; export processes; SignalWire once reinstated.
 
 **Earlier next up (S164):** Clint's feedback on V1; convert SF TV / My Best Heart / JF - Healthy Aging with
