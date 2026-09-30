@@ -10,6 +10,7 @@ public static class CallAuditAction
     public const string CustomFieldEdited = "custom_field_edited";
     public const string ApiCallRerun     = "api_call_rerun";
     public const string Finalized        = "finalized";
+    public const string Supervisor       = "supervisor";   // monitor / coach / barge / take-over
 }
 
 /// <summary>

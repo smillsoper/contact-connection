@@ -94,6 +94,17 @@ public interface IFlowHubClient
     /// <summary>Sign-in lock: the agent UI signs out immediately and shows the message at login.</summary>
     Task ReceiveForceSignOut(string message);
 
+    /// <summary>Supervisor listen-in (S167), to the supervisor's own connections: kind "monitor" arms
+    /// their softphone to auto-answer the eavesdrop INVITE that follows (label = agent's name, mode =
+    /// listen/coach/barge); kind "mode" is a mode switch on the running session.</summary>
+    Task ReceiveSupervisorConnecting(string kind, string label, string mode);
+
+    /// <summary>The supervisor's listen-in ended (they stopped, or the monitored call ended).</summary>
+    Task ReceiveMonitorEnded();
+
+    /// <summary>A supervisor ↔ agent internal call ended (either side hung up, or it wasn't answered).</summary>
+    Task ReceiveIntercomEnded();
+
     /// <summary>ESL screen pop — inbound call parked for this agent. <paramref name="tierLabel"/> is the
     /// parallel-queuing tier the call is offered to this agent through (e.g. "Alpha"), null for the
     /// regular pool.</summary>

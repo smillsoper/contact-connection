@@ -59,6 +59,7 @@ public static class DashboardWidgetsEndpoints
             IAgentStateStore stateStore,
             IAgentRegistrationStore registrationStore,
             IFlowEngine flowEngine,
+            ITelephonyCallSessionStore telephonySessions,
             TenantContext tenantContext,
             CancellationToken ct) =>
         {
@@ -66,6 +67,13 @@ public static class DashboardWidgetsEndpoints
             var tenantId = tenantContext.Current.Id;
 
             var agentIds = await ResolveAgentIdsAsync(campaignId, clientId, groupId, campaigns, agentGroups, agents, ct);
+
+            // Agents bridged to a live caller right now — Monitor / Coach / Barge need one.
+            var onLiveCall = (await telephonySessions.GetAllAsync(ct))
+                .Where(s => s.TenantId == tenantId && !string.IsNullOrEmpty(ContactConnection.Api.Telephony.SupervisorCallService.AgentLeg(s)))
+                .Select(s => s.Vars.GetValueOrDefault("_assigned_agent_id"))
+                .Where(a => a is not null)
+                .ToHashSet();
 
             // CRM scripts each agent has open right now — on a phone call or not (S165: links to the
             // call's review page, where a supervisor can correct data live).
@@ -101,6 +109,7 @@ public static class DashboardWidgetsEndpoints
                     registered        = reg is not null,
                     registered_since  = reg?.Since,
                     live_calls        = liveByAgent.GetValueOrDefault(agent.Id) ?? [],
+                    on_live_call      = onLiveCall.Contains(agent.Id.ToString()),
                     status_locked     = agent.IsStatusLocked,
                     sign_in_locked    = agent.SignInLocked,
                     lock_reason       = agent.StatusLockReason,

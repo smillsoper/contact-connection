@@ -56,6 +56,12 @@ public interface IFlowEngine
     /// the campaign's retention rule, as on any script end. False if it was already finished.</summary>
     Task<bool> FinalizeSessionAsync(Guid sessionId, string message, CancellationToken ct = default);
 
+    /// <summary>Supervisor Take Over (S167): the open script moves to <paramref name="newAgentId"/>
+    /// exactly where it is, everything captured so far intact. The previous agent's tab shows
+    /// <paramref name="message"/> and closes; returns the current node for the new owner (pushed to
+    /// them as a script pop), or null if the session isn't open.</summary>
+    Task<FlowNodeState?> TakeOverSessionAsync(Guid sessionId, Guid newAgentId, string message, CancellationToken ct = default);
+
     /// <summary>The CRM scripts these agents have open right now (live in Redis), whether or not
     /// they're on a phone call — the supervisor Agent List links each to its call's review page.</summary>
     Task<IReadOnlyList<LiveFlowSession>> GetLiveSessionsForAgentsAsync(

@@ -812,6 +812,19 @@ Submit to both Chrome Web Store and Microsoft Edge Add-ons Store. One codebase, 
 - Report page state back to background worker
 - Run in isolated world by default; MAIN world via script tag injection when page JS scope access needed
 
+**Portal Window Focus** *(added S167 — build alongside screen recording)*
+- Web pages can't raise another tab; the extension can: `chrome.tabs.update(tabId, { active: true })`
+  + `chrome.windows.update(windowId, { focused: true })` (needs the `tabs` permission)
+- Tracks the user's agent-portal tab (`/agent`); the platform asks the extension to bring it forward
+  when work lands there from elsewhere — first case: a supervisor **Take Over** from the dashboard
+  (S167) moves the call + script into their already-open portal, which today only says "switch to
+  that tab"
+- Second case: **agents** — when the queue logic selects an agent for a call (offer, auto-connect,
+  screen pop / script pop) and they aren't on the portal tab, the extension switches them to it as
+  part of delivery, so a call never waits in a background tab
+- Channel: the dashboard page messages the extension via `externally_connectable` (or its content
+  script via `window.postMessage`); fall back to the on-screen note when the extension isn't installed
+
 **Frame Registry**
 - Tracks all frames (top + iframes) for the active tab
 - `frameId → { url, parentFrameId, contentScriptReady }`

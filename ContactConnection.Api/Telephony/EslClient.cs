@@ -359,6 +359,58 @@ public sealed class EslClient(ILogger<EslClient>? logger = null, IConfiguration?
         return (null, $"sofia_contact={contact} originate → {response ?? "(null)"}");
     }
 
+    public async Task<(string? Uuid, string? Error)> OriginateEavesdropAsync(
+        string extension, string domain, string targetUuid, string label, CancellationToken ct = default)
+    {
+        var contact = await ResolveAgentContactAsync(extension, domain, ct);
+        if (!IsResolvedContact(contact))
+            return (null, $"sofia_contact {extension}@{domain} → {contact ?? "(null)"}");
+
+        var legUuid = Guid.NewGuid().ToString();
+        // Caller-id text can't carry spaces/commas inside {} vars — the softphone shows its own label
+        // (from the ReceiveSupervisorConnecting push), so this is just a tidy fallback.
+        var safeLabel = new string(label.Where(char.IsLetterOrDigit).ToArray());
+        if (safeLabel.Length == 0) safeLabel = "Monitor";
+        var vars = $"{{origination_uuid={legUuid},originate_timeout=30,sip_auto_answer=true," +
+                   $"sip_h_Alert-Info=answer-after=0,eavesdrop_enable_dtmf=true," +
+                   $"origination_caller_id_number=monitor,origination_caller_id_name={safeLabel}}}";
+        var response = await SendApiBodyAsync($"originate {vars}{contact} &eavesdrop({targetUuid})", ct);
+        if (response?.StartsWith("+OK") == true) return (legUuid, null);
+
+        await SendApiAsync($"uuid_kill {legUuid} ORIGINATOR_CANCEL", ct);
+        logger?.LogWarning("OriginateEavesdropAsync: originate failed for {Ext}@{Domain} → {Response}", extension, domain, response ?? "(null)");
+        return (null, $"originate → {response ?? "(null)"}");
+    }
+
+    public async Task<(string? Uuid, string? Error)> OriginateIntercomAsync(
+        string legUuid, string supervisorExtension, string agentExtension, string domain, string supervisorLabel, string agentLabel, CancellationToken ct = default)
+    {
+        var supContact = await ResolveAgentContactAsync(supervisorExtension, domain, ct);
+        if (!IsResolvedContact(supContact)) return (null, $"supervisor not registered ({supervisorExtension})");
+        var agentContact = await ResolveAgentContactAsync(agentExtension, domain, ct);
+        if (!IsResolvedContact(agentContact)) return (null, $"agent not registered ({agentExtension})");
+
+        static string Safe(string s, string fallback)
+        {
+            var t = new string(s.Where(char.IsLetterOrDigit).ToArray());
+            return t.Length == 0 ? fallback : t;
+        }
+        // A-leg: the supervisor (auto-answer). B-leg: the agent, ringing normally, shown who's calling.
+        var aVars = $"{{origination_uuid={legUuid},originate_timeout=30,sip_auto_answer=true,sip_h_Alert-Info=answer-after=0," +
+                    $"origination_caller_id_number={agentExtension},origination_caller_id_name={Safe(agentLabel, "Agent")}}}";
+        var bVars = $"{{origination_caller_id_number={supervisorExtension},origination_caller_id_name={Safe(supervisorLabel, "Supervisor")}," +
+                    $"call_timeout=30,cc_intercom=true}}";
+        var response = await SendApiBodyAsync($"originate {aVars}{supContact} &bridge({bVars}{agentContact})", ct);
+        if (response?.StartsWith("+OK") == true) return (legUuid, null);
+
+        await SendApiAsync($"uuid_kill {legUuid} ORIGINATOR_CANCEL", ct);
+        logger?.LogWarning("OriginateIntercomAsync: originate failed → {Response}", response ?? "(null)");
+        return (null, $"originate → {response ?? "(null)"}");
+    }
+
+    public Task RecvDtmfAsync(string uuid, string digits, CancellationToken ct = default) =>
+        SendApiAsync($"uuid_recv_dtmf {uuid} {digits}", ct);
+
     public ValueTask DisposeAsync()
     {
         _writer?.Dispose();

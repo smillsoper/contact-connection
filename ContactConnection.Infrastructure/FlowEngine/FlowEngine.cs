@@ -449,6 +449,56 @@ public class FlowEngine : IFlowEngine
         return true;
     }
 
+    public async Task<FlowNodeState?> TakeOverSessionAsync(Guid sessionId, Guid newAgentId, string message, CancellationToken ct = default)
+    {
+        var session = await _sessions.GetByIdAsync(sessionId, ct);
+        if (session is null || session.Status != FlowSessionStatus.Active) return null;
+        var old = await LoadFromRedis(sessionId, ct);
+        if (old is null) return null;   // only a script someone has open can be taken over
+        var previousAgentId = old.AgentId;
+
+        // 1. The previous agent's tab finishes ("taken over") and closes — pushed BEFORE the new
+        //    owner joins the session group, so only the previous agent sees it.
+        try
+        {
+            await _notifier.PushSessionUpdatedAsync(sessionId, new FlowNodeState
+            {
+                SessionId = sessionId, CallRecordId = old.CallRecordId, NodeId = old.CurrentNodeId,
+                NodeType = "end", Label = "Taken over by supervisor", IsTerminal = true,
+            }, message, ct);
+        }
+        catch (Exception ex) { _logger.LogWarning(ex, "Take-over push to previous agent failed for {SessionId}", sessionId); }
+
+        // 2. Same session, new owner — AgentId is fixed per context, so rebuild it with everything
+        //    else carried over (variables, history, call stack, sections, commit state).
+        var ctx = FlowExecutionContext.Deserialize(
+            old.SessionId, old.FlowId, old.FlowVersion, old.CallRecordId, old.InteractionId, newAgentId, old.TenantId,
+            old.CurrentNodeId, old.FlowDefinition.ToJsonString(), old.SerializeVariableStore(), old.SerializeExecutionHistory(),
+            old.CallRecord, old.Caller, agent: new() { ["id"] = newAgentId.ToString() }, old.Tenant);
+        await PopulateAgentAndTenantAsync(ctx, newAgentId, ct);
+        session.ReassignAgent(newAgentId);
+        session.AdvanceTo(ctx.CurrentNodeId, ctx.SerializeVariableStore(), ctx.SerializeExecutionHistory());
+        await _sessions.SaveChangesAsync(ct);
+        await SaveToRedis(ctx, ct);
+
+        // 3. The node the supervisor lands on (same re-render as a reconnect).
+        var state = await GetCurrentStateAsync(sessionId, ct);
+        if (state is not null)
+        {
+            state.FlowName = (await _flows.GetByIdAsync(ctx.FlowId, ct))?.Name;
+            AttachSectionInfo(ctx, state);
+        }
+
+        try
+        {
+            await _notifier.PushAgentSessionsChangedAsync(ctx.TenantId, previousAgentId, ct);
+            await _notifier.PushAgentSessionsChangedAsync(ctx.TenantId, newAgentId, ct);
+        }
+        catch (Exception ex) { _logger.LogWarning(ex, "Agent sessions push failed after take-over of {SessionId}", sessionId); }
+        await NotifyCallChangedAsync(ctx.CallRecordId, ct);
+        return state;
+    }
+
     public async Task<IReadOnlyList<LiveFlowSession>> GetLiveSessionsForAgentsAsync(
         IReadOnlyCollection<Guid> agentIds, CancellationToken ct = default)
     {

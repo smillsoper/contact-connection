@@ -8,6 +8,9 @@ import { getClientTransferNumbers, type ClientTransferNumber } from '../api/tele
 import { flowsApi } from '../api/flows'
 import { useFlowSessionsStore } from '../stores/flowSessionsStore'
 import { useAgentStateStore } from '../stores/agentStateStore'
+import { useSupervisorMonitorStore } from '../stores/supervisorMonitorStore'
+import { useIntercomStore } from '../stores/intercomStore'
+import { supervisorApi, MONITOR_MODE_LABEL } from '../api/supervisor'
 
 // Local dev: connect directly to FreeSWITCH (no cert required, no tunnel overhead).
 // External: VITE_SIP_WS_URL must be set to the production WSS endpoint (e.g. the
@@ -146,6 +149,14 @@ export default function SoftphonePanel() {
   // Audio: separate elements so primary and consultation audio never collide
   const remoteAudioRef      = useRef<HTMLAudioElement>(null)
   const consultAudioRef     = useRef<HTMLAudioElement>(null)
+  // Supervisor listen-in (S167) — its own session + audio, never touching the call UI/state.
+  const monitorAudioRef     = useRef<HTMLAudioElement>(null)
+  const monitorSessionRef   = useRef<any>(null)
+  const monitorPendingRef   = useRef(false)
+  // Supervisor ↔ agent internal call (S167) — likewise kept apart from the customer-call UI.
+  const intercomAudioRef    = useRef<HTMLAudioElement>(null)
+  const intercomSessionRef  = useRef<any>(null)
+  const intercomPendingRef  = useRef<'caller' | 'callee' | null>(null)
   // WebAudio context used for 3-way conference mixing
   const audioCtxRef         = useRef<AudioContext | null>(null)
   // Original mic send-track on the primary session; saved so we can restore it on end-conference
@@ -160,6 +171,38 @@ export default function SoftphonePanel() {
   const [transferNumbers, setTransferNumbers]       = useState<ClientTransferNumber[]>([])
   const [showTransfers, setShowTransfers]           = useState(false)
   const [pickingUp, setPickingUp]                   = useState(false)
+  const monitor = useSupervisorMonitorStore((s) => s.monitor)
+  // Arm auto-answer the moment the server says an eavesdrop INVITE is coming.
+  useEffect(() => { monitorPendingRef.current = monitor?.status === 'connecting' }, [monitor?.status])
+  // The server ended it (supervisor clicked End on the dashboard, or the call ended).
+  useEffect(() => {
+    const onEnded = () => { try { monitorSessionRef.current?.terminate() } catch { /* already gone */ } }
+    window.addEventListener('cc:monitor-ended', onEnded)
+    return () => window.removeEventListener('cc:monitor-ended', onEnded)
+  }, [])
+  const intercom = useIntercomStore((s) => s.call)
+  // Arm the next INVITE as the internal call (supervisor side auto-answers, agent side rings).
+  useEffect(() => {
+    intercomPendingRef.current = intercom && intercom.status === 'connecting' && !intercomSessionRef.current ? intercom.role : null
+  }, [intercom])
+  useEffect(() => {
+    const onEnded = () => { try { intercomSessionRef.current?.terminate() } catch { /* already gone */ } }
+    window.addEventListener('cc:intercom-ended', onEnded)
+    return () => window.removeEventListener('cc:intercom-ended', onEnded)
+  }, [])
+  function answerIntercom() {
+    try { intercomSessionRef.current?.answer({ mediaConstraints: { audio: true, video: false }, pcConfig: { iceServers: [] } }) } catch { /* ignore */ }
+  }
+  function endIntercom() {
+    try { intercomSessionRef.current?.terminate() } catch { /* already gone */ }
+    useIntercomStore.getState().clear()
+  }
+
+  function endMonitor() {
+    supervisorApi.stop().catch(() => {})
+    try { monitorSessionRef.current?.terminate() } catch { /* already gone */ }
+    useSupervisorMonitorStore.getState().clear()
+  }
   const [pickUpError, setPickUpError]               = useState<string | null>(null)
 
   // ── Timer ─────────────────────────────────────────────────────────────────
@@ -250,6 +293,57 @@ export default function SoftphonePanel() {
     ua.on('registrationFailed', () => { if (firstRegistration) setRegistrationStatus('failed'); else startGrace('failed') })
 
     ua.on('newRTCSession', ({ session }: { session: any }) => {
+      // Supervisor listen-in: the server's eavesdrop INVITE, armed by ReceiveSupervisorConnecting.
+      if (session.direction === 'incoming' && monitorPendingRef.current) {
+        monitorPendingRef.current = false
+        monitorSessionRef.current = session
+        const wireMonitor = (pc: RTCPeerConnection) => pc.addEventListener('track', (e: RTCTrackEvent) => {
+          if (monitorAudioRef.current && e.streams[0]) {
+            monitorAudioRef.current.srcObject = e.streams[0]
+            monitorAudioRef.current.play().catch(() => {})
+          }
+        })
+        session.on('peerconnection', ({ peerconnection }: { peerconnection: RTCPeerConnection }) => wireMonitor(peerconnection))
+        const done = () => {
+          monitorSessionRef.current = null
+          if (monitorAudioRef.current) monitorAudioRef.current.srcObject = null
+          useSupervisorMonitorStore.getState().clear()
+        }
+        session.on('accepted', () => useSupervisorMonitorStore.getState().connected())
+        session.on('ended', done)
+        session.on('failed', done)
+        try { session.answer({ mediaConstraints: { audio: true, video: false }, pcConfig: { iceServers: [] } }) } catch { /* ignore */ }
+        return
+      }
+
+      // Supervisor ↔ agent internal call, armed by ReceiveSupervisorConnecting('intercom…').
+      if (session.direction === 'incoming' && intercomPendingRef.current) {
+        const role = intercomPendingRef.current
+        intercomPendingRef.current = null
+        intercomSessionRef.current = session
+        const wireIntercom = (pc: RTCPeerConnection) => pc.addEventListener('track', (e: RTCTrackEvent) => {
+          if (intercomAudioRef.current && e.streams[0]) {
+            intercomAudioRef.current.srcObject = e.streams[0]
+            intercomAudioRef.current.play().catch(() => {})
+          }
+        })
+        session.on('peerconnection', ({ peerconnection }: { peerconnection: RTCPeerConnection }) => wireIntercom(peerconnection))
+        const done = () => {
+          intercomSessionRef.current = null
+          if (intercomAudioRef.current) intercomAudioRef.current.srcObject = null
+          useIntercomStore.getState().clear()
+        }
+        session.on('accepted', () => useIntercomStore.getState().setStatus('connected'))
+        session.on('ended', done)
+        session.on('failed', done)
+        if (role === 'caller') {
+          try { session.answer({ mediaConstraints: { audio: true, video: false }, pcConfig: { iceServers: [] } }) } catch { /* ignore */ }
+        } else {
+          useIntercomStore.getState().setStatus('ringing')   // the agent chooses Answer / Decline
+        }
+        return
+      }
+
       // Decide whether this is a consultation leg or a new primary call
       const isTransfer = nextIsTransferRef.current
       nextIsTransferRef.current = false
@@ -610,6 +704,50 @@ export default function SoftphonePanel() {
       {/* Audio: two separate elements so primary and consultation never share a stream */}
       <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
       <audio ref={consultAudioRef} autoPlay playsInline className="hidden" />
+      <audio ref={monitorAudioRef} autoPlay playsInline className="hidden" />
+      <audio ref={intercomAudioRef} autoPlay playsInline className="hidden" />
+
+      {intercom && (
+        <div className={`rounded-lg px-3 py-2 border ${intercom.status === 'ringing' ? 'bg-emerald-950/60 border-emerald-700' : 'bg-violet-950/50 border-violet-800'}`}>
+          <div className="flex items-center gap-2">
+            <span className="text-xs">📞</span>
+            <span className="text-xs font-medium text-gray-100 flex-1">
+              {intercom.status === 'ringing' ? `${intercom.peerName} is calling`
+                : intercom.status === 'connecting' ? `Calling ${intercom.peerName}…`
+                : `On a call with ${intercom.peerName}`}
+            </span>
+          </div>
+          <p className="text-[10px] text-gray-400 mt-0.5">
+            {intercom.role === 'callee' ? 'Internal call from your supervisor — not a customer call.' : 'Internal call — not a customer call.'}
+          </p>
+          <div className="flex gap-2 mt-1.5">
+            {intercom.status === 'ringing' && (
+              <button onClick={answerIntercom} className="text-[11px] bg-emerald-600 hover:bg-emerald-500 text-white rounded px-2 py-0.5">Answer</button>
+            )}
+            <button onClick={endIntercom} className="text-[11px] text-gray-300 hover:text-white rounded px-2 py-0.5 border border-gray-600">
+              {intercom.status === 'ringing' ? 'Decline' : 'Hang up'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {monitor && (
+        <div className="rounded-lg px-3 py-2 bg-sky-950/50 border border-sky-800">
+          <div className="flex items-center gap-2">
+            <span className="text-xs">🎧</span>
+            <span className="text-xs font-medium text-sky-200 flex-1">
+              {MONITOR_MODE_LABEL[monitor.mode]} · {monitor.agentName}
+            </span>
+            <button onClick={endMonitor} className="text-[10px] text-sky-300 hover:text-white">End</button>
+          </div>
+          <p className="text-[10px] text-sky-300/70 mt-0.5">
+            {monitor.status === 'connecting' ? 'Connecting…'
+              : monitor.mode === 'listen' ? 'Nobody can hear you.'
+              : monitor.mode === 'coach' ? 'Only the agent can hear you.'
+              : 'The caller and the agent can hear you.'}
+          </p>
+        </div>
+      )}
 
       {/* Header */}
       <div className="flex items-center gap-2 pt-1">

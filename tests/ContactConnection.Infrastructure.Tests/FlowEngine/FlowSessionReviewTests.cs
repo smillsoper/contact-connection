@@ -341,6 +341,53 @@ public class FlowSessionReviewTests
         Assert.False(await Engine(notifier.Object).FinalizeSessionAsync(finished.Id, "x"));
     }
 
+    [Fact]
+    public async Task TakeOver_MovesTheOpenScriptToTheSupervisor_WithEverythingCaptured()
+    {
+        var flow = AddFlow(Definition(("n_name", new JsonObject { ["type"] = "input", ["label"] = "Confirm name" }), ("end_1", EndNode())));
+        var agentId = Guid.NewGuid();
+        var supervisorId = Guid.NewGuid();
+        var session = FlowSession.Create(_tenantId, flow.Id, 1, _record.Id, Guid.NewGuid(), agentId, "n_name");
+        _sessions.Setup(s => s.GetByIdAsync(session.Id, It.IsAny<CancellationToken>())).ReturnsAsync(session);
+        var entry = new JsonObject
+        {
+            ["FlowId"] = flow.Id.ToString(), ["FlowVersion"] = 1, ["CallRecordId"] = _record.Id.ToString(),
+            ["InteractionId"] = Guid.NewGuid().ToString(), ["AgentId"] = agentId.ToString(), ["TenantId"] = _tenantId.ToString(),
+            ["CurrentNodeId"] = "n_name", ["DefinitionJson"] = flow.Definition,
+            ["VariableStoreJson"] = """{"FlowVars":{"coupon_code":"SAVE10"},"Inputs":{"v1_first_name":"Bob"},"ApiResults":{}}""",
+            ["ExecutionHistoryJson"] = "[]",
+            ["CallRecord"] = new JsonObject(), ["Caller"] = new JsonObject(), ["Agent"] = new JsonObject(), ["Tenant"] = new JsonObject(),
+        };
+        _redis.Setup(r => r.StringGetAsync(It.Is<RedisKey>(k => k.ToString().Contains(session.Id.ToString())), It.IsAny<CommandFlags>()))
+            .ReturnsAsync((RedisValue)entry.ToJsonString());
+        var notifier = new Mock<IFlowNotifier>();
+        var input = new RecordingInputHandler();
+
+        var state = await Engine(notifier.Object, input).TakeOverSessionAsync(session.Id, supervisorId, "Call taken over by Sue");
+
+        Assert.NotNull(state);
+        Assert.Equal("n_name", state!.NodeId);
+        Assert.Equal(supervisorId, session.AgentId);
+        // The previous agent's tab was told to finish.
+        notifier.Verify(n => n.PushSessionUpdatedAsync(session.Id,
+            It.Is<FlowNodeState>(st => st.NodeType == "end" && st.IsTerminal), "Call taken over by Sue", It.IsAny<CancellationToken>()), Times.Once);
+        // Everything captured so far came along (persisted under the new owner).
+        Assert.Contains("SAVE10", session.VariableStore);
+        Assert.Contains("Bob", session.VariableStore);
+        var saved = _redis.Invocations.Where(i => i.Method.Name == "StringSetAsync").Select(i => i.Arguments[1].ToString()).Last();
+        Assert.Contains(supervisorId.ToString(), saved);
+        notifier.Verify(n => n.PushAgentSessionsChangedAsync(_tenantId, agentId, It.IsAny<CancellationToken>()), Times.Once);
+        notifier.Verify(n => n.PushAgentSessionsChangedAsync(_tenantId, supervisorId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task TakeOver_NothingOpen_ReturnsNull()
+    {
+        var flow = AddFlow(Definition(("n_order", ApiNode()), ("end_1", EndNode())));
+        var finished = AddCompletedSession(flow, []);
+        Assert.Null(await Engine().TakeOverSessionAsync(finished.Id, Guid.NewGuid(), "x"));
+    }
+
     private sealed class RecordingInputHandler : INodeHandler
     {
         public string NodeType => "input";

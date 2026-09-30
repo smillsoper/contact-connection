@@ -68,6 +68,7 @@ builder.Services.AddScoped<QueueCallbackDeliveryService>();
 // Mints short-lived ESL connections for the call-recording watchdog (ICallRecordingController,
 // registered in AddInfrastructure) â€” its forced unmask fires after the triggering node is gone.
 builder.Services.AddSingleton<IEslCommanderFactory, EslCommanderFactory>();
+builder.Services.AddScoped<ContactConnection.Api.Telephony.SupervisorCallService>();
 
 // ESL background service â€” connects to FreeSWITCH and handles CHANNEL_PARK / CHANNEL_HANGUP
 builder.Services.AddHostedService<EslBackgroundService>();
@@ -204,6 +205,7 @@ app.MapTenantsEndpoints();
 app.MapCallRecordsEndpoints();
 app.MapCallReviewEndpoints();
 app.MapAgentLockEndpoints();
+app.MapSupervisorEndpoints();
 app.MapCallRecordingsEndpoints();
 app.MapScreenRecordingsEndpoints();
 app.MapVoicemailsEndpoints();

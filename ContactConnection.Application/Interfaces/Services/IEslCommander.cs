@@ -32,6 +32,19 @@ public interface IEslCommander
     Task BridgeChannelsAsync(string uuid1, string uuid2, CancellationToken ct = default);
     /// <summary>Originate a call to an agent extension with auto-answer and park the channel. Returns (uuid, null) on success, (null, errorDetail) on failure.</summary>
     Task<(string? Uuid, string? Error)> OriginateAndParkAsync(string extension, string domain, string callerNumber, CancellationToken ct = default);
+    /// <summary>Supervisor monitoring (S167): rings the supervisor's softphone (auto-answer) straight
+    /// into FreeSWITCH's eavesdrop on <paramref name="targetUuid"/> (the agent's leg). Listen-only to
+    /// start; <see cref="RecvDtmfAsync"/> on the returned leg switches modes (eavesdrop DTMF:
+    /// 0 listen, 2 speak to the eavesdropped leg only = coach, 3 three-way = barge).</summary>
+    Task<(string? Uuid, string? Error)> OriginateEavesdropAsync(string extension, string domain, string targetUuid, string label, CancellationToken ct = default);
+    /// <summary>Supervisor → agent internal call (S167): rings the supervisor's softphone (auto-answer),
+    /// then bridges it to the agent's softphone, which rings normally. No call session / call record —
+    /// the returned supervisor leg is the handle (its hangup ends the call).</summary>
+    Task<(string? Uuid, string? Error)> OriginateIntercomAsync(
+        string legUuid, string supervisorExtension, string agentExtension, string domain, string supervisorLabel, string agentLabel, CancellationToken ct = default);
+    /// <summary>uuid_recv_dtmf — as if <paramref name="uuid"/>'s own endpoint pressed the digits
+    /// (drives eavesdrop's mode switches without anyone hearing a tone).</summary>
+    Task RecvDtmfAsync(string uuid, string digits, CancellationToken ct = default);
     /// <summary>Send DTMF tones on the specified channel. digits may include 0-9 * # A-D w W; @durationMs sets per-digit tone length.</summary>
     Task SendDtmfAsync(string uuid, string digits, int durationMs, CancellationToken ct = default);
 

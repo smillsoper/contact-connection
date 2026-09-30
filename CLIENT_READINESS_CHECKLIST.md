@@ -648,6 +648,22 @@ Users (agents.manage) or the dashboard Agent List. Finalize is offered only whil
 live test number. Follow-up: preview calls end "incomplete" (no completed CallInteraction) — check on a
 real call.
 
+**Session 167 (2026-09-29): supervisor Monitor / Coach / Barge / Take Over** on the dashboard Agent
+List (🎧 menu). Audio runs through the supervisor's own agent-portal softphone (auto-answered eavesdrop
+on the agent's leg; mode switches via uuid_recv_dtmf: 0 listen, 2 coach, 3 barge). Monitor is silent
+to the agent. Permissions: monitor/coach = supervisor.monitor, barge/take over = supervisor.override.
+Take Over pops the portal (`/agent?takeover=<agentId>`), originates + parks a supervisor leg, re-bridges
+the caller, drops the agent leg (guards `_takeover_in_progress` / `_takeover_old_leg` in
+EslBackgroundService), moves the CRM script (`TakeOverSessionAsync`); the call + commission stay with
+the original agent, audited. Script-only take-over dry-run verified; **all audio paths await a live
+test number** (confirm eavesdrop digit mapping, re-bridge, agent → ACW). Also S167: Take Over goes straight into
+the supervisor's already-open portal when their softphone is registered (no second portal); **📞 call an
+agent** (internal supervisor → agent call for QA review / training — supervisor leg auto-answers, agent's
+rings with Answer/Decline, no call record, both held "On Call - Supervisor call" and restored after;
+testable now with two registered browsers, no carrier needed). Security: ESL password moved out of the
+tracked config into gitignored vars_local.xml and rotated; static SIP users 1000/1001 (committed
+default_password) removed from the FreeSWITCH directory.
+
 **Earlier next up (S165):** order-failure email link + name assignments in the V1 flow (Stephen); Commissions;
 remaining LS scripts; export processes; SignalWire once reinstated.
 

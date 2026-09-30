@@ -4,6 +4,7 @@ import type { WidgetFilterConfig } from '../../../types/dashboard'
 import { useDashboardLiveAgentState, useDashboardLiveRegistration, useDashboardLiveAgentSessions } from '../DashboardLiveContext'
 import { useAuthStore } from '../../../stores/authStore'
 import { agentLockApi } from '../../../api/agentLock'
+import { supervisorApi, MONITOR_MODE_LABEL, type MonitorMode, type MonitorState } from '../../../api/supervisor'
 
 type SortColumn = 'name' | 'state' | 'time'
 type SortDirection = 'asc' | 'desc'
@@ -44,6 +45,71 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
   const canOpenCalls = useAuthStore((s) => s.hasPermission('calls.view') || s.hasPermission('calls.manage'))
   const canUnlock = useAuthStore((s) => s.hasPermission('agents.manage') || s.hasPermission('calls.manage') || s.hasPermission('supervisor.override'))
   const [unlocking, setUnlocking] = useState<string | null>(null)
+  const canMonitor = useAuthStore((s) => s.hasPermission('supervisor.monitor') || s.hasPermission('supervisor.override'))
+  const canOverride = useAuthStore((s) => s.hasPermission('supervisor.override'))
+  const myId = useAuthStore((s) => s.agentId)
+  const [monitoring, setMonitoring] = useState<MonitorState | null>(null)
+  const [supBusy, setSupBusy] = useState(false)
+  const [supError, setSupError] = useState<string | null>(null)
+  const [menuFor, setMenuFor] = useState<string | null>(null)
+  const [supNote, setSupNote] = useState<string | null>(null)
+  // Is my own softphone (an open agent portal) registered? Kept live by the registration pushes.
+  const [myRegistered, setMyRegistered] = useState(false)
+  useEffect(() => { if (canOverride) supervisorApi.me().then((m) => setMyRegistered(m.registered)).catch(() => {}) }, [canOverride])
+  useEffect(() => { if (liveReg && liveReg.agentId === myId) setMyRegistered(liveReg.registered) }, [liveReg, myId])
+
+  // Current listen-in (survives a dashboard reload); ended remotely → cc:monitor-ended / push.
+  useEffect(() => { if (canMonitor) supervisorApi.current().then((m) => setMonitoring(m ?? null)).catch(() => {}) }, [canMonitor])
+  useEffect(() => {
+    const onEnded = () => setMonitoring(null)
+    window.addEventListener('cc:monitor-ended', onEnded)
+    return () => window.removeEventListener('cc:monitor-ended', onEnded)
+  }, [])
+
+  async function supervise(action: () => Promise<MonitorState | void>) {
+    setSupBusy(true); setSupError(null); setMenuFor(null)
+    try { const m = await action(); if (m) setMonitoring(m) }
+    catch (e) { setSupError(e instanceof Error ? e.message : 'Failed.') }
+    finally { setSupBusy(false) }
+  }
+  function takeOver(agentId: string) {
+    setMenuFor(null)
+    setSupError(null)
+    setMonitoring(null)   // the server ends any listen-in as part of the take-over
+    if (myRegistered) {
+      // My portal is already open — take the call over into it (no second portal, which would
+      // register the same extension twice and show the script in both).
+      setSupBusy(true)
+      supervisorApi.takeOver(agentId)
+        .then((r) => setSupNote(r.phone
+          ? 'Taken over — the call and script are in your agent portal. Switch to that tab.'
+          : 'Taken over — the script is in your agent portal. Switch to that tab.'))
+        .catch((e: Error) => setSupError(e.message))
+        .finally(() => setSupBusy(false))
+      return
+    }
+    // No portal open: open one inside the click (so the browser doesn't block it); it performs the
+    // take-over itself once its softphone registers.
+    window.open(`/agent?takeover=${agentId}`, 'cc-agent-portal')
+  }
+  function callAgent(agentId: string, name: string) {
+    setSupError(null)
+    if (!myRegistered) {
+      window.open(`/agent?callagent=${agentId}`, 'cc-agent-portal')   // inside the click — not blocked
+      return
+    }
+    setSupBusy(true)
+    supervisorApi.callAgent(agentId)
+      .then(() => setSupNote(`Calling ${name} from your agent portal's softphone…`))
+      .catch((e: Error) => setSupError(e.message))
+      .finally(() => setSupBusy(false))
+  }
+
+  useEffect(() => {
+    if (!supNote) return
+    const t = setTimeout(() => setSupNote(null), 10000)
+    return () => clearTimeout(t)
+  }, [supNote])
 
   async function unlock(agentId: string) {
     setUnlocking(agentId)
@@ -142,8 +208,29 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
 
   if (error) return <div className="text-xs text-red-400">{error}</div>
 
+  const monitorBar = monitoring && (
+    <div className="mb-2 rounded-lg bg-sky-950/50 border border-sky-800 px-2 py-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
+      <span className="text-sky-200 font-medium mr-1">🎧 {MONITOR_MODE_LABEL[monitoring.mode]} {monitoring.agentName}</span>
+      {(['listen', 'coach', 'barge'] as MonitorMode[]).map((m) => (
+        <button key={m} disabled={supBusy || monitoring.mode === m || (m === 'barge' && !canOverride)}
+          onClick={() => supervise(() => supervisorApi.setMode(m))}
+          className={`px-1.5 py-0.5 rounded ${monitoring.mode === m ? 'bg-sky-700 text-white' : 'text-sky-300 hover:bg-sky-900'} disabled:cursor-default`}>
+          {m === 'listen' ? 'Listen' : m === 'coach' ? 'Coach' : 'Barge'}
+        </button>
+      ))}
+      {canOverride && (
+        <button onClick={() => takeOver(monitoring.agentId)} className="px-1.5 py-0.5 rounded text-amber-300 hover:bg-amber-950">Take over</button>
+      )}
+      <button disabled={supBusy} onClick={() => supervise(async () => { await supervisorApi.stop(); setMonitoring(null) })}
+        className="ml-auto px-1.5 py-0.5 rounded text-gray-300 hover:bg-gray-800">End</button>
+    </div>
+  )
+
   return (
     <div className="h-full overflow-auto">
+      {monitorBar}
+      {supNote && <p className="text-[11px] text-sky-300 mb-1">{supNote}</p>}
+      {supError && <p className="text-[11px] text-red-400 mb-1">{supError} <button className="text-gray-500 hover:text-gray-300 ml-1" onClick={() => setSupError(null)}>✕</button></p>}
       <table className="w-full text-xs">
         <thead>
           <tr className="text-left text-gray-500 border-b border-gray-800">
@@ -158,6 +245,7 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
               Time<SortArrow active={sortColumn === 'time'} direction={sortDirection} />
             </th>
             {canOpenCalls && <th className="py-1 font-medium select-none" title="Open the call the agent's script is on — review, correct data, resubmit an order (new tab)">Call</th>}
+            {canMonitor && <th className="py-1 font-medium select-none" title="Monitor / Coach / Barge / Take over — your agent portal's softphone must be open">Supervise</th>}
           </tr>
         </thead>
         <tbody>
@@ -215,11 +303,43 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
                   ))}
                 </td>
               )}
+              {canMonitor && (
+                <td className="py-1.5 relative whitespace-nowrap">
+                  {r.agent_id !== myId && !r.on_live_call && r.registered && r.state_code !== 'logged_out' && (
+                    <button onClick={() => callAgent(r.agent_id, r.name)} disabled={supBusy}
+                      className="text-violet-300 hover:text-violet-200 disabled:opacity-50 mr-2"
+                      title={`Call ${r.name} (internal — QA review, training)${myRegistered ? '' : ' — opens your agent portal'}`}>
+                      📞
+                    </button>
+                  )}
+                  {r.agent_id !== myId && (r.on_live_call || (canOverride && (r.live_calls ?? []).length > 0)) && (
+                    <button onClick={() => setMenuFor(menuFor === r.agent_id ? null : r.agent_id)} disabled={supBusy}
+                      className="text-sky-400 hover:text-sky-300 disabled:opacity-50" title={r.on_live_call ? 'On a live call' : 'Script open (no phone call)'}>
+                      🎧 ▾
+                    </button>
+                  )}
+                  {menuFor === r.agent_id && (
+                    <div className="absolute right-0 top-full z-20 mt-1 w-40 bg-gray-800 border border-gray-700 rounded-lg shadow-xl overflow-hidden text-xs">
+                      {r.on_live_call && (
+                        <>
+                          <button className="w-full text-left px-3 py-1.5 hover:bg-gray-700 text-gray-200" onClick={() => supervise(() => supervisorApi.start(r.agent_id, 'listen'))}>Monitor <span className="text-gray-500">— listen only</span></button>
+                          <button className="w-full text-left px-3 py-1.5 hover:bg-gray-700 text-gray-200" onClick={() => supervise(() => supervisorApi.start(r.agent_id, 'coach'))}>Coach <span className="text-gray-500">— agent hears you</span></button>
+                          {canOverride && <button className="w-full text-left px-3 py-1.5 hover:bg-gray-700 text-gray-200" onClick={() => supervise(() => supervisorApi.start(r.agent_id, 'barge'))}>Barge in <span className="text-gray-500">— both hear you</span></button>}
+                        </>
+                      )}
+                      {canOverride && <button className="w-full text-left px-3 py-1.5 hover:bg-gray-700 text-amber-300 border-t border-gray-700" onClick={() => takeOver(r.agent_id)}>Take over…</button>}
+                      <p className="px-3 py-1.5 text-[10px] text-gray-500 border-t border-gray-700">
+                        {myRegistered ? 'Uses your open agent portal.' : 'Opens your agent portal (softphone needed for calls).'}
+                      </p>
+                    </div>
+                  )}
+                </td>
+              )}
             </tr>
           ))}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={canOpenCalls ? 5 : 4} className="py-4 text-center text-gray-600">No agents match this filter.</td>
+              <td colSpan={4 + (canOpenCalls ? 1 : 0) + (canMonitor ? 1 : 0)} className="py-4 text-center text-gray-600">No agents match this filter.</td>
             </tr>
           )}
         </tbody>

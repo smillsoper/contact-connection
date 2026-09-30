@@ -17,6 +17,8 @@ export interface AgentListRow {
   registered_since: string | null
   /** CRM scripts the agent has open right now (on a phone call or not), one per call record. */
   live_calls: { call_record_id: string; flow_name: string | null; started_at: string }[]
+  /** Bridged to a live caller right now — Monitor / Coach / Barge need one. */
+  on_live_call?: boolean
   /** Supervisor lock (Call Records "Finalize"). */
   status_locked?: boolean
   sign_in_locked?: boolean

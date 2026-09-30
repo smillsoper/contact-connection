@@ -176,6 +176,7 @@
 | 164 | 2026-09-28 | 10:26 AM PDT | 5:10 PM PDT | 404 min | ~18908 min |
 | 165 | 2026-09-29 | 12:55 PM PDT | 3:14 PM PDT | 139 min | ~19047 min |
 | 166 | 2026-09-29 | 3:21 PM PDT | 4:59 PM PDT | 98 min | ~19145 min |
+| 167 | 2026-09-29 | 5:08 PM PDT | 6:45 PM PDT | 97 min | ~19242 min |
 
 ---
 
@@ -10771,4 +10772,71 @@ Secure capture → re-authorize → resubmit with card release; the live-caller 
   finished script never creates/completes — check on a real call; affects reporting.
 - `cc_timesync` restart loop (stale chronyd pid) still open.
 - Next: Commissions; remaining Life Seasons scripts; export processes; SignalWire once reinstated.
+
+## Session 167
+
+**Date:** 2026-09-29
+**Start:** 5:08 PM PDT
+**End:** 6:45 PM PDT
+**Duration:** 97 minutes
+**Total Duration:** ~19242 minutes
+
+### Focus
+
+Supervisor tools on the dashboard Agent List (Stephen: "critical" before the remaining feature list):
+Monitor / Coach / Barge In / Take Over, and a direct supervisor → agent call. Plus a security fix
+found along the way.
+
+### Decisions (Stephen)
+
+Monitor/Coach = `supervisor.monitor`, Barge/Take Over = `supervisor.override`; Monitor is silent to the
+agent (QA); recording untouched (Coach/Barge audio stays the record of truth); after Take Over the call
+and commission stay with the original agent. Build now, verify live once a number exists.
+
+### Built
+
+- **Monitor / Coach / Barge** — the server rings the supervisor's own agent-portal softphone
+  (auto-answer) straight into FreeSWITCH `eavesdrop` on the agent's leg (`OriginateEavesdropAsync`);
+  one connection, modes switched with `uuid_recv_dtmf` (0 listen, 2 coach, 3 barge) — no tones heard.
+  Dashboard: 🎧 menu per agent + a mode bar (Listen / Coach / Barge / Take over / End); softphone
+  card shows who can hear you. Listen-ins audited on the call.
+- **Take Over** — supervisor leg originated + parked, caller re-bridged onto it, agent leg dropped
+  (`park_after_bridge` cleared); new ESL guards `_takeover_in_progress` (CHANNEL_UNBRIDGE) and
+  `_takeover_old_leg` (CHANNEL_HANGUP) keep the customer connected; CRM script moved to the supervisor
+  mid-step (`TakeOverSessionAsync`, `FlowSession.ReassignAgent`); agent → ACW, their tab closes
+  "taken over". Goes into the supervisor's already-open portal when registered, else pops one
+  (`/agent?takeover=`). Script-only take-over works without a call.
+- **📞 Call an agent** — internal supervisor → agent call (QA review, training):
+  `OriginateIntercomAsync` (supervisor auto-answers, agent rings with Answer/Decline), no call record,
+  both held "On Call - Supervisor call" and restored on hang-up (`intercom_leg:` key, registered before
+  dialing). **Stephen verified it working in the browser.**
+- Future (ARCHITECTURE §13 + memory): the Chrome extension raises the portal tab after a Take Over and
+  when the queue selects an agent for a call — built alongside screen recording.
+
+### Security
+
+- I accidentally printed the dev FreeSWITCH ESL password into the session (a redaction sed didn't
+  match). Investigating found it was a **literal in tracked `event_socket.conf.xml`, committed since
+  S80**. Now `$${esl_password}` from gitignored `vars_local.xml` (template documented); Stephen rotated
+  it; verified new accepted, old refused, API reconnected.
+- Static SIP users **1000/1001** on a committed `default_password` (domain 127.0.0.1, reachable on the
+  published SIP ports) removed from `directory/default.xml`, `default_password` dropped from vars.xml;
+  applied with `reloadxml` — gone, while tenant registrations (xml_curl) unaffected.
+
+### Verification
+
+Solution build clean (Worker included); **1322 tests pass** (Domain 204, Application 20,
+Infrastructure 986, Api 112) — new: take-over engine tests, MonitorModeTests. `tsc -b` clean.
+Dry run with a temporary agent (since deleted): script-only take-over moved the session with its data;
+refusals for no live call / barge without override / call self / unregistered agent / no permission.
+
+### Not verified (needs a live test number)
+
+Monitor / Coach / Barge audio and eavesdrop digit mapping; Take Over re-bridge keeping the caller,
+agent leg drop, agent → ACW.
+
+### Next
+
+Commissions; remaining Life Seasons scripts; export processes; SignalWire once reinstated (then the
+live verification list across S165–S167).
 

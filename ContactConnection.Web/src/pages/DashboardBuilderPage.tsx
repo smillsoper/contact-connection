@@ -171,6 +171,8 @@ export default function DashboardBuilderPage() {
       setLiveOfferEvent({ campaignId })
     })
 
+    connection.on('receiveMonitorEnded', () => window.dispatchEvent(new Event('cc:monitor-ended')))
+
     connection.on('receiveAgentSessionsChanged', (agentId: string) => {
       setLiveSessionsEvent({ agentId, at: Date.now() })
     })

@@ -1,8 +1,10 @@
 <include>
   <!--
-    SIP user directory — dev test extensions only.
-    Production agents authenticate via dynamic directory lookup; this file
-    provides two static extensions for local development and testing.
+    SIP user directory for the local domain ($${domain}). Intentionally holds no users:
+    every agent authenticates via the dynamic directory (mod_xml_curl -> the API's
+    /api/v1/freeswitch/directory, per-tenant a1-hash). The two static dev extensions that
+    used to live here (1000/1001 on a committed default_password) were removed in S167 —
+    they were reachable on the published SIP ports under the 127.0.0.1 domain.
   -->
   <domain name="$${domain}">
 
@@ -14,34 +16,5 @@
       <variable name="record_stereo"    value="true"/>
     </variables>
 
-    <groups>
-      <group name="default">
-        <users>
-
-          <user id="1000">
-            <params>
-              <param name="password"    value="$${default_password}"/>
-            </params>
-            <variables>
-              <variable name="user_context"                value="default"/>
-              <variable name="effective_caller_id_name"    value="Dev Agent 1000"/>
-              <variable name="effective_caller_id_number"  value="1000"/>
-            </variables>
-          </user>
-
-          <user id="1001">
-            <params>
-              <param name="password"    value="$${default_password}"/>
-            </params>
-            <variables>
-              <variable name="user_context"                value="default"/>
-              <variable name="effective_caller_id_name"    value="Dev Agent 1001"/>
-              <variable name="effective_caller_id_number"  value="1001"/>
-            </variables>
-          </user>
-
-        </users>
-      </group>
-    </groups>
   </domain>
 </include>

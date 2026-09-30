@@ -12,4 +12,12 @@
     `telnyx` gateway in sip_profiles/external.xml.
   -->
   <X-PRE-PROCESS cmd="set" data="telnyx_sip_password=REPLACE_WITH_TELNYX_SIP_CONNECTION_PASSWORD"/>
+
+  <!--
+    esl_password — the Event Socket password, referenced as $${esl_password} by
+    autoload_configs/event_socket.conf.xml. Must match the API/Worker's
+    FreeSWITCH:EslPassword (User Secrets locally, Key Vault FreeSWITCH--EslPassword
+    in production). Generate with: openssl rand -base64 24
+  -->
+  <X-PRE-PROCESS cmd="set" data="esl_password=REPLACE_WITH_ESL_PASSWORD"/>
 </include>

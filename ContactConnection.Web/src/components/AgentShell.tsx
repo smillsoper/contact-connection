@@ -1,4 +1,5 @@
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { supervisorApi } from '../api/supervisor'
 import { LOGIN_NOTICE_KEY } from '../api/agentLock'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
@@ -56,10 +57,52 @@ export default function AgentShell() {
     return () => window.removeEventListener('cc:force-signout', onForced)
   }, [clearAuth, clearSip, navigate])
 
+  // Supervisor Take Over (S167): the dashboard opens the portal as /agent?takeover=<agentId>. Once
+  // this window's softphone is registered (the call is about to be bridged to it), ask the server to
+  // move the call + script here. Script-only take-overs (no phone call) don't need the softphone,
+  // so give up waiting for registration after a few seconds and try anyway.
+  const registrationStatus = useSipStore((s) => s.registrationStatus)
+  const [takeOverNote, setTakeOverNote] = useState<string | null>(null)
+  const takeOverDone = useRef(false)
+  const [takeOverWaitOver, setTakeOverWaitOver] = useState(false)
+  useEffect(() => { const t = setTimeout(() => setTakeOverWaitOver(true), 6000); return () => clearTimeout(t) }, [])
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const agentId = params.get('takeover')
+    const callAgentId = params.get('callagent')
+    if ((!agentId && !callAgentId) || takeOverDone.current) return
+    if (callAgentId) {
+      // Supervisor → agent internal call: needs this window's softphone.
+      if (registrationStatus !== 'registered') return
+      takeOverDone.current = true
+      window.history.replaceState(null, '', '/agent')
+      supervisorApi.callAgent(callAgentId).catch((e: Error) => setTakeOverNote(`Call failed: ${e.message}`))
+      return
+    }
+    if (!agentId) return
+    if (registrationStatus !== 'registered' && !takeOverWaitOver) return
+    takeOverDone.current = true
+    window.history.replaceState(null, '', '/agent')
+    setTakeOverNote('Taking over the call…')
+    supervisorApi.takeOver(agentId)
+      .then((r) => setTakeOverNote(r.phone ? 'You have the call and the script.' : 'You have the script.'))
+      .catch((e: Error) => setTakeOverNote(`Take over failed: ${e.message}`))
+  }, [registrationStatus, takeOverWaitOver])
+  useEffect(() => {
+    if (!takeOverNote || takeOverNote.endsWith('…')) return
+    const t = setTimeout(() => setTakeOverNote(null), 8000)
+    return () => clearTimeout(t)
+  }, [takeOverNote])
+
   const { showWarning, secondsLeft, keepAlive } = useSessionTimeout(handleLogout)
 
   return (
     <div className="h-screen flex flex-col bg-gray-950 text-white overflow-hidden">
+      {takeOverNote && (
+        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-50 bg-sky-950/95 border border-sky-700 text-sky-100 text-sm rounded-lg px-4 py-2 shadow-lg">
+          {takeOverNote}
+        </div>
+      )}
       {showWarning && (
         <SessionTimeoutModal
           secondsLeft={secondsLeft}

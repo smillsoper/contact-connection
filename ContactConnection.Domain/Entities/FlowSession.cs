@@ -81,6 +81,13 @@ public class FlowSession
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    /// <summary>A supervisor took the call over (S167) — the script continues under their name.</summary>
+    public void ReassignAgent(Guid agentId)
+    {
+        AgentId = agentId;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
     public void Complete(string variableStore, string executionHistory)
     {
         Status = FlowSessionStatus.Complete;

@@ -1414,6 +1414,32 @@ public sealed class EslBackgroundService : BackgroundService
         // session may be keyed under this event's own uuid or its bridge partner's (see
         // ResolveSessionAsync). session.ChannelUuid (not the raw event uuid) is the correct key
         // for all session-store/CallRecord lookups below once a session is found.
+        // A supervisor → agent internal call ended (its supervisor leg is the handle; the agent leg
+        // ends with it). Give both their previous status back. No call session / record involved.
+        var intercomJson = await _sessionStore.GetKeyAsync(SupervisorCallService.IntercomLegKey(channelUuid), ct);
+        if (!string.IsNullOrEmpty(intercomJson))
+        {
+            await _sessionStore.DeleteKeyAsync(SupervisorCallService.IntercomLegKey(channelUuid), ct);
+            if (System.Text.Json.JsonSerializer.Deserialize<IntercomState>(intercomJson) is { } intercom)
+            {
+                try { await SupervisorCallService.EndIntercomAsync(intercom, _stateStore, _hub, ct); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Ending supervisor call {Uuid} failed", channelUuid); }
+            }
+            _logger.LogInformation("CHANNEL_HANGUP {Uuid}: supervisor → agent internal call ended", channelUuid);
+            return;
+        }
+
+        var monitorSupervisor = await _sessionStore.GetKeyAsync(SupervisorCallService.MonitorLegKey(channelUuid), ct);
+        if (!string.IsNullOrEmpty(monitorSupervisor))
+        {
+            await _sessionStore.DeleteKeyAsync(SupervisorCallService.MonitorLegKey(channelUuid), ct);
+            await _sessionStore.DeleteKeyAsync($"monitor:{monitorSupervisor}", ct);
+            _logger.LogInformation("CHANNEL_HANGUP {Uuid}: supervisor {Supervisor}'s listen-in ended", channelUuid, monitorSupervisor);
+            try { await _hub.Clients.Group($"agent:{monitorSupervisor}").ReceiveMonitorEnded(); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Monitor-ended push failed for {Supervisor}", monitorSupervisor); }
+            return;
+        }
+
         var session = await ResolveSessionAsync(channelUuid, vars, ct);
 
         // A secure_collect capture parks the agent leg solo (not bridged) — ResolveSessionAsync's
@@ -1490,6 +1516,18 @@ public sealed class EslBackgroundService : BackgroundService
                     "CHANNEL_HANGUP {Uuid} cause={Cause}: queue-callback placeholder kept in queue (position held)",
                     channelUuid, cause);
             }
+            return;
+        }
+
+        // Supervisor Take Over (S167): the agent's old leg was dropped on purpose after the caller was
+        // re-bridged to the supervisor — not the end of the call.
+        if (session is not null
+            && !string.IsNullOrEmpty(channelUuid)
+            && session.Vars.GetValueOrDefault("_takeover_old_leg") == channelUuid)
+        {
+            _logger.LogInformation(
+                "CHANNEL_HANGUP {Uuid} cause={Cause}: agent leg dropped by supervisor take-over — caller {Caller} stays up",
+                channelUuid, cause, session.ChannelUuid);
             return;
         }
 
@@ -1834,6 +1872,14 @@ public sealed class EslBackgroundService : BackgroundService
                 .EnsureBeepOnPeerAsync(uuid, other, esl, ct);
         }
 
+        // Supervisor Take Over: the caller is now on the supervisor's leg — later unbridges are real.
+        if (bridgeSession.Vars.GetValueOrDefault("_takeover_in_progress") == "true"
+            && bridgeSession.Vars.GetValueOrDefault("_takeover_new_leg") == other)
+        {
+            bridgeSession.Vars.Remove("_takeover_in_progress");
+            await _sessionStore.SaveAsync(bridgeSession, ct);
+        }
+
         // tf_transfer external_number connected — the outbound leg is now bridged to the caller, so
         // the transfer is no longer "in progress". Clearing this lets that outbound leg's eventual
         // CHANNEL_HANGUP complete the call normally instead of being read as a bridge failure.
@@ -2004,6 +2050,16 @@ public sealed class EslBackgroundService : BackgroundService
         {
             _logger.LogInformation(
                 "CHANNEL_UNBRIDGE {Uuid}: bridge torn down for a controlled secure-collect hold — leaving caller {SessionKeyUuid} parked",
+                uuid, session.ChannelUuid);
+            return;
+        }
+
+        // Supervisor Take Over (S167) re-bridges the caller onto the supervisor's leg — tearing down
+        // the agent bridge on purpose. Cleared on the new bridge (HandleChannelBridgeAsync).
+        if (session.Vars.GetValueOrDefault("_takeover_in_progress") == "true")
+        {
+            _logger.LogInformation(
+                "CHANNEL_UNBRIDGE {Uuid}: supervisor take-over re-bridge — leaving caller {SessionKeyUuid} up",
                 uuid, session.ChannelUuid);
             return;
         }

@@ -4,6 +4,9 @@ import { useAuthStore } from '../stores/authStore'
 import { useCallStore } from '../stores/callStore'
 import { useFlowSessionsStore, type FlowSessionEntry } from '../stores/flowSessionsStore'
 import { useAgentStateStore } from '../stores/agentStateStore'
+import { useSupervisorMonitorStore } from '../stores/supervisorMonitorStore'
+import { useIntercomStore } from '../stores/intercomStore'
+import type { MonitorMode } from '../api/supervisor'
 import { flowsApi, type AddressValidationResult, type ZipLookupResult, type AutocompleteSuggestion, type AutocompleteSelectionResult } from '../api/flows'
 import { api } from '../api/client'
 import type { FlowNodeState } from '../types/flow'
@@ -405,6 +408,23 @@ export default function FlowPanel() {
           initialNode:  node,
         })
       } catch { /* ignore malformed payload */ }
+    })
+
+    // Supervisor listen-in (S167): arm the softphone for the eavesdrop INVITE, or a mode switch.
+    connection.on('receiveSupervisorConnecting', (kind: string, label: string, mode: string) => {
+      if (kind === 'intercom') { useIntercomStore.getState().start(label, 'caller'); return }
+      if (kind === 'intercom-incoming') { useIntercomStore.getState().start(label, 'callee'); return }
+      const monitor = useSupervisorMonitorStore.getState()
+      if (kind === 'monitor') monitor.connecting(label, mode as MonitorMode)
+      else monitor.setMode(mode as MonitorMode)
+    })
+    connection.on('receiveIntercomEnded', () => {
+      window.dispatchEvent(new Event('cc:intercom-ended'))
+      useIntercomStore.getState().clear()
+    })
+    connection.on('receiveMonitorEnded', () => {
+      window.dispatchEvent(new Event('cc:monitor-ended'))
+      useSupervisorMonitorStore.getState().clear()
     })
 
     // Supervisor lock (Call Records "Finalize") — disable / re-enable the status picker.
