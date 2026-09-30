@@ -177,6 +177,7 @@
 | 165 | 2026-09-29 | 12:55 PM PDT | 3:14 PM PDT | 139 min | ~19047 min |
 | 166 | 2026-09-29 | 3:21 PM PDT | 4:59 PM PDT | 98 min | ~19145 min |
 | 167 | 2026-09-29 | 5:08 PM PDT | 6:45 PM PDT | 97 min | ~19242 min |
+| 168 | 2026-09-29 | 6:45 PM PDT | 7:53 PM PDT | 68 min | ~19310 min |
 
 ---
 
@@ -10839,4 +10840,58 @@ agent leg drop, agent → ACW.
 
 Commissions; remaining Life Seasons scripts; export processes; SignalWire once reinstated (then the
 live verification list across S165–S167).
+
+## Session 168
+
+**Date:** 2026-09-29
+**Start:** 6:45 PM PDT (started straight after S167 — Stephen checked the SignalWire case status)
+**End:** 7:53 PM PDT
+**Duration:** 68 minutes
+**Total Duration:** ~19310 minutes
+
+### Focus
+
+SignalWire account reinstated — set it up as the carrier and place the first live call since the
+Telnyx deactivation.
+
+### Done
+
+- Stephen topped up ($12, $5 minimum) and bought **+15416413898** and **+15416413945**, added to
+  NeuroQ - LF TV; verified his and William's cells as SignalWire verified numbers (Clint's next).
+- **SIP Credential** `contactconnection-fs` in Space call-center-solutions-llc (SIP domain
+  `call-center-solutions-llc-ccd6149a26e3.sip.signalwire.com`; the new UI calls endpoints "SIP
+  Credentials"): default caller ID/codecs, Call Handler **Passthrough (Allow dialing to PSTN)**.
+  Password generated straight into gitignored `vars_local.xml` + clipboard (never displayed). Both
+  numbers' inbound calls → the credential.
+- FreeSWITCH **`signalwire` gateway** (external profile, registers — dynamic home IP fine, OPTIONS
+  keepalive) → REGED / UP; applied with reloadxml + profile rescan (no restart).
+- **First call: dead air** — SIP trace showed SignalWire addresses the INVITE to our registration
+  (`gw+signalwire`), so `destination_number` = the credential name and `cc_did=contactconnection-fs`
+  ("no agent found for extension contactconnection-fs"); the dialed number is only in the **To**
+  header. Fix: new public-dialplan extension `inbound-to-cc-nanp-to-header` — when
+  destination_number isn't a phone number, route on `${sip_to_user}` (carrier-agnostic).
+- **Second call: success end to end** — DID resolved to NeuroQ - LF TV, the S163 "NeuroQ Inbound —
+  Parallel Queuing" flow ran live for the first time (ring loop), ring-all delivered to Stephen's
+  softphone, answered, script popped, dispositioned Junk → Test Call. Stephen then switched the
+  campaign to auto-answer best agent.
+
+### Found
+
+- **Real calls end "incomplete" too** (confirmed on this call): the CallInteraction stays "active"
+  with no disposition — nothing completes it at script end / hangup, and
+  `DeriveOverallStatus` needs a completed interaction. Every call would report incomplete — fix next.
+- Phone numbers: no remove / move-between-campaigns / bulk add (port-ins) in the portal; a typo
+  number **+15416416898** sits on NeuroQ - LF TV.
+- Direction (Stephen): Life Seasons wants off Dial800 (routing platform no longer needed); SignalWire
+  per-tenant Spaces + APIs for number management and per-tenant billing look promising — **research
+  its multi-tenant/billing model first** (direct vs roll-up billing, porting API, sub-space limits /
+  compliance) before planning; it's needed to charge tenants, including the first.
+
+### Next
+
+- Fix the CallInteraction completion ("incomplete" status).
+- Live verification: auto-answer best agent, Monitor/Coach/Barge, Take Over, Finalize live hang-up,
+  secure capture → re-auth → resubmit (needs Authorize.Net sandbox creds), outbound via SignalWire
+  (callback / transfer — Passthrough + caller ID), ACW multi-tab, pre-queue issue.
+- Phone number management (remove/archive, move, bulk import); SignalWire multi-tenancy research.
 

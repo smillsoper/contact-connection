@@ -664,6 +664,22 @@ testable now with two registered browsers, no carrier needed). Security: ESL pas
 tracked config into gitignored vars_local.xml and rotated; static SIP users 1000/1001 (committed
 default_password) removed from the FreeSWITCH directory.
 
+**Session 168 (2026-09-29): live on SignalWire.** SIP Credential `contactconnection-fs` + FreeSWITCH
+`signalwire` gateway (registered); numbers +15416413898 / +15416413945 on NeuroQ - LF TV. Dialed number
+arrives in the To header (registered trunk) — public dialplan now routes on `sip_to_user` when
+destination_number isn't a number. **First live call end to end** (parallel-queuing ring loop →
+ring-all → answer → script pop → disposition).
+
+- [ ] **Call interaction completion (added S168)** — real calls end "incomplete": the CallInteraction
+      stays "active"; complete it at script end / hangup so `DeriveOverallStatus` reports correctly.
+- [ ] **Phone number management (added S168)** — remove (hard delete if never used, else archive +
+      drop from routing), move between campaigns, bulk add / port-in import (paste/CSV, E.164
+      validation, cross-tenant duplicate check). Typo +15416416898 on NeuroQ - LF TV to remove.
+- [ ] **SignalWire multi-tenancy + tenant billing (added S168)** — Life Seasons is leaving Dial800;
+      research SignalWire's per-tenant Space model first (direct vs roll-up billing, porting API,
+      limits/compliance per space), then design per-tenant numbers, dynamic FreeSWITCH gateways
+      (credentials in Key Vault) and tenant billing. Needed to charge tenants, incl. the first.
+
 **Earlier next up (S165):** order-failure email link + name assignments in the V1 flow (Stephen); Commissions;
 remaining LS scripts; export processes; SignalWire once reinstated.
 

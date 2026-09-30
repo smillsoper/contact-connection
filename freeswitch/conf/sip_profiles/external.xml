@@ -78,5 +78,30 @@
       <param name="codec-prefs"        value="$${outbound_codec_prefs}"/>
       <param name="context"            value="public"/>
     </gateway>
+
+    <!--
+      SignalWire (S167, replacing the deactivated Telnyx account) — SIP Credential
+      "contactconnection-fs" in Space call-center-solutions-llc. FreeSWITCH registers
+      (so a dynamic home IP is fine); both numbers route to this credential, arriving
+      in the "public" context like Telnyx. Outbound: the credential's Call Handler is
+      "Passthrough (Allow dialing to PSTN)"; caller ID must be a SignalWire-owned
+      number. Password: $${signalwire_sip_password} in gitignored vars_local.xml.
+    -->
+    <gateway name="signalwire">
+      <param name="username"           value="contactconnection-fs"/>
+      <param name="password"           value="$${signalwire_sip_password}"/>
+      <param name="realm"              value="call-center-solutions-llc-ccd6149a26e3.sip.signalwire.com"/>
+      <param name="proxy"              value="call-center-solutions-llc-ccd6149a26e3.sip.signalwire.com"/>
+      <param name="from-domain"        value="call-center-solutions-llc-ccd6149a26e3.sip.signalwire.com"/>
+      <param name="register"           value="true"/>
+      <param name="register-transport" value="udp"/>
+      <param name="expire-seconds"     value="120"/>
+      <param name="retry-seconds"      value="30"/>
+      <!-- OPTIONS keepalive holds the home router's UDP NAT pinhole open (as for Telnyx). -->
+      <param name="ping"               value="25"/>
+      <param name="caller-id-in-from"  value="true"/>
+      <param name="codec-prefs"        value="$${outbound_codec_prefs}"/>
+      <param name="context"            value="public"/>
+    </gateway>
   </gateways>
 </profile>
