@@ -58,14 +58,21 @@ public static class OffersEndpoints
             req.MixMatchPriceBreaks,
             req.AllowPriceOverride);
 
-        if (req.ClientId.HasValue || req.CampaignId.HasValue)
-            offer.SetScope(req.ClientId, req.CampaignId);
+        if (req.ClientId.HasValue)
+        {
+            try { offer.SetScope(req.ClientId, req.CampaignIds); }
+            catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        }
 
         if (req.MixMatchCode is not null)
             offer.SetMixMatch(req.MixMatchCode, req.MixMatchPriceBreaks);
 
         if (!string.IsNullOrWhiteSpace(req.TaxCode))
             offer.SetTaxCode(req.TaxCode);
+
+        offer.SetSku(req.Sku);
+        if (req.Flags is { Count: > 0 })
+            offer.SetFlags(CleanFlags(req.Flags));
 
         if (req.IsUpsell)
             offer.SetUpsell(
@@ -130,9 +137,11 @@ public static class OffersEndpoints
     }
 
     // ── PUT /api/v1/offers/{id} ──────────────────────────────────────────────
-    // Covers the fields the admin Offer editor actually exposes: name, price/shipping, tax/
-    // shipping exemption, and scope. Advanced fields (QPB, MixMatch, AutoShip, personalization,
-    // upsell) are left untouched here — API-only for now, matching the create form's own scope.
+    // Covers the fields the admin Offer editor exposes: name, price/shipping, tax/shipping
+    // exemption, scope, and (S169, the fields Life Seasons' offers use) SKU override, AutoShip,
+    // upsell and flags. Those newer fields are optional on the request — omitted = left unchanged,
+    // so an older client can't wipe them. QPB, MixMatch, personalization, ship-to options and the
+    // campaign window stay API-only until a feature needs them.
 
     private static async Task<IResult> Update(
         Guid id,
@@ -165,8 +174,18 @@ public static class OffersEndpoints
             offer.AllowDeliveryMessage,
             offer.ShipMethods);
 
-        offer.SetScope(req.ClientId, req.CampaignId);
+        try { offer.SetScope(req.ClientId, req.CampaignIds); }
+        catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
         offer.SetTaxCode(req.TaxCode);
+
+        if (req.Sku is not null) offer.SetSku(req.Sku);
+        if (req.AutoShip is not null)
+            offer.SetAutoShip(req.AutoShip.Value, req.AutoShipOptional ?? offer.AutoShipOptional,
+                req.AutoShipIntervals?.Where(i => i.IntervalDays > 0).ToList() ?? offer.AutoShipIntervals);
+        if (req.Upsell is not null)
+            offer.SetUpsell(req.Upsell.IsUpsell, req.Upsell.UpsellQty, req.Upsell.UpsellQtyOfEntry,
+                req.Upsell.UpsellCommission, req.Upsell.UpsellClientAmount);
+        if (req.Flags is not null) offer.SetFlags(CleanFlags(req.Flags));
 
         await offers.SaveChangesAsync(ct);
         return Results.Ok(ToResponse(offer));
@@ -225,6 +244,12 @@ public static class OffersEndpoints
         return Results.Ok(list.Select(ToResponse));
     }
 
+    /// <summary>Drops blank flag names and trims — the editor sends whatever rows are on screen.</summary>
+    private static List<ProductFlag> CleanFlags(IEnumerable<ProductFlag> flags)
+        => flags.Where(f => !string.IsNullOrWhiteSpace(f.Name))
+                .Select(f => new ProductFlag(f.Name.Trim(), f.Value?.Trim() ?? ""))
+                .ToList();
+
     // ── Response shape ───────────────────────────────────────────────────────
 
     internal static object ToResponse(Offer o) => new
@@ -232,8 +257,10 @@ public static class OffersEndpoints
         o.Id,
         o.ProductId,
         o.Name,
+        o.Sku,
+        EffectiveSku = o.Product is null ? o.Sku : o.EffectiveSku,
         o.ClientId,
-        o.CampaignId,
+        o.CampaignIds,
         o.FullPrice,
         o.Shipping,
         o.TaxExempt,
@@ -290,7 +317,7 @@ public record CreateOfferRequest(
     bool ShippingExempt = false,
     bool AllowPriceOverride = false,
     Guid? ClientId = null,
-    Guid? CampaignId = null,
+    List<Guid>? CampaignIds = null,
     string? MixMatchCode = null,
     bool IsUpsell = false,
     int UpsellQty = 0,
@@ -311,7 +338,9 @@ public record CreateOfferRequest(
     List<AutoShipInterval>? AutoShipIntervals = null,
     List<ProductShipMethod>? ShipMethods = null,
     List<PersonalizationPrompt>? Personalization = null,
-    string? TaxCode = null);
+    string? TaxCode = null,
+    string? Sku = null,
+    List<ProductFlag>? Flags = null);
 
 public record UpdateOfferRequest(
     string Name,
@@ -320,5 +349,18 @@ public record UpdateOfferRequest(
     bool TaxExempt,
     bool ShippingExempt,
     Guid? ClientId,
-    Guid? CampaignId,
-    string? TaxCode = null);
+    List<Guid>? CampaignIds,
+    string? TaxCode = null,
+    string? Sku = null,
+    bool? AutoShip = null,
+    bool? AutoShipOptional = null,
+    List<AutoShipInterval>? AutoShipIntervals = null,
+    OfferUpsellRequest? Upsell = null,
+    List<ProductFlag>? Flags = null);
+
+public record OfferUpsellRequest(
+    bool IsUpsell,
+    int UpsellQty = 0,
+    int UpsellQtyOfEntry = 0,
+    decimal UpsellCommission = 0,
+    decimal UpsellClientAmount = 0);

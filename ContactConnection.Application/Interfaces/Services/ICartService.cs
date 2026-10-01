@@ -39,7 +39,10 @@ public interface ICartService
     ///
     /// Throws <see cref="InvalidOperationException"/> if the call record or offer doesn't exist.
     /// </summary>
-    Task<CartOperationResult> AddItemAsync(Guid callRecordId, Guid offerId, int quantity, CancellationToken ct = default);
+    /// <param name="enforceScope">True when a person picked the offer (agent cart, call review): an offer
+    /// scoped to a different client/campaign than the call's is refused. Flow nodes pass false — the flow
+    /// designer chose those offers deliberately.</param>
+    Task<CartOperationResult> AddItemAsync(Guid callRecordId, Guid offerId, int quantity, CancellationToken ct = default, bool enforceScope = false);
 
     /// <summary>
     /// Removes every existing line whose OfferId is in <paramref name="removeOfferIds"/> (0, 1, or

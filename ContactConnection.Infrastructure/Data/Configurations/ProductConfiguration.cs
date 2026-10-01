@@ -24,6 +24,8 @@ public class ProductConfiguration : IEntityTypeConfiguration<Product>
         builder.Property(p => p.Searchable).HasColumnName("searchable");
         builder.Property(p => p.ReportingOnly).HasColumnName("reporting_only");
         builder.Property(p => p.TaxCode).HasColumnName("tax_code").HasMaxLength(50);
+        builder.Property(p => p.ClientId).HasColumnName("client_id");
+        builder.Property(p => p.CampaignIds).HasColumnName("campaign_ids").IsRequired();   // uuid[]
         builder.Property(p => p.ParentProductId).HasColumnName("parent_product_id");
 
         // Physical
@@ -73,6 +75,7 @@ public class ProductConfiguration : IEntityTypeConfiguration<Product>
         // Indexes
         builder.HasIndex(p => p.Sku).IsUnique().HasDatabaseName("ix_products_sku");
         builder.HasIndex(p => p.ParentProductId).HasDatabaseName("ix_products_parent_product_id");
+        builder.HasIndex(p => p.ClientId).HasDatabaseName("ix_products_scope");
         builder.HasIndex(p => new { p.Searchable, p.InventoryStatus })
             .HasDatabaseName("ix_products_searchable_status");
 

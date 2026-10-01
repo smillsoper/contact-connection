@@ -23,7 +23,7 @@ public class OfferConfiguration : IEntityTypeConfiguration<Offer>
 
         // Scope — null = tenant-wide
         builder.Property(o => o.ClientId).HasColumnName("client_id");
-        builder.Property(o => o.CampaignId).HasColumnName("campaign_id");
+        builder.Property(o => o.CampaignIds).HasColumnName("campaign_ids").IsRequired();   // uuid[]
 
         // Pricing
         builder.Property(o => o.FullPrice).HasColumnName("full_price").HasColumnType("numeric(18,2)");
@@ -37,6 +37,7 @@ public class OfferConfiguration : IEntityTypeConfiguration<Offer>
         // Mix & match
         builder.Property(o => o.MixMatchCode).HasColumnName("mix_match_code").HasMaxLength(100);
         builder.Property(o => o.TaxCode).HasColumnName("tax_code").HasMaxLength(50);
+        builder.Property(o => o.Sku).HasColumnName("sku").HasMaxLength(100);
 
         // Upsell
         builder.Property(o => o.IsUpsell).HasColumnName("is_upsell");
@@ -118,7 +119,7 @@ public class OfferConfiguration : IEntityTypeConfiguration<Offer>
         builder.HasIndex(o => o.ProductId).HasDatabaseName("ix_offers_product_id");
         builder.HasIndex(o => o.MixMatchCode).HasDatabaseName("ix_offers_mix_match_code");
         builder.HasIndex(o => new { o.TenantId, o.IsActive }).HasDatabaseName("ix_offers_tenant_active");
-        builder.HasIndex(o => new { o.TenantId, o.ProductId, o.ClientId, o.CampaignId }).HasDatabaseName("ix_offers_scope");
+        builder.HasIndex(o => new { o.TenantId, o.ProductId, o.ClientId }).HasDatabaseName("ix_offers_scope");
 
         // FK — Product is configured from ProductConfiguration (cascade delete)
     }

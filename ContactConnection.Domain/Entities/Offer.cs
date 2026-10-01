@@ -23,15 +23,21 @@ public class Offer
     public Guid TenantId { get; private set; }
     public Guid ProductId { get; private set; }
 
-    // Scope — null/null = tenant-wide (the default, matching every offer created before this
-    // existed). A campaign-scoped offer must also carry its client. Mirrors CustomFieldDefinition's
-    // scope model, minus its "most specific wins" collapse — offers are meant to coexist (TV
-    // Special, Web Offer, Retention Offer can all be simultaneously valid), not resolve to one.
+    // Scope — no client = tenant-wide (the default, matching every offer created before this
+    // existed). CampaignIds narrows a client's offer to some of its campaigns (S169: e.g. NeuroQ offers
+    // on the NeuroQ scripts but not My Best Heart, same client); empty = all of the client's campaigns.
+    // Offers are meant to coexist (TV Special, Web Offer, Retention Offer all valid at once), not
+    // resolve to one — no "most specific wins".
     public Guid? ClientId { get; private set; }
-    public Guid? CampaignId { get; private set; }
+    public List<Guid> CampaignIds { get; private set; } = [];
 
     // Display
     public string Name { get; private set; } = "";  // e.g. "TV Special", "Web Offer", "Upsell"
+
+    /// <summary>SKU override (S169) — fulfillment houses often give each variant of a product its own
+    /// SKU (Life Seasons: "283-3-CTY-90" vs "283-3-OT-1" for the same item). Null = the product's SKU.
+    /// The cart line, order line, order API and tax request all carry <see cref="EffectiveSku"/>.</summary>
+    public string? Sku { get; private set; }
 
     // Pricing
     public decimal FullPrice { get; private set; }
@@ -181,15 +187,30 @@ public class Offer
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
-    public void SetScope(Guid? clientId, Guid? campaignId)
+    public void SetScope(Guid? clientId, IEnumerable<Guid>? campaignIds = null)
     {
-        if (campaignId.HasValue && !clientId.HasValue)
+        var campaigns = (campaignIds ?? []).Where(c => c != Guid.Empty).Distinct().ToList();
+        if (campaigns.Count > 0 && !clientId.HasValue)
             throw new ArgumentException("A campaign-scoped offer must also specify its client.", nameof(clientId));
 
-        ClientId   = clientId;
-        CampaignId = campaignId;
-        UpdatedAt  = DateTimeOffset.UtcNow;
+        ClientId    = clientId;
+        CampaignIds = campaigns;
+        UpdatedAt   = DateTimeOffset.UtcNow;
     }
+
+    /// <summary>Tenant-wide, or on this client and (no campaign list, or this campaign listed).</summary>
+    public bool AvailableFor(Guid? clientId, Guid? campaignId)
+        => (ClientId is null || ClientId == clientId)
+        && (CampaignIds.Count == 0 || (campaignId.HasValue && CampaignIds.Contains(campaignId.Value)));
+
+    public void SetSku(string? sku)
+    {
+        Sku       = string.IsNullOrWhiteSpace(sku) ? null : sku.Trim();
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>Offer SKU override, else the product's SKU (Product must be loaded).</summary>
+    public string EffectiveSku => Sku ?? Product?.Sku ?? "";
 
     public void SetTaxCode(string? taxCode)
     {

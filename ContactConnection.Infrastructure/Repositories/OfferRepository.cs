@@ -23,15 +23,17 @@ public class OfferRepository : IOfferRepository
 
     public Task<List<Offer>> GetByProductIdAsync(Guid productId, CancellationToken ct = default)
         => Ctx.Offers
+            .Include(o => o.Product)   // EffectiveSku in the response
             .Where(o => o.ProductId == productId)
             .OrderBy(o => o.Name)
             .ToListAsync(ct);
 
     public Task<List<Offer>> GetAvailableForContextAsync(Guid productId, Guid? clientId, Guid? campaignId, CancellationToken ct = default)
         => Ctx.Offers
+            .Include(o => o.Product)   // EffectiveSku in the response
             .Where(o => o.ProductId == productId
                 && (o.ClientId == null || o.ClientId == clientId)
-                && (o.CampaignId == null || o.CampaignId == campaignId))
+                && (o.CampaignIds.Count == 0 || (campaignId != null && o.CampaignIds.Contains(campaignId.Value))))
             .OrderBy(o => o.Name)
             .ToListAsync(ct);
 

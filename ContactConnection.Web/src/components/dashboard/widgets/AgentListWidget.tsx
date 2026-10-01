@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { dashboardWidgetsApi, type AgentListRow } from '../../../api/dashboardWidgets'
 import type { WidgetFilterConfig } from '../../../types/dashboard'
 import { useDashboardLiveAgentState, useDashboardLiveRegistration, useDashboardLiveAgentSessions } from '../DashboardLiveContext'
@@ -52,6 +53,27 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
   const [supBusy, setSupBusy] = useState(false)
   const [supError, setSupError] = useState<string | null>(null)
   const [menuFor, setMenuFor] = useState<string | null>(null)
+  // The Supervise menu renders in a portal at fixed coordinates under its button — inside the
+  // widget's scroll area it was clipped at the widget edge, hiding options (S169).
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!menuFor) return
+    const close = () => setMenuFor(null)
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement
+      if (menuRef.current?.contains(t) || t.closest('[data-supervise-toggle]')) return
+      close()
+    }
+    document.addEventListener('mousedown', onDown)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [menuFor])
   const [supNote, setSupNote] = useState<string | null>(null)
   // Is my own softphone (an open agent portal) registered? Kept live by the registration pushes.
   const [myRegistered, setMyRegistered] = useState(false)
@@ -313,13 +335,19 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
                     </button>
                   )}
                   {r.agent_id !== myId && (r.on_live_call || (canOverride && (r.live_calls ?? []).length > 0)) && (
-                    <button onClick={() => setMenuFor(menuFor === r.agent_id ? null : r.agent_id)} disabled={supBusy}
+                    <button data-supervise-toggle disabled={supBusy}
+                      onClick={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
+                        setMenuFor(menuFor === r.agent_id ? null : r.agent_id)
+                      }}
                       className="text-sky-400 hover:text-sky-300 disabled:opacity-50" title={r.on_live_call ? 'On a live call' : 'Script open (no phone call)'}>
                       🎧 ▾
                     </button>
                   )}
-                  {menuFor === r.agent_id && (
-                    <div className="absolute right-0 top-full z-20 mt-1 w-40 bg-gray-800 border border-gray-700 rounded-lg shadow-xl overflow-hidden text-xs">
+                  {menuFor === r.agent_id && menuPos && createPortal(
+                    <div ref={menuRef} style={{ top: menuPos.top, right: menuPos.right }}
+                      className="fixed z-50 w-52 whitespace-normal bg-gray-800 border border-gray-700 rounded-lg shadow-xl overflow-hidden text-xs">
                       {r.on_live_call && (
                         <>
                           <button className="w-full text-left px-3 py-1.5 hover:bg-gray-700 text-gray-200" onClick={() => supervise(() => supervisorApi.start(r.agent_id, 'listen'))}>Monitor <span className="text-gray-500">— listen only</span></button>
@@ -331,7 +359,8 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
                       <p className="px-3 py-1.5 text-[10px] text-gray-500 border-t border-gray-700">
                         {myRegistered ? 'Uses your open agent portal.' : 'Opens your agent portal (softphone needed for calls).'}
                       </p>
-                    </div>
+                    </div>,
+                    document.body,
                   )}
                 </td>
               )}

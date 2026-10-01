@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import AdminShell from '../../components/admin/AdminShell'
-import { productsApi, type ProductSearchResult, type ProductInventoryStatus } from '../../api/products'
+import { productsApi, type ProductSearchResult, type ProductInventoryStatus, type ProductSearchScope } from '../../api/products'
+import { listClients, type Client } from '../../api/telephony'
+import ScopePicker, { scopeLabel } from '../../components/admin/ScopePicker'
 
 const INVENTORY_STATUSES: ProductInventoryStatus[] = ['Available', 'CanBackorder', 'NoBackorder', 'OutOfStock', 'Discontinued']
 
@@ -21,14 +23,18 @@ interface EditorState {
   minimumQty: number
   searchable: boolean
   taxCode: string
+  clientId: string
+  campaignIds: string[]
 }
 
 function ProductEditorModal({
   product,
+  clients,
   onSave,
   onClose,
 }: {
   product: ProductSearchResult | null // null = new
+  clients: Client[]
   onSave: (sku: string, description: string, data: EditorState) => Promise<void>
   onClose: () => void
 }) {
@@ -43,6 +49,8 @@ function ProductEditorModal({
   const [minimumQty, setMinimumQty] = useState(product?.inventory.minimumQty ?? 0)
   const [searchable, setSearchable] = useState(product?.searchable ?? true)
   const [taxCode, setTaxCode] = useState(product?.taxCode ?? '')
+  const [clientId, setClientId] = useState(product?.clientId ?? '')
+  const [campaignIds, setCampaignIds] = useState<string[]>(product?.campaignIds ?? [])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -57,6 +65,7 @@ function ProductEditorModal({
     try {
       await onSave(sku.trim(), description.trim(), {
         weight, inventoryStatus, qtyAvailable, decrementOnOrder, minimumQty, searchable, taxCode: taxCode.trim(),
+        clientId, campaignIds,
       })
       onClose()
     } catch (e) {
@@ -133,6 +142,12 @@ function ProductEditorModal({
             </p>
           </div>
 
+          <ScopePicker
+            clients={clients} clientId={clientId} campaignIds={campaignIds}
+            onChange={(cl, ca) => { setClientId(cl); setCampaignIds(ca) }}
+            help="Keeps each client's catalog apart. Agents only see products that fit the call's client/campaign."
+          />
+
           <label className="flex items-center gap-3 cursor-pointer">
             <button
               type="button"
@@ -196,15 +211,28 @@ function ProductEditorModal({
   )
 }
 
+// Client filter: '' = all products, TENANT_WIDE = unscoped only, else a client id.
+const TENANT_WIDE = '__tenant__'
+
 export default function AdminProductsPage() {
   const [products, setProducts] = useState<ProductSearchResult[]>([])
+  const [clients, setClients] = useState<Client[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [editing, setEditing] = useState<ProductSearchResult | null | 'new'>(null)
+  const [query, setQuery] = useState('')
+  const [clientFilter, setClientFilter] = useState('')
+  const [campaignFilter, setCampaignFilter] = useState('')
+
+  useEffect(() => { listClients().then(setClients).catch(() => {}) }, [])
 
   async function load() {
+    const scope: ProductSearchScope = clientFilter === TENANT_WIDE
+      ? { tenantWideOnly: true }
+      : { clientId: clientFilter || undefined, campaignId: campaignFilter || undefined }
     try {
-      setProducts(await productsApi.search('', 1, 100, true))
+      setProducts(await productsApi.search(query.trim(), 1, 200, true, scope))
+      setError(null)
     } catch {
       setError('Failed to load products.')
     } finally {
@@ -212,7 +240,13 @@ export default function AdminProductsPage() {
     }
   }
 
-  useEffect(() => { load() }, [])
+  // Text search waits for a pause in typing; client/campaign changes reload right away.
+  useEffect(() => {
+    const t = setTimeout(load, query ? 300 : 0)
+    return () => clearTimeout(t)
+  }, [query, clientFilter, campaignFilter]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const filterClient = clients.find((c) => c.id === clientFilter)
 
   async function handleSave(sku: string, description: string, data: EditorState) {
     if (editing === 'new') {
@@ -222,6 +256,8 @@ export default function AdminProductsPage() {
         qtyAvailable: data.qtyAvailable,
         decrementOnOrder: data.decrementOnOrder,
         taxCode: data.taxCode || null,
+        clientId: data.clientId || null,
+        campaignIds: data.clientId ? data.campaignIds : [],
       })
     } else if (editing) {
       await productsApi.update(editing.id, {
@@ -232,6 +268,8 @@ export default function AdminProductsPage() {
         minimumQty: data.minimumQty,
         searchable: data.searchable,
         taxCode: data.taxCode || null,
+        clientId: data.clientId || null,
+        campaignIds: data.clientId ? data.campaignIds : [],
       })
     }
     await load()
@@ -257,12 +295,39 @@ export default function AdminProductsPage() {
           </button>
         </div>
 
+        <div className="flex flex-wrap gap-2 mb-4">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search name, SKU, offer name or offer SKU…"
+            className="flex-1 min-w-[14rem] bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm"
+          />
+          <select
+            value={clientFilter}
+            onChange={(e) => { setClientFilter(e.target.value); setCampaignFilter('') }}
+            className="bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm"
+          >
+            <option value="">All clients</option>
+            <option value={TENANT_WIDE}>Tenant-wide only</option>
+            {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <select
+            value={campaignFilter}
+            onChange={(e) => setCampaignFilter(e.target.value)}
+            disabled={!filterClient}
+            className="bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm disabled:opacity-50"
+          >
+            <option value="">All campaigns</option>
+            {filterClient?.campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+
         {error && <p className="text-red-400 text-sm mb-4">{error}</p>}
 
         {loading ? (
           <p className="text-gray-400">Loading…</p>
         ) : sorted.length === 0 ? (
-          <p className="text-gray-500 italic">No products yet.</p>
+          <p className="text-gray-500 italic">{query || clientFilter ? 'No products match these filters.' : 'No products yet.'}</p>
         ) : (
           <div className="space-y-3">
             {sorted.map((p) => (
@@ -278,6 +343,7 @@ export default function AdminProductsPage() {
                       <span className="text-xs bg-gray-700 text-gray-400 px-2 py-0.5 rounded-full">Not searchable</span>
                     )}
                   </div>
+                  <p className="text-xs text-gray-400 mt-1">{scopeLabel(p.clientId, p.campaignIds, clients)}</p>
                 </div>
                 <Link
                   to={`/admin/products/${p.id}/offers`}
@@ -300,6 +366,7 @@ export default function AdminProductsPage() {
       {editing !== null && (
         <ProductEditorModal
           product={editing === 'new' ? null : editing}
+          clients={clients}
           onSave={handleSave}
           onClose={() => setEditing(null)}
         />

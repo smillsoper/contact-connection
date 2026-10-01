@@ -51,13 +51,15 @@ public class CartService : ICartService
         return await ApplyAsync(record, newCart, ct);
     }
 
-    public async Task<CartOperationResult> AddItemAsync(Guid callRecordId, Guid offerId, int quantity, CancellationToken ct = default)
+    public async Task<CartOperationResult> AddItemAsync(Guid callRecordId, Guid offerId, int quantity, CancellationToken ct = default, bool enforceScope = false)
     {
         if (quantity < 1) throw new InvalidOperationException("Quantity must be at least 1.");
 
         var record = await LoadRecordAsync(callRecordId, ct);
         var offer = await _offers.GetByIdAsync(offerId, ct)
             ?? throw new InvalidOperationException($"Offer {offerId} not found");
+        if (enforceScope && !OfferFitsCall(offer, record))
+            throw new InvalidOperationException("This offer isn't available for this call's client/campaign.");
 
         var existingItems = record.Cart?.Items ?? [];
         var newItem = BuildPricedItem(offer, quantity, existingItems);
@@ -65,6 +67,12 @@ public class CartService : ICartService
         var newCart = (record.Cart ?? CartDocument.Empty()) with { Items = [.. existingItems, newItem] };
         return await ApplyAsync(record, newCart, ct);
     }
+
+    /// <summary>Same rule as IOfferRepository.GetAvailableForContextAsync: a tenant-wide offer fits any
+    /// call; a client-scoped offer only fits that client's calls, and only its listed campaigns if any.</summary>
+    internal static bool OfferFitsCall(Offer offer, CallRecord record)
+        => offer.AvailableFor(record.ClientId == Guid.Empty ? null : record.ClientId,
+                              record.CampaignId == Guid.Empty ? null : record.CampaignId);
 
     public async Task<CartOperationResult> ReplaceItemsAsync(Guid callRecordId, IReadOnlyList<Guid> removeOfferIds, Guid addOfferId, int quantity, CancellationToken ct = default)
     {
@@ -182,7 +190,7 @@ public class CartService : ICartService
         return new CartItem(
             OfferId: offer.Id,
             ProductId: offer.ProductId,
-            Sku: offer.Product.Sku,
+            Sku: offer.EffectiveSku,
             Description: offer.Product.Description,
             Quantity: quantity,
             FullPrice: offer.FullPrice,

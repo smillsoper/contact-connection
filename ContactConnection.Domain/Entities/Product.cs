@@ -28,6 +28,12 @@ public class Product
     // Variant — null for base products; set for size/color/etc. variants
     public Guid? ParentProductId { get; private set; }
 
+    // Scope (S169) — no client = tenant-wide. Lets a tenant with many clients keep each client's
+    // catalog apart (admin filters, and the agent's cart search only shows products that fit the
+    // call). CampaignIds narrows to some of the client's campaigns; empty = all. Same rule as Offer.
+    public Guid? ClientId { get; private set; }
+    public List<Guid> CampaignIds { get; private set; } = [];
+
     // Physical — used for shipping weight calculations
     public decimal Weight { get; private set; }
 
@@ -93,6 +99,17 @@ public class Product
             CreatedAt   = now,
             UpdatedAt   = now
         };
+    }
+
+    public void SetScope(Guid? clientId, IEnumerable<Guid>? campaignIds = null)
+    {
+        var campaigns = (campaignIds ?? []).Where(c => c != Guid.Empty).Distinct().ToList();
+        if (campaigns.Count > 0 && !clientId.HasValue)
+            throw new ArgumentException("A campaign-scoped product must also specify its client.", nameof(clientId));
+
+        ClientId    = clientId;
+        CampaignIds = campaigns;
+        UpdatedAt   = DateTimeOffset.UtcNow;
     }
 
     public void SetTaxCode(string? taxCode)

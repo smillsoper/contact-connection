@@ -30,7 +30,7 @@ export default function CartModal({ callRecordId, cart, onChanged, onClose }: Ca
     setError(null)
     setBusy(true)
     try {
-      const found = await productsApi.search(query.trim())
+      const found = await productsApi.search(query.trim(), 1, 50, false, { callRecordId })
       setResults(found)
       setSelectedProduct(null)
       setOffers([])
@@ -46,7 +46,7 @@ export default function CartModal({ callRecordId, cart, onChanged, onClose }: Ca
     setSelectedProduct(product)
     setAddQty(1)
     try {
-      setOffers(await offersApi.listByProduct(product.id))
+      setOffers(await offersApi.listForCall(callRecordId, product.id))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load offers for this product.')
     }
@@ -227,7 +227,7 @@ export default function CartModal({ callRecordId, cart, onChanged, onClose }: Ca
                     />
                   </div>
                   {offers.length === 0 ? (
-                    <p className="text-xs text-gray-500 italic">No active offers for this product.</p>
+                    <p className="text-xs text-gray-500 italic">No offers for this product on this call’s client/campaign.</p>
                   ) : (
                     offers.filter((o) => o.isActive).map((offer) => (
                       <button

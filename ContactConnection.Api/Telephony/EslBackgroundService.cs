@@ -1783,45 +1783,12 @@ public sealed class EslBackgroundService : BackgroundService
             if (assignedAgentIdStr is not null && Guid.TryParse(assignedAgentIdStr, out var assignedAgentId))
             {
                 var acwSeconds = campaign?.AfterCallWorkSeconds ?? 0;
-
-                if (acwSeconds > 0)
-                {
-                    var acwEndsAt = DateTimeOffset.UtcNow.AddSeconds(acwSeconds);
-                    await _stateStore.SetAsync(session.TenantId, assignedAgentId, session.TenantSchemaName,
-                        new AgentStateEntry(AgentStateCodes.Acw, "After Call Work", null, DateTimeOffset.UtcNow), ct);
-                    await _hub.Clients.Group($"agent:{assignedAgentId}")
-                        .ReceiveAgentStateChange(AgentStateCodes.Acw, "After Call Work", acwEndsAt.ToString("O"));
-                    _logger.LogInformation(
-                        "CHANNEL_HANGUP {Uuid}: agent {AgentId} → ACW for {Seconds}s", channelUuid, assignedAgentId, acwSeconds);
-
-                    // Fire-and-forget: after ACW expires, auto-transition to available
-                    // Only transitions if the agent hasn't manually changed state during ACW.
-                    var tenantId         = session.TenantId;
-                    var tenantSchemaName = session.TenantSchemaName;
-                    var hub              = _hub;
-                    var stateStore       = _stateStore;
-                    _ = Task.Run(async () =>
-                    {
-                        await Task.Delay(TimeSpan.FromSeconds(acwSeconds));
-                        var current = await stateStore.GetAsync(tenantId, assignedAgentId);
-                        if (current?.Code == AgentStateCodes.Acw)
-                        {
-                            await stateStore.SetAsync(tenantId, assignedAgentId, tenantSchemaName,
-                                new AgentStateEntry(AgentStateCodes.Available, "Available", null, DateTimeOffset.UtcNow));
-                            await hub.Clients.Group($"agent:{assignedAgentId}")
-                                .ReceiveAgentStateChange(AgentStateCodes.Available, "Available", null);
-                        }
-                    });
-                }
-                else
-                {
-                    await _stateStore.SetAsync(session.TenantId, assignedAgentId, session.TenantSchemaName,
-                        new AgentStateEntry(AgentStateCodes.Unavailable, "Unavailable", null, DateTimeOffset.UtcNow), ct);
-                    await _hub.Clients.Group($"agent:{assignedAgentId}")
-                        .ReceiveAgentStateChange(AgentStateCodes.Unavailable, "Unavailable", null);
-                    _logger.LogInformation(
-                        "CHANNEL_HANGUP {Uuid}: agent {AgentId} → unavailable (ACW=0)", channelUuid, assignedAgentId);
-                }
+                await AfterCallWork.StartAsync(_stateStore, _hub, session.TenantId, assignedAgentId,
+                    session.TenantSchemaName, acwSeconds, ct);
+                _logger.LogInformation(acwSeconds > 0
+                        ? "CHANNEL_HANGUP {Uuid}: agent {AgentId} → ACW for {Seconds}s"
+                        : "CHANNEL_HANGUP {Uuid}: agent {AgentId} → unavailable (ACW={Seconds})",
+                    channelUuid, assignedAgentId, acwSeconds);
             }
 
             return;

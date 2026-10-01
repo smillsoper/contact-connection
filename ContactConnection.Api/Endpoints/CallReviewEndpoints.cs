@@ -331,7 +331,7 @@ public static class CallReviewEndpoints
         Guid id, ReviewAddCartItemRequest req, HttpContext http, ICartService cart, ICallRecordRepository callRecords,
         ICallRecordAuditRepository audit, TenantContext tenantContext, CancellationToken ct) =>
         CartEdit(id, http, callRecords, audit, tenantContext,
-            () => cart.AddItemAsync(id, req.OfferId, req.Quantity, ct), $"Added offer to cart (qty {req.Quantity})",
+            () => cart.AddItemAsync(id, req.OfferId, req.Quantity, ct, enforceScope: true), $"Added offer to cart (qty {req.Quantity})",
             new { req.OfferId, req.Quantity }, ct);
 
     private static Task<IResult> UpdateCartItem(

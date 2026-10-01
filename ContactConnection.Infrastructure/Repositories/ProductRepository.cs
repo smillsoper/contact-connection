@@ -38,7 +38,8 @@ public class ProductRepository : IProductRepository
         IReadOnlyList<Guid>? attributeValueIds,
         int page, int pageSize,
         bool includeAll = false,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        ProductScopeFilter? scope = null)
     {
         var q = Ctx.Products
             .Include(p => p.Categories)
@@ -61,7 +62,28 @@ public class ProductRepository : IProductRepository
             q = q.Where(p =>
                 EF.Functions.ILike(p.Description, $"%{query}%") ||
                 EF.Functions.ILike(p.Sku, $"%{query}%") ||
-                p.Offers.Any(o => EF.Functions.ILike(o.Name, $"%{query}%")));
+                p.Offers.Any(o => EF.Functions.ILike(o.Name, $"%{query}%") || (o.Sku != null && EF.Functions.ILike(o.Sku, $"%{query}%"))));
+
+        if (scope is { ForCall: true })
+        {
+            var client = scope.ClientId;
+            var hasCampaign = scope.CampaignId.HasValue;
+            var campaign = scope.CampaignId ?? Guid.Empty;
+            q = q.Where(p => (p.ClientId == null || p.ClientId == client)
+                          && (p.CampaignIds.Count == 0 || (hasCampaign && p.CampaignIds.Contains(campaign)))
+                          && p.Offers.Any(o => o.IsActive
+                                && (o.ClientId == null || o.ClientId == client)
+                                && (o.CampaignIds.Count == 0 || (hasCampaign && o.CampaignIds.Contains(campaign)))));
+        }
+        else if (scope is { TenantWideOnly: true })
+            q = q.Where(p => p.ClientId == null);
+        else if (scope is not null)
+        {
+            if (scope.ClientId.HasValue) q = q.Where(p => p.ClientId == scope.ClientId);
+            // "Available in this campaign": no campaign list (all of the client's) or listed.
+            if (scope.CampaignId is { } campaign)
+                q = q.Where(p => p.CampaignIds.Count == 0 || p.CampaignIds.Contains(campaign));
+        }
 
         if (categoryId.HasValue)
             q = q.Where(p => p.Categories.Any(c => c.Id == categoryId.Value));

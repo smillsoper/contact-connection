@@ -1,7 +1,7 @@
 """Generate the NeuroQ - V1 CRM flow (draft) + Life Seasons catalog seed from the CRMPro sources.
 
 Outputs:
-  v1_seed.sql       — products/offers (15), custom field defs, the draft flow row (inactive)
+  v1_seed.sql       — 4 products + 15 offers (variant SKUs as offer SKU overrides), custom field defs, the draft flow row (inactive)
   v1_flow.json      — the flow definition (also exported to docs/integrations)
   v1_review.txt     — every node's label + plain text, for a quick human read-through
 
@@ -60,7 +60,14 @@ CATALOG = [
     ('307-1-OT-1', 'Sleep Now', 19.95, 0, 0, None),
 ]
 OFFER = {sku: uid(f'offer:{sku}') for sku, *_ in CATALOG}
-PRODUCT = {sku: uid(f'product:{sku}') for sku, *_ in CATALOG}
+# Physical products (S169): one per product family; each catalog row is an offer on its family's product,
+# carrying its variant SKU as the offer's SKU override.
+FAMILIES = {
+    '283': 'NeuroQ Memory & Focus',
+    '326': 'NeuroQ Memory & Focus + Matching DHA',
+    '303': 'NeuroQ Memory DHA-400',
+    '307': 'NeuroQ Sleep Now',
+}
 DESC = {sku: d for sku, d, *_ in CATALOG}
 
 # ── Script text ───────────────────────────────────────────────────────────────
@@ -511,12 +518,14 @@ def q(s): return 'NULL' if s is None else "'" + str(s).replace("'", "''") + "'"
 
 sql = [f"set search_path=tenant_test_tenant,public;", "begin;",
        f"create temp table t as select id as tenant_id from public.tenants where subdomain={q(TENANT_SUB)};"]
-for sku, desc, price, sh, days, cannella in CATALOG:
+# Products keyed by SKU (not a generated id) so re-running the seed never duplicates a family.
+for fam, fam_desc in FAMILIES.items():
     sql.append(f"""insert into products (id, tenant_id, sku, description, searchable, reporting_only, weight, canada_surcharge,
   akhi_surcharge, outlying_us_surcharge, foreign_surcharge, inventory_status, decrement_on_order, qty_available, minimum_qty,
-  qty_limit, qty_limit_exception, expected_quantity, alias_skus, keywords, created_at, updated_at, qty_reserved)
-select {q(PRODUCT[sku])}, tenant_id, {q(sku)}, {q(desc)}, true, false, 0, 0, 0, 0, 0, 'Available', false, 0, 0, 0, 0, 0,
-  '[]', '[]', now(), now(), 0 from t on conflict (id) do nothing;""")
+  qty_limit, qty_limit_exception, expected_quantity, alias_skus, keywords, created_at, updated_at, qty_reserved, client_id)
+select gen_random_uuid(), tenant_id, {q(fam)}, {q(fam_desc)}, true, false, 0, 0, 0, 0, 0, 'Available', false, 0, 0, 0, 0, 0,
+  '[]', '[]', now(), now(), 0, {q(CLIENT)} from t on conflict (sku) do nothing;""")
+for sku, desc, price, sh, days, cannella in CATALOG:
     payments = json.dumps([{'paymentNumber': 1, 'description': 'Full payment', 'amount': price, 'intervalDays': 0, 'paymentId': None}])
     intervals = json.dumps([{'intervalDays': days, 'autoShipId': None}] if days else [])
     flags = json.dumps([{'name': 'Cannella SKU', 'value': cannella}] if cannella else [])
@@ -524,10 +533,10 @@ select {q(PRODUCT[sku])}, tenant_id, {q(sku)}, {q(desc)}, true, false, 0, 0, 0, 
   shipping_exempt, is_upsell, upsell_qty, upsell_qty_of_entry, upsell_commission, upsell_client_amount, auto_ship,
   auto_ship_optional, allow_ship_to, ship_to_required, allow_delivery_message, ship_method_per_item, is_active, payments,
   quantity_price_breaks, mix_match_price_breaks, auto_ship_intervals, ship_methods, personalization, flags, created_at,
-  updated_at, campaign_id, client_id)
-select {q(OFFER[sku])}, tenant_id, {q(PRODUCT[sku])}, {q(desc)}, {price}, false, {sh}, false, {str(sh == 0).lower()},
+  updated_at, campaign_ids, client_id, sku)
+select {q(OFFER[sku])}, tenant_id, (select id from products where sku = {q(sku[:3])}), {q(desc)}, {price}, false, {sh}, false, {str(sh == 0).lower()},
   {str(sku[:3] in ('303', '307')).lower()}, 0, 0, 0, 0, {str(days > 0).lower()}, false, false, false, false, false, true,
-  {q(payments)}, '[]', '[]', {q(intervals)}, '[]', '[]', {q(flags)}, now(), now(), {q(CAMPAIGN)}, {q(CLIENT)}
+  {q(payments)}, '[]', '[]', {q(intervals)}, '[]', '[]', {q(flags)}, now(), now(), ARRAY[{q(CAMPAIGN)}]::uuid[], {q(CLIENT)}, {q(sku)}
 from t on conflict (id) do nothing;""")
 for defid, field, label in [(CF_REASON, 'disposition_reason', 'Disposition Reason'), (CF_SMS, 'sms_consent', 'SMS Consent')]:
     sql.append(f"""insert into custom_field_definitions (id, tenant_id, client_id, campaign_id, field_name, display_label,

@@ -294,10 +294,8 @@ public sealed class SupervisorCallService(
 
             // Agent → after-call work; supervisor → on the call.
             var campaign = call.CampaignId == Guid.Empty ? null : await campaigns.GetByIdAsync(call.CampaignId, ct);
-            var acwEnds = DateTimeOffset.UtcNow.AddSeconds(campaign?.AfterCallWorkSeconds ?? 30);
-            await agentStates.SetAsync(tenant.Id, agentId, tenant.SchemaName,
-                new AgentStateEntry(AgentStateCodes.Acw, "After Call Work", null, DateTimeOffset.UtcNow), ct);
-            await hub.Clients.Group($"agent:{agentId}").ReceiveAgentStateChange(AgentStateCodes.Acw, "After Call Work", acwEnds.ToString("O"));
+            await AfterCallWork.StartAsync(agentStates, hub, tenant.Id, agentId, tenant.SchemaName,
+                campaign?.AfterCallWorkSeconds ?? 30, ct);
             await agentStates.SetAsync(tenant.Id, supervisor.Id, tenant.SchemaName,
                 new AgentStateEntry(AgentStateCodes.OnCall, "On Call", null, DateTimeOffset.UtcNow), ct);
             await hub.Clients.Group($"agent:{supervisor.Id}").ReceiveAgentStateChange(AgentStateCodes.OnCall, "On Call", null);

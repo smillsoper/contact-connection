@@ -19,6 +19,7 @@ public static class CallRecordsEndpoints
         group.MapPost("manual", CreateManual);
         group.MapGet("{id:guid}", GetById);
         group.MapGet("{id:guid}/cart", GetCart);
+        group.MapGet("{id:guid}/offers", GetOffersForCall);
         // Changes made from the agent's screen outside a flow step — an open Call Records page for
         // the call refreshes after each successful one (S165).
         group.MapPut("{id:guid}/cart", SetCart).AddEndpointFilter(NotifyCallChanged);
@@ -110,6 +111,24 @@ public static class CallRecordsEndpoints
         await callRecords.SaveChangesAsync(ct);
 
         return Results.Created($"/api/v1/call-records/{record.Id}", new { id = record.Id });
+    }
+
+    // ── GET /api/v1/call-records/{id}/offers?productId= ─────────────────────
+    // A product's offers that fit this call: tenant-wide ones plus those scoped to the call's client /
+    // campaign (S169 — the agent's cart search showed every client's offers). Same shape as
+    // GET /offers/product/{productId}.
+
+    private static async Task<IResult> GetOffersForCall(
+        Guid id, Guid productId, ICallRecordRepository callRecords, IOfferRepository offers,
+        TenantContext tenantContext, CancellationToken ct)
+    {
+        if (!tenantContext.HasTenant) return Results.Unauthorized();
+        var record = await callRecords.GetByIdAsync(id, ct);
+        if (record is null) return Results.NotFound();
+        var list = await offers.GetAvailableForContextAsync(productId,
+            record.ClientId == Guid.Empty ? null : record.ClientId,
+            record.CampaignId == Guid.Empty ? null : record.CampaignId, ct);
+        return Results.Ok(list.Select(OffersEndpoints.ToResponse));
     }
 
     // ── POST /api/v1/call-records/{id}/end ─────────────────────────────────
@@ -246,7 +265,7 @@ public static class CallRecordsEndpoints
 
         try
         {
-            var result = await cart.AddItemAsync(id, request.OfferId, request.Quantity, ct);
+            var result = await cart.AddItemAsync(id, request.OfferId, request.Quantity, ct, enforceScope: true);
             return CartResult(result);
         }
         catch (InvalidOperationException ex)
