@@ -131,6 +131,19 @@ services:
     # 88 (2026-08-25) from `docker logs cc_cloudflared`. HTTP/2 (TCP) transport handles idle/NAT
     # timeouts far more gracefully than QUIC on this kind of host networking setup.
 
+  # TURN relay for agent softphones (S171) — see coturn/turnserver.conf. Only 3478 is published;
+  # relay ports stay on the Docker network (it only relays to FreeSWITCH there). Secret from .env.
+  coturn:
+    image: coturn/coturn:4.6.3
+    container_name: cc_coturn
+    restart: unless-stopped
+    command: ["-c", "/etc/coturn/turnserver.conf", "--static-auth-secret=${TURN_STATIC_AUTH_SECRET}"]
+    volumes:
+      - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+
 volumes:
   cc_pgdata:
   cc_redisdata:

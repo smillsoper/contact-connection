@@ -329,6 +329,29 @@ export default function FlowPanel() {
   const [selectedFlowId, setSelectedFlowId] = useState('')
   const [starting, setStarting] = useState(false)
 
+  // Reopen the agent's still-open scripts on load (S171): a reload, a dropped connection or a crashed
+  // browser no longer loses a script mid-call. Each comes back on the step the agent was on — they can
+  // carry on with the caller, or finish the record if the caller is gone. addSession is idempotent,
+  // so a tab that's already open (or a double-run effect) is never duplicated.
+  const [restoredCount, setRestoredCount] = useState(0)
+  useEffect(() => {
+    let cancelled = false
+    flowsApi.mySessions().then((states) => {
+      if (cancelled || states.length === 0) return
+      const open = new Set(useFlowSessionsStore.getState().sessions.map((x) => x.id))
+      const fresh = states.filter((st) => !open.has(st.sessionId))
+      for (const st of fresh)
+        addSession({ id: st.sessionId, label: st.flowName ?? 'Script Flow', sessionId: st.sessionId, callRecordId: st.callRecordId, initialNode: st })
+      if (fresh.length > 0) setRestoredCount(fresh.length)
+    }).catch(() => { /* not fatal — the agent can still work; nothing to restore */ })
+    return () => { cancelled = true }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!restoredCount) return
+    const t = setTimeout(() => setRestoredCount(0), 8000)
+    return () => clearTimeout(t)
+  }, [restoredCount])
+
   // Keep useCallStore.callRecordId in sync with whichever flow tab is actually active — with 2+
   // tabs open (a manual preview alongside a real bridged call's script-pop, or several bridged
   // calls in sequence), each tab's own callRecordId can differ, and call-scoped UI (the cart strip)
@@ -338,6 +361,17 @@ export default function FlowPanel() {
     const active = sessions.find((s) => s.id === activeSessionId)
     if (active) setCallRecordId(active.callRecordId)
   }, [activeSessionId, sessions, setCallRecordId])
+
+  // A call hanging up runs the softphone's reset(), which clears callRecordId — but the script tab is
+  // still open (the agent finishes it in ACW), so the cart strip went blank until the agent switched
+  // tabs (S170). Put the active tab's call back once the softphone is idle again. Only while idle and
+  // only when cleared: a new call sets/clears callRecordId itself (queued, auto-connecting, ringing,
+  // dialing), so this never overrides a live call's id.
+  useEffect(() => {
+    if (callRecordId || callStatus !== 'idle') return
+    const active = sessions.find((s) => s.id === activeSessionId)
+    if (active?.callRecordId) setCallRecordId(active.callRecordId)
+  }, [callRecordId, callStatus, activeSessionId, sessions, setCallRecordId])
 
   // CRM script flows only — a telephony flow needs a real call on the line, so it can't be
   // started from this manual test toolbar.
@@ -549,6 +583,15 @@ export default function FlowPanel() {
           >
             {starting ? 'Starting…' : 'Start'}
           </button>
+        </div>
+      )}
+
+      {restoredCount > 0 && (
+        <div className="mx-3 mt-2 rounded-lg border border-sky-800 bg-sky-950/50 px-3 py-1.5 text-xs text-sky-200 flex items-center gap-2">
+          <span className="flex-1">
+            Reopened {restoredCount === 1 ? 'the script' : `${restoredCount} scripts`} you had open — each is on the step you left it.
+          </span>
+          <button onClick={() => setRestoredCount(0)} className="text-sky-300 hover:text-white">✕</button>
         </div>
       )}
 

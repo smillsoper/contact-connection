@@ -372,7 +372,7 @@ public sealed class EslClient(ILogger<EslClient>? logger = null, IConfiguration?
         var safeLabel = new string(label.Where(char.IsLetterOrDigit).ToArray());
         if (safeLabel.Length == 0) safeLabel = "Monitor";
         var vars = $"{{origination_uuid={legUuid},originate_timeout=30,sip_auto_answer=true," +
-                   $"sip_h_Alert-Info=answer-after=0,eavesdrop_enable_dtmf=true," +
+                   $"sip_h_Alert-Info=answer-after=0,sip_h_X-CC-Leg=monitor,eavesdrop_enable_dtmf=true," +
                    $"origination_caller_id_number=monitor,origination_caller_id_name={safeLabel}}}";
         var response = await SendApiBodyAsync($"originate {vars}{contact} &eavesdrop({targetUuid})", ct);
         if (response?.StartsWith("+OK") == true) return (legUuid, null);
@@ -396,10 +396,12 @@ public sealed class EslClient(ILogger<EslClient>? logger = null, IConfiguration?
             return t.Length == 0 ? fallback : t;
         }
         // A-leg: the supervisor (auto-answer). B-leg: the agent, ringing normally, shown who's calling.
-        var aVars = $"{{origination_uuid={legUuid},originate_timeout=30,sip_auto_answer=true,sip_h_Alert-Info=answer-after=0," +
+        // X-CC-Leg labels each INVITE so the softphone knows what it is from the call itself — it can
+        // arrive before the ReceiveSupervisorConnecting push that used to be the only signal (S171).
+        var aVars = $"{{origination_uuid={legUuid},originate_timeout=30,sip_auto_answer=true,sip_h_Alert-Info=answer-after=0,sip_h_X-CC-Leg=intercom-caller," +
                     $"origination_caller_id_number={agentExtension},origination_caller_id_name={Safe(agentLabel, "Agent")}}}";
         var bVars = $"{{origination_caller_id_number={supervisorExtension},origination_caller_id_name={Safe(supervisorLabel, "Supervisor")}," +
-                    $"call_timeout=30,cc_intercom=true}}";
+                    $"call_timeout=30,cc_intercom=true,sip_h_X-CC-Leg=intercom-callee}}";
         var response = await SendApiBodyAsync($"originate {aVars}{supContact} &bridge({bVars}{agentContact})", ct);
         if (response?.StartsWith("+OK") == true) return (legUuid, null);
 

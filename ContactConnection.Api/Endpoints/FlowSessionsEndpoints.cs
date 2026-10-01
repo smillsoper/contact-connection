@@ -45,6 +45,28 @@ public static class FlowSessionsEndpoints
             }
         });
 
+        // The signed-in agent's still-open scripts (S171) — the agent portal reopens them on load, so a
+        // reload or dropped connection doesn't lose a script mid-call. Each comes back on the step the
+        // agent was on. Window = the 12h a live session is kept; sessions taken over by a supervisor
+        // belong to the supervisor now, so they don't come back here.
+        group.MapGet("/mine", async (
+            IFlowEngine engine,
+            IFlowSessionRepository sessions,
+            TenantContext tenantContext,
+            HttpContext http,
+            CancellationToken ct) =>
+        {
+            if (tenantContext.Current is null) return Results.Unauthorized();
+            if (!Guid.TryParse(http.User.FindFirst("sub")?.Value, out var agentId)) return Results.Unauthorized();
+
+            var open = await sessions.GetActiveForAgentsAsync([agentId], DateTimeOffset.UtcNow.AddHours(-12), ct);
+            var states = new List<FlowNodeState>();
+            foreach (var s in open)
+                if (await engine.GetCurrentStateAsync(s.Id, ct) is { } state)
+                    states.Add(state);
+            return Results.Ok(states);
+        });
+
         // Get current node state for an active session (reconnect / refresh)
         group.MapGet("/{id:guid}", async (
             Guid id,

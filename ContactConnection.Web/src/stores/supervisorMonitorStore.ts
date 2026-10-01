@@ -14,8 +14,12 @@ interface SupervisorMonitorStore {
 
 export const useSupervisorMonitorStore = create<SupervisorMonitorStore>((set) => ({
   monitor: null,
-  connecting: (agentName, mode) => set({ monitor: { agentName, mode, status: 'connecting' } }),
-  connected: () => set((s) => (s.monitor ? { monitor: { ...s.monitor, status: 'connected' } } : s)),
+  // The listen-in INVITE can be answered before this push arrives (S171) — don't knock a connected
+  // monitor back to 'connecting' (that would re-arm the softphone for a call that already came).
+  connecting: (agentName, mode) => set((s) => (s.monitor?.status === 'connected'
+    ? { monitor: { ...s.monitor, agentName, mode } }
+    : { monitor: { agentName, mode, status: 'connecting' } })),
+  connected: () => set((s) => ({ monitor: s.monitor ? { ...s.monitor, status: 'connected' } : { agentName: '', mode: 'listen', status: 'connected' } })),
   setMode: (mode) => set((s) => (s.monitor ? { monitor: { ...s.monitor, mode } } : s)),
   clear: () => set({ monitor: null }),
 }))

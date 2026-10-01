@@ -236,6 +236,8 @@ public class FlowEngine : IFlowEngine
 
         if (ReferencesCart(node)) await RefreshCartVarsAsync(ctx, ct);
         var result = await handler.ExecuteAsync(node, ctx, agentInput: null, agentTransition: "default", ct);
+        // The tab label when the agent portal reopens this script (S171) — same as the script pop's.
+        result.State.FlowName ??= (await _flows.GetByIdAsync(ctx.FlowId, ct))?.Name;
         return result.State;
     }
 

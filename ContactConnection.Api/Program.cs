@@ -207,6 +207,7 @@ app.MapCallReviewEndpoints();
 app.MapAgentLockEndpoints();
 app.MapSupervisorEndpoints();
 app.MapCampaignCredentialsEndpoints();
+app.MapSoftphoneEndpoints();
 app.MapCallRecordingsEndpoints();
 app.MapScreenRecordingsEndpoints();
 app.MapVoicemailsEndpoints();

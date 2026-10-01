@@ -144,6 +144,9 @@ export const flowsApi = {
   getSession: (sessionId: string) =>
     api.get<FlowNodeState>(`/api/v1/flow-sessions/${sessionId}`),
 
+  /** The signed-in agent's still-open scripts, each on its current step — reopened on portal load (S171). */
+  mySessions: () => api.get<FlowNodeState[]>('/api/v1/flow-sessions/mine'),
+
   advance: (sessionId: string, req: AdvanceSessionRequest) =>
     api.post<FlowNodeState>(`/api/v1/flow-sessions/${sessionId}/advance`, req),
 

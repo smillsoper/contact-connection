@@ -24,12 +24,16 @@ export const useFlowSessionsStore = create<FlowSessionsState>((set) => ({
   sessions: [],
   activeSessionId: null,
 
+  // Idempotent (S171): adding a tab that's already open just switches to it — a script pop for a
+  // session the portal already restored (or a double-run effect) never makes a duplicate tab.
   addSession: (entry) =>
-    set((s) => ({
-      sessions: [...s.sessions, entry],
-      // Auto-switch to new tab
-      activeSessionId: entry.id,
-    })),
+    set((s) => s.sessions.some((x) => x.id === entry.id)
+      ? { activeSessionId: entry.id }
+      : {
+          sessions: [...s.sessions, entry],
+          // Auto-switch to new tab
+          activeSessionId: entry.id,
+        }),
 
   removeSession: (id) =>
     set((s) => {

@@ -14,6 +14,7 @@ import { supervisorApi, MONITOR_MODE_LABEL } from '../api/supervisor'
 import AudioSettingsPanel from './AudioSettingsPanel'
 import { applySpeaker, getInputDeviceId, micConstraints, onAudioDevicesChanged } from '../utils/audioDevices'
 import { startRinging } from '../utils/ringtone'
+import { loadIceServers, rtcConfig } from '../utils/iceServers'
 
 // Local dev: connect directly to FreeSWITCH (no cert required, no tunnel overhead).
 // External: VITE_SIP_WS_URL must be set to the production WSS endpoint (e.g. the
@@ -230,7 +231,7 @@ export default function SoftphonePanel() {
     return () => window.removeEventListener('cc:intercom-ended', onEnded)
   }, [])
   function answerIntercom() {
-    try { intercomSessionRef.current?.answer({ mediaConstraints: micConstraints(), pcConfig: { iceServers: [] } }) } catch { /* ignore */ }
+    try { intercomSessionRef.current?.answer({ mediaConstraints: micConstraints(), pcConfig: rtcConfig() }) } catch { /* ignore */ }
   }
   function endIntercom() {
     try { intercomSessionRef.current?.terminate() } catch { /* already gone */ }
@@ -332,8 +333,33 @@ export default function SoftphonePanel() {
     ua.on('registrationFailed', () => { if (firstRegistration) setRegistrationStatus('failed'); else startGrace('failed') })
 
     ua.on('newRTCSession', ({ session }: { session: any }) => {
+      // Bounded ICE gathering (S171). JsSIP sends its offer/answer only once the browser has finished
+      // gathering every candidate — with TURN configured, Chrome tries the relay from every network
+      // adapter (Docker/WSL virtual adapters, IPv6…), and the unreachable ones take tens of seconds to
+      // time out. The supervisor's auto-answer then stalled past FreeSWITCH's 30 s ring timeout. Go as
+      // soon as a relay candidate exists (it works from anywhere), else 1.5 s after the first candidate.
+      let iceTimer: ReturnType<typeof setTimeout> | null = null
+      session.on('icecandidate', (e: { candidate: RTCIceCandidate; ready: () => void }) => {
+        if (/ typ relay /.test(e.candidate?.candidate ?? '')) {
+          if (iceTimer) clearTimeout(iceTimer)
+          e.ready()
+          return
+        }
+        iceTimer ??= setTimeout(() => e.ready(), 1500)
+      })
+      const clearIceTimer = () => { if (iceTimer) clearTimeout(iceTimer) }
+      session.on('ended', clearIceTimer)
+      session.on('failed', clearIceTimer)
+
+      // What the server says this INVITE is (S171): FreeSWITCH labels supervisor-tool legs with an
+      // X-CC-Leg header, so they're recognised even when the INVITE beats the SignalR push that arms
+      // the softphone (it often did — the supervisor's leg then rang instead of auto-answering).
+      const ccLeg: string | undefined = session.direction === 'incoming'
+        ? session.request?.getHeader?.('X-CC-Leg') || undefined
+        : undefined
+
       // Supervisor listen-in: the server's eavesdrop INVITE, armed by ReceiveSupervisorConnecting.
-      if (session.direction === 'incoming' && monitorPendingRef.current) {
+      if (session.direction === 'incoming' && (ccLeg === 'monitor' || monitorPendingRef.current)) {
         monitorPendingRef.current = false
         monitorSessionRef.current = session
         const wireMonitor = (pc: RTCPeerConnection) => pc.addEventListener('track', (e: RTCTrackEvent) => {
@@ -351,15 +377,19 @@ export default function SoftphonePanel() {
         session.on('accepted', () => useSupervisorMonitorStore.getState().connected())
         session.on('ended', done)
         session.on('failed', done)
-        try { session.answer({ mediaConstraints: micConstraints(), pcConfig: { iceServers: [] } }) } catch { /* ignore */ }
+        try { session.answer({ mediaConstraints: micConstraints(), pcConfig: rtcConfig() }) } catch { /* ignore */ }
         return
       }
 
-      // Supervisor ↔ agent internal call, armed by ReceiveSupervisorConnecting('intercom…').
-      if (session.direction === 'incoming' && intercomPendingRef.current) {
-        const role = intercomPendingRef.current
+      // Supervisor ↔ agent internal call — labelled by X-CC-Leg, or armed by ReceiveSupervisorConnecting('intercom…').
+      const intercomRole: 'caller' | 'callee' | null =
+        ccLeg === 'intercom-caller' ? 'caller' : ccLeg === 'intercom-callee' ? 'callee' : intercomPendingRef.current
+      if (session.direction === 'incoming' && intercomRole) {
+        const role = intercomRole
         intercomPendingRef.current = null
         intercomSessionRef.current = session
+        // The push may not have arrived yet — make sure the call exists in the store for the UI.
+        if (!useIntercomStore.getState().call) useIntercomStore.getState().begin(role, 'connecting')
         const wireIntercom = (pc: RTCPeerConnection) => pc.addEventListener('track', (e: RTCTrackEvent) => {
           if (intercomAudioRef.current && e.streams[0]) {
             intercomAudioRef.current.srcObject = e.streams[0]
@@ -376,7 +406,7 @@ export default function SoftphonePanel() {
         session.on('ended', done)
         session.on('failed', done)
         if (role === 'caller') {
-          try { session.answer({ mediaConstraints: micConstraints(), pcConfig: { iceServers: [] } }) } catch { /* ignore */ }
+          try { session.answer({ mediaConstraints: micConstraints(), pcConfig: rtcConfig() }) } catch { /* ignore */ }
         } else {
           useIntercomStore.getState().setStatus('ringing')   // the agent chooses Answer / Decline
         }
@@ -444,7 +474,7 @@ export default function SoftphonePanel() {
             // This INVITE was triggered by our own Pick Up bridge request — answer immediately.
             autoAnswerBridgeRef.current = false
             try {
-              session.answer({ mediaConstraints: micConstraints(), pcConfig: { iceServers: [] } })
+              session.answer({ mediaConstraints: micConstraints(), pcConfig: rtcConfig() })
             } catch {
               // ignore
             }
@@ -466,6 +496,7 @@ export default function SoftphonePanel() {
     })
 
     setRegistrationStatus('registering')
+    void loadIceServers()   // TURN relay credentials (S171) — ready well before the first call
     ua.start()
     uaRef.current = ua
 
@@ -506,7 +537,7 @@ export default function SoftphonePanel() {
         if (rec.campaignId) setCampaignId(rec.campaignId)
       } catch {}
     }
-    session.answer({ mediaConstraints: micConstraints(), pcConfig: { iceServers: [] } })
+    session.answer({ mediaConstraints: micConstraints(), pcConfig: rtcConfig() })
   }
 
   // Pick up a queued (screen-popped) call: bridge the parked FreeSWITCH channel to this agent's SIP extension.
@@ -590,7 +621,7 @@ export default function SoftphonePanel() {
     try {
       ua.call(`sip:${t.number}@${tenantSubdomain}`, {
         mediaConstraints: micConstraints(),
-        pcConfig: { iceServers: [] },
+        pcConfig: rtcConfig(),
         // Present the number the customer dialed (the campaign's DID) as caller ID on the
         // consult leg — FreeSWITCH's pstn-outbound route reads this (S169).
         extraHeaders: callerIdHeader(destinationNumber),
@@ -744,7 +775,7 @@ export default function SoftphonePanel() {
     try {
       ua.call(`sip:${number}@${tenantSubdomain}`, {
         mediaConstraints: micConstraints(),
-        pcConfig: { iceServers: [] },
+        pcConfig: rtcConfig(),
       })
     } catch { reset() }
   }
