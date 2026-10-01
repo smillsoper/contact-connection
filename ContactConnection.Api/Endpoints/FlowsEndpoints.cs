@@ -252,6 +252,48 @@ public static class FlowsEndpoints
         // designers — merges the tenant's own endpoints with platform-provided ones. Any
         // authenticated agent can read this (not gated behind TenantAdmin like
         // /admin/api-definitions) since any agent can build flows. A general definition is a
+        // ── API Call node request preview (S169) ───────────────────────────────────────
+        // Recent sessions to render against: this flow's, or — when it has none yet (e.g. a sub-flow
+        // that only ever runs inside another flow's session) — any flow's, flagged as such.
+        group.MapGet("/{id:guid}/preview-sessions", async (
+            Guid id, IFlowSessionRepository sessions, ICallRecordRepository callRecords,
+            TenantContext tenantContext, CancellationToken ct) =>
+        {
+            if (tenantContext.Current is null) return Results.Unauthorized();
+            var own = await sessions.GetRecentAsync(id, 20, ct);
+            var list = own.Count > 0 ? own : await sessions.GetRecentAsync(null, 20, ct);
+            var result = new List<object>();
+            foreach (var s in list)
+            {
+                var record = await callRecords.GetByIdAsync(s.CallRecordId, ct);
+                result.Add(new
+                {
+                    sessionId = s.Id,
+                    callRecordId = s.CallRecordId,
+                    startedAt = s.StartedAt,
+                    status = s.Status,
+                    callerId = record?.CallerId,
+                    callerName = string.Join(' ', new[] { record?.FirstName, record?.LastName }.Where(n => !string.IsNullOrWhiteSpace(n))),
+                    otherFlow = own.Count == 0,
+                });
+            }
+            return Results.Ok(result);
+        });
+
+        // Renders the node's request against the chosen session's data and sends NOTHING. The node
+        // JSON comes from the designer so unsaved edits are previewed too.
+        group.MapPost("/{id:guid}/preview-api-call", async (
+            Guid id, PreviewApiCallRequest req, IFlowEngine engine, TenantContext tenantContext, CancellationToken ct) =>
+        {
+            if (tenantContext.Current is null) return Results.Unauthorized();
+            try
+            {
+                var preview = await engine.PreviewApiCallAsync(req.SessionId, req.NodeId ?? "", req.Node?.ToJsonString(), ct);
+                return Results.Ok(preview);
+            }
+            catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        });
+
         // connection (base URL, auth); its endpoints are the individual callable operations —
         // that's what the api_call / tf_general_api_call node dropdown picks from.
         group.MapGet("/general-apis", async (
@@ -346,3 +388,8 @@ public record GeneralApiEndpointSummary(
     string Scope);
 
 public record SetFlowScopeRequest(Guid? ClientId, Guid? CampaignId);
+
+/// <summary>Request-preview input (S169): the session whose data to render with, and the API Call
+/// node's current settings from the designer (or its id, to use the saved node).</summary>
+public record PreviewApiCallRequest(Guid SessionId, string? NodeId, System.Text.Json.Nodes.JsonObject? Node);
+

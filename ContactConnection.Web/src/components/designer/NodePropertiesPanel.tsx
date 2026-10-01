@@ -12,6 +12,8 @@ import { flowsApi } from '../../api/flows'
 import type { FlowSummary, GeneralApiSummary, CustomFieldDefinitionSummary } from '../../api/flows'
 import { useTenantTimezone } from '../../hooks/useTenantTimezone'
 import { timezoneLabel } from '../../utils/timezones'
+import ApiRequestPreviewModal from './ApiRequestPreviewModal'
+import { useParams } from 'react-router-dom'
 
 const PRESET_MASKS = [
   { label: 'None', value: '' },
@@ -55,6 +57,11 @@ export default function NodePropertiesPanel({
 
   // Variable panel toggle for set_variable node
   const [varPanelOpen, setVarPanelOpen] = useState(false)
+
+  // API Call node — request preview dialog (S169). The flow id comes from the designer route
+  // (/designer/:id); a never-saved flow previews against other flows' sessions.
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const { id: routeFlowId } = useParams<{ id: string }>()
 
   // Whether the "offer to add" picker is open for add_to_cart (the replace-list's own picker is
   // self-contained inside OfferListManagerField).
@@ -1058,6 +1065,23 @@ export default function NodePropertiesPanel({
               </p>
             )}
             {field('outputVariable', 'Output Variable', input('outputVariable', 'orderApi'))}
+            <div>
+              <button type="button" disabled={!selectedEndpointId} onClick={() => setPreviewOpen(true)}
+                className="w-full border border-sky-700 text-sky-300 hover:bg-sky-950 disabled:opacity-40 rounded px-2 py-1 text-xs">
+                Preview request…
+              </button>
+              <p className="text-[10px] text-gray-500 mt-0.5 leading-snug">
+                See exactly what this node would send — rendered against a real call's data, nothing sent.
+              </p>
+              {previewOpen && (
+                <ApiRequestPreviewModal
+                  flowId={routeFlowId ?? null}
+                  nodeId={node.id}
+                  node={{ ...data, type: 'api_call' }}
+                  onClose={() => setPreviewOpen(false)}
+                />
+              )}
+            </div>
             {field(
               'timeoutSeconds',
               'Timeout (seconds)',

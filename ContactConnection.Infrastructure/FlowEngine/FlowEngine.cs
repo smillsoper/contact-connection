@@ -372,6 +372,37 @@ public class FlowEngine : IFlowEngine
             Replayed: replayed);
     }
 
+    public async Task<ApiRequestPreview> PreviewApiCallAsync(Guid sessionId, string nodeId, string? nodeJson, CancellationToken ct = default)
+    {
+        var (ctx, _, _) = await LoadForReviewAsync(sessionId, ct)
+            ?? throw new InvalidOperationException($"Flow session {sessionId} not found.");
+
+        // The designer's current (possibly unsaved) node settings, else the node as saved in the flow.
+        JsonObject? node = null;
+        if (!string.IsNullOrWhiteSpace(nodeJson))
+        {
+            try { node = JsonNode.Parse(nodeJson) as JsonObject; }
+            catch (System.Text.Json.JsonException) { throw new InvalidOperationException("The node settings sent for preview aren't valid JSON."); }
+        }
+        node ??= (await FindNodeAsync(ctx.FlowDefinition, nodeId, ct))?.Node
+            ?? throw new InvalidOperationException($"Node '{nodeId}' is not in this session's flow.");
+        if (node["type"]?.GetValue<string>() != "api_call")
+            throw new InvalidOperationException("Only API Call nodes can be previewed.");
+        if (!_handlers.TryGetValue("api_call", out var h) || h is not NodeHandlers.ApiCallNodeHandler apiHandler)
+            throw new InvalidOperationException("No API Call handler registered.");
+
+        // Same fresh call data RerunNodeAsync uses — the preview shows what would be sent now.
+        ctx.CallRecord.Clear();
+        ctx.Caller.Clear();
+        await PopulateAgentAndTenantAsync(ctx, ctx.AgentId, ct);
+        await PopulateCallContextAsync(ctx, ctx.CallRecordId, ctx.InteractionId, ct);
+        ctx.SharedVars = await _sharedVars.GetAllAsync(ctx.CallRecordId, ct);
+        if (ReferencesCart(node)) await RefreshCartVarsAsync(ctx, ct);
+
+        // Nothing is saved: the session and call are untouched.
+        return await apiHandler.PreviewAsync(node, ctx, ct);
+    }
+
     /// <summary>One line for the Call Records view: "$139.90 · card …1234 · txn 60012345 · authorized".</summary>
     private static string? PaymentSummary(string? amount, string? last4, string? txn, string? action)
     {

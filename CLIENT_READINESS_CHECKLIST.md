@@ -39,7 +39,10 @@ helpdesk CMS, and team chat. This is a multi-month roadmap, not a single session
 
 Nothing else matters if an agent can't take an order and get paid on a call.
 
-- [ ] **CRM cart/product handling + inventory awareness.** Most of the Commerce Engine backend
+- [x] **CRM cart/product handling + inventory awareness.** *Closed S170: scoped offers wired into the agent
+      cart, product scope (client + campaign list) with admin filters, offer SKU override + fuller offer
+      editor, Life Seasons catalog consolidated to 4 products; multi-tab cart follows the active tab
+      (one bug — cart vanishes on call disconnect — tracked below).* Most of the Commerce Engine backend
       already exists (`Product`/`Offer`/`CartDocument`/`Order`/`OrderLine`/`PricingService`/
       inventory reservation — see ARCHITECTURE.md and DevLog Sessions 7–13). The gap is entirely
       agent-facing UI plus external stock sync:
@@ -181,10 +184,16 @@ Nothing else matters if an agent can't take an order and get paid on a call.
           the agent's own tab at all — nothing in the frontend even listens for it currently; it
           would only matter for a future supervisor-watching-live-call view), so reusing that
           request/response cycle is simpler and sufficient here. `npm run build` clean.
-        - **Still open:** wiring the agent-facing cart's offer picker (`CartModal`) to actually
+        - ~~**Still open:** wiring the agent-facing cart's offer picker (`CartModal`) to actually
           filter by the call's client/campaign scope via `IOfferRepository.GetAvailableForContextAsync`
-          (built, not called from anywhere yet) — right now scoping is admin-visible metadata only.
-- [ ] **Payment Gateway: Authorize.Net.** Workflow from the user's own prior experience running this
+          (built, not called from anywhere yet) — right now scoping is admin-visible metadata only.~~
+          *Done S170.*
+- [ ] **Payment Gateway: Authorize.Net.** *Status S170: auth-only, void, re-authorize, per-campaign
+      credentials (settings card + Test), card brand/last4, approve **and bank decline** live-verified
+      (sandbox ZIP 46282). Only open item: the Life Seasons **Order API** (Add Order, Liquid, Life Seasons'
+      staging server) has never been sent — its payload now renders cleanly via the API Call node's
+      Preview request; needs the staging API key from Clint for a first real test order.*
+      Workflow from the user's own prior experience running this
       account at the call center: **Auth-only transaction** against Authorize.Net at the point of
       sale, then **separately submit the order via Life Seasons' own Order API** (their backend,
       not Authorize.Net's) — this is a general API integration, and the platform's API Builder /
@@ -690,6 +699,11 @@ now end "complete"; softphone no longer drops registration on token refresh; Sig
 TLS (no more duplicate INVITEs); outbound works (callback + idle dial); softphone-dialed records close
 on hang-up. Campaign settings gained **Payment Gateways** and Avalara credential cards with Test.
 
+- [ ] **Cart vanishes on call disconnect (added S170)** — with several script tabs open, the cart strip
+      disappears when the call hangs up; selecting another tab and back restores it. Fix next session.
+- [ ] **Remote softphone audio (added S170)** — off-LAN agents register but get no audio (internal profile
+      `ext-rtp-ip=auto-nat` advertises the Docker IP); set it to STUN + profile restart, then test from a
+      phone off Wi-Fi. Needed before Clint can test as an agent.
 - [ ] **Manual outbound dialing (added S169)** — CXOne-style: client → manual outbound campaign → address
       book or free-form; granular role permissions (campaign / direct, address book / any number);
       dial parked server-side running the entry's → campaign's telephony flow (dial node with

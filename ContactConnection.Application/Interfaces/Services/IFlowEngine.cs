@@ -45,6 +45,12 @@ public interface IFlowEngine
     /// The flow does not move on; only the node's output variables change.</summary>
     Task<ApiCallRerunResult> RerunNodeAsync(Guid sessionId, string nodeId, CancellationToken ct = default);
 
+    /// <summary>S169 — renders an api_call node's request (URL, query, headers, body — Liquid or simple)
+    /// against an existing session's data exactly as it would be sent, and sends NOTHING. Uses the given
+    /// node JSON (the designer's current, possibly unsaved settings) or, when null, the node as saved in
+    /// the session's flow. Call data is re-read fresh, like RerunNodeAsync; the session is not changed.</summary>
+    Task<ApiRequestPreview> PreviewApiCallAsync(Guid sessionId, string nodeId, string? nodeJson, CancellationToken ct = default);
+
     /// <summary>If an agent still has this session open: reload its call data from the call record
     /// (so {{caller.*}} / {{call_record.*}} show a correction made elsewhere) and push the refreshed
     /// current node to the agent with <paramref name="message"/>. False when the session isn't live.</summary>
@@ -103,6 +109,19 @@ public class ApiCallNodeSummary
     public string? Error { get; init; }
     public string? Response { get; init; }
 }
+
+/// <summary>An API request as it would be sent (S169). Credentials are never included: auth is applied
+/// at send time, and auth-looking headers are masked. <see cref="Error"/> is set when the request
+/// couldn't be built (e.g. a Liquid template that renders invalid JSON).</summary>
+public record ApiRequestPreview(
+    string? EndpointName,
+    string? Method,
+    string? Url,
+    IReadOnlyDictionary<string, string> Headers,
+    string? Body,
+    string? BodyTemplateType,
+    string? AuthType,
+    string? Error);
 
 public record ApiCallRerunResult(
     bool Success, string Transition, string? StatusCode, string? Error, string? Response, bool Replayed,

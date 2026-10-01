@@ -179,6 +179,7 @@
 | 167 | 2026-09-29 | 5:08 PM PDT | 6:45 PM PDT | 97 min | ~19242 min |
 | 168 | 2026-09-29 | 6:45 PM PDT | 7:53 PM PDT | 68 min | ~19310 min |
 | 169 | 2026-09-30 | 7:53 AM PDT | 5:37 PM PDT | 584 min | ~19894 min |
+| 170 | 2026-09-30 | 7:08 PM PDT | 9:50 PM PDT | 162 min | ~20056 min |
 
 ---
 
@@ -10991,4 +10992,85 @@ multi-tenancy, manual outbound dialing, production launch and storage).
   Over / 📞 audio); secure capture → authorize → resubmit with the Authorize.Net sandbox.
 - Waiting on: SignalWire Sales + vetting/CPS answers, Avalara support, Clint's Five9 price.
 - Then: manual outbound dialing build; phone number management.
+
+## Session 170
+
+**Date:** 2026-09-30
+**Start:** 7:08 PM PDT
+**End:** 9:50 PM PDT
+**Duration:** 162 minutes
+**Total Duration:** ~20056 minutes
+
+### Focus
+
+Evening session after S169: supervisor-tool fixes found while setting up William as an agent tester,
+softphone audio settings + ringtone, the product/offer catalog for Life Seasons, secure-collect PCI
+logging + card brand, the Authorize.Net decline test, and an API request preview.
+
+### Done — softphone & supervisor
+
+- **Supervise menu** (dashboard Agent List) rendered in a portal — it was clipped by the widget's
+  scroll area, hiding Coach / Barge / Take over.
+- **Take Over left the original agent stuck in ACW** — the hang-up path schedules ACW → Available, Take
+  Over only set ACW. Shared `AfterCallWork.StartAsync` used by both; the return-to-Available timer now
+  only fires if the agent is still in *that* ACW. Live-verified.
+- **Audio settings** (⚙ in the softphone): microphone + speaker pickers remembered per browser, live
+  mic level meter, test sound; every call path opens the chosen mic; changing it mid-call swaps the
+  track live (mute preserved). William's headset trouble was the trigger (no picker existed).
+- **Ringtone**: rings while a call waits on the agent (queue / ring-all offer, direct incoming,
+  supervisor call); synthesized tones (Classic, Double, Chime, Soft pulse, Digital, Off), volume, and a
+  separate ring device. Live-verified.
+- **Agent portal "refreshes on its own" / mid-call drop explained**: a network blip on the tunnel path
+  drops the Vite dev server's HMR socket and Vite reloads every page on reconnect — dev-only.
+  `npm run prod` (build + `vite preview` on 5173) for live-call testing with outside testers.
+
+### Done — catalog (Products & Offers)
+
+- Agent cart search only shows offers fitting the call's client/campaign
+  (`GET /call-records/{id}/offers`); manual adds (agent cart, call review) refused server-side for
+  out-of-scope offers; flow nodes unchanged.
+- **Products scoped** to a client and a **list of campaigns** (offers moved from one campaign to a list
+  too — e.g. NeuroQ offers on the NeuroQ scripts but not My Best Heart, same client). Admin product list
+  filters by client / campaign / text (incl. offer name + offer SKU); the cart search only shows products
+  with an offer that fits the call. Migrations `AddProductScopeAndOfferSku`, `MultiCampaignCatalogScope`
+  (copies existing scope into the lists before dropping the old column). Stephen ran "migrate all tenants".
+- **Offer SKU override** (`EffectiveSku` on cart, order, order API, tax) and an expanded offer editor:
+  SKU, AutoShip + intervals, upsell fields, flags (the Cannella SKU).
+- **Life Seasons catalog consolidated**: 15 per-variant products → 4 real products (283 Memory & Focus,
+  326 + Matching DHA, 303 DHA-400, 307 Sleep Now) with each offer keeping its variant SKU as an override;
+  11 old products deleted, 4 retired (still referenced by old test carts). Backup taken first.
+  `gen_v1.py` seeds the new shape.
+
+### Done — secure collect & payments
+
+- **PCI: card digits were reaching the FreeSWITCH log file** (per-digit `RECV DTMF` lines + the full
+  value in the logged `event(...cc_sc_digits=...)` dialplan line). Fixed: `sensitive_dtmf=true` during
+  capture, digits no longer in the event args (ESL reads `variable_cc_sc_result`), value unset after.
+  Old FS logs (13 captured values) cleared. Live-verified: 0 digit lines, capture still works.
+- The "wait 2-3 s between digits" problem was Telnyx-era; normal-speed entry works on SignalWire.
+- **Card brand + last four** from the PAN's leading digits (Visa, MasterCard incl. 2-series, Amex,
+  Discover, Diners, JCB, UnionPay) → `{{shared.card_brand}}` / `{{shared.card_last4}}` for the CRM
+  script and `card_brand` / `card_last4` in the telephony flow. Live-verified on a script node.
+- **Authorize.Net bank decline live-verified** (sandbox ZIP 46282): `declined`, code 2, reason shown in
+  the script, card data wiped.
+- **API request preview**: CRM API Call node → "Preview request…" renders method, URL + query, headers
+  (auth masked), body (Liquid or simple) against a real session's data with the designer's current
+  settings — sends nothing; shares one builder with the live send. Telephony API nodes record the
+  rendered request as `{outputVariable}.request` in the call trace (redacted when built from `secure.*`).
+  First-ever render of the Life Seasons Add Order template: valid JSON, full order structure, POST to
+  Life Seasons' staging server — only the staging API key (Clint) is missing for a real test order.
+  Live-verified in the browser.
+
+### Verified / found
+
+- Multi-tab cart (3 test calls, 3 scripts, different carts): the cart follows the selected tab. **Bug:**
+  the cart disappears when a call disconnects; clicking another tab and back brings it back — fix next.
+- 1,358 tests passing (Domain 211, Application 20, Api 112, Infrastructure 1,015).
+
+### Next
+
+- Fix the cart disappearing on call disconnect (multi-tab).
+- Remote softphone audio (internal profile `ext-rtp-ip` — off-LAN agents get no audio); William's
+  supervisor-tool tests (Monitor / Coach / Barge / Take Over / 📞) with the new audio picker.
+- Life Seasons Order API: staging key from Clint → first real test order (preview first).
 

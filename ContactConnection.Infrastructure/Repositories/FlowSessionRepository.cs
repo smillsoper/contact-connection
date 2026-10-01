@@ -26,6 +26,13 @@ public class FlowSessionRepository : IFlowSessionRepository
             .OrderBy(s => s.StartedAt)
             .ToListAsync(ct);
 
+    public async Task<IReadOnlyList<FlowSession>> GetRecentAsync(Guid? flowId, int limit, CancellationToken ct = default) =>
+        await Db.FlowSessions.AsNoTracking()
+            .Where(s => flowId == null || s.FlowId == flowId)
+            .OrderByDescending(s => s.StartedAt)
+            .Take(limit)
+            .ToListAsync(ct);
+
     public async Task<IReadOnlyList<FlowSession>> GetActiveForAgentsAsync(
         IReadOnlyCollection<Guid> agentIds, DateTimeOffset updatedSince, CancellationToken ct = default)
     {

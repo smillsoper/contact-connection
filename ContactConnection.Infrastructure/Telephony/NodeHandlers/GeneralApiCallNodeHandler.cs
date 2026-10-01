@@ -39,7 +39,7 @@ public class GeneralApiCallNodeHandler(
 {
     public string NodeType => "tf_general_api_call";
 
-    private record CallTarget(
+    internal record CallTarget(
         Guid DefinitionId, string HttpMethod, string BaseUrl, string Path, string Headers, string QueryParams,
         string? RequestBodyTemplate, string AuthConfig, int TimeoutSeconds, bool IsActive, bool IsRetrySafe,
         int? RateLimitPerMinute, string SensitiveResponseFields, string BodyTemplateType, string SuccessCriteria);
@@ -54,6 +54,7 @@ public class GeneralApiCallNodeHandler(
         ApiDefinitionExecutionResult result;
         string transitionKey;
         var targetSensitiveFields = "[]";
+        string? requestRecord = null;   // the request as sent — kept in the call trace (S169)
 
         if (string.IsNullOrEmpty(endpointIdStr) || !Guid.TryParse(endpointIdStr, out var endpointId))
         {
@@ -114,10 +115,7 @@ public class GeneralApiCallNodeHandler(
                     ? overrideSeconds
                     : (int?)null;
 
-                if (bodyError is not null)
-                    result = new ApiDefinitionExecutionResult(false, null, null, new(), null, false, bodyError);
-                else
-                result = await executor.ExecuteAsync(new ApiDefinitionExecutionRequest(
+                var request = new ApiDefinitionExecutionRequest(
                     HttpMethod: target.HttpMethod,
                     Url: resolvedUrl,
                     Headers: headers,
@@ -129,7 +127,12 @@ public class GeneralApiCallNodeHandler(
                     DefinitionId: target.DefinitionId,
                     AllowRetryOnAmbiguousFailure: target.IsRetrySafe,
                     RateLimitPerMinute: target.RateLimitPerMinute,
-                    HmacPayload: hmacPayload), ct);
+                    HmacPayload: hmacPayload);
+                requestRecord = RecordRequest(target, request, bodyError);
+
+                result = bodyError is not null
+                    ? new ApiDefinitionExecutionResult(false, null, null, new(), null, false, bodyError)
+                    : await executor.ExecuteAsync(request, ct);
 
                 result = ResponseSuccessEvaluator.Apply(result, target.SuccessCriteria);
                 transitionKey = result.TimedOut ? "timeout" : (!result.Success ? "error" : "success");
@@ -159,10 +162,32 @@ public class GeneralApiCallNodeHandler(
                 ctx.Vars[$"{outputVariable}.{key}"] = value;
         }
 
+        // The rendered request — telephony calls have no screen to preview it on, so it goes into the
+        // call's variables (as {outputVariable}.request) and from there into the call trace snapshot.
+        // A node without an output variable writes no variables at all, this one included.
+        if (requestRecord is not null && !string.IsNullOrEmpty(outputVariable))
+            ctx.Vars[$"{outputVariable}.request"] = requestRecord;
+
         var nextNodeId = node["transitions"]?[transitionKey]?.GetValue<string>()
                        ?? node["transitions"]?["default"]?.GetValue<string>();
 
         return new TelephonyNodeResult(nextNodeId, transitionKey);
+    }
+
+    /// <summary>The request as sent, for the call trace — credentials never included (auth is applied at
+    /// send time; auth-looking headers masked). PCI: a request built from captured card data
+    /// ({{secure.*}}, e.g. a tokenization call right after tf_secure_collect) is never recorded.</summary>
+    internal static string RecordRequest(CallTarget target, ApiDefinitionExecutionRequest request, string? bodyError)
+    {
+        var templates = string.Join(" ", target.BaseUrl, target.Path, target.Headers, target.QueryParams, target.RequestBodyTemplate ?? "");
+        if (templates.Contains("secure.", StringComparison.OrdinalIgnoreCase))
+            return """{"redacted":"request built from captured card data — not recorded"}""";
+        var preview = ApiRequestPreviewer.From(null, request, target.BodyTemplateType, bodyError);
+        return System.Text.Json.JsonSerializer.Serialize(new
+        {
+            method = preview.Method, url = preview.Url, headers = preview.Headers,
+            body = preview.Body, authType = preview.AuthType, error = preview.Error,
+        });
     }
 
     private async Task<CallTarget?> LoadTenantAsync(string schemaName, Guid endpointId, CancellationToken ct)

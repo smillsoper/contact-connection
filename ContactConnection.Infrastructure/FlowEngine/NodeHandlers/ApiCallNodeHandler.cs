@@ -61,13 +61,13 @@ public class ApiCallNodeHandler(
     private record CallTarget(
         Guid DefinitionId, string HttpMethod, string BaseUrl, string Path, string Headers, string QueryParams,
         string? RequestBodyTemplate, string AuthConfig, int TimeoutSeconds, bool IsActive, bool IsRetrySafe,
-        int? RateLimitPerMinute, string SensitiveResponseFields, string BodyTemplateType, string SuccessCriteria);
+        int? RateLimitPerMinute, string SensitiveResponseFields, string BodyTemplateType, string SuccessCriteria,
+        string? EndpointName = null);
 
     public async Task<NodeResult> ExecuteAsync(
         JsonObject node, FlowExecutionContext ctx,
         string? agentInput, string agentTransition, CancellationToken ct = default)
     {
-        var varCtx = ctx.ToVariableContext();
         var outputVariable = Str(node, "outputVariable")?.Trim();
         var scope = Str(node, "apiDefinitionScope") ?? "tenant";
         var endpointIdStr = Str(node, "apiEndpointId");
@@ -112,55 +112,11 @@ public class ApiCallNodeHandler(
             }
             else
             {
-                var resolvedBaseUrl = Resolver.Resolve(target.BaseUrl, varCtx);
-                var resolvedPath    = Resolver.Resolve(target.Path, varCtx);
-                var resolvedUrl     = resolvedBaseUrl.TrimEnd('/') + "/" + resolvedPath.TrimStart('/');
-                var headers     = ResolveHeaders(target.Headers, varCtx);
-                string? resolvedBody = null;
-                string? bodyError = null;
-                if (target.RequestBodyTemplate is { } bodyTemplate)
-                {
-                    if (target.BodyTemplateType == BodyTemplateType.Liquid)
-                    {
-                        var rendered = await liquid.RenderAsync(bodyTemplate, await templateModel.BuildAsync(ctx, ct), ct);
-                        resolvedBody = rendered.Output;
-                        bodyError = rendered.Success ? LiquidJsonCheck(rendered.Output, headers) : rendered.Error;
-                    }
-                    else
-                    {
-                        resolvedBody = Resolver.Resolve(bodyTemplate, varCtx);
-                    }
-                }
-                var queryParams = ResolveQueryParams(target.QueryParams, varCtx);
-                var hmacPayload = ResolveHmacPayload(target.AuthConfig, varCtx);
-
-                Func<string, CancellationToken, Task<string?>> getCredential = scope == "portal"
-                    ? portalCredentials.GetAsync
-                    : tenantCredentials.GetAsync;
-
-                var timeoutOverride = node["timeoutSeconds"] is JsonValue tv && tv.TryGetValue<int>(out var overrideSeconds) && overrideSeconds > 0
-                    ? overrideSeconds
-                    : (int?)null;
-
-                if (bodyError is not null)
-                {
+                var (request, bodyError) = await BuildRequestAsync(target, node, ctx, scope, ct);
+                result = bodyError is not null
                     // Never send a body the template couldn't produce correctly.
-                    result = new ApiDefinitionExecutionResult(false, null, null, new(), null, false, bodyError);
-                }
-                else
-                result = await executor.ExecuteAsync(new ApiDefinitionExecutionRequest(
-                    HttpMethod: target.HttpMethod,
-                    Url: resolvedUrl,
-                    Headers: headers,
-                    QueryParams: queryParams,
-                    Body: resolvedBody,
-                    AuthConfigJson: target.AuthConfig,
-                    TimeoutSeconds: timeoutOverride ?? target.TimeoutSeconds,
-                    GetCredential: getCredential,
-                    DefinitionId: target.DefinitionId,
-                    AllowRetryOnAmbiguousFailure: target.IsRetrySafe,
-                    RateLimitPerMinute: target.RateLimitPerMinute,
-                    HmacPayload: hmacPayload), ct);
+                    ? new ApiDefinitionExecutionResult(false, null, null, new(), null, false, bodyError)
+                    : await executor.ExecuteAsync(request, ct);
 
                 result = ResponseSuccessEvaluator.Apply(result, target.SuccessCriteria);
                 transitionKey = result.TimedOut ? "timeout" : (!result.Success ? "error" : "success");
@@ -199,6 +155,68 @@ public class ApiCallNodeHandler(
 
     private static string OnceKey(string scope, Guid endpointId) => $"once:{scope}:{endpointId}";
 
+    /// <summary>Resolves everything the request needs — URL, headers, query, body (simple tags or Liquid)
+    /// — exactly as sent. Shared by ExecuteAsync and PreviewAsync so a preview can never differ from the
+    /// real request. A non-null BodyError means the body couldn't be produced and nothing may be sent.</summary>
+    private async Task<(ApiDefinitionExecutionRequest Request, string? BodyError)> BuildRequestAsync(
+        CallTarget target, JsonObject node, FlowExecutionContext ctx, string scope, CancellationToken ct)
+    {
+        var varCtx = ctx.ToVariableContext();
+        var resolvedBaseUrl = Resolver.Resolve(target.BaseUrl, varCtx);
+        var resolvedPath    = Resolver.Resolve(target.Path, varCtx);
+        var resolvedUrl     = resolvedBaseUrl.TrimEnd('/') + "/" + resolvedPath.TrimStart('/');
+        var headers         = ResolveHeaders(target.Headers, varCtx);
+        string? resolvedBody = null;
+        string? bodyError = null;
+        if (target.RequestBodyTemplate is { } bodyTemplate)
+        {
+            if (target.BodyTemplateType == BodyTemplateType.Liquid)
+            {
+                var rendered = await liquid.RenderAsync(bodyTemplate, await templateModel.BuildAsync(ctx, ct), ct);
+                resolvedBody = rendered.Output;
+                bodyError = rendered.Success ? LiquidJsonCheck(rendered.Output, headers) : rendered.Error;
+            }
+            else
+            {
+                resolvedBody = Resolver.Resolve(bodyTemplate, varCtx);
+            }
+        }
+
+        Func<string, CancellationToken, Task<string?>> getCredential = scope == "portal"
+            ? portalCredentials.GetAsync
+            : tenantCredentials.GetAsync;
+        var timeoutOverride = node["timeoutSeconds"] is JsonValue tv && tv.TryGetValue<int>(out var overrideSeconds) && overrideSeconds > 0
+            ? overrideSeconds
+            : (int?)null;
+
+        return (new ApiDefinitionExecutionRequest(
+            HttpMethod: target.HttpMethod,
+            Url: resolvedUrl,
+            Headers: headers,
+            QueryParams: ResolveQueryParams(target.QueryParams, varCtx),
+            Body: resolvedBody,
+            AuthConfigJson: target.AuthConfig,
+            TimeoutSeconds: timeoutOverride ?? target.TimeoutSeconds,
+            GetCredential: getCredential,
+            DefinitionId: target.DefinitionId,
+            AllowRetryOnAmbiguousFailure: target.IsRetrySafe,
+            RateLimitPerMinute: target.RateLimitPerMinute,
+            HmacPayload: ResolveHmacPayload(target.AuthConfig, varCtx)), bodyError);
+    }
+
+    /// <summary>Renders the node's request against this context without sending it (S169).</summary>
+    public async Task<ApiRequestPreview> PreviewAsync(JsonObject node, FlowExecutionContext ctx, CancellationToken ct = default)
+    {
+        var scope = Str(node, "apiDefinitionScope") ?? "tenant";
+        if (!Guid.TryParse(Str(node, "apiEndpointId"), out var endpointId))
+            return ApiRequestPreviewer.Failed("This API Call node has no API endpoint selected.");
+        var target = scope == "portal" ? await LoadPortalAsync(endpointId, ct) : await LoadTenantAsync(endpointId, ct);
+        if (target is null) return ApiRequestPreviewer.Failed("API endpoint not found.");
+
+        var (request, bodyError) = await BuildRequestAsync(target, node, ctx, scope, ct);
+        return ApiRequestPreviewer.From(target.EndpointName, request, target.BodyTemplateType, bodyError);
+    }
+
     /// <summary>A Liquid body meant to be JSON must parse as JSON — catching a template bug (a
     /// stray comma, an unquoted string) with a clear message instead of a vendor's 400.</summary>
     public static string? LiquidJsonCheck(string? body, Dictionary<string, string> headers)
@@ -219,7 +237,8 @@ public class ApiCallNodeHandler(
         return new CallTarget(
             def.Id, endpoint.HttpMethod ?? def.HttpMethod, def.BaseUrl, endpoint.Path, endpoint.Headers, endpoint.QueryParams,
             endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive, endpoint.IsRetrySafe,
-            def.RateLimitPerMinute, endpoint.SensitiveResponseFields, endpoint.BodyTemplateType, endpoint.SuccessCriteria);
+            def.RateLimitPerMinute, endpoint.SensitiveResponseFields, endpoint.BodyTemplateType, endpoint.SuccessCriteria,
+            $"{def.Name} → {endpoint.Name}");
     }
 
     private async Task<CallTarget?> LoadPortalAsync(Guid endpointId, CancellationToken ct)
@@ -231,7 +250,8 @@ public class ApiCallNodeHandler(
         return new CallTarget(
             def.Id, endpoint.HttpMethod ?? def.HttpMethod, def.BaseUrl, endpoint.Path, endpoint.Headers, endpoint.QueryParams,
             endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive, endpoint.IsRetrySafe,
-            def.RateLimitPerMinute, endpoint.SensitiveResponseFields, endpoint.BodyTemplateType, endpoint.SuccessCriteria);
+            def.RateLimitPerMinute, endpoint.SensitiveResponseFields, endpoint.BodyTemplateType, endpoint.SuccessCriteria,
+            $"{def.Name} → {endpoint.Name}");
     }
 
     /// <summary>Extracts the hmac auth type's optional payloadTemplate (if any) and resolves it

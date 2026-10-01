@@ -81,7 +81,41 @@ export interface CustomFieldDefinitionSummary {
   isActive: boolean
 }
 
+/** A past session to render an API Call node's request against (S169). */
+export interface PreviewSession {
+  sessionId: string
+  callRecordId: string
+  startedAt: string
+  status: string
+  callerId: string | null
+  callerName: string
+  /** True when this flow has no sessions yet and these come from other flows. */
+  otherFlow: boolean
+}
+
+/** An API request as it would be sent — credentials never included. */
+export interface ApiRequestPreview {
+  endpointName: string | null
+  method: string | null
+  url: string | null
+  headers: Record<string, string>
+  body: string | null
+  bodyTemplateType: string | null
+  authType: string | null
+  error: string | null
+}
+
+const NO_FLOW = '00000000-0000-0000-0000-000000000000'
+
 export const flowsApi = {
+  /** Recent sessions to preview an API Call node against (this flow's, else any flow's). */
+  previewSessions: (flowId: string | null) =>
+    api.get<PreviewSession[]>(`/api/v1/flows/${flowId ?? NO_FLOW}/preview-sessions`),
+
+  /** Renders the node's request against a session's data. Sends nothing. */
+  previewApiCall: (flowId: string | null, sessionId: string, nodeId: string, node: Record<string, unknown>) =>
+    api.post<ApiRequestPreview>(`/api/v1/flows/${flowId ?? NO_FLOW}/preview-api-call`, { sessionId, nodeId, node }),
+
   // Agent panel — published flows only
   list: () => api.get<FlowSummary[]>('/api/v1/flows'),
 
