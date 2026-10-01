@@ -337,7 +337,8 @@ export default function SoftphonePanel() {
       // gathering every candidate — with TURN configured, Chrome tries the relay from every network
       // adapter (Docker/WSL virtual adapters, IPv6…), and the unreachable ones take tens of seconds to
       // time out. The supervisor's auto-answer then stalled past FreeSWITCH's 30 s ring timeout. Go as
-      // soon as a relay candidate exists (it works from anywhere), else 1.5 s after the first candidate.
+      // soon as a relay candidate exists (it works from anywhere), else 4 s after the first candidate —
+      // long enough for a phone on cellular to resolve the TURN host and allocate (1.5 s wasn't).
       let iceTimer: ReturnType<typeof setTimeout> | null = null
       session.on('icecandidate', (e: { candidate: RTCIceCandidate; ready: () => void }) => {
         if (/ typ relay /.test(e.candidate?.candidate ?? '')) {
@@ -345,7 +346,7 @@ export default function SoftphonePanel() {
           e.ready()
           return
         }
-        iceTimer ??= setTimeout(() => e.ready(), 1500)
+        iceTimer ??= setTimeout(() => e.ready(), 4000)
       })
       const clearIceTimer = () => { if (iceTimer) clearTimeout(iceTimer) }
       session.on('ended', clearIceTimer)
