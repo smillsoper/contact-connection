@@ -64,6 +64,8 @@ public class TenantDbContext : DbContext
     public DbSet<StoredValue> StoredValues => Set<StoredValue>();
     public DbSet<PaymentTransaction> PaymentTransactions => Set<PaymentTransaction>();
     public DbSet<OrderNumberSequence> OrderNumberSequences => Set<OrderNumberSequence>();
+    public DbSet<MediaAgency> MediaAgencies => Set<MediaAgency>();
+    public DbSet<MediaAssignment> MediaAssignments => Set<MediaAssignment>();
     public DbSet<CallRecordAuditEntry> CallRecordAuditEntries => Set<CallRecordAuditEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -118,6 +120,8 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new StoredValueConfiguration());
         modelBuilder.ApplyConfiguration(new PaymentTransactionConfiguration());
         modelBuilder.ApplyConfiguration(new OrderNumberSequenceConfiguration());
+        modelBuilder.ApplyConfiguration(new MediaAgencyConfiguration());
+        modelBuilder.ApplyConfiguration(new MediaAssignmentConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 

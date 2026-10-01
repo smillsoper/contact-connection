@@ -858,6 +858,9 @@ public class FlowEngine : IFlowEngine
         if (record.Addresses?.Shipping is { } shipping)
             ctx.CallRecord[CallAddressVars.Shipping] = CallAddressJson.ToJsonObject(shipping).ToJsonString();
         ctx.CallRecord["campaign_id"] = record.CampaignId.ToString();
+        // Media attribution copied at call time (S171) — {{call_record.media.station}}, …fields.access_code.
+        if (record.MediaAttribution is { } media)
+            ctx.CallRecord["media"] = ContactConnection.Infrastructure.Media.MediaAttributionJson.ToJson(media).ToJsonString();
         ctx.CallRecord["call_started_at"] = record.CallStartAt?.ToString("O") ?? string.Empty;
         ctx.CallRecord["call_ended_at"] = record.CallEndAt?.ToString("O") ?? string.Empty;
         ctx.CallRecord["handle_time_seconds"] = record.HandleTimeSeconds?.ToString() ?? string.Empty;

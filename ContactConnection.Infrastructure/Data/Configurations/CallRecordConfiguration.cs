@@ -92,6 +92,13 @@ public class CallRecordConfiguration : IEntityTypeConfiguration<CallRecord>
         builder.Property(r => r.RecordingDeleteReason).HasColumnName("recording_delete_reason").HasMaxLength(200);
 
         // JSONB — typed
+        builder.Property(r => r.MediaAttribution)
+            .HasColumnName("media_attribution")
+            .HasColumnType("jsonb")
+            .HasConversion(
+                v => v == null ? null : JsonSerializer.Serialize(v, JsonOptions),
+                v => v == null ? null : JsonSerializer.Deserialize<MediaAttribution>(v, JsonOptions));
+
         builder.Property(r => r.Addresses)
             .HasColumnName("addresses")
             .HasColumnType("jsonb")

@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using ContactConnection.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace ContactConnection.Infrastructure.Migrations.TenantDb
 {
     [DbContext(typeof(TenantDbContext))]
-    partial class TenantDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261001180758_AddMediaAttribution")]
+    partial class AddMediaAttribution
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -2073,6 +2076,11 @@ namespace ContactConnection.Infrastructure.Migrations.TenantDb
                     b.Property<bool>("IsDefaultLocal")
                         .HasColumnType("boolean")
                         .HasColumnName("is_default_local");
+
+                    b.Property<string>("Market")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("market");
 
                     b.Property<string>("MarketType")
                         .IsRequired()

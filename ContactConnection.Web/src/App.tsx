@@ -21,6 +21,7 @@ import AdminAgentsPage from './pages/admin/AdminAgentsPage'
 import AdminRolesPage from './pages/admin/AdminRolesPage'
 import AdminCustomFieldDefinitionsPage from './pages/admin/AdminCustomFieldDefinitionsPage'
 import AdminProductsPage from './pages/admin/AdminProductsPage'
+import AdminMediaAgenciesPage from './pages/admin/AdminMediaAgenciesPage'
 import AdminProductOffersPage from './pages/admin/AdminProductOffersPage'
 import AdminApiDefinitionsPage from './pages/admin/AdminApiDefinitionsPage'
 import AdminApiDefinitionDetailPage from './pages/admin/AdminApiDefinitionDetailPage'
@@ -244,6 +245,14 @@ export default function App() {
           element={
             <RequireAdminAuth>
               <AdminCustomFieldDefinitionsPage />
+            </RequireAdminAuth>
+          }
+        />
+        <Route
+          path="/admin/media-agencies"
+          element={
+            <RequireAdminAuth>
+              <AdminMediaAgenciesPage />
             </RequireAdminAuth>
           }
         />

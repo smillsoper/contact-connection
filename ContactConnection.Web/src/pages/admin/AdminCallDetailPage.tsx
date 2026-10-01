@@ -197,6 +197,28 @@ export default function AdminCallDetailPage() {
           </div>
         </div>
 
+        {call.mediaAttribution && (() => {
+          const m = call.mediaAttribution
+          const rows: [string, string | null][] = [
+            ['Agency', m.agency], ['Station', m.station],
+            ['Media type', m.mediaType], ['Ad type', m.adType],
+            ['Assignment start', m.startDate], ['Number', fmtPhone(m.phoneNumber)],
+            ...Object.entries(m.fields),
+          ]
+          return (
+            <div className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+                Media attribution <span className="normal-case font-normal">— {m.marketType}, as assigned when the call arrived</span>
+              </p>
+              <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-400">
+                {rows.filter(([, v]) => v).map(([k, v]) => (
+                  <span key={k}>{k}: <span className="text-gray-200">{v}</span></span>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
+
         {amountMismatch && (
           <div className="bg-amber-950/40 border border-amber-800 text-amber-200 rounded-lg px-4 py-3 text-sm">
             The cart total ({money(cartTotal)}) no longer matches the authorized payment ({money(call.authorizedAmount)}).

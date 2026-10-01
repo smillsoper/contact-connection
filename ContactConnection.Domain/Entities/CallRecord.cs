@@ -89,6 +89,10 @@ public class CallRecord
     public CartDocument? Cart { get; private set; }             // JSONB — commerce engine owns this
     public string? FlowExecutionState { get; private set; }   // JSONB — flow engine owns this
     public string? CustomFields { get; private set; }         // JSONB — denormalized snapshot
+
+    /// <summary>The media buy this call is attributed to — copied at call time (S171). Null when the
+    /// number had no assignment in effect.</summary>
+    public MediaAttribution? MediaAttribution { get; private set; }
     public string? ApiResponseCache { get; private set; }     // JSONB — adapter framework owns this
     public string? TelephonyEvents { get; private set; }      // JSONB — telephony layer owns this
 
@@ -317,6 +321,12 @@ public class CallRecord
         RoutedTier      = tier;
         RoutedTierLabel = tierLabel;
         UpdatedAt       = DateTimeOffset.UtcNow;
+    }
+
+    public void SetMediaAttribution(MediaAttribution? attribution)
+    {
+        MediaAttribution = attribution;
+        UpdatedAt = DateTimeOffset.UtcNow;
     }
 
     public void SetNumberProvider(Guid? providerId, string? clientNumber)

@@ -145,6 +145,17 @@ export interface CallDetail {
   agentName: string | null
   callerId: string | null
   dnis: string | null
+  /** The media buy copied onto the call when it arrived (S171); null = no assignment in effect. */
+  mediaAttribution: {
+    marketType: string
+    agency: string
+    station: string
+    mediaType: string | null
+    adType: string | null
+    startDate: string
+    phoneNumber: string | null
+    fields: Record<string, string>
+  } | null
   orderNumber: string | null
   recordingUrl: string | null
   contact: {

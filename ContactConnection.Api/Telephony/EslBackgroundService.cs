@@ -433,10 +433,25 @@ public sealed class EslBackgroundService : BackgroundService
         // (pseudo-DNIS) — the public client number the caller actually dialed.
         var arrivedOn = await db.PhoneNumbers.AsNoTracking()
             .Where(p => p.Number == routing.Number)
-            .Select(p => new { p.ProviderId, p.ClientNumber })
+            .Select(p => new { p.Id, p.ProviderId, p.ClientNumber })
             .FirstOrDefaultAsync(ct);
         if (arrivedOn is not null)
+        {
             record.SetNumberProvider(arrivedOn.ProviderId, arrivedOn.ClientNumber);
+
+            // Media attribution (S171): copy the assignment in effect today (tenant's local date) for the
+            // number the caller dialed onto the call. Never blocks the call.
+            try
+            {
+                record.SetMediaAttribution(await ContactConnection.Infrastructure.Media.MediaAttributionResolver.ResolveAsync(
+                    db, arrivedOn.Id, arrivedOn.ClientNumber ?? routing.Number,
+                    ContactConnection.Infrastructure.Media.MediaAttributionResolver.TodayIn(tenant.Timezone), ct));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "CHANNEL_PARK DID {Uuid}: media attribution lookup failed — call continues unattributed", channelUuid);
+            }
+        }
 
         db.CallRecords.Add(record);
         await db.SaveChangesAsync(ct);

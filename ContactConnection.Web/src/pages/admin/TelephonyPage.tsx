@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import AdminShell from '../../components/admin/AdminShell'
 import SearchableSelect from '../../components/SearchableSelect'
 import GroupRoutingPanel from '../../components/admin/GroupRoutingPanel'
+import MediaAssignmentsModal from '../../components/admin/MediaAssignmentsModal'
 import {
   listClients, createClient, activateClient, deactivateClient,
   getOrderNumberSequence, putOrderNumberSequence, deleteOrderNumberSequence,
@@ -565,6 +566,7 @@ function CampaignsTab() {
 function PhoneNumbersTab() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [numbers, setNumbers] = useState<PhoneNumber[]>([])
+  const [mediaFor, setMediaFor] = useState<PhoneNumber | null>(null)
   const [scriptFlows, setScriptFlows] = useState<FlowSummary[]>([])
   const [inboundFlows, setInboundFlows] = useState<FlowSummary[]>([])
   const [selectedCampaignId, setSelectedCampaignId] = useState('')
@@ -661,6 +663,10 @@ function PhoneNumbersTab() {
 
   return (
     <div>
+      {mediaFor && (
+        <MediaAssignmentsModal phoneNumberId={mediaFor.id} number={mediaFor.number}
+          clientNumber={mediaFor.clientNumber} onClose={() => setMediaFor(null)} />
+      )}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <p className="text-gray-500 text-sm">DIDs assigned to campaigns.</p>
@@ -812,6 +818,13 @@ function PhoneNumbersTab() {
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-3">
+                      <button
+                        onClick={() => setMediaFor(n)}
+                        className="text-sky-400 hover:text-sky-300 text-xs font-medium"
+                        title="Media agency attribution for calls on this number"
+                      >
+                        Media
+                      </button>
                       <button
                         onClick={() => openCallTrace({ dnis: n.number })}
                         className="text-gray-400 hover:text-gray-200 text-xs font-medium"

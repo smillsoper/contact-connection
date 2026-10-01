@@ -56,6 +56,7 @@ const NAV_SECTIONS: NavSection[] = [
     heading: 'Commerce',
     cards: [
       { title: 'Products & Offers', desc: 'Manage the product catalog, pricing, and client/campaign-scoped offers.', path: '/admin/products', live: true },
+      { title: 'Media Agencies', desc: 'The agencies your clients buy airtime through, and the fields each tracks per phone number. Assign them to numbers under Telephony → Phone Numbers.', path: '/admin/media-agencies', live: true },
     ],
   },
   {

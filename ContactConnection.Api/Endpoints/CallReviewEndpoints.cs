@@ -175,6 +175,7 @@ public static class CallReviewEndpoints
             agentName = agent?.FullName,
             r.CallerId,
             r.Dnis,
+            r.MediaAttribution,
             r.OrderNumber,
             r.RecordingUrl,
             contact = new
