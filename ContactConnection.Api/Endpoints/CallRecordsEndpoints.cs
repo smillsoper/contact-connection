@@ -15,6 +15,7 @@ public static class CallRecordsEndpoints
 
         group.MapPost("inbound", CreateInbound);
         group.MapPost("outbound", CreateOutbound);
+        group.MapPost("{id:guid}/end", EndOutbound);
         group.MapPost("manual", CreateManual);
         group.MapGet("{id:guid}", GetById);
         group.MapGet("{id:guid}/cart", GetCart);
@@ -109,6 +110,32 @@ public static class CallRecordsEndpoints
         await callRecords.SaveChangesAsync(ct);
 
         return Results.Created($"/api/v1/call-records/{record.Id}", new { id = record.Id });
+    }
+
+    // ── POST /api/v1/call-records/{id}/end ─────────────────────────────────
+    // Called by the agent UI when a softphone-dialed call (idle dial or consult leg) ends. Those legs
+    // never pass through the ESL call pipeline, so nothing else closes their record (S169 — they stayed
+    // "active" until the next API startup's orphan sweep, which remains the backstop for a closed
+    // browser). Only the dialing agent's own outbound records; idempotent.
+
+    private static async Task<IResult> EndOutbound(
+        Guid id,
+        System.Security.Claims.ClaimsPrincipal user,
+        ICallRecordRepository callRecords,
+        TenantContext tenantContext,
+        CancellationToken ct)
+    {
+        if (tenantContext.Current is null) return Results.Unauthorized();
+        if (!Guid.TryParse(user.FindFirst("sub")?.Value, out var agentId)) return Results.Unauthorized();
+
+        var record = await callRecords.GetByIdWithInteractionsAsync(id, ct);
+        if (record is null || record.Source != CallSource.Outbound || record.AgentId != agentId) return Results.NotFound();
+        if (record.CallEndAt is null)
+        {
+            record.Complete();
+            await callRecords.SaveChangesAsync(ct);
+        }
+        return Results.NoContent();
     }
 
     // ── POST /api/v1/call-records/manual ────────────────────────────────────

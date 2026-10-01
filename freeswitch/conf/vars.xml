@@ -4,6 +4,12 @@
   <!-- ext-sip-ip / ext-rtp-ip use auto-nat to handle Docker NAT.        -->
   <X-PRE-PROCESS cmd="set" data="domain=127.0.0.1"/>
   <X-PRE-PROCESS cmd="set" data="domain_name=$${domain}"/>
+  <!-- Outbound PSTN for agent softphones (S169 — see dialplan/default.xml pstn-outbound).
+       default_outbound_cid is used when the softphone doesn't send one (dialing from idle); it
+       must be a number the carrier accepts (owned or verified). TEMPORARY dev value — a
+       per-tenant/campaign outbound caller ID comes with the SignalWire multi-tenant work. -->
+  <X-PRE-PROCESS cmd="set" data="default_gateway=signalwire"/>
+  <X-PRE-PROCESS cmd="set" data="default_outbound_cid=+15416413898"/>
 
   <!-- ── SIP ports ────────────────────────────────────────────────────── -->
   <!-- Internal (5060): agent softphones register here                    -->

@@ -1677,7 +1677,7 @@ public sealed class EslBackgroundService : BackgroundService
 
             // Mark the call record complete
             await using var db = dbFactory.Create(session.TenantSchemaName);
-            var record = await db.CallRecords.FirstOrDefaultAsync(
+            var record = await db.CallRecords.Include(r => r.Interactions).FirstOrDefaultAsync(
                 r => r.ContactIdExternal == sessionUuid, ct);
             Campaign? campaign = null;
             if (record is not null)
@@ -2753,7 +2753,7 @@ public sealed class EslBackgroundService : BackgroundService
         foreach (var tenant in tenants)
         {
             await using var db = dbFactory.Create(tenant.SchemaName);
-            var record = await db.CallRecords.FirstOrDefaultAsync(
+            var record = await db.CallRecords.Include(r => r.Interactions).FirstOrDefaultAsync(
                 r => r.ContactIdExternal == channelUuid, ct);
             if (record is null) continue;
 

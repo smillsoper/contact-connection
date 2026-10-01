@@ -178,6 +178,7 @@
 | 166 | 2026-09-29 | 3:21 PM PDT | 4:59 PM PDT | 98 min | ~19145 min |
 | 167 | 2026-09-29 | 5:08 PM PDT | 6:45 PM PDT | 97 min | ~19242 min |
 | 168 | 2026-09-29 | 6:45 PM PDT | 7:53 PM PDT | 68 min | ~19310 min |
+| 169 | 2026-09-30 | 7:53 AM PDT | 5:37 PM PDT | 584 min | ~19894 min |
 
 ---
 
@@ -10894,4 +10895,100 @@ Telnyx deactivation.
   secure capture → re-auth → resubmit (needs Authorize.Net sandbox creds), outbound via SignalWire
   (callback / transfer — Passthrough + caller ID), ACW multi-tab, pre-queue issue.
 - Phone number management (remove/archive, move, bulk import); SignalWire multi-tenancy research.
+
+## Session 169
+
+**Date:** 2026-09-30
+**Start:** 7:53 AM PDT
+**End:** 5:37 PM PDT
+**Duration:** 584 minutes
+**Total Duration:** ~19894 minutes
+
+### Focus
+
+Solo live testing on SignalWire while waiting on Clint, fixing what turned up; campaign credential
+settings for payment gateways and tax; SignalWire TLS; then a long planning thread (SignalWire
+multi-tenancy, manual outbound dialing, production launch and storage).
+
+### Done — fixes from live testing
+
+- **Calls ended "incomplete"** (found S168): `FlowEngine.CompleteSession` now completes the call's
+  active CallInteraction with the flow's disposition (custom field `disposition`, else
+  `flow.disposition`) and re-derives an ended call's status (`CallRecord.RefreshOverallStatus`). The
+  hang-up paths (EslBackgroundService ×2, QueueCallbackDeliveryService ×2, OrphanedCallReconciler)
+  now load Interactions before `Complete()` — they were deriving status from an empty list.
+  Live-verified: Junk → Test Call ends "complete", one call record.
+- **Agent portal "blips" / softphone "Not registered"**: every `/auth/refresh` rotated the SIP
+  password, and StrictMode + reconnects fired several refreshes in seconds. SIP credentials now
+  refresh only with `?sip=true`, deduped to one in-flight call on mount. Live-verified, stayed
+  registered.
+- **SignalWire forked duplicate INVITEs** (UDP registrations landing on two edges): temporary
+  single-edge pin, then **TLS registration on 5061** per SignalWire support (ticket #64110) — external
+  profile `tls=true`, `tls-verify-policy=out` (carrier cert checked against the CA bundle), pin
+  removed. `freeswitch/conf/tls/agent.pem` + `cafile.pem` are generated locally and gitignored
+  (recreate command in external.xml). Live-verified: inbound = one INVITE, one call record.
+- **Outbound via SignalWire**: SignalWire answered a `From` of the caller ID with endless 407s — From
+  is now the credential, caller ID in P-Asserted-Identity (`caller-id-in-from=false`,
+  `sip_cid_type=pid`). New `pstn-outbound` dialplan route (default gateway `signalwire`, default
+  caller ID +15416413898 for dev, `X-CC-Caller-Id` override). Default gateway `signalwire` in Api /
+  Worker config. Live-verified: Worker scheduled callback, softphone idle dial.
+- **Worker** wouldn't start (`ITelephonyEventNotifier` not registered → no-op added) and its ESL
+  secret was stale (copied from the Api's, compared by hash only).
+- **Softphone-dialed calls never closed their record** (idle dial and consult legs stayed
+  "active" until the next API start): new `POST /call-records/{id}/end` (dialing agent's own
+  outbound records only, idempotent), called by the softphone when the leg ends or fails.
+- **Script-less outbound calls now end "complete"** (Stephen: callbacks to finish abandoned orders,
+  re-collecting payment, etc. are finished work); an outbound call that opened a script is still
+  judged by it; inbound unchanged. 3 domain tests.
+- Live-verified also: auto-answer best agent with whisper + script pop + ACW → Available; Finalize
+  with a live caller.
+
+### Done — campaign credential settings
+
+- **Payment Gateways** section in campaign settings: one card per registered gateway (Authorize.Net)
+  with setup instructions, where each value comes from (campaign / client / tenant / not set),
+  write-only secrets, save-to scope, Remove, and **Test credentials** (`authenticateTestRequest`, no
+  transaction). Tenants no longer guess credential key names.
+- **Sales Tax → Avalara**: the same card (Account ID, License Key, Environment) with Test via
+  `/utilities/ping`, replacing the static key-name hint.
+- Shared by design: `ICampaignCredentialSet` (descriptor + test) implemented by `IPaymentGatewayClient`
+  and `AvalaraTaxProvider`; `CampaignCredentialsEndpoints` (`/campaigns/{id}/payment-gateways`,
+  `/tax-providers`, `.../{provider}/test`); `CampaignCredentialCards.tsx`. A new gateway/tax
+  provider appears in settings by registering it.
+- Authorize.Net sandbox credentials were already stored tenant-wide and test OK. Avalara: Stephen's
+  free trial signup hit an email typo + blocked re-signup; Avalara support case open.
+
+### Planning (recorded in memory; nothing built)
+
+- **SignalWire multi-tenancy — verified answers from support** (after web answers proved partly
+  wrong): one Project per tenant; numbers movable between Projects unless E911-assigned; usage rolls
+  up to one shared prepaid balance; no porting API; outbound must present a number bought/verified in
+  that Project — **no caller-ID passthrough on transfers**; purchased numbers get **C attestation**
+  until vetted; SIP endpoints register (one per tenant); **1 CPS for the whole Space**.
+- Drafted messages: Space Increase form, attestation vetting, Sales (ISV, pricing, postpaid, porting,
+  per-Project usage, does CPS count inbound) — sent; legal-counsel question list (regulatory status /
+  RMD, Kari's Law / RAY BAUM'S, TCPA calling hours, DNC, voicemail-drop consent, recording consent,
+  record retention) — held until counsel is engaged.
+- **Life Seasons volume from the CXOne CDR backup** (6 months): ~26.4k inbound calls / ~246k billed
+  min per month, ~810 outbound; peak 104 concurrent; up to 4 inbound calls in the same second; ~1,900
+  toll-free + ~50 local numbers; 150 agents, max 76/day.
+- **Manual outbound dialing** (CXOne-style): reviewed what exists (manual outbound campaigns +
+  External Numbers address book, used only as the mid-call transfer list; configured outbound and
+  per-number flows never executed) and agreed the full-boat design — client → campaign → address
+  book / free-form, granular role dial permissions, server-parked dial running the number's /
+  campaign's telephony flow with a dial node, internal-campaign address-book entries, script pop on
+  dial or on answer, platform DNC + calling-hours rules with callee time-zone resolution (caller TZ →
+  ZIP → prior call records → area code from zip-codes.com's monthly SFTP database, strictest hours when
+  ambiguous).
+- **Production launch**: cloud hosting, widest stable RTP range, load test near peak, recordings as
+  MP3 / MP4 (screen recording) in cloud storage with an allowance + overage model, a storage-provider
+  model (S3, Azure Blob, GCS, Box, Google Drive, SFTP) with tenant-set migration and retention, push
+  SignalWire to postpaid, onboarding fee funding a 1-month go-live window, Five9 price as the benchmark.
+
+### Next
+
+- Consult transfer live test (verified numbers only); Clint session (Monitor / Coach / Barge / Take
+  Over / 📞 audio); secure capture → authorize → resubmit with the Authorize.Net sandbox.
+- Waiting on: SignalWire Sales + vetting/CPS answers, Avalara support, Clint's Five9 price.
+- Then: manual outbound dialing build; phone number management.
 

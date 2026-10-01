@@ -365,16 +365,14 @@ export default function SoftphonePanel() {
         // ── Consultation leg ──────────────────────────────────────────────
         transferSessionRef.current = session
 
-        session.on('accepted', async () => {
+        let consultRecord: Promise<string | null> | null = null
+        session.on('accepted', () => {
           setTransferConnected()
-          try {
-            await api.post('/api/v1/call-records/outbound', {
-              dialedNumber: session.remote_identity?.uri?.user ?? null,
-            })
-          } catch {}
+          consultRecord = createOutboundRecord(session.remote_identity?.uri?.user ?? null)
         })
 
         const cleanupConsult = async () => {
+          endOutboundRecord(consultRecord)
           transferSessionRef.current = null
           if (consultAudioRef.current) consultAudioRef.current.srcObject = null
           stopConferenceAudio()
@@ -416,17 +414,14 @@ export default function SoftphonePanel() {
           }
         } else {
           // Outbound direct dial (idle → dialing)
-          session.on('accepted', async () => {
+          let dialRecord: Promise<string | null> | null = null
+          session.on('accepted', () => {
             setOnCall()
-            try {
-              const rec = await api.post<{ id: string }>('/api/v1/call-records/outbound', {
-                dialedNumber: session.remote_identity?.uri?.user ?? null,
-              })
-              setCallRecordId(rec.id)
-            } catch {}
+            dialRecord = createOutboundRecord(session.remote_identity?.uri?.user ?? null)
+            dialRecord.then((id) => { if (id) setCallRecordId(id) })
           })
-          session.on('ended',  () => { sessionRef.current = null; reset() })
-          session.on('failed', () => { sessionRef.current = null; reset() })
+          session.on('ended',  () => { endOutboundRecord(dialRecord); sessionRef.current = null; reset() })
+          session.on('failed', () => { endOutboundRecord(dialRecord); sessionRef.current = null; reset() })
         }
       }
     })
@@ -557,6 +552,9 @@ export default function SoftphonePanel() {
       ua.call(`sip:${t.number}@${tenantSubdomain}`, {
         mediaConstraints: { audio: true, video: false },
         pcConfig: { iceServers: [] },
+        // Present the number the customer dialed (the campaign's DID) as caller ID on the
+        // consult leg — FreeSWITCH's pstn-outbound route reads this (S169).
+        extraHeaders: callerIdHeader(destinationNumber),
       })
     } catch {
       // Dial failed immediately — undo hold and reset
@@ -676,6 +674,25 @@ export default function SoftphonePanel() {
     } catch {
       // Mixing failed — still in conference state but audio is relay-mode (agent hears both, both hear agent)
     }
+  }
+
+  /** Softphone-dialed legs (idle dial, consult) don't go through the ESL call pipeline, so the UI opens
+   *  their call record when the far end answers and closes it when the leg ends (S169). */
+  const createOutboundRecord = (dialedNumber: string | null): Promise<string | null> =>
+    api.post<{ id: string }>('/api/v1/call-records/outbound', { dialedNumber })
+      .then((rec) => rec.id)
+      .catch(() => null)
+
+  const endOutboundRecord = (record: Promise<string | null> | null) => {
+    record?.then((id) => { if (id) api.post<void>(`/api/v1/call-records/${id}/end`).catch(() => {}) })
+  }
+
+  /** X-CC-Caller-Id for an outbound leg — only a well-formed +1 number; FreeSWITCH falls back to the
+   *  default outbound caller ID otherwise. */
+  function callerIdHeader(num: string | null | undefined): string[] {
+    const d = (num ?? '').replace(/\D/g, '')
+    const e164 = d.length === 10 ? `+1${d}` : d.length === 11 && d.startsWith('1') ? `+${d}` : null
+    return e164 ? [`X-CC-Caller-Id: ${e164}`] : []
   }
 
   // Manual outbound dial from idle state

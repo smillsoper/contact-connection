@@ -23,7 +23,7 @@ public record GatewayVoidResult(bool Succeeded, string? ResponseReasonText);
 /// naming (different gateways need different credential shapes), resolved via ITenantCredentialStore
 /// using the campaign -> client -> tenant cascade.
 /// </summary>
-public interface IPaymentGatewayClient
+public interface IPaymentGatewayClient : ICampaignCredentialSet
 {
     /// <summary>Dispatch key for IPaymentGatewayClientFactory — e.g. "authorize_net".</summary>
     string ProviderKey { get; }
@@ -52,4 +52,5 @@ public interface IPaymentGatewayClient
 public interface IPaymentGatewayClientFactory
 {
     IPaymentGatewayClient Resolve(string providerKey);
+    IReadOnlyList<IPaymentGatewayClient> All { get; }
 }

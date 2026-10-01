@@ -53,7 +53,7 @@ public sealed class QueueCallbackDeliveryService(
     private string EslHost => config["FreeSWITCH:Host"] ?? "127.0.0.1";
     private int    EslPort => int.TryParse(config["FreeSWITCH:EslPort"], out var p) ? p : 8021;
     private string EslPass => config["FreeSWITCH:EslPassword"] ?? "ClueCon";
-    private string Gateway => config["FreeSWITCH:DefaultGateway"] ?? "telnyx";
+    private string Gateway => config["FreeSWITCH:DefaultGateway"] ?? "signalwire";
 
     // ── 1. Reserve an agent + dial the caller back ───────────────────────────────
 
@@ -350,7 +350,7 @@ public sealed class QueueCallbackDeliveryService(
                 abandonType: CallAbandonType.CallbackAbandon, ct: CancellationToken.None);
 
             await using var db = dbFactory.Create(tenantSchema);
-            var record = await db.CallRecords.FirstOrDefaultAsync(r => r.Id == recordId);
+            var record = await db.CallRecords.Include(r => r.Interactions).FirstOrDefaultAsync(r => r.Id == recordId);
             if (record is not null)
             {
                 record.Complete();
@@ -412,7 +412,7 @@ public sealed class QueueCallbackDeliveryService(
 
         // Out of attempts — a callback abandon against the original inbound call record.
         await using var db = dbFactory.Create(tenantSchema);
-        var record = await db.CallRecords.FirstOrDefaultAsync(r => r.Id == placeholder.CallRecordId, ct);
+        var record = await db.CallRecords.Include(r => r.Interactions).FirstOrDefaultAsync(r => r.Id == placeholder.CallRecordId, ct);
         if (record is not null)
         {
             await callStateRecorder.RecordAsync(

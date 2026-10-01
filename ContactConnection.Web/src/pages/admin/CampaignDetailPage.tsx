@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import AdminShell from '../../components/admin/AdminShell'
 import SearchableSelect from '../../components/SearchableSelect'
+import PaymentGatewaysForm from '../../components/admin/PaymentGatewaysForm'
+import CampaignCredentialCards from '../../components/admin/CampaignCredentialCards'
 import {
   getCampaign, updateCampaign, updateCampaignRecording, updateCampaignSensitiveDataRetention, updateCampaignExternalRouting, setCampaignFlow, removeCampaignFlow,
   updateCampaignTax, type TaxProviderKey, type CampaignTaxSettings, type AvalaraFeeLine,
@@ -1140,21 +1142,6 @@ function SalesTaxForm({ campaign, onSaved }: SalesTaxFormProps) {
               </button>
             )}
           </div>
-
-          <div className="mt-5 rounded-lg bg-gray-800/50 border border-gray-800 p-3 text-xs text-gray-400 leading-relaxed">
-            <p className="text-gray-300 font-medium mb-1">Credentials</p>
-            Add these on the <a href="/admin/credentials" className="text-indigo-400 hover:text-indigo-300">Credentials</a> page
-            (they are never stored with the campaign):
-            <ul className="mt-1 font-mono text-[11px] text-gray-300 space-y-0.5">
-              <li>Avalara:{campaign.id}:AccountId</li>
-              <li>Avalara:{campaign.id}:LicenseKey</li>
-              <li>Avalara:{campaign.id}:Environment <span className="font-sans text-gray-500">— optional; "production", otherwise sandbox</span></li>
-            </ul>
-            <p className="mt-1">
-              To share one Avalara account across campaigns, use the client ID in place of the campaign ID
-              (<span className="font-mono">Avalara:{campaign.clientId}:AccountId</span>), or omit the ID entirely for a tenant-wide account.
-            </p>
-          </div>
         </>
       )}
 
@@ -1170,6 +1157,17 @@ function SalesTaxForm({ campaign, onSaved }: SalesTaxFormProps) {
         {rateInvalid && <span className="text-red-400 text-sm">Fix the highlighted fields before saving.</span>}
         {saveError && <span className="text-red-400 text-sm">{saveError}</span>}
       </div>
+
+      {provider !== '' && (
+        <div className="mt-6 pt-5 border-t border-gray-800">
+          <p className="text-xs text-gray-400 font-medium mb-1">Provider credentials</p>
+          <p className="text-xs text-gray-500 mb-4 leading-snug">
+            Saved separately from the settings above, and never stored with the campaign. A field left unset here falls
+            back to the client-wide value, then the tenant default.
+          </p>
+          <CampaignCredentialCards campaignId={campaign.id} section="tax-providers" only={provider} />
+        </div>
+      )}
     </div>
   )
 }
@@ -1786,6 +1784,7 @@ export default function CampaignDetailPage() {
             campaign={campaign}
             onSaved={(updated) => setCampaign(updated)}
           />
+          <PaymentGatewaysForm campaignId={campaign.id} />
           {campaign.direction === 'inbound' && (
             <RoutingForm
               campaign={campaign}

@@ -50,6 +50,20 @@
     <!-- Adaptive inbound jitter buffer (~60 ms) — smooths trunk network jitter
          for cleaner DTMF detection and recording quality. -->
     <param name="auto-jitterbuffer-msec" value="60"/>
+
+    <!-- TLS (S169) — for trunks that register over TLS (SignalWire, port 5061). The connection is
+         outbound from us, so the TLS port needn't be published. tls-cert-dir holds agent.pem (our
+         own self-signed cert+key, required for sofia to enable TLS) and cafile.pem (the public CA
+         bundle, used to verify the carrier's certificate). Both are generated locally and
+         gitignored — to recreate them:
+           docker exec cc_freeswitch sh -c 'cd /tmp && openssl req -x509 -newkey rsa:2048 -nodes              -keyout k.pem -out c.pem -days 3650 -subj /CN=contactconnection-fs &&
+             cat k.pem c.pem > /etc/freeswitch/tls/agent.pem && rm k.pem c.pem &&
+             cp /etc/ssl/certs/ca-certificates.crt /etc/freeswitch/tls/cafile.pem' -->
+    <param name="tls"                 value="true"/>
+    <param name="tls-sip-port"        value="5081"/>
+    <param name="tls-cert-dir"        value="/etc/freeswitch/tls"/>
+    <param name="tls-version"         value="tlsv1.2"/>
+    <param name="tls-verify-policy"   value="out"/>
   </settings>
 
   <gateways>
@@ -91,15 +105,24 @@
       <param name="username"           value="contactconnection-fs"/>
       <param name="password"           value="$${signalwire_sip_password}"/>
       <param name="realm"              value="call-center-solutions-llc-ccd6149a26e3.sip.signalwire.com"/>
-      <param name="proxy"              value="call-center-solutions-llc-ccd6149a26e3.sip.signalwire.com"/>
+      <param name="proxy"              value="call-center-solutions-llc-ccd6149a26e3.sip.signalwire.com:5061"/>
       <param name="from-domain"        value="call-center-solutions-llc-ccd6149a26e3.sip.signalwire.com"/>
       <param name="register"           value="true"/>
-      <param name="register-transport" value="udp"/>
+      <!-- TLS on 5061, per SignalWire support (ticket #64110, S169): one persistent connection = one
+           registration binding, so no forked duplicate INVITEs (UDP refreshes could land on different
+           SignalWire edges, leaving a binding on each), and signaling is encrypted. Inbound calls
+           arrive over the same connection. -->
+      <param name="register-transport" value="tls"/>
       <param name="expire-seconds"     value="120"/>
       <param name="retry-seconds"      value="30"/>
-      <!-- OPTIONS keepalive holds the home router's UDP NAT pinhole open (as for Telnyx). -->
+      <!-- OPTIONS keepalive keeps the TLS connection (and the router's NAT mapping) alive. -->
       <param name="ping"               value="25"/>
-      <param name="caller-id-in-from"  value="true"/>
+      <!-- From must be the credential (SignalWire answered a From of +1541… with endless 407s, S169);
+           the caller ID travels in P-Asserted-Identity instead. -->
+      <param name="caller-id-in-from"  value="false"/>
+      <variables>
+        <variable name="sip_cid_type" value="pid" direction="outbound"/>
+      </variables>
       <param name="codec-prefs"        value="$${outbound_codec_prefs}"/>
       <param name="context"            value="public"/>
     </gateway>

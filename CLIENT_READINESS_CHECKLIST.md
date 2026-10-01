@@ -670,8 +670,10 @@ arrives in the To header (registered trunk) — public dialplan now routes on `s
 destination_number isn't a number. **First live call end to end** (parallel-queuing ring loop →
 ring-all → answer → script pop → disposition).
 
-- [ ] **Call interaction completion (added S168)** — real calls end "incomplete": the CallInteraction
+- [x] **Call interaction completion (added S168)** — real calls end "incomplete": the CallInteraction
       stays "active"; complete it at script end / hangup so `DeriveOverallStatus` reports correctly.
+      *Done S169: completed at script end with the flow's disposition; hang-up paths load interactions;
+      script-less outbound dials end "complete". Live-verified.*
 - [ ] **Phone number management (added S168)** — remove (hard delete if never used, else archive +
       drop from routing), move between campaigns, bulk add / port-in import (paste/CSV, E.164
       validation, cross-tenant duplicate check). Typo +15416416898 on NeuroQ - LF TV to remove.
@@ -679,6 +681,38 @@ ring-all → answer → script pop → disposition).
       research SignalWire's per-tenant Space model first (direct vs roll-up billing, porting API,
       limits/compliance per space), then design per-tenant numbers, dynamic FreeSWITCH gateways
       (credentials in Key Vault) and tenant billing. Needed to charge tenants, incl. the first.
+      *S169: research done — SignalWire support's verified answers (one Project per tenant, shared
+      prepaid balance, no caller-ID passthrough, C attestation until vetted, 1 CPS space-wide). Sales /
+      vetting / CPS questions sent. Design + build still to do.*
+
+**Session 169 (2026-09-30): live testing fixes, campaign credential settings, launch planning.** Calls
+now end "complete"; softphone no longer drops registration on token refresh; SignalWire registers over
+TLS (no more duplicate INVITEs); outbound works (callback + idle dial); softphone-dialed records close
+on hang-up. Campaign settings gained **Payment Gateways** and Avalara credential cards with Test.
+
+- [ ] **Manual outbound dialing (added S169)** — CXOne-style: client → manual outbound campaign → address
+      book or free-form; granular role permissions (campaign / direct, address book / any number);
+      dial parked server-side running the entry's → campaign's telephony flow (dial node with
+      answered / no-answer / busy / failed / machine); internal-campaign address-book entries; script
+      pop on dial or on answer; record stamped with client/campaign; caller ID chosen server-side.
+- [ ] **Outbound compliance (added S169)** — platform DNC checks (national via the tenant's SAN, state,
+      tenant internal list) and tenant calling hours with per-state overrides; callee time zone:
+      caller TZ → ZIP (zip-codes.com API definition) → prior call records → area code (zip-codes.com
+      monthly database over SFTP, Worker import); strictest hours when ambiguous; audit log. Needs
+      counsel's answers before the rules lock.
+- [ ] **Production hosting (added S169)** — cloud FreeSWITCH + API with static IP; widest stable RTP
+      range (Life Seasons peaks at 104 concurrent calls); load test near peak before go-live.
+- [ ] **Recording storage (added S169)** — compress (MP3 audio, MP4 when screen recording is on);
+      cloud storage with tiering; allowance in the flat fee + overage per GB (monthly average);
+      storage-provider model (S3, Azure Blob, GCS, Box, Google Drive, SFTP) with tenant-set migration
+      and retention, never deleting before delivery is confirmed.
+- [ ] **Carrier readiness (added S169)** — SignalWire: postpaid billing (Sales), A/B attestation
+      vetting, CPS increase (inbound peaks at 4/sec), low-balance alerts + auto top-up now; port
+      ~1,900 toll-free numbers from Dial800 (start on day one of onboarding).
+- [ ] **911 + regulatory (added S169)** — Kari's Law / RAY BAUM'S Act for home-based agents, RMD
+      update, interconnected-VoIP obligations — questions ready for legal counsel (not yet engaged).
+- [ ] **Pricing (added S169)** — benchmark against Life Seasons' Five9 cost (Clint); onboarding fee
+      funding a 1-month go-live window.
 
 **Earlier next up (S165):** order-failure email link + name assignments in the V1 flow (Stephen); Commissions;
 remaining LS scripts; export processes; SignalWire once reinstated.

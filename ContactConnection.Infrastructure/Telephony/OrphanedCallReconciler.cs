@@ -100,7 +100,7 @@ public class OrphanedCallReconciler : IOrphanedCallReconciler
             (contactId is not null && liveChannelUuids.Contains(contactId));
 
         // ── 1. call_records still open (no call_end_at) past the grace window ─────
-        var openRecords = await db.CallRecords
+        var openRecords = await db.CallRecords.Include(r => r.Interactions)
             .Where(r => r.CallEndAt == null && r.CreatedAt < cutoff)
             .ToListAsync(ct);
 

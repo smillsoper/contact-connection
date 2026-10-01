@@ -26,7 +26,12 @@ public static class AuthEndpoints
         return app;
     }
 
+    // ?sip=true — also issue a fresh softphone (SIP) password. Only the agent portal's page load asks
+    // (the SIP password isn't kept client-side across reloads). A plain token refresh ("stay signed
+    // in") must NOT rotate it: the server-side A1 hash would change under a still-registered
+    // softphone, whose next re-registration then fails (S169).
     private static async Task<IResult> Refresh(
+        bool? sip,
         ClaimsPrincipal user,
         IAgentRepository agents,
         IRoleRepository roles,
@@ -45,8 +50,12 @@ public static class AuthEndpoints
 
         var role = agent.RoleId.HasValue ? await roles.GetByIdAsync(agent.RoleId.Value, ct) : null;
 
-        var (sipExt, sipPwd) = await RefreshSipCredentialsAsync(agent, tenantContext.Current, agents, ct);
-        await agents.SaveChangesAsync(ct);
+        string? sipExt = null, sipPwd = null;
+        if (sip == true)
+        {
+            (sipExt, sipPwd) = await RefreshSipCredentialsAsync(agent, tenantContext.Current, agents, ct);
+            await agents.SaveChangesAsync(ct);
+        }
 
         var token = tokens.GenerateToken(agent, tenantContext.Current, role);
         return Results.Ok(BuildFullLoginResponse(token, agent, tenantContext.Current.Subdomain, role, sipExt, sipPwd));

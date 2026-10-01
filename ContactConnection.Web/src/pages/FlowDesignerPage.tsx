@@ -588,7 +588,8 @@ function DesignerCanvas({
             <Controls>
               <CanvasSelectionToggle active={selectionModeOn} onToggle={() => setSelectionModeOn((v) => !v)} />
             </Controls>
-            <MiniMap nodeColor={(n) => {
+            {/* pannable: drag the viewport box (or click) to move the canvas; zoomable: scroll over it to zoom */}
+            <MiniMap pannable zoomable nodeColor={(n) => {
               const meta: Record<string, string> = {
                 script: '#3b82f6',
                 input: '#10b981',

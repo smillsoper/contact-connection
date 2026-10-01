@@ -370,6 +370,16 @@ public class CallRecord
         UpdatedAt       = DateTimeOffset.UtcNow;
     }
 
+    /// <summary>Re-derives the overall status after an interaction finished late — e.g. the caller hung up
+    /// (Complete() ran, no completed interaction yet → "incomplete") and the agent finished the script in
+    /// after-call work afterwards. Only for calls that have already ended; a live call stays "active".</summary>
+    public void RefreshOverallStatus()
+    {
+        if (CallEndAt is null || FinalizedAt is not null) return;
+        OverallStatus = DeriveOverallStatus();
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
     public void MarkIncomplete()
     {
         OverallStatus = CallRecordStatus.Incomplete;
@@ -518,8 +528,11 @@ public class CallRecord
     /// </summary>
     private string DeriveOverallStatus()
     {
+        // A call the agent placed straight from the softphone with no script (a callback to finish an
+        // abandoned order, re-collecting payment details, ...) is a finished piece of work — complete.
+        // An outbound call that DID open a script is judged by that script like any other call (S169).
         if (!_interactions.Any())
-            return CallRecordStatus.Incomplete;
+            return Source == CallSource.Outbound ? CallRecordStatus.Complete : CallRecordStatus.Incomplete;
 
         var completed = _interactions.Where(i => i.Status == InteractionStatus.Complete).ToList();
         if (!completed.Any())

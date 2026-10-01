@@ -58,7 +58,7 @@ public sealed class ScheduledCallbackProcessingService : BackgroundService
         _eslPort           = int.TryParse(config["FreeSWITCH:EslPort"], out var p) ? p
                              : config.GetSection("FreeSwitchEsl").GetValue<int>("Port", 8021);
         _eslPassword       = config["FreeSWITCH:EslPassword"] ?? "ClueCon";
-        _defaultGateway    = config["FreeSWITCH:DefaultGateway"] ?? "telnyx";
+        _defaultGateway    = config["FreeSWITCH:DefaultGateway"] ?? "signalwire";
         _autoResolveAfterSeconds = int.TryParse(config["ScheduledCallbacks:AutoResolveAttemptedAfterSeconds"], out var s) ? s : 0;
     }
 

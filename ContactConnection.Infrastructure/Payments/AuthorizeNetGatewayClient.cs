@@ -22,6 +22,45 @@ public class AuthorizeNetGatewayClient(
 {
     public string ProviderKey => "authorize_net";
 
+    public CredentialDescriptor Descriptor { get; } = new(
+        "authorize_net", "Authorize.Net", "AuthorizeNet",
+        [
+            new("ApiLoginId", "API Login ID", Secret: true,
+                Help: "Merchant Interface → Account → Settings → Security Settings → API Credentials & Keys."),
+            new("TransactionKey", "Transaction Key", Secret: true,
+                Help: "Same page — generate a new Transaction Key (it's shown once; generating a new one disables the old key after 24h unless you choose immediately)."),
+            new("Environment", "Environment", Secret: false, Options: ["sandbox", "production"], Default: "sandbox",
+                Help: "Sandbox credentials come from a developer (sandbox) account at developer.authorize.net and only work against sandbox."),
+        ],
+        "Sign in to the Authorize.Net Merchant Interface for the merchant account this campaign charges to. " +
+        "Each campaign can use its own merchant account; leave a field unset here to fall back to the client-wide " +
+        "or tenant-wide value. Use \"Test credentials\" to confirm before taking live orders — it makes no transaction.");
+
+    public async Task<CredentialTestResult> TestCredentialsAsync(Guid campaignId, Guid clientId, CancellationToken ct = default)
+    {
+        var (apiLoginId, transactionKey, url) = await ResolveCredentialsAsync(campaignId, clientId, ct);
+        var environment = url == ProductionUrl ? "production" : "sandbox";
+        if (apiLoginId is null || transactionKey is null)
+            return new CredentialTestResult(false, "API Login ID and Transaction Key are both required.", environment);
+
+        var body = new { authenticateTestRequest = new { merchantAuthentication = new { name = apiLoginId, transactionKey } } };
+        try
+        {
+            var response = await httpClientFactory.CreateClient("AuthorizeNet").PostAsJsonAsync(url, body, ct);
+            var json = JsonNode.Parse(StripBom(await response.Content.ReadAsStringAsync(ct)));
+            var ok = json?["messages"]?["resultCode"]?.GetValue<string>() == "Ok";
+            var text = json?["messages"]?["message"]?[0]?["text"]?.GetValue<string>();
+            return new CredentialTestResult(ok,
+                ok ? $"Credentials accepted by Authorize.Net ({environment})." : $"Authorize.Net rejected the credentials ({environment}): {text ?? "unknown error"}",
+                environment);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Authorize.Net credential test failed (transport).");
+            return new CredentialTestResult(false, $"Couldn't reach Authorize.Net: {ex.Message}", environment);
+        }
+    }
+
     private const string SandboxUrl    = "https://apitest.authorize.net/xml/v1/request.api";
     private const string ProductionUrl = "https://api.authorize.net/xml/v1/request.api";
 

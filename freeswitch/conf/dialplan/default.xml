@@ -17,6 +17,32 @@
       </condition>
     </extension>
 
+    <!--
+      Outbound PSTN from an agent softphone (S169): manual dial from idle, and consult transfers
+      to a client's transfer numbers. Only authenticated internal users reach this context
+      (internal profile auth-calls=true). US numbers only (10 digits, optionally 1/+1).
+      Caller ID: the softphone's X-CC-Caller-Id header (the current call's DID) when it's a
+      well-formed +1 number, else $${default_outbound_cid}. The carrier still rejects any
+      number we don't own or haven't verified. SignalWire needs the caller ID in
+      P-Asserted-Identity (gateway sets sip_cid_type=pid) — the From must be the credential.
+    -->
+    <extension name="pstn-outbound">
+      <condition field="destination_number" expression="^\+?1?([2-9]\d{2}[2-9]\d{6})$">
+        <action application="set" data="cc_out_number=+1$1"/>
+        <action application="set" data="cc_out_cid=$${default_outbound_cid}"/>
+      </condition>
+      <condition field="${sip_h_X-CC-Caller-Id}" expression="^\+1[2-9]\d{9}$" break="never">
+        <action application="set" data="cc_out_cid=${sip_h_X-CC-Caller-Id}"/>
+      </condition>
+      <condition field="destination_number" expression="^\+?1?([2-9]\d{2}[2-9]\d{6})$">
+        <action application="set" data="effective_caller_id_number=${cc_out_cid}"/>
+        <action application="set" data="effective_caller_id_name=${cc_out_cid}"/>
+        <action application="set" data="call_timeout=45"/>
+        <action application="set" data="hangup_after_bridge=true"/>
+        <action application="bridge" data="{origination_caller_id_number=${cc_out_cid},origination_caller_id_name=${cc_out_cid}}sofia/gateway/$${default_gateway}/${cc_out_number}"/>
+      </condition>
+    </extension>
+
     <!-- Hold music test: dial 9732 to hear the MOH stream -->
     <extension name="moh-test">
       <condition field="destination_number" expression="^9732$">

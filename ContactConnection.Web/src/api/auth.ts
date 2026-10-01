@@ -117,8 +117,18 @@ export async function mfaVerify(
   return res.json() as Promise<FullAuthResponse>
 }
 
-async function refresh(): Promise<FullAuthResponse> {
-  return api.post<FullAuthResponse>('/api/v1/auth/refresh')
+/** Refreshes the login token. `withSip` also issues a new softphone password — only the agent
+ *  portal's page load needs that; any other refresh must leave the registered softphone alone. */
+async function refresh(withSip = false): Promise<FullAuthResponse> {
+  return api.post<FullAuthResponse>(`/api/v1/auth/refresh${withSip ? '?sip=true' : ''}`)
 }
 
-export const authApi = { login, mfaSetup, mfaSetupConfirm, mfaVerify, refresh }
+// One SIP-issuing refresh per page load: React dev mode runs mount effects twice, and two
+// overlapping refreshes each rotate the SIP password — the softphone could keep the older one.
+let sipRefreshInFlight: Promise<FullAuthResponse> | null = null
+function refreshWithSipOnce(): Promise<FullAuthResponse> {
+  sipRefreshInFlight ??= refresh(true)
+  return sipRefreshInFlight
+}
+
+export const authApi = { login, mfaSetup, mfaSetupConfirm, mfaVerify, refresh, refreshWithSipOnce }

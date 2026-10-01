@@ -54,9 +54,62 @@ public record AvalaraFeeLine(string State, string TaxCode, string Description, s
 public class AvalaraTaxProvider(
     IHttpClientFactory httpClientFactory,
     ITenantCredentialStore credentials,
-    ILogger<AvalaraTaxProvider> logger) : ITaxProvider
+    ILogger<AvalaraTaxProvider> logger) : ITaxProvider, ICampaignCredentialSet
 {
     public string ProviderKey => TaxProviderKey.Avalara;
+
+    internal const string SandboxPingUrl    = "https://sandbox-rest.avatax.com/api/v2/utilities/ping";
+    internal const string ProductionPingUrl = "https://rest.avatax.com/api/v2/utilities/ping";
+
+    public CredentialDescriptor Descriptor { get; } = new(
+        TaxProviderKey.Avalara, "Avalara AvaTax", "Avalara",
+        [
+            new("AccountId", "Account ID", Secret: true,
+                Help: "The 10-digit AvaTax account number — top right of the AvaTax portal, or Settings → License and API Keys."),
+            new("LicenseKey", "License Key", Secret: true,
+                Help: "Settings → License and API Keys → Generate new key. Shown once; generating a new key immediately disables the old one for every integration using it."),
+            new("Environment", "Environment", Secret: false, Options: ["sandbox", "production"], Default: "sandbox",
+                Help: "Sandbox accounts (sandbox.admin.avalara.com) have their own Account ID and License Key and only work against sandbox."),
+        ],
+        "Sign in to the AvaTax portal for the Avalara account this campaign's sales tax is calculated with. " +
+        "Tax is only quoted (never committed), so nothing is recorded in Avalara. Leave a field unset here to fall " +
+        "back to the client-wide or tenant-wide value. The Company Code and tax codes are set below with the other " +
+        "Avalara settings. Use \"Test credentials\" to confirm the account authenticates.");
+
+    public async Task<CredentialTestResult> TestCredentialsAsync(Guid campaignId, Guid clientId, CancellationToken ct = default)
+    {
+        var accountId   = await ScopedCredentials.ResolveAsync(credentials, "Avalara", "AccountId", campaignId, clientId, ct);
+        var licenseKey  = await ScopedCredentials.ResolveAsync(credentials, "Avalara", "LicenseKey", campaignId, clientId, ct);
+        var production  = string.Equals(
+            await ScopedCredentials.ResolveAsync(credentials, "Avalara", "Environment", campaignId, clientId, ct),
+            "production", StringComparison.OrdinalIgnoreCase);
+        var environment = production ? "production" : "sandbox";
+        if (accountId is null || licenseKey is null)
+            return new CredentialTestResult(false, "Account ID and License Key are both required.", environment);
+
+        try
+        {
+            using var message = new HttpRequestMessage(HttpMethod.Get, production ? ProductionPingUrl : SandboxPingUrl);
+            message.Headers.Authorization = new AuthenticationHeaderValue("Basic",
+                Convert.ToBase64String(Encoding.UTF8.GetBytes($"{accountId}:{licenseKey}")));
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(15));
+            using var response = await httpClientFactory.CreateClient("Avalara").SendAsync(message, timeout.Token);
+            var raw = await response.Content.ReadAsStringAsync(timeout.Token);
+            var json = string.IsNullOrWhiteSpace(raw) ? null : JsonNode.Parse(raw);
+            var authenticated = response.IsSuccessStatusCode && json?["authenticated"]?.GetValue<bool>() == true;
+            return new CredentialTestResult(authenticated,
+                authenticated
+                    ? $"Credentials accepted by Avalara ({environment})."
+                    : $"Avalara did not accept the credentials ({environment}) — check the Account ID, License Key and environment.",
+                environment);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+        {
+            logger.LogWarning(ex, "Avalara credential test failed (transport).");
+            return new CredentialTestResult(false, $"Couldn't reach Avalara: {ex.Message}", environment);
+        }
+    }
 
     internal const string SandboxUrl    = "https://sandbox-rest.avatax.com/api/v2/transactions/create";
     internal const string ProductionUrl = "https://rest.avatax.com/api/v2/transactions/create";

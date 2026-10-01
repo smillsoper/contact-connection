@@ -388,6 +388,36 @@ public class FlowSessionReviewTests
         Assert.Null(await Engine().TakeOverSessionAsync(finished.Id, Guid.NewGuid(), "x"));
     }
 
+    [Fact]
+    public async Task ScriptEnd_CompletesTheInteraction_WithTheFlowsDisposition_AndFixesAnEndedCallsStatus()
+    {
+        // S169: the caller hung up first (status derived "incomplete" — interaction still active), then
+        // the agent finished the script in ACW.
+        var interaction = _record.AddInteraction(InteractionType.OrderSale);
+        _record.Complete();
+        Assert.Equal(CallRecordStatus.Incomplete, _record.OverallStatus);
+        _record.UpdateCustomFieldsSnapshot("""{"call_type":"Junk","disposition":"Test Call"}""");
+
+        var flow = AddFlow(Definition(("n_order", ApiNode()), ("end_1", EndNode())));
+        var session = FlowSession.Create(_tenantId, flow.Id, 1, _record.Id, interaction.Id, Guid.NewGuid(), "end_1");
+        _sessions.Setup(s => s.GetByIdAsync(session.Id, It.IsAny<CancellationToken>())).ReturnsAsync(session);
+
+        Assert.True(await Engine().FinalizeSessionAsync(session.Id, "x"));   // runs the normal completion path
+
+        Assert.Equal((InteractionStatus.Complete, "Test Call"), (interaction.Status, interaction.Disposition));
+        Assert.Equal(CallRecordStatus.Complete, _record.OverallStatus);
+    }
+
+    [Fact]
+    public void Disposition_FallsBackToTheFlowVariable()
+    {
+        var ctx = new FlowExecutionContext { CallRecordId = _record.Id };
+        ctx.FlowVars["disposition"] = "Sale";
+        Assert.Equal("Sale", CrmFlowEngine.DispositionOf(_record, ctx));
+        ctx.FlowVars.Clear();
+        Assert.Null(CrmFlowEngine.DispositionOf(_record, ctx));
+    }
+
     private sealed class RecordingInputHandler : INodeHandler
     {
         public string NodeType => "input";

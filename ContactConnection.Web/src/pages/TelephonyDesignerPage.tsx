@@ -590,7 +590,10 @@ function DesignerCanvas() {
             <Controls>
               <CanvasSelectionToggle active={selectionModeOn} onToggle={() => setSelectionModeOn((v) => !v)} />
             </Controls>
+            {/* pannable: drag the viewport box (or click) to move the canvas; zoomable: scroll over it to zoom */}
             <MiniMap
+              pannable
+              zoomable
               nodeColor={(n) => TELEPHONY_NODE_META[n.type as TelephonyNodeType]?.color ?? '#374151'}
               style={{ background: '#1f2937' }}
             />

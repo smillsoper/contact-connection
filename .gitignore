@@ -60,3 +60,7 @@ postgres_data/
 
 ## Original application reference code — local reference only, never committed
 Original Application/
+
+# FreeSWITCH external-profile TLS (S169) — generated locally, never committed (agent.pem holds a private key)
+freeswitch/conf/tls/agent.pem
+freeswitch/conf/tls/cafile.pem

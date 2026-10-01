@@ -25,7 +25,7 @@ export default function AgentShell() {
   // Fire a token refresh to get a fresh SIP password without requiring re-login.
   useEffect(() => {
     if (sipExtension) return
-    authApi.refresh().then((res) => {
+    authApi.refreshWithSipOnce().then((res) => {
       setAuth(res.token, res.agentId, res.tenantSubdomain, res.role, res.firstName, res.lastName, res.permissions ?? [], res.landingPage ?? undefined)
       if (res.sipExtension && res.sipPassword) {
         setSipCredentials(res.sipExtension, res.sipPassword)

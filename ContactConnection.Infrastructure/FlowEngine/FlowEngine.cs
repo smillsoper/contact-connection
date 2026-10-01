@@ -930,13 +930,39 @@ public class FlowEngine : IFlowEngine
         // A captured card is kept after authorization for re-auth on an order change (see
         // PaymentService); the script is done with it now — unless the campaign keeps it until the
         // order is submitted (CardDataRetentionMode.UntilOrderSubmitted; retention sweep backstops).
-        var record = await _callRecords.GetByIdAsync(ctx.CallRecordId, ct);
-        if (record is not null && !string.IsNullOrEmpty(record.SensitiveData)
+        var record = await _callRecords.GetByIdWithInteractionsAsync(ctx.CallRecordId, ct);
+        if (record is null) return;
+        if (!string.IsNullOrEmpty(record.SensitiveData)
             && !await _cardRetention.HoldsUntilOrderSubmittedAsync(record.CampaignId, ct))
-        {
             record.WipeSensitiveData("flow_completed");
-            await _callRecords.SaveChangesAsync(ct);
+
+        // The script is this interaction's work — finishing it completes the interaction (S169: nothing
+        // did, so every scripted call derived "incomplete"). Its disposition is whatever the flow saved:
+        // the "disposition" custom field, else a flow.disposition variable. If the caller already hung
+        // up (agent wrapped up in ACW), re-derive the call's status now.
+        var interaction = record.Interactions.FirstOrDefault(i => i.Id == ctx.InteractionId);
+        if (interaction is not null && interaction.Status == InteractionStatus.Active)
+        {
+            interaction.Complete(DispositionOf(record, ctx) ?? "");
+            record.RefreshOverallStatus();
         }
+        await _callRecords.SaveChangesAsync(ct);
+    }
+
+    /// <summary>The disposition the flow recorded, if any.</summary>
+    internal static string? DispositionOf(CallRecord record, FlowExecutionContext ctx)
+    {
+        if (!string.IsNullOrWhiteSpace(record.CustomFields))
+        {
+            try
+            {
+                if (JsonNode.Parse(record.CustomFields)?["disposition"] is JsonValue v
+                    && v.TryGetValue<string>(out var fromField) && !string.IsNullOrWhiteSpace(fromField))
+                    return fromField;
+            }
+            catch (JsonException) { /* malformed snapshot — fall through */ }
+        }
+        return ctx.FlowVars.TryGetValue("disposition", out var fromVar) && !string.IsNullOrWhiteSpace(fromVar) ? fromVar : null;
     }
 
     private static JsonObject? GetNode(JsonObject definition, string nodeId) =>

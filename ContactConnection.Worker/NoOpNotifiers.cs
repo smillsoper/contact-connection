@@ -44,6 +44,14 @@ internal sealed class NoOpFlowNotifier : IFlowNotifier
         Task.CompletedTask;
 }
 
+/// <summary>Needed since TelEndNodeHandler (S147) takes it — without it the Worker failed DI validation at
+/// startup and never ran (found S169). Telephony events only fire on live calls in the API.</summary>
+internal sealed class NoOpTelephonyEventNotifier : ITelephonyEventNotifier
+{
+    public Task NotifyEndedAsync(Guid agentId, Guid callRecordId, string eventName, string outcome, CancellationToken ct = default) =>
+        Task.CompletedTask;
+}
+
 internal sealed class NoOpCallTraceNotifier : ICallTraceNotifier
 {
     public Task NotifyCallMatchedAsync(Guid subscriptionId, Guid callRecordId, CancellationToken ct = default) =>

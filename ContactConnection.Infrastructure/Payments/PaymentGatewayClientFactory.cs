@@ -17,6 +17,8 @@ public class PaymentGatewayClientFactory : IPaymentGatewayClientFactory
         _clients = clients.ToDictionary(c => c.ProviderKey, StringComparer.OrdinalIgnoreCase);
     }
 
+    public IReadOnlyList<IPaymentGatewayClient> All => _clients.Values.ToList();
+
     public IPaymentGatewayClient Resolve(string providerKey)
     {
         if (_clients.TryGetValue(providerKey, out var client))

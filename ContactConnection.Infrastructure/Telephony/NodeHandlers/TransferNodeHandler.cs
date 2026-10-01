@@ -176,7 +176,7 @@ public class TransferNodeHandler : ITelephonyNodeHandler
         {
             var gw = node["externalGatewayName"]?.GetValue<string>();
             if (string.IsNullOrWhiteSpace(gw))
-                gw = _config["FreeSWITCH:DefaultGateway"] ?? "telnyx";
+                gw = _config["FreeSWITCH:DefaultGateway"] ?? "signalwire";
             var digits = new string(raw.Where(c => char.IsDigit(c) || c == '+').ToArray());
             dest = $"sofia/gateway/{gw.Trim()}/{digits}";
         }
