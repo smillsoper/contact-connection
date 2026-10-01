@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "prod": "npm run build && vite preview --port 5173 --strictPort"
   },
   "dependencies": {
     "@azure/msal-browser": "^5.11.0",

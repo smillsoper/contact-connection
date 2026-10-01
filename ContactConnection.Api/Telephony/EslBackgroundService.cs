@@ -827,9 +827,31 @@ public sealed class EslBackgroundService : BackgroundService
                 // the call-trace snapshot by prefix (CallTraceSnapshot.RedactTelephonyVars).
                 foreach (var (k, v) in finalBlob)
                     session.Vars["secure." + k] = v;
+
+                // Card brand + last four (S169) — not sensitive under PCI, so they're published openly:
+                // telephony vars card_brand / card_last4, and the same keys as shared call variables so
+                // the CRM script can show "Visa ending 1111" ({{shared.card_brand}}, {{shared.card_last4}}).
+                if (SecureCollect.FindPan(specs, finalBlob) is { } pan)
+                {
+                    var brand = SecureCollect.CardBrand(pan);
+                    var last4 = pan[^4..];
+                    session.Vars["card_brand"] = brand;
+                    session.Vars["card_last4"] = last4;
+                    try
+                    {
+                        using var brandScope = _scopeFactory.CreateScope();
+                        var shared = brandScope.ServiceProvider.GetRequiredService<ISharedCallVariableStore>();
+                        await shared.SetAsync(session.CallRecordId, "card_brand", brand, ct);
+                        await shared.SetAsync(session.CallRecordId, "card_last4", last4, ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "secure_collect_done {Uuid}: publishing card brand/last4 failed — capture unaffected", uuid);
+                    }
+                }
                 _logger.LogInformation(
-                    "secure_collect_done {Uuid}: all {Count} field(s) captured + encrypted to sensitive_data",
-                    uuid, finalBlob.Count);
+                    "secure_collect_done {Uuid}: all {Count} field(s) captured + encrypted to sensitive_data ({Brand})",
+                    uuid, finalBlob.Count, session.Vars.GetValueOrDefault("card_brand", "no card number field"));
             }
             await _sessionStore.DeleteKeyAsync(blobKey, ct);
         }

@@ -13,6 +13,7 @@ import { useIntercomStore } from '../stores/intercomStore'
 import { supervisorApi, MONITOR_MODE_LABEL } from '../api/supervisor'
 import AudioSettingsPanel from './AudioSettingsPanel'
 import { applySpeaker, getInputDeviceId, micConstraints, onAudioDevicesChanged } from '../utils/audioDevices'
+import { startRinging } from '../utils/ringtone'
 
 // Local dev: connect directly to FreeSWITCH (no cert required, no tunnel overhead).
 // External: VITE_SIP_WS_URL must be set to the production WSS endpoint (e.g. the
@@ -210,6 +211,15 @@ export default function SoftphonePanel() {
     return () => window.removeEventListener('cc:monitor-ended', onEnded)
   }, [])
   const intercom = useIntercomStore((s) => s.call)
+
+  // Audible ring (S169) while a call waits on this agent: a queue / ring-all offer (Pick Up), a direct
+  // incoming call (Answer) or a supervisor's call. Auto-answered calls don't ring — they just connect.
+  const shouldRing = callStatus === 'queued' || callStatus === 'ringing' || intercom?.status === 'ringing'
+  useEffect(() => {
+    if (!shouldRing) return
+    const ring = startRinging()
+    return () => ring.stop()
+  }, [shouldRing])
   // Arm the next INVITE as the internal call (supervisor side auto-answers, agent side rings).
   useEffect(() => {
     intercomPendingRef.current = intercom && intercom.status === 'connecting' && !intercomSessionRef.current ? intercom.role : null

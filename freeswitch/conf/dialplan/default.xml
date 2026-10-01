@@ -101,10 +101,18 @@
     <extension name="secure-collect">
       <condition field="destination_number" expression="^secure_collect$">
         <action application="answer"/>
+        <!-- PCI (S169): card digits must never reach the log file. sensitive_dtmf stops FreeSWITCH
+             logging each received digit ("RECV DTMF n") while this field is collected, and the result
+             is NOT passed in the event's arguments (the EXECUTE line is logged) — the event carries
+             the channel's variables, so EslBackgroundService reads variable_cc_sc_result instead.
+             The result is unset right after the event fires (the event already holds its copy). -->
+        <action application="set" data="sensitive_dtmf=true"/>
         <action application="play_and_get_digits"
                 data="${cc_sc_min} ${cc_sc_max} ${cc_sc_tries} ${cc_sc_timeout} ${cc_sc_term} ${cc_sc_prompt} ${cc_sc_invalid} cc_sc_result ${cc_sc_regex} ${cc_sc_digit_timeout}"/>
         <action application="event"
-                data="Event-Name=CUSTOM,Event-Subclass=contactconnection::secure_collect_done,cc_sc_field=${cc_sc_field},cc_sc_digits=${cc_sc_result}"/>
+                data="Event-Name=CUSTOM,Event-Subclass=contactconnection::secure_collect_done,cc_sc_field=${cc_sc_field}"/>
+        <action application="unset" data="cc_sc_result"/>
+        <action application="unset" data="sensitive_dtmf"/>
         <action application="park"/>
       </condition>
     </extension>

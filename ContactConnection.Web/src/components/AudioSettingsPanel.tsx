@@ -3,6 +3,10 @@ import {
   applySpeaker, canChooseSpeaker, getInputDeviceId, getOutputDeviceId, micConstraints,
   setInputDeviceId, setOutputDeviceId,
 } from '../utils/audioDevices'
+import {
+  RINGTONES, getRingOutput, getRingVolume, getRingtone, setRingOutput, setRingVolume, setRingtone, startRinging,
+  type RingtoneId,
+} from '../utils/ringtone'
 
 // Softphone audio settings (S169): pick the headset microphone and speaker, see the mic level move,
 // and play a test sound — so an agent can sort out their own headset without a walkthrough.
@@ -15,6 +19,16 @@ export default function AudioSettingsPanel() {
   const [needsPermission, setNeedsPermission] = useState(false)
   const [level, setLevel] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [ringtone, setRingtoneState] = useState<RingtoneId>(getRingtone())
+  const [ringVolume, setRingVolumeState] = useState(getRingVolume())
+  const [ringOutput, setRingOutputState] = useState(getRingOutput())
+  const previewRef = useRef<{ stop: () => void } | null>(null)
+  useEffect(() => () => previewRef.current?.stop(), [])
+
+  function previewRing(tone = ringtone, volume = ringVolume, output = ringOutput) {
+    previewRef.current?.stop()
+    previewRef.current = startRinging({ tone, volume, outputId: output || outputId, cycles: 1 })
+  }
 
   const refresh = useCallback(async () => {
     try {
@@ -151,6 +165,40 @@ export default function AudioSettingsPanel() {
           </button>
         </>
       )}
+
+      <div className="border-t border-gray-700 pt-2 flex flex-col gap-2">
+        <p className="text-gray-300 font-medium">Ringtone</p>
+        <label className="flex flex-col gap-1">
+          <span className="text-gray-400">Sound</span>
+          <select value={ringtone} className={selectCls}
+            onChange={(e) => { const t = e.target.value as RingtoneId; setRingtoneState(t); setRingtone(t); previewRing(t) }}>
+            {RINGTONES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-gray-400">Volume</span>
+          <input type="range" min={0} max={1} step={0.05} value={ringVolume} disabled={ringtone === 'off'}
+            onChange={(e) => { const v = Number(e.target.value); setRingVolumeState(v); setRingVolume(v) }}
+            onPointerUp={() => previewRing()} className="accent-blue-500" />
+        </label>
+        {canChooseSpeaker() && (
+          <label className="flex flex-col gap-1">
+            <span className="text-gray-400">Ring on</span>
+            <select value={ringOutput} className={selectCls} disabled={ringtone === 'off'}
+              onChange={(e) => { setRingOutputState(e.target.value); setRingOutput(e.target.value); previewRing(ringtone, ringVolume, e.target.value) }}>
+              <option value="">Same as call audio</option>
+              {outputs.filter((d) => d.deviceId && d.deviceId !== 'default').map((d) => (
+                <option key={d.deviceId} value={d.deviceId}>{d.label || 'Speaker'}</option>
+              ))}
+            </select>
+            <span className="text-[10px] text-gray-500">Pick your PC speakers to hear calls ring with the headset off.</span>
+          </label>
+        )}
+        <button onClick={() => previewRing()} disabled={ringtone === 'off'}
+          className="border border-gray-600 text-gray-200 hover:bg-gray-700 disabled:opacity-40 rounded px-2 py-1">
+          Preview ringtone
+        </button>
+      </div>
       {error && <p className="text-[10px] text-red-400">{error}</p>}
     </div>
   )

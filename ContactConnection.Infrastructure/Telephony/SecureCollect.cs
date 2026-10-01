@@ -118,6 +118,38 @@ public static class SecureCollect
         };
     }
 
+    /// <summary>
+    /// Card brand from the PAN's leading digits (the issuer identification range), S169. Safe to show
+    /// and store alongside the last four — neither is sensitive under PCI DSS. Returns "Unknown" for
+    /// anything outside the ranges below (or too short to tell).
+    /// </summary>
+    public static string CardBrand(string pan)
+    {
+        if (string.IsNullOrEmpty(pan) || pan.Length < 6 || !pan.All(char.IsDigit)) return "Unknown";
+        int P(int n) => int.Parse(pan[..n]);
+
+        if (P(2) is 34 or 37) return "American Express";
+        if (pan[0] == '4') return "Visa";
+        if (P(2) is >= 51 and <= 55 || P(4) is >= 2221 and <= 2720) return "MasterCard";
+        if (P(4) == 6011 || P(6) is >= 622126 and <= 622925 || P(3) is >= 644 and <= 649 || P(2) == 65) return "Discover";
+        if (P(3) is >= 300 and <= 305 || P(4) == 3095 || P(2) is 36 or 38 or 39) return "Diners Club";
+        if (P(4) is >= 3528 and <= 3589) return "JCB";
+        if (P(2) == 62) return "UnionPay";
+        return "Unknown";
+    }
+
+    /// <summary>The captured card number in a finished capture: the field validated as a PAN (Luhn).</summary>
+    public static string? FindPan(JsonArray specs, IReadOnlyDictionary<string, string> captured)
+    {
+        foreach (var spec in specs)
+        {
+            if (spec?["val"]?.GetValue<string>() != SecureCollectValidation.Luhn) continue;
+            var key = spec["k"]?.GetValue<string>();
+            if (key is not null && captured.TryGetValue(key, out var pan) && !string.IsNullOrEmpty(pan)) return pan;
+        }
+        return null;
+    }
+
     /// <summary>Mod-10 (Luhn) check used for card PANs.</summary>
     public static bool LuhnValid(string digits)
     {
