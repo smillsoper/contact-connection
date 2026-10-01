@@ -155,6 +155,9 @@ export interface CallDetail {
     startDate: string
     phoneNumber: string | null
     fields: Record<string, string>
+    locationSource: 'zip' | 'area_code' | null
+    locationKey: string | null
+    distanceMiles: number | null
   } | null
   orderNumber: string | null
   recordingUrl: string | null

@@ -3,6 +3,7 @@ using System;
 using ContactConnection.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace ContactConnection.Infrastructure.Migrations
 {
     [DbContext(typeof(ContactConnectionDbContext))]
-    partial class ContactConnectionDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261001212256_AddBroadcastStations")]
+    partial class AddBroadcastStations
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -22,34 +25,6 @@ namespace ContactConnection.Infrastructure.Migrations
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
-
-            modelBuilder.Entity("ContactConnection.Domain.Entities.AreaCodeLocation", b =>
-                {
-                    b.Property<string>("AreaCode")
-                        .HasMaxLength(3)
-                        .HasColumnType("character varying(3)")
-                        .HasColumnName("area_code");
-
-                    b.Property<DateTimeOffset>("ImportedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("imported_at");
-
-                    b.Property<double>("Latitude")
-                        .HasColumnType("double precision")
-                        .HasColumnName("latitude");
-
-                    b.Property<double>("Longitude")
-                        .HasColumnType("double precision")
-                        .HasColumnName("longitude");
-
-                    b.Property<int>("ZipCount")
-                        .HasColumnType("integer")
-                        .HasColumnName("zip_count");
-
-                    b.HasKey("AreaCode");
-
-                    b.ToTable("area_codes", "public");
-                });
 
             modelBuilder.Entity("ContactConnection.Domain.Entities.BroadcastStation", b =>
                 {
@@ -871,50 +846,6 @@ namespace ContactConnection.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("tenant_invites", "public");
-                });
-
-            modelBuilder.Entity("ContactConnection.Domain.Entities.ZipCodeLocation", b =>
-                {
-                    b.Property<string>("Zip")
-                        .HasMaxLength(5)
-                        .HasColumnType("character varying(5)")
-                        .HasColumnName("zip");
-
-                    b.PrimitiveCollection<string[]>("AreaCodes")
-                        .IsRequired()
-                        .HasColumnType("text[]")
-                        .HasColumnName("area_codes");
-
-                    b.Property<string>("City")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("city");
-
-                    b.Property<string>("County")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("county");
-
-                    b.Property<DateTimeOffset>("ImportedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("imported_at");
-
-                    b.Property<double>("Latitude")
-                        .HasColumnType("double precision")
-                        .HasColumnName("latitude");
-
-                    b.Property<double>("Longitude")
-                        .HasColumnType("double precision")
-                        .HasColumnName("longitude");
-
-                    b.Property<string>("State")
-                        .HasMaxLength(2)
-                        .HasColumnType("character varying(2)")
-                        .HasColumnName("state");
-
-                    b.HasKey("Zip");
-
-                    b.ToTable("zip_codes", "public");
                 });
 
             modelBuilder.Entity("ContactConnection.Domain.Entities.TenantAdminInvite", b =>

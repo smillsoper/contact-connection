@@ -6,7 +6,8 @@ using ContactConnection.Domain.ValueObjects.Commerce;
 namespace ContactConnection.Infrastructure.Commerce;
 
 /// <summary>See ICallAddressService.</summary>
-public class CallAddressService(ICallRecordRepository callRecords, ICartService carts) : ICallAddressService
+public class CallAddressService(
+    ICallRecordRepository callRecords, ICartService carts, IMediaReattributionService? media = null) : ICallAddressService
 {
     public async Task<CartDocument?> SetAsync(
         Guid callRecordId, string role, AddressData address, CancellationToken ct = default)
@@ -28,6 +29,17 @@ public class CallAddressService(ICallRecordRepository callRecords, ICartService 
             Shipping = setsShipping ? address : current?.Shipping,
         };
         record.SetAddresses(updated);
+
+        // Media (S171, Phase B): a captured zip places a Local media call at the station nearest the
+        // caller — at arrival only the phone's area code was known. Never blocks the address save.
+        if (media is not null && (updated.Billing ?? updated.Shipping)?.Zip is { } zip)
+        {
+            try
+            {
+                if (await media.ForZipAsync(record, zip, ct) is { } attribution) record.SetMediaAttribution(attribution);
+            }
+            catch (Exception) { /* keep the existing attribution */ }
+        }
         await callRecords.SaveChangesAsync(ct);
 
         // Tax depends on the ship-to address — re-price. A billing-only change can matter too when

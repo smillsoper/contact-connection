@@ -20,6 +20,9 @@ public class MediaAssignmentConfiguration : IEntityTypeConfiguration<MediaAssign
         builder.Property(a => a.MarketType).HasColumnName("market_type").HasMaxLength(20).IsRequired();
         builder.Property(a => a.MediaAgencyId).HasColumnName("media_agency_id");
         builder.Property(a => a.Station).HasColumnName("station").HasMaxLength(200).IsRequired();
+        builder.Property(a => a.StationFacilityId).HasColumnName("station_facility_id");
+        builder.Property(a => a.StationLatitude).HasColumnName("station_latitude");
+        builder.Property(a => a.StationLongitude).HasColumnName("station_longitude");
         builder.Property(a => a.MediaType).HasColumnName("media_type").HasMaxLength(50);
         builder.Property(a => a.AdType).HasColumnName("ad_type").HasMaxLength(50);
         builder.Property(a => a.StartDate).HasColumnName("start_date");

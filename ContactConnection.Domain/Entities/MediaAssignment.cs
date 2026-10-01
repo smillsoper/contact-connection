@@ -7,9 +7,9 @@ namespace ContactConnection.Domain.Entities;
 /// <list type="bullet">
 /// <item><b>National</b> — exactly one in effect per number at a time. Adding a new one with a start
 /// date ends the previous one the day before (see <see cref="MediaAssignmentRules"/>).</item>
-/// <item><b>Local</b> — several can be in effect at once, one per station. Phase A uses the one marked
-/// <see cref="IsDefaultLocal"/>; Phase B attributes the call to the station closest to the caller (FCC
-/// station locations vs. the caller's zip, else area code). Markets are deliberately not tracked: mapping
+/// <item><b>Local</b> — several can be in effect at once, one per station. The call goes to the one whose
+/// FCC station is closest to the caller (the zip the script captures, else the phone number's area
+/// code); with no caller location, or no located stations, the one marked <see cref="IsDefaultLocal"/>. Markets are deliberately not tracked: mapping
 /// stations to market areas is the media agency's job for their reporting — ours is attributing the call
 /// to the right station (Stephen, S171).</item>
 /// </list>
@@ -26,6 +26,12 @@ public class MediaAssignment
     public string MarketType { get; private set; } = MediaMarketType.National;
     public Guid MediaAgencyId { get; private set; }
     public string Station { get; private set; } = "";
+    /// <summary>The FCC facility the station was picked from (Phase B, S171); null for free-text
+    /// stations (print, digital, cable networks…). Its transmitter coordinates are copied here so
+    /// nearest-station attribution doesn't depend on the platform station table later changing.</summary>
+    public int? StationFacilityId { get; private set; }
+    public double? StationLatitude { get; private set; }
+    public double? StationLongitude { get; private set; }
     public string? MediaType { get; private set; }   // TV, Radio, Print, …
     public string? AdType { get; private set; }      // SF, LF, MF, PI, Paid, …
     public DateOnly StartDate { get; private set; }
@@ -59,7 +65,18 @@ public class MediaAssignment
     {
         if (string.IsNullOrWhiteSpace(station)) throw new ArgumentException("Station is required.", nameof(station));
         Station = station.Trim();
+        StationFacilityId = null;
+        StationLatitude = StationLongitude = null;
         UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>A station picked from the FCC list — the name plus its facility id and location.</summary>
+    public void SetStation(string station, int facilityId, double latitude, double longitude)
+    {
+        SetStation(station);
+        StationFacilityId = facilityId;
+        StationLatitude = latitude;
+        StationLongitude = longitude;
     }
 
     public void SetDetails(string? mediaType, string? adType)
@@ -147,15 +164,26 @@ public static class MediaAssignmentRules
 
     /// <summary>
     /// The assignment a call on <paramref name="date"/> is attributed to: the National one in effect;
-    /// else the default Local one in effect; else the most recently started Local one in effect.
+    /// else, when the caller's location is known, the in-effect Local one whose FCC station is nearest
+    /// (Phase B); else the default Local one in effect; else the most recently started Local one.
     /// </summary>
-    public static MediaAssignment? Resolve(IEnumerable<MediaAssignment> assignments, DateOnly date)
+    public static MediaAssignment? Resolve(IEnumerable<MediaAssignment> assignments, DateOnly date, ValueObjects.GeoPoint? caller = null)
     {
         var inEffect = assignments.Where(a => a.InEffectOn(date)).ToList();
-        return inEffect.FirstOrDefault(a => a.MarketType == MediaMarketType.National)
-            ?? inEffect.Where(a => a.MarketType == MediaMarketType.Local)
-                       .OrderByDescending(a => a.IsDefaultLocal)
-                       .ThenByDescending(a => a.StartDate)
-                       .FirstOrDefault();
+        var national = inEffect.FirstOrDefault(a => a.MarketType == MediaMarketType.National);
+        if (national is not null) return national;
+
+        var locals = inEffect.Where(a => a.MarketType == MediaMarketType.Local).ToList();
+        if (caller is { } point && Nearest(locals, point) is { } nearest) return nearest.Assignment;
+        return locals.OrderByDescending(a => a.IsDefaultLocal).ThenByDescending(a => a.StartDate).FirstOrDefault();
     }
+
+    /// <summary>The located assignment (picked from the FCC list) nearest <paramref name="caller"/>.</summary>
+    public static (MediaAssignment Assignment, double Miles)? Nearest(IEnumerable<MediaAssignment> assignments, ValueObjects.GeoPoint caller) =>
+        assignments
+            .Where(a => a.StationLatitude is not null && a.StationLongitude is not null)
+            .Select(a => (Assignment: a, Miles: caller.MilesTo(new(a.StationLatitude!.Value, a.StationLongitude!.Value))))
+            .OrderBy(x => x.Miles)
+            .Cast<(MediaAssignment, double)?>()
+            .FirstOrDefault();
 }

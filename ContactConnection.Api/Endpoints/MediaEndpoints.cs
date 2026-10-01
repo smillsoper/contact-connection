@@ -24,6 +24,8 @@ public static class MediaEndpoints
         app.MapPost("/api/v1/phone-numbers/{id:guid}/media-assignments", AddAssignment).RequireAuthorization("TenantAdmin");
         app.MapPut("/api/v1/media-assignments/{id:guid}", UpdateAssignment).RequireAuthorization("TenantAdmin");
         app.MapDelete("/api/v1/media-assignments/{id:guid}", DeleteAssignment).RequireAuthorization("TenantAdmin");
+
+        app.MapGet("/api/v1/broadcast-stations", SearchStations).RequireAuthorization("TenantAdmin");
         return app;
     }
 
@@ -90,7 +92,8 @@ public static class MediaEndpoints
     }
 
     private static async Task<IResult> AddAssignment(
-        Guid id, AssignmentRequest req, HttpContext http, TenantContext tenant, ScopedTenantDbContextFactory dbFactory, CancellationToken ct)
+        Guid id, AssignmentRequest req, HttpContext http, TenantContext tenant, ScopedTenantDbContextFactory dbFactory,
+        ContactConnectionDbContext platformDb, CancellationToken ct)
     {
         if (!tenant.HasTenant) return Results.Unauthorized();
         await using var db = dbFactory.Create();
@@ -107,6 +110,7 @@ public static class MediaEndpoints
         {
             var a = MediaAssignment.Create(tenant.Current!.Id, id, req.MarketType ?? "", agency.Id, req.Station ?? "",
                 req.StartDate.Value, CreatedBy(http));
+            if (await ApplyStationAsync(a, req, platformDb, ct) is { } stationError) return Results.BadRequest(new { error = stationError });
             a.SetDetails(req.MediaType, req.AdType);
             a.SetFieldValues(req.FieldValues ?? []);
             if (a.MarketType == MediaMarketType.National)
@@ -130,7 +134,8 @@ public static class MediaEndpoints
 
     // Start date, market type and agency are fixed once created — a different buy is a new assignment.
     private static async Task<IResult> UpdateAssignment(
-        Guid id, AssignmentRequest req, TenantContext tenant, ScopedTenantDbContextFactory dbFactory, CancellationToken ct)
+        Guid id, AssignmentRequest req, TenantContext tenant, ScopedTenantDbContextFactory dbFactory,
+        ContactConnectionDbContext platformDb, CancellationToken ct)
     {
         if (!tenant.HasTenant) return Results.Unauthorized();
         await using var db = dbFactory.Create();
@@ -140,7 +145,8 @@ public static class MediaEndpoints
         if (agency is not null && MissingRequired(agency, req.FieldValues) is { } missing) return Results.BadRequest(new { error = missing });
         try
         {
-            if (req.Station is not null) a.SetStation(req.Station);
+            if (req.Station is not null && await ApplyStationAsync(a, req, platformDb, ct) is { } stationError)
+                return Results.BadRequest(new { error = stationError });
             a.SetDetails(req.MediaType, req.AdType);
             if (req.FieldValues is not null) a.SetFieldValues(req.FieldValues);
             if (a.MarketType == MediaMarketType.Local)
@@ -175,6 +181,59 @@ public static class MediaEndpoints
         return Results.NoContent();
     }
 
+    /// <summary>Sets the station — linked to its FCC facility (with coordinates) when one was picked from
+    /// the list, otherwise free text.</summary>
+    private static async Task<string?> ApplyStationAsync(MediaAssignment a, AssignmentRequest req, ContactConnectionDbContext platformDb, CancellationToken ct)
+    {
+        if (req.StationFacilityId is not { } facilityId)
+        {
+            a.SetStation(req.Station ?? "");
+            return null;
+        }
+        var station = await platformDb.BroadcastStations.AsNoTracking().FirstOrDefaultAsync(s => s.FacilityId == facilityId, ct);
+        if (station is null) return $"FCC facility {facilityId} isn't in the station list.";
+        a.SetStation(string.IsNullOrWhiteSpace(req.Station) ? station.CallSign : req.Station, station.FacilityId, station.Latitude, station.Longitude);
+        return null;
+    }
+
+    // ── FCC stations (platform-wide, imported daily by the Worker) ─────────────
+
+    /// <summary>Call-sign prefix matches first, then community city matches. <paramref name="q"/> may
+    /// end with a state ("KABC CA", "Phoenix AZ"); <paramref name="service"/> = tv | radio ranks that kind first.</summary>
+    private static async Task<IResult> SearchStations(string? q, string? service, ContactConnectionDbContext platformDb, CancellationToken ct)
+    {
+        var terms = (q ?? "").Trim().ToUpperInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
+        if (terms.Count == 0) return Results.Ok(Array.Empty<object>());
+        string? state = terms.Count > 1 && terms[^1].Length == 2 ? terms[^1] : null;
+        if (state is not null) terms.RemoveAt(terms.Count - 1);
+        var text = string.Join(' ', terms);
+
+        var query = platformDb.BroadcastStations.AsNoTracking();
+        if (state is not null) query = query.Where(s => s.CommunityState == state);
+        // The assignment's media type only ranks stations of that kind first — never hides the rest, so a
+        // media type set before the station can't make a valid station look missing (S171).
+        var preferred = service?.ToLowerInvariant() switch
+        {
+            "tv" => FccStationImporter.TvServices,
+            "radio" => FccStationImporter.RadioServices,
+            _ => [],
+        };
+        var cityPattern = "%" + text.Replace("%", "").Replace("_", "") + "%";
+        var matches = await query
+            .Where(s => s.CallSign.StartsWith(text) || EF.Functions.ILike(s.CommunityCity!, cityPattern))
+            .OrderBy(s => s.CallSign.StartsWith(text) ? 0 : 1)
+            .ThenBy(s => preferred.Contains(s.ServiceCode) ? 0 : 1)
+            .ThenBy(s => s.CallSign)
+            .Take(25)
+            .Select(s => new
+            {
+                s.FacilityId, s.CallSign, s.ServiceCode, s.CommunityCity, s.CommunityState,
+                s.Latitude, s.Longitude, s.NetworkAffiliation,
+            })
+            .ToListAsync(ct);
+        return Results.Ok(matches);
+    }
+
     private static string? MissingRequired(MediaAgency agency, Dictionary<string, string>? values)
     {
         var missing = agency.Fields
@@ -191,7 +250,8 @@ public static class MediaEndpoints
 
     private static object AssignmentResponse(MediaAssignment a, string agencyName, DateOnly today) => new
     {
-        a.Id, a.PhoneNumberId, a.MarketType, a.MediaAgencyId, agencyName, a.Station, a.MediaType, a.AdType,
+        a.Id, a.PhoneNumberId, a.MarketType, a.MediaAgencyId, agencyName, a.Station,
+        a.StationFacilityId, a.StationLatitude, a.StationLongitude, a.MediaType, a.AdType,
         a.StartDate, a.EndDate, a.IsDefaultLocal, a.FieldValues, a.CreatedByName, a.CreatedAt,
         inEffect = a.InEffectOn(today),
     };
@@ -200,5 +260,5 @@ public static class MediaEndpoints
 public record AgencyRequest(string? Name, List<MediaAgencyField>? Fields, bool? IsActive);
 
 public record AssignmentRequest(
-    string? MarketType, Guid MediaAgencyId, string? Station, string? MediaType, string? AdType,
+    string? MarketType, Guid MediaAgencyId, string? Station, int? StationFacilityId, string? MediaType, string? AdType,
     DateOnly? StartDate, DateOnly? EndDate, bool? IsDefaultLocal, Dictionary<string, string>? FieldValues);

@@ -493,6 +493,27 @@ export interface MigrateTenantsResult {
 // repeatedly). Fixes schema drift like a tenant missing migrations that were applied
 // everywhere else. Backend returns 207 when some tenants error, which fetch treats as
 // ok (in the 200-299 range), so both outcomes come back through the normal response path.
+export interface LocationDataStatus {
+  stations: number
+  stationsImportedAt: string | null
+  zipCodes: number
+  areaCodes: number
+  zipCodesImportedAt: string | null
+}
+
+export function getLocationData(): Promise<LocationDataStatus> {
+  return portalFetch<LocationDataStatus>('/api/v1/portal/maintenance/location-data')
+}
+
+// The zip-codes.com Standard database (.csv or the download .zip), sent as the raw body.
+export function importZipCodes(file: File): Promise<{ zips: number; areaCodes: number }> {
+  return portalFetch(`/api/v1/portal/maintenance/zip-codes?fileName=${encodeURIComponent(file.name)}`, {
+    method: 'POST',
+    body: file,
+    headers: { 'Content-Type': 'application/octet-stream' },
+  })
+}
+
 export async function migrateTenants(): Promise<MigrateTenantsResult> {
   return portalFetch<MigrateTenantsResult>('/api/v1/portal/maintenance/migrate-tenants', {
     method: 'POST',

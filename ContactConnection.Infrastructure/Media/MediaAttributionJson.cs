@@ -31,6 +31,10 @@ public static partial class MediaAttributionJson
             ["start_date"]   = m.StartDate.ToString("yyyy-MM-dd"),
             ["phone_number"] = m.PhoneNumber ?? "",
             ["fields"]       = fields,
+            // Phase B: how a Local call was placed — "zip" / "area_code" (+ which), and miles to the station.
+            ["location_source"] = m.LocationSource ?? "",
+            ["location_key"]    = m.LocationKey ?? "",
+            ["distance_miles"]  = m.DistanceMiles,
         };
     }
 

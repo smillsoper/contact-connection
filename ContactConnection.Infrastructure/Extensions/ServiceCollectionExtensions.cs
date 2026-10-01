@@ -366,6 +366,18 @@ public static class ServiceCollectionExtensions
         // HTTP client for AvalaraTaxProvider
         services.AddHttpClient("Avalara");
 
+        // FCC LMS broadcast station import (Media Agency Phase B, S171) — run daily by the Worker.
+        // The FCC's WAF returns 403 to requests with no (or a bare) User-Agent; a descriptive one with a
+        // contact URL is accepted (checked S171).
+        services.AddHttpClient("Fcc", c =>
+        {
+            c.Timeout = TimeSpan.FromMinutes(10);
+            c.DefaultRequestHeaders.UserAgent.ParseAdd("ContactConnection-FccImport/1.0 (+https://contactconnection.io)");
+        });
+        services.AddScoped<ContactConnection.Infrastructure.Media.FccStationImporter>();
+        services.AddScoped<ContactConnection.Infrastructure.Media.ZipCodeImporter>();
+        services.AddScoped<IMediaReattributionService, ContactConnection.Infrastructure.Media.MediaReattributionService>();
+
         // Redis — singleton connection multiplexer shared across all requests
         var redisConnection = configuration.GetConnectionString("Redis")
             ?? "localhost:6379";

@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using ContactConnection.Infrastructure.FlowEngine;
 using ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
+using Moq;
 using Xunit;
 
 namespace ContactConnection.Infrastructure.Tests.FlowEngine.NodeHandlers;
@@ -63,6 +64,29 @@ public class AddressNodeHandlerTests
             Moq.It.Is<ContactConnection.Domain.ValueObjects.AddressData>(d =>
                 d.Street == "123 Main St" && d.State == "OR" && d.Zip == "97477" && d.IsVerified && d.FirstName == "John"),
             Moq.It.IsAny<CancellationToken>()), Moq.Times.Once);
+    }
+
+    [Fact]
+    public async Task AddressRole_RefreshesMediaVars_FromTheReattributedRecord()
+    {
+        // S171: saving the address can re-attribute a Local media call by its zip; later script text
+        // reading {{call_record.media.*}} must see the record's new station, not the session's old copy.
+        var ctx = Ctx();
+        var record = ContactConnection.Domain.Entities.CallRecord.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        record.SetMediaAttribution(new ContactConnection.Domain.ValueObjects.MediaAttribution(
+            Guid.NewGuid(), "local", "Cannella", "WJAR", "TV", "LF", new DateOnly(2026, 10, 1), null, [],
+            "zip", "02801", 12.3));
+        var repo = new Moq.Mock<ContactConnection.Application.Interfaces.Repositories.ICallRecordRepository>();
+        repo.Setup(r => r.GetByIdAsync(ctx.CallRecordId, Moq.It.IsAny<CancellationToken>())).ReturnsAsync(record);
+        ctx.CallRecord["media"] = "{\"station\":\"KNAZ-TV\"}";
+
+        var node = Node();
+        node["addressRole"] = "billing";
+        var handler = new AddressNodeHandler(new VariableResolver(),
+            new Moq.Mock<ContactConnection.Application.Interfaces.Services.ICallAddressService>().Object, repo.Object);
+        await handler.ExecuteAsync(node, ctx, agentInput: Submission(isVerified: "true"), agentTransition: "");
+
+        Assert.Equal("WJAR", new VariableResolver().Resolve("{{call_record.media.station}}", ctx.ToVariableContext()));
     }
 
     [Fact]

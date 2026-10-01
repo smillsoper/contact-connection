@@ -1,5 +1,7 @@
 using System.Text.Json.Nodes;
 using ContactConnection.Application.Interfaces.Services;
+using ContactConnection.Infrastructure.Media;
+using Microsoft.Extensions.Logging;
 
 namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 
@@ -18,16 +20,43 @@ namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 ///   "minChars": 2,           // text only — minimum characters (omit for none)
 ///   "maxChars": 50,          // text only — maximum characters (omit for none)
 ///   "inputMask": "(000) 000-0000", // text only — WinForms mask; overrides min/max
+///   "mediaZipAttribution": true,    // ZIP masks only — re-attribute a Local media call to the
+///                                   // station nearest the captured zip (S171, Media Phase B)
 ///   "transitions": { "default": "node_002" }
 /// }
 /// </summary>
-public class InputNodeHandler(IVariableResolver resolver) : NodeHandlerBase(resolver), INodeHandler
+public class InputNodeHandler(
+    IVariableResolver resolver, IMediaReattributionService? media = null, ILogger<InputNodeHandler>? logger = null)
+    : NodeHandlerBase(resolver), INodeHandler
 {
     public string NodeType => "input";
 
-    public Task<NodeResult> ExecuteAsync(
+    private static readonly HashSet<string> ZipMasks = ["00000", "00000-0000", "__zip_ca__"];
+
+    public async Task<NodeResult> ExecuteAsync(
         JsonObject node, FlowExecutionContext ctx,
         string? agentInput, string agentTransition, CancellationToken ct = default)
+    {
+        var result = Execute(node, ctx, agentInput, agentTransition);
+        if (agentInput is not null && media is not null
+            && node["mediaZipAttribution"]?.GetValue<bool>() == true && ZipMasks.Contains(Str(node, "inputMask") ?? ""))
+        {
+            // Never holds up the call: a failed lookup keeps the attribution the call already has.
+            try
+            {
+                if (await media.ApplyZipAsync(ctx.CallRecordId, agentInput, ct) is { } attribution)
+                    ctx.CallRecord["media"] = MediaAttributionJson.ToJson(attribution).ToJsonString();
+            }
+            catch (Exception ex)
+            {
+                logger?.LogWarning(ex, "Input node {Node}: media zip attribution failed for call {CallRecord}", ctx.CurrentNodeId, ctx.CallRecordId);
+            }
+        }
+        return result;
+    }
+
+    private NodeResult Execute(
+        JsonObject node, FlowExecutionContext ctx, string? agentInput, string agentTransition)
     {
         var varCtx    = ctx.ToVariableContext();
         var inputType = Str(node, "input_type") ?? Str(node, "fieldType") ?? "text";
@@ -58,7 +87,7 @@ public class InputNodeHandler(IVariableResolver resolver) : NodeHandlerBase(reso
             var advancedState = BuildState(ctx, node, resolvedContent: prompt,
                 inputType: inputType, options: ParseOptions(node));
             AttachInlineScript(node, ctx, advancedState);
-            return Task.FromResult(new NodeResult(advancedState, next));
+            return new NodeResult(advancedState, next);
         }
 
         // No input yet — return the node for display (agent must submit before advancing)
@@ -71,7 +100,7 @@ public class InputNodeHandler(IVariableResolver resolver) : NodeHandlerBase(reso
         if (!string.IsNullOrEmpty(outputVar) && ctx.FlowVars.TryGetValue(outputVar, out var existing))
             displayState.DefaultValue = existing;
 
-        return Task.FromResult(new NodeResult(displayState, NextNodeId: null));
+        return new NodeResult(displayState, NextNodeId: null);
     }
 
     private static void AttachTextConstraints(JsonObject node, string inputType, FlowNodeState state)

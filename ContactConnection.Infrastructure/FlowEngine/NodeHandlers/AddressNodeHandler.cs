@@ -2,7 +2,9 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
+using ContactConnection.Infrastructure.Media;
 using ContactConnection.Domain.ValueObjects;
 
 namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
@@ -48,7 +50,8 @@ namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 ///                   multiple-match candidate); false whenever the agent overrides with a value
 ///                   the vendor didn't confirm, or when validation never ran
 /// </summary>
-public partial class AddressNodeHandler(IVariableResolver resolver, ICallAddressService callAddresses)
+public partial class AddressNodeHandler(
+    IVariableResolver resolver, ICallAddressService callAddresses, ICallRecordRepository? callRecords = null)
     : NodeHandlerBase(resolver), INodeHandler
 {
     public string NodeType => "address";
@@ -184,6 +187,11 @@ public partial class AddressNodeHandler(IVariableResolver resolver, ICallAddress
         {
             await callAddresses.SetAsync(ctx.CallRecordId, addressRole, addressData, ct);
             CallAddressVars.Apply(ctx, addressRole, addressData);
+
+            // Saving the address may have re-attributed a Local media call by its zip (S171) — refresh
+            // {{call_record.media.*}} so later script text shows the station now on the record.
+            if (callRecords is not null && await callRecords.GetByIdAsync(ctx.CallRecordId, ct) is { MediaAttribution: { } media })
+                ctx.CallRecord["media"] = MediaAttributionJson.ToJson(media).ToJsonString();
         }
 
         var next = Transition(node, agentTransition) ?? Transition(node, "default");

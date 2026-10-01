@@ -443,9 +443,11 @@ public sealed class EslBackgroundService : BackgroundService
             // number the caller dialed onto the call. Never blocks the call.
             try
             {
+                // Located by the caller's area code for now; re-attributed if the script captures a zip.
+                var caller = await ContactConnection.Infrastructure.Media.CallerLocator.LocateAsync(platformDb, null, record.CallerId, ct);
                 record.SetMediaAttribution(await ContactConnection.Infrastructure.Media.MediaAttributionResolver.ResolveAsync(
                     db, arrivedOn.Id, arrivedOn.ClientNumber ?? routing.Number,
-                    ContactConnection.Infrastructure.Media.MediaAttributionResolver.TodayIn(tenant.Timezone), ct));
+                    ContactConnection.Infrastructure.Media.MediaAttributionResolver.TodayIn(tenant.Timezone), caller, ct));
             }
             catch (Exception ex)
             {

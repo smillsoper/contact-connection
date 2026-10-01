@@ -203,12 +203,15 @@ export default function AdminCallDetailPage() {
             ['Agency', m.agency], ['Station', m.station],
             ['Media type', m.mediaType], ['Ad type', m.adType],
             ['Assignment start', m.startDate], ['Number', fmtPhone(m.phoneNumber)],
+            ['Placed by', m.locationSource && m.distanceMiles != null
+              ? `${m.locationSource === 'zip' ? 'caller zip' : 'caller area code'} ${m.locationKey} · ${m.distanceMiles} mi from station`
+              : null],
             ...Object.entries(m.fields),
           ]
           return (
             <div className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
-                Media attribution <span className="normal-case font-normal">— {m.marketType}, as assigned when the call arrived</span>
+                Media attribution <span className="normal-case font-normal">— {m.marketType}, as assigned to this call</span>
               </p>
               <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-400">
                 {rows.filter(([, v]) => v).map(([k, v]) => (

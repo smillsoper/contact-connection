@@ -1,4 +1,5 @@
 using ContactConnection.Domain.Entities;
+using ContactConnection.Domain.ValueObjects;
 using Xunit;
 
 namespace ContactConnection.Domain.Tests.Domain;
@@ -91,4 +92,69 @@ public class MediaAssignmentTests
         Assert.False(n.IsDefaultLocal);
         Assert.Throws<ArgumentException>(() => n.SetEndDate(D(4, 30)));
     }
+
+    // ── Phase B: nearest station ─────────────────────────────────────────────
+
+    private static readonly GeoPoint Phoenix = new(33.4484, -112.0740), Flagstaff = new(35.1983, -111.6513);
+
+    private static MediaAssignment LocatedLocal(string station, GeoPoint at, bool isDefault = false)
+    {
+        var a = Local(station, D(1, 1));
+        a.SetStation(station, Math.Abs(station.GetHashCode()), at.Latitude, at.Longitude);
+        a.SetDefaultLocal(isDefault);
+        return a;
+    }
+
+    [Fact]
+    public void Local_WithCallerLocation_GoesToTheNearestStation()
+    {
+        var phx = LocatedLocal("KNXV-TV", Phoenix, isDefault: true);
+        var flg = LocatedLocal("KNAZ-TV", Flagstaff);
+        var callerInSedona = new GeoPoint(34.8697, -111.7610);
+
+        Assert.Same(flg, MediaAssignmentRules.Resolve([phx, flg], D(5, 1), callerInSedona));
+        Assert.Same(phx, MediaAssignmentRules.Resolve([phx, flg], D(5, 1)));   // no location → default
+    }
+
+    [Fact]
+    public void Local_NoStationsLocated_FallsBackToTheDefault()
+    {
+        var a = Local("Newspaper", D(1, 1));
+        var b = Local("Billboard", D(1, 1));
+        b.SetDefaultLocal(true);
+        Assert.Same(b, MediaAssignmentRules.Resolve([a, b], D(5, 1), Phoenix));
+    }
+
+    [Fact]
+    public void National_WinsRegardlessOfLocation()
+    {
+        var n = National("CNN", D(1, 1));
+        var flg = LocatedLocal("KNAZ-TV", Flagstaff);
+        Assert.Same(n, MediaAssignmentRules.Resolve([n, flg], D(5, 1), Flagstaff));
+    }
+
+    [Fact]
+    public void FreeTextStation_ClearsTheFccLink()
+    {
+        var a = LocatedLocal("KNAZ-TV", Flagstaff);
+        a.SetStation("KNAZ");
+        Assert.Null(a.StationFacilityId);
+        Assert.Null(a.StationLatitude);
+    }
+
+    [Fact]
+    public void Attribution_RecordsHowTheCallWasPlaced()
+    {
+        var flg = LocatedLocal("KNAZ-TV", Flagstaff);
+        var caller = new CallerLocation(Phoenix, CallerLocation.FromZip, "85001");
+        var m = MediaAttribution.From(flg, "Cannella", "+18005551234", caller);
+
+        Assert.Equal("zip", m.LocationSource);
+        Assert.Equal("85001", m.LocationKey);
+        Assert.InRange(m.DistanceMiles!.Value, 115, 125);   // Phoenix → Flagstaff ≈ 120 mi
+    }
+
+    [Fact]
+    public void GeoPoint_MilesTo_IsGreatCircleDistance() =>
+        Assert.InRange(new GeoPoint(40.7128, -74.0060).MilesTo(new GeoPoint(34.0522, -118.2437)), 2440, 2460);   // NYC → LA
 }

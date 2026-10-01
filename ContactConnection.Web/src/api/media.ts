@@ -14,6 +14,9 @@ export interface MediaAssignment {
   mediaAgencyId: string
   agencyName: string
   station: string
+  stationFacilityId: number | null
+  stationLatitude: number | null
+  stationLongitude: number | null
   mediaType: string | null
   adType: string | null
   startDate: string
@@ -35,6 +38,8 @@ export interface AssignmentInput {
   marketType?: MediaMarketType
   mediaAgencyId?: string
   station: string
+  /** Set when the station was picked from the FCC list; omit for free text. */
+  stationFacilityId?: number | null
   mediaType?: string | null
   adType?: string | null
   startDate?: string
@@ -43,7 +48,22 @@ export interface AssignmentInput {
   fieldValues: Record<string, string>
 }
 
+/** A station from the platform's FCC list (imported daily from the FCC LMS database). */
+export interface BroadcastStation {
+  facilityId: number
+  callSign: string
+  serviceCode: string
+  communityCity: string | null
+  communityState: string | null
+  latitude: number
+  longitude: number
+  networkAffiliation: string | null
+}
+
 export const mediaApi = {
+  searchStations: (q: string, service?: 'tv' | 'radio') =>
+    api.get<BroadcastStation[]>(`/api/v1/broadcast-stations?q=${encodeURIComponent(q)}${service ? `&service=${service}` : ''}`),
+
   agencies: () => api.get<MediaAgency[]>('/api/v1/media-agencies'),
   createAgency: (name: string, fields: MediaAgencyField[]) => api.post<MediaAgency>('/api/v1/media-agencies', { name, fields }),
   updateAgency: (id: string, name: string, fields: MediaAgencyField[], isActive: boolean) =>

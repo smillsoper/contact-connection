@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   AD_TYPES, MEDIA_TYPES, mediaApi,
-  type MediaAgency, type MediaAssignment, type MediaAssignmentList, type MediaMarketType,
+  type BroadcastStation, type MediaAgency, type MediaAssignment, type MediaAssignmentList, type MediaMarketType,
 } from '../../api/media'
 
 // A phone number's media assignments (S171, Media Agency Phase A): what it's attributed to now, its
@@ -16,6 +16,8 @@ interface FormState {
   marketType: MediaMarketType
   mediaAgencyId: string
   station: string
+  stationFacilityId: number | null
+  stationLocation: string | null   // "City, ST" of the picked FCC station, for display
   mediaType: string
   adType: string
   startDate: string
@@ -25,7 +27,86 @@ interface FormState {
 }
 
 function emptyForm(today: string): FormState {
-  return { marketType: 'national', mediaAgencyId: '', station: '', mediaType: '', adType: '', startDate: today, endDate: '', isDefaultLocal: false, fieldValues: {} }
+  return { marketType: 'national', mediaAgencyId: '', station: '', stationFacilityId: null, stationLocation: null, mediaType: '', adType: '', startDate: today, endDate: '', isDefaultLocal: false, fieldValues: {} }
+}
+
+/**
+ * Station field: type a call sign or city (optionally followed by a state, "Phoenix AZ") to pick from
+ * the FCC station list, which links the assignment to that station's transmitter location — what
+ * Local calls are matched against. Anything not in the list (a cable network, a publication, a
+ * website) can still be typed as free text.
+ */
+function StationPicker({ station, facilityId, location, service, onChange }: {
+  station: string
+  facilityId: number | null
+  location: string | null
+  service?: 'tv' | 'radio'
+  onChange: (p: { station: string; stationFacilityId: number | null; stationLocation: string | null; mediaType?: string }) => void
+}) {
+  const [results, setResults] = useState<BroadcastStation[]>([])
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    if (!open || station.trim().length < 2) { setResults([]); return }
+    const t = setTimeout(() => {
+      mediaApi.searchStations(station.trim(), service).then(setResults).catch(() => setResults([]))
+    }, 250)
+    return () => clearTimeout(t)
+  }, [station, service, open])
+
+  function pick(s: BroadcastStation) {
+    const kind = ['FM', 'AM', 'FL'].includes(s.serviceCode) ? 'Radio' : 'TV'
+    onChange({ station: s.callSign, stationFacilityId: s.facilityId, stationLocation: placeOf(s), mediaType: kind })
+    setOpen(false)
+  }
+
+  return (
+    <label className="block relative">
+      <span className="block text-xs text-gray-400 mb-1">Station</span>
+      <input
+        value={station}
+        onChange={(e) => { onChange({ station: e.target.value, stationFacilityId: null, stationLocation: null }); setOpen(true) }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        className={inputCls}
+        placeholder="Call sign or city — or any name"
+      />
+      <span className={`block text-[11px] mt-1 ${facilityId ? 'text-emerald-400' : 'text-gray-500'}`}>
+        {facilityId ? `FCC station${location ? ` · ${location}` : ''} · #${facilityId}` : 'Free text (not linked to an FCC station)'}
+      </span>
+      {open && results.length > 0 && (
+        <ul className="absolute z-20 left-0 right-0 top-[4.1rem] max-h-64 overflow-y-auto bg-gray-800 border border-gray-600 rounded-lg shadow-xl">
+          {results.map((s) => (
+            <li key={s.facilityId}>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => pick(s)}
+                className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-700"
+              >
+                <span className="text-white font-medium">{s.callSign}</span>
+                <span className="text-gray-400"> · {serviceLabel(s.serviceCode)} · {placeOf(s)}</span>
+                {s.networkAffiliation && <span className="text-gray-500"> · {s.networkAffiliation}</span>}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </label>
+  )
+}
+
+const placeOf = (s: BroadcastStation) => [s.communityCity, s.communityState].filter(Boolean).join(', ')
+
+function serviceLabel(code: string) {
+  switch (code) {
+    case 'DTV': return 'TV'
+    case 'DCA': return 'Class A TV'
+    case 'DTS': return 'TV (DTS)'
+    case 'LPD': return 'Low-power TV'
+    case 'FL': return 'LPFM'
+    default: return code
+  }
 }
 
 function AssignmentForm({ agencies, editing, today, onSave, onCancel }: {
@@ -37,6 +118,7 @@ function AssignmentForm({ agencies, editing, today, onSave, onCancel }: {
 }) {
   const [f, setF] = useState<FormState>(editing ? {
     marketType: editing.marketType, mediaAgencyId: editing.mediaAgencyId, station: editing.station,
+    stationFacilityId: editing.stationFacilityId, stationLocation: null,
     mediaType: editing.mediaType ?? '', adType: editing.adType ?? '',
     startDate: editing.startDate, endDate: editing.endDate ?? '', isDefaultLocal: editing.isDefaultLocal,
     fieldValues: { ...editing.fieldValues },
@@ -77,10 +159,13 @@ function AssignmentForm({ agencies, editing, today, onSave, onCancel }: {
           <span className="block text-xs text-gray-400 mb-1">Start date</span>
           <input type="date" value={f.startDate} disabled={fixed} onChange={(e) => set({ startDate: e.target.value })} className={`${inputCls} disabled:opacity-60`} />
         </label>
-        <label className="block">
-          <span className="block text-xs text-gray-400 mb-1">Station</span>
-          <input value={f.station} onChange={(e) => set({ station: e.target.value })} className={inputCls} placeholder="e.g. CNN, KDFW" />
-        </label>
+        <StationPicker
+          station={f.station}
+          facilityId={f.stationFacilityId}
+          location={f.stationLocation}
+          service={/radio/i.test(f.mediaType) ? 'radio' : /tv/i.test(f.mediaType) ? 'tv' : undefined}
+          onChange={({ mediaType, ...p }) => set(f.mediaType.trim() || !mediaType ? p : { ...p, mediaType })}
+        />
         <label className="block">
           <span className="block text-xs text-gray-400 mb-1">Media type</span>
           <input list="cc-media-types" value={f.mediaType} onChange={(e) => set({ mediaType: e.target.value })} className={inputCls} />
@@ -156,6 +241,7 @@ export default function MediaAssignmentsModal({ phoneNumberId, number, clientNum
   async function save(f: FormState) {
     const input = {
       marketType: f.marketType, mediaAgencyId: f.mediaAgencyId, station: f.station.trim(),
+      stationFacilityId: f.stationFacilityId,
       mediaType: f.mediaType || null, adType: f.adType || null,
       startDate: f.startDate, endDate: f.endDate || null, isDefaultLocal: f.isDefaultLocal, fieldValues: f.fieldValues,
     }

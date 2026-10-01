@@ -29,6 +29,8 @@ const PRESET_MASKS = [
   { label: 'Custom…', value: '__custom__' },
 ]
 
+const ZIP_MASKS = ['00000', '00000-0000', '__zip_ca__']
+
 interface Props {
   node: Node<NodeData>
   isEntry: boolean
@@ -337,6 +339,24 @@ export default function NodePropertiesPanel({
                 </div>
                 {hasMask && (
                   <p className="text-[10px] text-gray-600 -mt-1">Min / max are set automatically by the mask.</p>
+                )}
+
+                {/* ZIP masks: place a Local media call at the station nearest this zip (S171) */}
+                {ZIP_MASKS.includes(inputMask) && (
+                  <label className="flex items-start gap-2 text-sm text-gray-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={(data.mediaZipAttribution as boolean) ?? false}
+                      onChange={(e) => onUpdate(node.id, { mediaZipAttribution: e.target.checked })}
+                    />
+                    <span>
+                      Perform local media station attribution
+                      <span className="block text-[10px] text-gray-500 leading-snug">
+                        On a Local media call, re-attributes the call to the station nearest this zip. National calls are unaffected.
+                      </span>
+                    </span>
+                  </label>
                 )}
               </>
             )}

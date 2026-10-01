@@ -19,6 +19,9 @@ public class ContactConnectionDbContext : DbContext
     public DbSet<PhoneNumberRouting> PhoneNumberRoutings => Set<PhoneNumberRouting>();
     public DbSet<EntityVersion> EntityVersions => Set<EntityVersion>();
     public DbSet<CredentialAuditEntry> CredentialAuditEntries => Set<CredentialAuditEntry>();
+    public DbSet<BroadcastStation> BroadcastStations => Set<BroadcastStation>();
+    public DbSet<ZipCodeLocation> ZipCodes => Set<ZipCodeLocation>();
+    public DbSet<AreaCodeLocation> AreaCodes => Set<AreaCodeLocation>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -33,6 +36,9 @@ public class ContactConnectionDbContext : DbContext
         modelBuilder.ApplyConfiguration(new PhoneNumberRoutingConfiguration());
         modelBuilder.ApplyConfiguration(new EntityVersionConfiguration());
         modelBuilder.ApplyConfiguration(new CredentialAuditEntryConfiguration());
+        modelBuilder.ApplyConfiguration(new BroadcastStationConfiguration());
+        modelBuilder.ApplyConfiguration(new ZipCodeLocationConfiguration());
+        modelBuilder.ApplyConfiguration(new AreaCodeLocationConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 }
