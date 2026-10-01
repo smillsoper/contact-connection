@@ -20,6 +20,7 @@ const STATE_DOT: Record<string, string> = {
   unavailable: 'bg-red-500',
   unavailable_break: 'bg-amber-500',
   unavailable_lunch: 'bg-orange-500',
+  unavailable_custom: 'bg-orange-400',
   on_call: 'bg-violet-500',
   acw: 'bg-blue-500',
   callback_pending: 'bg-sky-500',

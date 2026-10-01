@@ -480,6 +480,12 @@ immediately once calls are live, not deferrable.
       - **Takeover** (supervisor takes the call, agent is removed).
       - A way to **call an agent directly from the dashboard** when that agent is *not* currently on
         a call (direct dial to their extension/softphone from the supervisor view).
+- [ ] **Dashboard — Active Calls widget (QA by client/campaign).** (Requested S171.) A widget listing
+      calls in progress: **client, campaign, agent, duration** (live-ticking). Clicking a row drills
+      down to more call detail, with the **same supervisor tools as the Agent List's 🎧 menu**
+      (Monitor / Coach / Barge / Take Over, same permissions). Purpose: QA can monitor specific
+      **clients/campaigns**, not only specific agents. Filterable by client/campaign like the other
+      widgets; real-time SignalR push, never polling ([[feedback_dashboard_realtime_push]]).
 
 ## Tier 3 — Operational scale & reporting infrastructure
 

@@ -41,7 +41,9 @@ public static class DashboardWidgetsEndpoints
                 var state = await stateStore.GetAsync(tenantId, agentId, ct);
                 var code = state?.Code ?? AgentStateCodes.LoggedOut;
                 if (loggedInOnly == true && code == AgentStateCodes.LoggedOut) continue;
-                counts[code] = counts.GetValueOrDefault(code) + 1;
+                // Each custom unavailable code counts on its own, under its label ("Unavailable - Training").
+                var key = code == AgentStateCodes.UnavailableCustom && !string.IsNullOrEmpty(state?.Label) ? state.Label : code;
+                counts[key] = counts.GetValueOrDefault(key) + 1;
                 total++;
             }
 

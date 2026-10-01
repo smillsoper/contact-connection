@@ -474,9 +474,9 @@ export default function FlowPanel() {
     })
 
     // Server-side agent state change (on_call at pickup, acw on hangup, available after acw)
-    connection.on('receiveAgentStateChange', (code: string, _label: string, expiresAtIso: string | null) => {
+    connection.on('receiveAgentStateChange', (code: string, label: string, expiresAtIso: string | null) => {
       const expiresAt = expiresAtIso ? new Date(expiresAtIso) : null
-      setAgentStateCode(code, expiresAt)
+      setAgentStateCode(code, expiresAt, label)
     })
 
     // tf_secure_collect: a capture field started/advanced on the caller's parked leg (agent is on

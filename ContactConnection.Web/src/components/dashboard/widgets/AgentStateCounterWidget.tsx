@@ -26,6 +26,9 @@ const STATE_LABELS: Record<string, string> = {
   logged_out: 'Logged Out',
 }
 
+// Custom unavailable codes arrive keyed by their label ("Unavailable - Training") — orange, like the softphone.
+const colorOf = (key: string) => STATE_COLORS[key] ?? '#fb923c'
+
 export default function AgentStateCounterWidget({ config }: { config: WidgetFilterConfig }) {
   const [data, setData] = useState<AgentStateCounterData | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -71,7 +74,7 @@ export default function AgentStateCounterWidget({ config }: { config: WidgetFilt
       <div className="flex flex-wrap gap-x-3 gap-y-1 justify-center mb-2 shrink-0">
         {Object.entries(data.by_state).map(([code, count]) => (
           <div key={code} className="flex items-center gap-1 text-[11px] text-gray-300">
-            <span className="w-2 h-2 rounded-sm shrink-0" style={{ backgroundColor: STATE_COLORS[code] ?? '#6b7280' }} />
+            <span className="w-2 h-2 rounded-sm shrink-0" style={{ backgroundColor: colorOf(code) }} />
             {STATE_LABELS[code] ?? code} ({count})
           </div>
         ))}
@@ -89,7 +92,7 @@ export default function AgentStateCounterWidget({ config }: { config: WidgetFilt
               stroke="none"
             >
               {pieData.map((entry) => (
-                <Cell key={entry.code} fill={STATE_COLORS[entry.code] ?? '#374151'} />
+                <Cell key={entry.code} fill={entry.code === 'empty' ? '#374151' : colorOf(entry.code)} />
               ))}
             </Pie>
           </PieChart>

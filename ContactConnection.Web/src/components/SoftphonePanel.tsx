@@ -102,8 +102,9 @@ export default function SoftphonePanel() {
   type AgentStateCode = 'unavailable' | 'available' | 'unavailable_break' | 'unavailable_lunch' | 'on_call' | string
   type CustomCode = { id: string; name: string }
 
-  const { agentStateCode: agentState, agentStateExpiresAt, setAgentStateCode, lockMessage, setLockMessage } = useAgentStateStore()
+  const { agentStateCode: agentState, agentStateLabel, agentStateExpiresAt, setAgentStateCode, lockMessage, setLockMessage } = useAgentStateStore()
   const [stateOpen, setStateOpen]   = useState(false)
+  const [stateError, setStateError] = useState<string | null>(null)
   const [customCodes, setCustomCodes] = useState<CustomCode[]>([])
   const [acwCountdown, setAcwCountdown] = useState<number | null>(null)
 
@@ -125,11 +126,16 @@ export default function SoftphonePanel() {
     return () => clearInterval(id)
   }, [agentState, agentStateExpiresAt])
 
-  async function applyState(code: AgentStateCode, customCodeId?: string, customLabel?: string) {
+  // A custom unavailable code goes up as "unavailable_custom" + its id; the server names it.
+  async function applyState(code: AgentStateCode, customCodeId?: string) {
+    setStateError(null)
     try {
-      await api.put('/api/v1/agent-state', { code, customCodeId: customCodeId ?? null, customLabel: customLabel ?? null })
-      setAgentStateCode(code)
-    } catch {}
+      const saved = await api.put<{ code: string; label: string }>('/api/v1/agent-state', { code, customCodeId: customCodeId ?? null })
+      setAgentStateCode(saved?.code ?? code, null, saved?.label ?? null)
+    } catch (e) {
+      // Never fail silently — an agent who thinks they're on Break but isn't gets calls.
+      setStateError(e instanceof Error && e.message ? e.message : 'Status change failed — try again.')
+    }
     setStateOpen(false)
   }
   const {
@@ -883,7 +889,7 @@ export default function SoftphonePanel() {
           acw:               { label: 'After Call Work',     dot: 'bg-purple-500', text: 'text-purple-400' },
           callback_pending:  { label: 'Callback Pending',    dot: 'bg-blue-500',  text: 'text-blue-400'  },
         }
-        const current = STATE_META[agentState] ?? { label: customCodes.find(c => c.id === agentState)?.name ?? 'Unavailable', dot: 'bg-orange-500', text: 'text-orange-400' }
+        const current = STATE_META[agentState] ?? { label: agentStateLabel ?? 'Unavailable', dot: 'bg-orange-500', text: 'text-orange-400' }
         const currentLabel = agentState === 'acw' && acwCountdown !== null
           ? `${current.label} (${acwCountdown}s)`
           : current.label
@@ -913,6 +919,8 @@ export default function SoftphonePanel() {
               </svg>
             </button>
 
+            {stateError && <p className="text-[10px] text-red-400 mt-1 leading-snug">{stateError}</p>}
+
             {stateOpen && (
               <div className="absolute left-0 right-0 top-full mt-1 bg-gray-800 border border-gray-700 rounded-lg overflow-hidden z-20 shadow-xl">
                 {/* Built-in selectable states */}
@@ -938,8 +946,8 @@ export default function SoftphonePanel() {
                     {customCodes.map((c) => (
                       <button
                         key={c.id}
-                        onClick={() => applyState(c.id, c.id, c.name)}
-                        className={`w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-gray-700 transition-colors text-left ${agentState === c.id ? 'bg-gray-700/60' : ''}`}
+                        onClick={() => applyState('unavailable_custom', c.id)}
+                        className={`w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-gray-700 transition-colors text-left ${agentState === 'unavailable_custom' && agentStateLabel === `Unavailable - ${c.name}` ? 'bg-gray-700/60' : ''}`}
                       >
                         <span className="w-2 h-2 rounded-full shrink-0 bg-orange-500" />
                         <span className="text-orange-400">{c.name}</span>

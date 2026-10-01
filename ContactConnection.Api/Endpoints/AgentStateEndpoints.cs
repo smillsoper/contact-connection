@@ -53,6 +53,7 @@ public static class AgentStateEndpoints
         SetAgentStateRequest req,
         HttpContext http,
         IAgentStateStore store,
+        ICustomUnavailableCodeRepository codes,
         CancellationToken ct)
     {
         if (!TryGetAgentClaims(http, out var tenantId, out var agentId))
@@ -62,17 +63,12 @@ public static class AgentStateEndpoints
         if (string.IsNullOrEmpty(tenantSchema))
             return Results.Unauthorized();
 
-        var label = req.Code switch
-        {
-            AgentStateCodes.Available        => "Available",
-            AgentStateCodes.UnavailableBreak => "Unavailable - Break",
-            AgentStateCodes.UnavailableLunch => "Unavailable - Lunch",
-            AgentStateCodes.Unavailable      => "Unavailable",
-            AgentStateCodes.LoggedOut        => "Logged Out",
-            _                                => req.CustomLabel ?? "Unavailable",
-        };
+        var custom = req.CustomCodeId is { } cid ? await codes.GetByIdAsync(cid, ct) : null;
+        var (resolved, error) = ResolveRequestedState(req, custom, http.User.FindFirst("role_id")?.Value);
+        if (resolved is null) return Results.BadRequest(new { error });
+        var (code, label, customCodeId) = resolved.Value;
 
-        var entry = new AgentStateEntry(req.Code, label, req.CustomCodeId, DateTimeOffset.UtcNow);
+        var entry = new AgentStateEntry(code, label, customCodeId, DateTimeOffset.UtcNow);
         await store.SetAsync(tenantId, agentId, tenantSchema, entry, ct);
         // Return what was actually stored — a supervisor-locked agent is held Unavailable.
         return Results.Ok(await store.GetAsync(tenantId, agentId, ct) ?? entry);
@@ -176,6 +172,35 @@ public static class AgentStateEndpoints
         return Results.NoContent();
     }
 
+    /// <summary>
+    /// What an agent's status request becomes. A custom unavailable code is named by the server and
+    /// must exist, be active and be offered to the agent's role (the softphone list's rule). Otherwise
+    /// only agent-selectable states are accepted — on_call / acw / callback_pending are set by the
+    /// telephony engine, never by the client.
+    /// </summary>
+    internal static ((string Code, string Label, Guid? CustomCodeId)? State, string? Error) ResolveRequestedState(
+        SetAgentStateRequest req, CustomUnavailableCode? custom, string? roleId)
+    {
+        if (req.CustomCodeId is not null || req.Code == AgentStateCodes.UnavailableCustom)
+        {
+            if (custom is null || custom.Id != req.CustomCodeId || !custom.IsActive
+                || (custom.Roles.Length > 0 && !custom.Roles.Contains(roleId ?? "")))
+                return (null, "That unavailable code isn't available for your role.");
+            return ((AgentStateCodes.UnavailableCustom, $"Unavailable - {custom.Name}", custom.Id), null);
+        }
+
+        var label = req.Code switch
+        {
+            AgentStateCodes.Available        => "Available",
+            AgentStateCodes.UnavailableBreak => "Unavailable - Break",
+            AgentStateCodes.UnavailableLunch => "Unavailable - Lunch",
+            AgentStateCodes.Unavailable      => "Unavailable",
+            AgentStateCodes.LoggedOut        => "Logged Out",
+            _                                => null,
+        };
+        return label is null ? (null, $"Unknown agent state '{req.Code}'.") : ((req.Code, label, null), null);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static bool TryGetAgentClaims(HttpContext http, out Guid tenantId, out Guid agentId)
@@ -202,5 +227,6 @@ public static class AgentStateEndpoints
     };
 }
 
+/// <summary><see cref="CustomLabel"/> is ignored — the server names custom codes itself.</summary>
 public record SetAgentStateRequest(string Code, Guid? CustomCodeId = null, string? CustomLabel = null);
 public record UnavailableCodeRequest(string Name, string[]? Roles, bool? IsActive);

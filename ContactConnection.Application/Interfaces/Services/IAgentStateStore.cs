@@ -6,6 +6,13 @@ public static class AgentStateCodes
     public const string Available        = "available";
     public const string UnavailableBreak = "unavailable_break";
     public const string UnavailableLunch = "unavailable_lunch";
+    /// <summary>
+    /// One of the tenant's admin-defined unavailable codes (Roles → unavailable codes). The entry's
+    /// CustomCodeId says which; its Label is "Unavailable - {name}". A fixed code rather than the
+    /// custom code's id, so code columns stay short and state checks stay simple (S171 — the id
+    /// overflowed agent_state_history.state_code and every custom selection failed).
+    /// </summary>
+    public const string UnavailableCustom = "unavailable_custom";
     public const string OnCall           = "on_call";
     public const string Acw              = "acw";
 
