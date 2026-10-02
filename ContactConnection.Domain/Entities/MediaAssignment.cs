@@ -79,6 +79,22 @@ public class MediaAssignment
         StationLongitude = longitude;
     }
 
+    /// <summary>
+    /// Corrects the market, agency or start date (S171: a number moved to another agency, a start date
+    /// entered wrong). A National's end date is cleared for <see cref="MediaAssignmentRules.Reassign"/> to
+    /// re-fit; a Local keeps its end date unless it now falls before the start.
+    /// </summary>
+    public void Reassign(string marketType, Guid mediaAgencyId, DateOnly startDate)
+    {
+        if (!MediaMarketType.IsValid(marketType)) throw new ArgumentException($"Unknown market type '{marketType}'.", nameof(marketType));
+        MarketType = marketType;
+        MediaAgencyId = mediaAgencyId;
+        StartDate = startDate;
+        if (marketType == MediaMarketType.National) { IsDefaultLocal = false; EndDate = null; }
+        else if (EndDate < startDate) EndDate = null;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
     public void SetDetails(string? mediaType, string? adType)
     {
         MediaType = Blank(mediaType);
@@ -147,6 +163,46 @@ public static class MediaAssignmentRules
         var next = nationals.Where(a => a.StartDate > added.StartDate).OrderBy(a => a.StartDate).FirstOrDefault();
         if (next is not null) added.SetEndDate(next.StartDate.AddDays(-1));
         return changed;
+    }
+
+    /// <summary>
+    /// Changes an existing assignment's market, agency and/or start date, keeping the National history
+    /// seamless: if it was National, the one before it gets back the end it had before this one started
+    /// (as when deleting); if it is National now, it's fitted in again exactly like a new one.
+    /// </summary>
+    public static void Reassign(MediaAssignment a, string marketType, Guid mediaAgencyId, DateOnly startDate, IEnumerable<MediaAssignment> others)
+    {
+        if (marketType == a.MarketType && startDate == a.StartDate)
+        {
+            if (mediaAgencyId != a.MediaAgencyId) a.Reassign(marketType, mediaAgencyId, startDate);
+            return;
+        }
+
+        var list = others.Where(o => o.Id != a.Id).ToList();
+        if (a.MarketType == MediaMarketType.National)
+        {
+            var previous = list.FirstOrDefault(o => o.MarketType == MediaMarketType.National && o.EndDate == a.StartDate.AddDays(-1));
+            previous?.SetEndDate(a.EndDate);
+        }
+        a.Reassign(marketType, mediaAgencyId, startDate);
+        if (marketType == MediaMarketType.National) FitNational(a, list);
+    }
+
+    /// <summary>
+    /// Sets a National's end date (S171): the requested end, or — when none — the day before the next
+    /// National starts (open-ended if there is none). An end past the next National's start is refused
+    /// rather than overlapping. After a National ends, the number's Local assignments take over — so a
+    /// number can switch National → Local (or back) on a date.
+    /// </summary>
+    public static void SetNationalEnd(MediaAssignment a, DateOnly? requestedEnd, IEnumerable<MediaAssignment> others)
+    {
+        var next = others
+            .Where(o => o.Id != a.Id && o.MarketType == MediaMarketType.National && o.StartDate > a.StartDate)
+            .OrderBy(o => o.StartDate).FirstOrDefault();
+        var cap = next?.StartDate.AddDays(-1);
+        if (requestedEnd is { } r && cap is { } c && r > c)
+            throw new InvalidOperationException($"It would overlap the next National assignment, which starts {next!.StartDate:yyyy-MM-dd} — end it by {c:yyyy-MM-dd}.");
+        a.SetEndDate(requestedEnd ?? cap);
     }
 
     /// <summary>Makes <paramref name="chosen"/> the number's only default Local assignment.</summary>

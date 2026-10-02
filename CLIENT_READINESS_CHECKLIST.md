@@ -478,7 +478,10 @@ immediately once calls are live, not deferrable.
       paid) or on each call's date (not yet paid). Each run is logged with reason/who/result; its
       entries carry `batch_id`. Real TMS pattern (Stephen): commission provided weeks after launch, or
       "change X to Y from the start of this pay period".
-- [ ] **Media attribution replay (retroactive).** (S171, agreed next.) Same shape as commission
+- [x] **Media attribution replay (retroactive).** *(S171 — built + live-verified: change log per number;
+      replay in the number's Media dialog and on Media Agencies (all numbers); market / agency / start
+      date now editable with National history re-fitted; National end dates so a number switches
+      National → Local (or back) on a date — verified CNN Sep 29–30 → KQEN from Oct 1.)* Same shape as commission
       recalculation: change log for media-assignment edits; "replay" re-resolves past calls' media
       attribution for chosen number(s) + window against the assignments in effect on each call's date
       and the caller location already on the call (zip / area code); preview (calls changing station /

@@ -74,6 +74,45 @@ export const mediaApi = {
     api.post<MediaAssignment>(`/api/v1/phone-numbers/${phoneNumberId}/media-assignments`, input),
   updateAssignment: (id: string, input: AssignmentInput) => api.put<MediaAssignment>(`/api/v1/media-assignments/${id}`, input),
   deleteAssignment: (id: string) => api.delete<void>(`/api/v1/media-assignments/${id}`),
+  changes: (phoneNumberId: string) => api.get<MediaAssignmentChange[]>(`/api/v1/phone-numbers/${phoneNumberId}/media-assignments/changes`),
+
+  replayNumbers: () => api.get<ReplayNumber[]>('/api/v1/media-replay/numbers'),
+  previewReplay: (input: ReplayInput) => api.post<MediaReplayPreview>('/api/v1/media-replay/preview', input),
+  startReplay: (input: ReplayInput) => api.post<{ id: string }>('/api/v1/media-replay', input),
+  replays: () => api.get<MediaReplayBatch[]>('/api/v1/media-replay'),
+}
+
+/** One change to a number's assignments (S171). */
+export interface MediaAssignmentChange {
+  id: string
+  assignmentId: string
+  action: 'created' | 'edited' | 'deleted' | 'ended' | 'default_changed'
+  summary: string
+  changedBy: string | null
+  changedAt: string
+}
+
+export interface ReplayNumber { id: string; number: string; clientNumber: string | null; label: string | null }
+
+/** Calls that started in [from, to), tenant-local "yyyy-MM-ddTHH:mm"; no phoneNumberId = all numbers. */
+export interface ReplayInput { phoneNumberId?: string | null; from: string; to: string; reason?: string }
+
+export interface MediaReplayPreview { calls: number; changedCalls: number; changes: { from: string; to: string; calls: number }[] }
+
+export interface MediaReplayBatch {
+  id: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  reason: string
+  requestedBy: string | null
+  totalCalls: number
+  processedCalls: number
+  changedCalls: number
+  error: string | null
+  createdAt: string
+  completedAt: string | null
+  from: string
+  to: string
+  scope: string
 }
 
 /** Suggestions for the media / ad type fields — free text is allowed too. */

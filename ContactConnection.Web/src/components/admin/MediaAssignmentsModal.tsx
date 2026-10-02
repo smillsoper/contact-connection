@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import MediaReplayCard from './MediaReplayCard'
 import {
   AD_TYPES, MEDIA_TYPES, mediaApi,
-  type BroadcastStation, type MediaAgency, type MediaAssignment, type MediaAssignmentList, type MediaMarketType,
+  type BroadcastStation, type MediaAgency, type MediaAssignmentChange, type MediaAssignment, type MediaAssignmentList, type MediaMarketType,
 } from '../../api/media'
 
 // A phone number's media assignments (S171, Media Agency Phase A): what it's attributed to now, its
@@ -127,7 +128,7 @@ function AssignmentForm({ agencies, editing, today, onSave, onCancel }: {
   const [saving, setSaving] = useState(false)
   const set = (p: Partial<FormState>) => setF((s) => ({ ...s, ...p }))
   const agency = agencies.find((a) => a.id === f.mediaAgencyId)
-  const fixed = editing !== null   // type, agency and start date are fixed once created
+  const fixed = false   // market, agency and start date can be corrected too (S171)
 
   async function save() {
     setError(null)
@@ -174,12 +175,15 @@ function AssignmentForm({ agencies, editing, today, onSave, onCancel }: {
           <span className="block text-xs text-gray-400 mb-1">Ad type</span>
           <input list="cc-ad-types" value={f.adType} onChange={(e) => set({ adType: e.target.value })} className={inputCls} />
         </label>
-        {f.marketType === 'local' && (
-          <label className="block">
-            <span className="block text-xs text-gray-400 mb-1">End date (optional)</span>
-            <input type="date" value={f.endDate} onChange={(e) => set({ endDate: e.target.value })} className={inputCls} />
-          </label>
-        )}
+        <label className="block">
+          <span className="block text-xs text-gray-400 mb-1">End date (optional)</span>
+          <input type="date" value={f.endDate} onChange={(e) => set({ endDate: e.target.value })} className={inputCls} />
+          {f.marketType === 'national' && (
+            <span className="block text-[11px] text-gray-500 mt-1 leading-snug">
+              Blank = until the next National starts. After it ends, the number's Local assignments take over.
+            </span>
+          )}
+        </label>
       </div>
       <datalist id="cc-media-types">{MEDIA_TYPES.map((m) => <option key={m} value={m} />)}</datalist>
       <datalist id="cc-ad-types">{AD_TYPES.map((m) => <option key={m} value={m} />)}</datalist>
@@ -231,8 +235,13 @@ export default function MediaAssignmentsModal({ phoneNumberId, number, clientNum
   const [agencies, setAgencies] = useState<MediaAgency[]>([])
   const [form, setForm] = useState<MediaAssignment | 'new' | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [changes, setChanges] = useState<MediaAssignmentChange[]>([])
+  const [showChanges, setShowChanges] = useState(false)
 
-  const load = () => mediaApi.assignments(phoneNumberId).then(setData).catch((e: Error) => setError(e.message))
+  const load = () => {
+    mediaApi.changes(phoneNumberId).then(setChanges).catch(() => {})
+    return mediaApi.assignments(phoneNumberId).then(setData).catch((e: Error) => setError(e.message))
+  }
   useEffect(() => {
     load()
     mediaApi.agencies().then(setAgencies).catch(() => {})
@@ -336,6 +345,31 @@ export default function MediaAssignmentsModal({ phoneNumberId, number, clientNum
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            <MediaReplayCard phoneNumberId={phoneNumberId} />
+
+            {changes.length > 0 && (
+              <div className="mt-4">
+                <button onClick={() => setShowChanges((v) => !v)} className="text-xs font-semibold uppercase tracking-wide text-gray-500 hover:text-gray-300">
+                  {showChanges ? '▾' : '▸'} Change log ({changes.length})
+                </button>
+                {showChanges && (
+                  <>
+                    <ul className="mt-2 divide-y divide-gray-800 text-xs">
+                      {changes.map((c) => (
+                        <li key={c.id} className="py-1.5">
+                          <span className="text-gray-500">{new Date(c.changedAt).toLocaleString()}{c.changedBy ? ` · ${c.changedBy}` : ''} · </span>
+                          <span className="text-gray-300">{c.summary}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="text-[11px] text-gray-500 mt-2">
+                      Calls already taken keep the attribution they had — use "Replay attribution onto past calls" below to apply changes to them.
+                    </p>
+                  </>
+                )}
               </div>
             )}
           </div>

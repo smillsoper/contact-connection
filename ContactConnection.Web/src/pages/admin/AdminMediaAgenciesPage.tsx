@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import AdminShell from '../../components/admin/AdminShell'
 import { mediaApi, type MediaAgency, type MediaAgencyField } from '../../api/media'
+import MediaReplayCard from '../../components/admin/MediaReplayCard'
 
 // Media Agencies (S171, Media Agency Phase A). Each agency lists the data points it tracks per phone
 // number (e.g. Cannella: PRODUCTCODE, ACCESS CODE). Defining them once here keeps every assignment —
@@ -130,6 +131,7 @@ export default function AdminMediaAgenciesPage() {
             ))}
           </div>
         )}
+        <MediaReplayCard />
       </div>
       {editing !== null && (
         <AgencyEditor

@@ -157,4 +157,82 @@ public class MediaAssignmentTests
     [Fact]
     public void GeoPoint_MilesTo_IsGreatCircleDistance() =>
         Assert.InRange(new GeoPoint(40.7128, -74.0060).MilesTo(new GeoPoint(34.0522, -118.2437)), 2440, 2460);   // NYC → LA
+
+    // ── Corrections: market / agency / start date (S171) ─────────────────────
+
+    [Fact]
+    public void MovingANationalsStart_RefitsTheHistory()
+    {
+        var cnn = National("CNN", D(1, 1));
+        var fox = National("FOX", D(3, 1));
+        MediaAssignmentRules.FitNational(fox, [cnn]);      // CNN ends Feb 28
+        MediaAssignmentRules.Reassign(fox, MediaMarketType.National, Agency, D(3, 15), [cnn]);
+
+        Assert.Equal(D(3, 14), cnn.EndDate);                // CNN now runs until the day before FOX's new start
+        Assert.Equal(D(3, 15), fox.StartDate);
+        Assert.Null(fox.EndDate);
+    }
+
+    [Fact]
+    public void NationalBecomingLocal_GivesThePredecessorItsEndBack()
+    {
+        var cnn = National("CNN", D(1, 1));
+        var fox = National("FOX", D(3, 1));
+        MediaAssignmentRules.FitNational(fox, [cnn]);
+        MediaAssignmentRules.Reassign(fox, MediaMarketType.Local, Agency, D(3, 1), [cnn]);
+
+        Assert.Null(cnn.EndDate);
+        Assert.Equal(MediaMarketType.Local, fox.MarketType);
+    }
+
+    [Fact]
+    public void AgencyOnlyChange_LeavesDatesAlone()
+    {
+        var cnn = National("CNN", D(1, 1));
+        var fox = National("FOX", D(3, 1));
+        MediaAssignmentRules.FitNational(fox, [cnn]);
+        var other = Guid.NewGuid();
+        MediaAssignmentRules.Reassign(fox, MediaMarketType.National, other, D(3, 1), [cnn]);
+
+        Assert.Equal(other, fox.MediaAgencyId);
+        Assert.Equal(D(2, 28), cnn.EndDate);
+    }
+
+    [Fact]
+    public void MovingOntoAnotherNationalsStart_IsRefused()
+    {
+        var cnn = National("CNN", D(1, 1));
+        var fox = National("FOX", D(3, 1));
+        MediaAssignmentRules.FitNational(fox, [cnn]);
+        Assert.Throws<InvalidOperationException>(() => MediaAssignmentRules.Reassign(fox, MediaMarketType.National, Agency, D(1, 1), [cnn]));
+    }
+
+    // ── National end dates: switching a number National → Local on a date ────
+
+    [Fact]
+    public void NationalWithAnEndDate_HandsOverToLocalTheDayAfter()
+    {
+        var cnn = National("CNN", D(10, 1));
+        MediaAssignmentRules.SetNationalEnd(cnn, D(10, 15), []);
+        var knaz = Local("KNAZ-TV", D(10, 16));
+        knaz.SetDefaultLocal(true);
+
+        Assert.Same(cnn, MediaAssignmentRules.Resolve([cnn, knaz], D(10, 15)));
+        Assert.Same(knaz, MediaAssignmentRules.Resolve([cnn, knaz], D(10, 16)));
+    }
+
+    [Fact]
+    public void NationalEnd_BlankRunsUntilTheNextNational_AndCantOverlapIt()
+    {
+        var cnn = National("CNN", D(1, 1));
+        var fox = National("FOX", D(3, 1));
+
+        MediaAssignmentRules.SetNationalEnd(cnn, null, [fox]);
+        Assert.Equal(D(2, 28), cnn.EndDate);
+
+        MediaAssignmentRules.SetNationalEnd(cnn, D(2, 10), [fox]);
+        Assert.Equal(D(2, 10), cnn.EndDate);
+
+        Assert.Throws<InvalidOperationException>(() => MediaAssignmentRules.SetNationalEnd(cnn, D(3, 5), [fox]));
+    }
 }
