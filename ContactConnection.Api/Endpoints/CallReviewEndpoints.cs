@@ -391,6 +391,7 @@ public static class CallReviewEndpoints
         HttpContext http,
         ICustomFieldService customFields,
         ICallRecordAuditRepository audit,
+        ICommissionService commissions,
         TenantContext tenantContext,
         CancellationToken ct)
     {
@@ -418,6 +419,8 @@ public static class CallReviewEndpoints
         await Audit(audit, id, CallAuditAction.CustomFieldEdited,
             $"Custom field “{field.Definition.DisplayLabel}”: {before ?? "(blank)"} → {after ?? "(blank)"}",
             new { definitionId, field.Definition.FieldName, before, after }, actor, ct, http);
+        // A flag-based commission may depend on this field (S171).
+        await commissions.RecalculateAsync(id, CommissionTrigger.CustomFieldEdited, ct);
         return Results.NoContent();
     }
 

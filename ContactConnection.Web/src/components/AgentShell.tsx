@@ -12,6 +12,7 @@ import SoftphonePanel from './SoftphonePanel'
 import FlowPanel from './FlowPanel'
 import ChatPanel from './ChatPanel'
 import CartPanel from './cart/CartPanel'
+import MyCommissions from './MyCommissions'
 
 export default function AgentShell() {
   const clearAuth = useAuthStore((s) => s.clearAuth)
@@ -115,6 +116,7 @@ export default function AgentShell() {
       <header className="flex items-stretch bg-gray-900 border-b border-gray-800 shrink-0">
         <img src="/cc-navbar-dark.svg" alt="Contact Connection" className="shrink-0 block" />
         <div className="flex items-center justify-end flex-1 gap-4 px-4">
+          <MyCommissions />
           <button
             onClick={() => navigate('/flows')}
             className="text-xs text-gray-400 hover:text-indigo-300 transition-colors"

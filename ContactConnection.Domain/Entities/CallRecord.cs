@@ -65,6 +65,15 @@ public class CallRecord
     /// or nothing has needed a number yet.</summary>
     public string? OrderNumber { get; private set; }
 
+    /// <summary>When the call's order first went through (the flow's order-submission API node
+    /// succeeded, S171). Order-based commission rules apply only once this is set.</summary>
+    public DateTimeOffset? OrderSubmittedAt { get; private set; }
+
+    /// <summary>Set when an admin reverses the call's commissions (e.g. the order was cancelled) —
+    /// recalculation then earns nothing until they're restored.</summary>
+    public DateTimeOffset? CommissionsReversedAt { get; private set; }
+    public string? CommissionsReversedReason { get; private set; }
+
     // Fulfillment summary — relational, operations
     public string? FulfillmentStatus { get; private set; }
     public string? TrackingNumber { get; private set; }
@@ -321,6 +330,27 @@ public class CallRecord
         RoutedTier      = tier;
         RoutedTierLabel = tierLabel;
         UpdatedAt       = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>Records the order as submitted — keeps the first time (resubmits don't move it).</summary>
+    public void MarkOrderSubmitted(DateTimeOffset at)
+    {
+        OrderSubmittedAt ??= at;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void ReverseCommissions(string reason, DateTimeOffset at)
+    {
+        CommissionsReversedAt = at;
+        CommissionsReversedReason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void RestoreCommissions()
+    {
+        CommissionsReversedAt = null;
+        CommissionsReversedReason = null;
+        UpdatedAt = DateTimeOffset.UtcNow;
     }
 
     public void SetMediaAttribution(MediaAttribution? attribution)

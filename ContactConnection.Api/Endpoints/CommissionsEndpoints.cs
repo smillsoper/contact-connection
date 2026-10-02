@@ -1,0 +1,357 @@
+using System.Globalization;
+using System.Text;
+using ContactConnection.Application.Interfaces.Services;
+using ContactConnection.Application.Services;
+using ContactConnection.Domain.Entities;
+using ContactConnection.Domain.ValueObjects;
+using ContactConnection.Infrastructure.Data;
+using ContactConnection.Infrastructure.Media;
+using Microsoft.EntityFrameworkCore;
+
+namespace ContactConnection.Api.Endpoints;
+
+/// <summary>
+/// Commissions (S171): rules per campaign / client, the tenant's pay period, the per-agent report and
+/// payroll CSV, an agent's own earnings, and a call's entries with reverse / restore.
+/// Rules + pay period: tenant admins. Reports: reports.view (supervisors). Mine: any signed-in agent.
+/// Call panel: calls.view; reverse / restore: calls.manage.
+/// </summary>
+public static class CommissionsEndpoints
+{
+    public static IEndpointRouteBuilder MapCommissionsEndpoints(this IEndpointRouteBuilder app)
+    {
+        var rules = app.MapGroup("/api/v1/commission-rules").RequireAuthorization("TenantAdmin");
+        rules.MapGet("", ListRules);
+        rules.MapPost("", CreateRule);
+        rules.MapPut("{id:guid}", UpdateRule);
+        rules.MapDelete("{id:guid}", DeleteRule);
+
+        app.MapGet("/api/v1/commission-settings", GetSettings).RequireAuthorization();
+        app.MapPut("/api/v1/commission-settings", UpdateSettings).RequireAuthorization("TenantAdmin");
+
+        var reports = app.MapGroup("/api/v1/commissions").RequireAuthorization();
+        reports.MapGet("report", Report);
+        reports.MapGet("entries", Entries);
+        reports.MapGet("export.csv", ExportCsv);
+        reports.MapGet("mine", Mine);
+
+        app.MapGet("/api/v1/call-review/calls/{id:guid}/commissions", CallCommissions).RequireAuthorization();
+        app.MapPost("/api/v1/call-review/calls/{id:guid}/commissions/reverse", ReverseCall).RequireAuthorization();
+        app.MapPost("/api/v1/call-review/calls/{id:guid}/commissions/restore", RestoreCall).RequireAuthorization();
+        return app;
+    }
+
+    // ── Rules ─────────────────────────────────────────────────────────────────
+
+    private static async Task<IResult> ListRules(Guid? clientId, Guid? campaignId, TenantContext tenant, ScopedTenantDbContextFactory dbFactory, CancellationToken ct)
+    {
+        if (!tenant.HasTenant) return Results.Unauthorized();
+        await using var db = dbFactory.Create();
+        var q = db.CommissionRules.AsNoTracking();
+        if (campaignId is not null) q = q.Where(r => r.CampaignId == campaignId);
+        else if (clientId is not null) q = q.Where(r => r.ClientId == clientId);
+        var list = await q.OrderBy(r => r.Kind).ThenBy(r => r.TierLabel == null).ThenBy(r => r.Name).ToListAsync(ct);
+        return Results.Ok(list);
+    }
+
+    private static async Task<IResult> CreateRule(RuleRequest req, TenantContext tenant, ScopedTenantDbContextFactory dbFactory, CancellationToken ct)
+    {
+        if (!tenant.HasTenant) return Results.Unauthorized();
+        await using var db = dbFactory.Create();
+        try
+        {
+            var rule = CommissionRule.Create(tenant.Current!.Id, req.CampaignId is null ? req.ClientId : null, req.CampaignId);
+            rule.Set(req.Name ?? "", req.Kind ?? "", req.Amount, req.ProductId, await ProductLabelAsync(db, req.ProductId, ct),
+                req.FieldName, req.FieldValue, req.TierLabel, req.IsActive ?? true);
+            db.CommissionRules.Add(rule);
+            await db.SaveChangesAsync(ct);
+            return Results.Created($"/api/v1/commission-rules/{rule.Id}", rule);
+        }
+        catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    }
+
+    private static async Task<IResult> UpdateRule(Guid id, RuleRequest req, TenantContext tenant, ScopedTenantDbContextFactory dbFactory, CancellationToken ct)
+    {
+        if (!tenant.HasTenant) return Results.Unauthorized();
+        await using var db = dbFactory.Create();
+        var rule = await db.CommissionRules.FirstOrDefaultAsync(r => r.Id == id, ct);
+        if (rule is null) return Results.NotFound();
+        try
+        {
+            rule.Set(req.Name ?? "", req.Kind ?? "", req.Amount, req.ProductId, await ProductLabelAsync(db, req.ProductId, ct),
+                req.FieldName, req.FieldValue, req.TierLabel, req.IsActive ?? rule.IsActive);
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(rule);
+        }
+        catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    }
+
+    // Past entries keep the rule's name and numbers, so a rule can simply be deleted.
+    private static async Task<IResult> DeleteRule(Guid id, TenantContext tenant, ScopedTenantDbContextFactory dbFactory, CancellationToken ct)
+    {
+        if (!tenant.HasTenant) return Results.Unauthorized();
+        await using var db = dbFactory.Create();
+        var rule = await db.CommissionRules.FirstOrDefaultAsync(r => r.Id == id, ct);
+        if (rule is null) return Results.NotFound();
+        db.CommissionRules.Remove(rule);
+        await db.SaveChangesAsync(ct);
+        return Results.NoContent();
+    }
+
+    private static async Task<string?> ProductLabelAsync(TenantDbContext db, Guid? productId, CancellationToken ct) =>
+        productId is null ? null : await db.Products.AsNoTracking().Where(p => p.Id == productId)
+            .Select(p => p.Sku + " — " + p.Description).FirstOrDefaultAsync(ct);
+
+    // ── Pay period ────────────────────────────────────────────────────────────
+
+    private static IResult GetSettings(TenantContext tenant)
+    {
+        if (!tenant.HasTenant) return Results.Unauthorized();
+        var s = tenant.Current!.Settings;
+        var current = CurrentPeriod(tenant);
+        return Results.Ok(new
+        {
+            frequency = PayPeriods.IsValid(s.PayPeriodFrequency) ? s.PayPeriodFrequency : PayPeriods.Biweekly,
+            start = PayPeriods.AnchorOf(s.PayPeriodStart).ToString("yyyy-MM-dd"),
+            current = PeriodJson(current),
+            timezone = tenant.Current.Timezone,
+        });
+    }
+
+    private static async Task<IResult> UpdateSettings(SettingsRequest req, TenantContext tenant, ContactConnectionDbContext platformDb, CancellationToken ct)
+    {
+        if (!tenant.HasTenant) return Results.Unauthorized();
+        if (!PayPeriods.IsValid(req.Frequency)) return Results.BadRequest(new { error = "Choose weekly, biweekly, semimonthly or monthly." });
+        if (!DateOnly.TryParse(req.Start, CultureInfo.InvariantCulture, out var start)) return Results.BadRequest(new { error = "Enter the first day of a pay period." });
+
+        var row = await platformDb.Tenants.FirstOrDefaultAsync(t => t.Id == tenant.Current!.Id, ct);
+        if (row is null) return Results.NotFound();
+        var s = row.Settings;
+        row.UpdateSettings(new TenantSettings
+        {
+            DateFormat = s.DateFormat, TimeFormat = s.TimeFormat, SupportEmail = s.SupportEmail, BillingEmail = s.BillingEmail,
+            SessionTimeoutMinutes = s.SessionTimeoutMinutes, MfaRequirement = s.MfaRequirement,
+            PayPeriodFrequency = req.Frequency!, PayPeriodStart = start.ToString("yyyy-MM-dd"),
+        });
+        await platformDb.SaveChangesAsync(ct);
+        tenant.Current = row;
+        return GetSettings(tenant);
+    }
+
+    // ── Reports ───────────────────────────────────────────────────────────────
+
+    /// <summary>Per-agent totals for a pay period (period = current | previous, or start=yyyy-MM-dd for the
+    /// period containing that date). Optional agentId narrows it to one agent.</summary>
+    private static async Task<IResult> Report(
+        string? period, string? start, Guid? agentId, HttpContext http, TenantContext tenant, ScopedTenantDbContextFactory dbFactory, CancellationToken ct)
+    {
+        if (!tenant.HasTenant) return Results.Unauthorized();
+        if (!Has(http, Permission.ReportsView)) return Results.Forbid();
+        var p = ResolvePeriod(tenant, period, start);
+        var (from, to) = Bounds(tenant, p);
+
+        await using var db = dbFactory.Create();
+        var q = db.CommissionEntries.AsNoTracking().Where(e => e.OccurredAt >= from && e.OccurredAt < to);
+        if (agentId is not null) q = q.Where(e => e.AgentId == agentId);
+        var rows = await q.GroupBy(e => e.AgentId).Select(g => new
+        {
+            AgentId = g.Key,
+            Earned = g.Where(e => e.EntryType == CommissionEntryType.Earned).Sum(e => e.Amount),
+            Reversed = g.Where(e => e.EntryType == CommissionEntryType.Reversal).Sum(e => e.Amount),
+            Total = g.Sum(e => e.Amount),
+            Calls = g.Select(e => e.CallRecordId).Distinct().Count(),
+        }).ToListAsync(ct);
+        var names = await AgentNamesAsync(db, rows.Select(r => r.AgentId), ct);
+
+        return Results.Ok(new
+        {
+            period = PeriodJson(p),
+            agents = rows.Select(r => new { r.AgentId, agentName = names.GetValueOrDefault(r.AgentId, "(unknown agent)"), r.Earned, r.Reversed, r.Total, r.Calls })
+                         .OrderBy(r => r.agentName),
+            total = rows.Sum(r => r.Total),
+        });
+    }
+
+    /// <summary>The entries behind a report row: one agent (or all) for a pay period.</summary>
+    private static async Task<IResult> Entries(
+        string? period, string? start, Guid? agentId, HttpContext http, TenantContext tenant, ScopedTenantDbContextFactory dbFactory, CancellationToken ct)
+    {
+        if (!tenant.HasTenant) return Results.Unauthorized();
+        if (!Has(http, Permission.ReportsView)) return Results.Forbid();
+        await using var db = dbFactory.Create();
+        var p = ResolvePeriod(tenant, period, start);
+        return Results.Ok(new { period = PeriodJson(p), entries = await EntryRowsAsync(db, tenant, p, agentId, ct) });
+    }
+
+    /// <summary>Payroll CSV: one row per entry for the period, plus the agent's period total.</summary>
+    private static async Task<IResult> ExportCsv(
+        string? period, string? start, Guid? agentId, HttpContext http, TenantContext tenant, ScopedTenantDbContextFactory dbFactory, CancellationToken ct)
+    {
+        if (!tenant.HasTenant) return Results.Unauthorized();
+        if (!Has(http, Permission.ReportsView)) return Results.Forbid();
+        await using var db = dbFactory.Create();
+        var p = ResolvePeriod(tenant, period, start);
+        var rows = await EntryRowsAsync(db, tenant, p, agentId, ct);
+
+        var csv = new StringBuilder();
+        csv.AppendLine("Agent,Agent Total,Date,Client,Campaign,Order Number,Call ID,Rule,Type,Detail,Amount,Note");
+        foreach (var agent in rows.GroupBy(r => r.AgentName).OrderBy(g => g.Key))
+        {
+            var total = agent.Sum(r => r.Amount);
+            foreach (var r in agent)
+                csv.AppendLine(string.Join(',', Csv(r.AgentName), Money(total), Csv(r.Date), Csv(r.Client), Csv(r.Campaign),
+                    Csv(r.OrderNumber), r.CallRecordId, Csv(r.RuleName), r.EntryType, Csv(r.Description), Money(r.Amount), Csv(r.Note)));
+        }
+        var name = $"commissions-{p.Start:yyyy-MM-dd}-to-{p.End:yyyy-MM-dd}.csv";
+        return Results.File(Encoding.UTF8.GetBytes(csv.ToString()), "text/csv", name);
+    }
+
+    /// <summary>The signed-in agent's own earnings: the current or previous pay period, plus today.</summary>
+    private static async Task<IResult> Mine(string? period, HttpContext http, TenantContext tenant, ScopedTenantDbContextFactory dbFactory, CancellationToken ct)
+    {
+        if (!tenant.HasTenant) return Results.Unauthorized();
+        if (!Guid.TryParse(http.User.FindFirst("sub")?.Value, out var agentId)) return Results.Unauthorized();
+        await using var db = dbFactory.Create();
+        var p = ResolvePeriod(tenant, period, null);
+        var today = MediaAttributionResolver.TodayIn(tenant.Current!.Timezone);
+        var (dayFrom, dayTo) = Bounds(tenant, new PayPeriod(today, today));
+        var todayTotal = await db.CommissionEntries.AsNoTracking()
+            .Where(e => e.AgentId == agentId && e.OccurredAt >= dayFrom && e.OccurredAt < dayTo).SumAsync(e => e.Amount, ct);
+        var entries = await EntryRowsAsync(db, tenant, p, agentId, ct);
+        return Results.Ok(new { period = PeriodJson(p), today = todayTotal, total = entries.Sum(e => e.Amount), entries });
+    }
+
+    // ── A call's commissions ──────────────────────────────────────────────────
+
+    private static async Task<IResult> CallCommissions(Guid id, HttpContext http, TenantContext tenant, ScopedTenantDbContextFactory dbFactory, CancellationToken ct)
+    {
+        if (!tenant.HasTenant) return Results.Unauthorized();
+        if (!Has(http, Permission.CallsView)) return Results.Forbid();
+        await using var db = dbFactory.Create();
+        var record = await db.CallRecords.AsNoTracking().Where(r => r.Id == id)
+            .Select(r => new { r.OrderSubmittedAt, r.CommissionsReversedAt, r.CommissionsReversedReason }).FirstOrDefaultAsync(ct);
+        if (record is null) return Results.NotFound();
+        var entries = await db.CommissionEntries.AsNoTracking().Where(e => e.CallRecordId == id).OrderBy(e => e.OccurredAt).ToListAsync(ct);
+        var names = await AgentNamesAsync(db, entries.Select(e => e.AgentId), ct);
+        return Results.Ok(new
+        {
+            record.OrderSubmittedAt, record.CommissionsReversedAt, record.CommissionsReversedReason,
+            total = entries.Sum(e => e.Amount),
+            entries = entries.Select(e => new
+            {
+                e.Id, e.EntryType, e.RuleName, e.Description, e.Amount, e.IsReversed, e.Note, e.OccurredAt,
+                agentName = names.GetValueOrDefault(e.AgentId, "(unknown agent)"),
+            }),
+        });
+    }
+
+    private static async Task<IResult> ReverseCall(Guid id, ReverseRequest req, HttpContext http, TenantContext tenant, ICommissionService commissions, CancellationToken ct)
+    {
+        if (!tenant.HasTenant) return Results.Unauthorized();
+        if (!Has(http, Permission.CallsManage)) return Results.Forbid();
+        await commissions.ReverseAsync(id, string.IsNullOrWhiteSpace(req.Reason) ? CommissionTrigger.OrderCancelled : req.Reason, ct);
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> RestoreCall(Guid id, HttpContext http, TenantContext tenant, ICommissionService commissions, CancellationToken ct)
+    {
+        if (!tenant.HasTenant) return Results.Unauthorized();
+        if (!Has(http, Permission.CallsManage)) return Results.Forbid();
+        await commissions.RestoreAsync(id, ct);
+        return Results.NoContent();
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private record EntryRow(
+        Guid Id, Guid AgentId, string AgentName, Guid CallRecordId, string? OrderNumber, string Client, string Campaign,
+        string EntryType, string RuleName, string Description, decimal Amount, string? Note, DateTimeOffset OccurredAt, string Date);
+
+    private static async Task<List<EntryRow>> EntryRowsAsync(
+        TenantDbContext db, TenantContext tenant, PayPeriod p, Guid? agentId, CancellationToken ct)
+    {
+        var (from, to) = Bounds(tenant, p);
+        var q = db.CommissionEntries.AsNoTracking().Where(e => e.OccurredAt >= from && e.OccurredAt < to);
+        if (agentId is not null) q = q.Where(e => e.AgentId == agentId);
+        var entries = await q.OrderBy(e => e.OccurredAt).ToListAsync(ct);
+
+        var names = await AgentNamesAsync(db, entries.Select(e => e.AgentId), ct);
+        var callIds = entries.Select(e => e.CallRecordId).Distinct().ToList();
+        var orders = await db.CallRecords.AsNoTracking().Where(r => callIds.Contains(r.Id))
+            .ToDictionaryAsync(r => r.Id, r => r.OrderNumber, ct);
+        var clients = await db.Clients.AsNoTracking().ToDictionaryAsync(c => c.Id, c => c.Name, ct);
+        var campaigns = await db.Campaigns.AsNoTracking().ToDictionaryAsync(c => c.Id, c => c.Name, ct);
+        var tz = Zone(tenant);
+
+        return entries.Select(e => new EntryRow(
+            e.Id, e.AgentId, names.GetValueOrDefault(e.AgentId, "(unknown agent)"), e.CallRecordId, orders.GetValueOrDefault(e.CallRecordId),
+            clients.GetValueOrDefault(e.ClientId, ""), campaigns.GetValueOrDefault(e.CampaignId, ""),
+            e.EntryType, e.RuleName, e.Description, e.Amount, e.Note, e.OccurredAt,
+            TimeZoneInfo.ConvertTime(e.OccurredAt, tz).ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture))).ToList();
+    }
+
+    private static async Task<Dictionary<Guid, string>> AgentNamesAsync(TenantDbContext db, IEnumerable<Guid> ids, CancellationToken ct)
+    {
+        var list = ids.Distinct().ToList();
+        return await db.Agents.AsNoTracking().Where(a => list.Contains(a.Id))
+            .ToDictionaryAsync(a => a.Id, a => (a.FirstName + " " + a.LastName).Trim(), ct);
+    }
+
+    private static PayPeriod CurrentPeriod(TenantContext tenant)
+    {
+        var s = tenant.Current!.Settings;
+        return PayPeriods.Containing(MediaAttributionResolver.TodayIn(tenant.Current.Timezone), s.PayPeriodFrequency, PayPeriods.AnchorOf(s.PayPeriodStart));
+    }
+
+    private static PayPeriod ResolvePeriod(TenantContext tenant, string? period, string? start)
+    {
+        var s = tenant.Current!.Settings;
+        var anchor = PayPeriods.AnchorOf(s.PayPeriodStart);
+        if (DateOnly.TryParse(start, CultureInfo.InvariantCulture, out var date))
+            return PayPeriods.Containing(date, s.PayPeriodFrequency, anchor);
+        var current = CurrentPeriod(tenant);
+        return period == "previous" ? current.Previous(s.PayPeriodFrequency, anchor) : current;
+    }
+
+    /// <summary>The period's [from, to) instants: tenant-local midnight of Start to midnight after End,
+    /// as UTC — Npgsql only accepts offset-0 values for timestamptz parameters.</summary>
+    private static (DateTimeOffset From, DateTimeOffset To) Bounds(TenantContext tenant, PayPeriod p)
+    {
+        var tz = Zone(tenant);
+        DateTimeOffset Midnight(DateOnly d)
+        {
+            var local = d.ToDateTime(TimeOnly.MinValue);
+            return new DateTimeOffset(local, tz.GetUtcOffset(local)).ToUniversalTime();
+        }
+        return (Midnight(p.Start), Midnight(p.End.AddDays(1)));
+    }
+
+    private static TimeZoneInfo Zone(TenantContext tenant)
+    {
+        try { return TimeZoneInfo.FindSystemTimeZoneById(tenant.Current?.Timezone ?? "UTC"); }
+        catch (TimeZoneNotFoundException) { return TimeZoneInfo.Utc; }
+    }
+
+    private static object PeriodJson(PayPeriod p) => new { start = p.Start.ToString("yyyy-MM-dd"), end = p.End.ToString("yyyy-MM-dd"), label = p.Label };
+
+    private static bool Has(HttpContext http, string permission) =>
+        (http.User.FindFirst("permissions")?.Value ?? "").Split(',').Contains(permission);
+
+    private static string Money(decimal d) => d.ToString("0.00", CultureInfo.InvariantCulture);
+
+    private static string Csv(string? s)
+    {
+        s ??= "";
+        // Neutralize spreadsheet formulas, then quote.
+        if (s.Length > 0 && "=+-@".Contains(s[0])) s = "'" + s;
+        return "\"" + s.Replace("\"", "\"\"") + "\"";
+    }
+}
+
+public record RuleRequest(
+    Guid? ClientId, Guid? CampaignId, string? Name, string? Kind, decimal Amount, Guid? ProductId,
+    string? FieldName, string? FieldValue, string? TierLabel, bool? IsActive);
+
+public record SettingsRequest(string? Frequency, string? Start);
+
+public record ReverseRequest(string? Reason);

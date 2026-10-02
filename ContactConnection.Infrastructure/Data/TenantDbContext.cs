@@ -66,6 +66,8 @@ public class TenantDbContext : DbContext
     public DbSet<OrderNumberSequence> OrderNumberSequences => Set<OrderNumberSequence>();
     public DbSet<MediaAgency> MediaAgencies => Set<MediaAgency>();
     public DbSet<MediaAssignment> MediaAssignments => Set<MediaAssignment>();
+    public DbSet<CommissionRule> CommissionRules => Set<CommissionRule>();
+    public DbSet<CommissionEntry> CommissionEntries => Set<CommissionEntry>();
     public DbSet<CallRecordAuditEntry> CallRecordAuditEntries => Set<CallRecordAuditEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -122,6 +124,8 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new OrderNumberSequenceConfiguration());
         modelBuilder.ApplyConfiguration(new MediaAgencyConfiguration());
         modelBuilder.ApplyConfiguration(new MediaAssignmentConfiguration());
+        modelBuilder.ApplyConfiguration(new CommissionRuleConfiguration());
+        modelBuilder.ApplyConfiguration(new CommissionEntryConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 

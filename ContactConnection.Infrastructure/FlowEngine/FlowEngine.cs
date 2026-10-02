@@ -54,6 +54,8 @@ public class FlowEngine : IFlowEngine
 
     private static readonly TimeSpan SessionTtl = TimeSpan.FromHours(12);
 
+    private readonly ICommissionService? _commissions;
+
     public FlowEngine(
         IFlowRepository flows,
         IFlowSessionRepository sessions,
@@ -66,9 +68,11 @@ public class FlowEngine : IFlowEngine
         ISharedCallVariableStore sharedVars,
         IEnumerable<INodeHandler> handlers,
         ILogger<FlowEngine> logger,
-        ICardDataRetentionService cardRetention)
+        ICardDataRetentionService cardRetention,
+        ICommissionService? commissions = null)
     {
         _cardRetention = cardRetention;
+        _commissions   = commissions;
         _flows         = flows;
         _sessions      = sessions;
         _agents        = agents;
@@ -983,6 +987,13 @@ public class FlowEngine : IFlowEngine
             record.RefreshOverallStatus();
         }
         await _callRecords.SaveChangesAsync(ct);
+
+        // Commissions (S171): the script's flags (custom fields) are final now. Never fails the flow.
+        if (_commissions is not null)
+        {
+            try { await _commissions.RecalculateAsync(ctx.CallRecordId, CommissionTrigger.ScriptCompleted, ct); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Commission recalculation failed for call {CallRecordId}", ctx.CallRecordId); }
+        }
     }
 
     /// <summary>The disposition the flow recorded, if any.</summary>

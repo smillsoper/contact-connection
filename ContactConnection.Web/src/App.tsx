@@ -22,6 +22,8 @@ import AdminRolesPage from './pages/admin/AdminRolesPage'
 import AdminCustomFieldDefinitionsPage from './pages/admin/AdminCustomFieldDefinitionsPage'
 import AdminProductsPage from './pages/admin/AdminProductsPage'
 import AdminMediaAgenciesPage from './pages/admin/AdminMediaAgenciesPage'
+import AdminCommissionsPage from './pages/admin/AdminCommissionsPage'
+import CommissionReportPage from './pages/CommissionReportPage'
 import AdminProductOffersPage from './pages/admin/AdminProductOffersPage'
 import AdminApiDefinitionsPage from './pages/admin/AdminApiDefinitionsPage'
 import AdminApiDefinitionDetailPage from './pages/admin/AdminApiDefinitionDetailPage'
@@ -246,6 +248,23 @@ export default function App() {
             <RequireAdminAuth>
               <AdminCustomFieldDefinitionsPage />
             </RequireAdminAuth>
+          }
+        />
+        <Route
+          path="/admin/commissions"
+          element={
+            <RequireAdminAuth>
+              <AdminCommissionsPage />
+            </RequireAdminAuth>
+          }
+        />
+        {/* Commission report — reports.view, so supervisors can see their agents' earnings. */}
+        <Route
+          path="/commissions"
+          element={
+            <RequirePermission permission="reports.view">
+              <CommissionReportPage />
+            </RequirePermission>
           }
         />
         <Route

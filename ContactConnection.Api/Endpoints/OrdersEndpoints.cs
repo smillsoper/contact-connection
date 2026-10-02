@@ -32,6 +32,7 @@ public static class OrdersEndpoints
     private static async Task<IResult> CreateFromCart(
         Guid callRecordId,
         IOrderService orderService,
+        ICommissionService commissions,
         TenantContext tenantContext,
         CancellationToken ct)
     {
@@ -41,6 +42,7 @@ public static class OrdersEndpoints
         try
         {
             var (order, created) = await orderService.CreateFromCartAsync(callRecordId, ct);
+            if (created) await commissions.OrderSubmittedAsync(callRecordId, ct);
             return created
                 ? Results.Created($"/api/v1/orders/{order.Id}", ToResponse(order))
                 : Results.Ok(ToResponse(order));
@@ -86,6 +88,7 @@ public static class OrdersEndpoints
     private static async Task<IResult> CancelOrder(
         Guid id,
         IOrderRepository orderRepo,
+        ICommissionService commissions,
         TenantContext tenantContext,
         CancellationToken ct)
     {
@@ -100,6 +103,7 @@ public static class OrdersEndpoints
 
         order.Cancel();
         await orderRepo.SaveChangesAsync(ct);
+        if (order.CallRecordId is { } callId) await commissions.ReverseAsync(callId, CommissionTrigger.OrderCancelled, ct);
         return Results.Ok(ToResponse(order));
     }
 

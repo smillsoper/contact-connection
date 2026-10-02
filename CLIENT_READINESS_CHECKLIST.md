@@ -458,7 +458,19 @@ immediately once calls are live, not deferrable.
         Long Form/LF, Mid Form/MF, PI, Paid, etc.) tracked per assignment.
       - Excel import for media hit schedules is part of the full Tier 4 build (bulk-loading
         assignments) — Phase A can start with manual entry only if that's faster to ship first.
-- [ ] **Commissions tracking.** Depends on Tier 1's order/payment existing (commissions are computed
+- [x] **Commissions tracking.** *(Session 171 — built; flag rule + agent view + report + reverse/restore
+      live-verified; the % / per-order / per-product path awaits a successful Order API submission
+      (staging key) to verify live.)* `CommissionRule` per campaign (client = default when a campaign
+      has none), kinds % of order (total − shipping − tax − fees, the NeuroQ V1 basis) / $ per order /
+      $ per product unit / $ when a custom field equals a value (script flags — no order needed); a
+      tier rule ("Alpha") replaces the general rule of the same kind. Append-only `CommissionEntry`
+      ledger with reversals; recalculated on the API node marked "Order submission" (stamps
+      `call_records.order_submitted_at`), at script end, on Call Records custom-field edits, and on
+      internal Order create/cancel. Pay period (weekly/biweekly/semimonthly/monthly) is a tenant
+      setting. Admin → Commissions (rules + pay period), `/commissions` report (reports.view: per
+      agent, drill-down, CSV), agent top-bar "Commission" (this/last period, today), Call Records
+      panel with Reverse/Restore (calls.manage).
+      Depends on Tier 1's order/payment existing (commissions are computed
       off real order data) and on the flow engine's variable resolution (already built) for
       script-driven flags:
       - *S163:* the call record now carries the routing tier it was won through

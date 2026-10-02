@@ -209,6 +209,7 @@ app.MapSupervisorEndpoints();
 app.MapCampaignCredentialsEndpoints();
 app.MapSoftphoneEndpoints();
 app.MapMediaEndpoints();
+app.MapCommissionsEndpoints();
 app.MapCallRecordingsEndpoints();
 app.MapScreenRecordingsEndpoints();
 app.MapVoicemailsEndpoints();

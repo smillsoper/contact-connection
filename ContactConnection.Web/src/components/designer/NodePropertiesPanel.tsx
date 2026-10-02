@@ -1136,10 +1136,11 @@ export default function NodePropertiesPanel({
                 onChange={(e) => onUpdate(node.id, { releasesCardData: e.target.checked })}
               />
               <span>
-                Order submission — release card data
+                Order submission
                 <span className="block text-[10px] text-gray-500 leading-snug">
-                  When this call succeeds, the captured card is wiped. For campaigns set to keep card data until
-                  the order is submitted, this is the point it's no longer needed — also when a reviewer
+                  When this call succeeds the order counts as placed: the call records its order time and the
+                  agent's commission, and the captured card is wiped (for campaigns keeping card data until the
+                  order is submitted, this is the point it's no longer needed). Also applies when a reviewer
                   resubmits from Call Records.
                 </span>
               </span>

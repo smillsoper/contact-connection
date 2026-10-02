@@ -104,6 +104,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IInventoryService, InventoryService>();
         services.AddScoped<ICartService, CartService>();
         services.AddScoped<ICallAddressService, CallAddressService>();
+        services.AddScoped<ICommissionService, CommissionService>();
         services.AddScoped<IOrderService, OrderService>();
         services.AddScoped<ISubscriptionOrderCreator, SubscriptionOrderCreator>();
         services.AddScoped<ICustomFieldService, CustomFieldService>();

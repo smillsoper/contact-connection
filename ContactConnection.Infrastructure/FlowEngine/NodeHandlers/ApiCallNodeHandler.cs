@@ -5,6 +5,7 @@ using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Domain.Entities;
 using ContactConnection.Infrastructure.ApiExecution;
 using ContactConnection.Infrastructure.Common;
+using Microsoft.Extensions.Logging;
 
 namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 
@@ -53,7 +54,9 @@ public class ApiCallNodeHandler(
     ILiquidTemplateRenderer liquid,
     IApiTemplateModelBuilder templateModel,
     IApiResponseCacheStore responseCache,
-    ICardDataRetentionService cardRetention)
+    ICardDataRetentionService cardRetention,
+    ICommissionService? commissions = null,
+    ILogger<ApiCallNodeHandler>? logger = null)
     : NodeHandlerBase(resolver), INodeHandler
 {
     public string NodeType => "api_call";
@@ -131,7 +134,16 @@ public class ApiCallNodeHandler(
         // (CardDataRetentionMode.UntilOrderSubmitted keeps it until exactly here). A replayed
         // once-per-call success counts too.
         if (transitionKey == "success" && node["releasesCardData"]?.GetValue<bool>() == true)
+        {
             await cardRetention.ReleaseAfterOrderSubmittedAsync(ctx.CallRecordId, ct);
+
+            // The order is placed: stamp it and record the agent's commission (S171). Never fails the flow.
+            if (commissions is not null)
+            {
+                try { await commissions.OrderSubmittedAsync(ctx.CallRecordId, ct); }
+                catch (Exception ex) { logger?.LogWarning(ex, "Commission recording failed for call {CallRecordId}", ctx.CallRecordId); }
+            }
+        }
 
         if (!string.IsNullOrEmpty(outputVariable))
         {
