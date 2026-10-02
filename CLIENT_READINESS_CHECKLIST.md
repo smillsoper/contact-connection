@@ -560,6 +560,17 @@ immediately once calls are live, not deferrable.
         as a **pop-out or slide-out that does not block the view of the CRM script flow** underneath
         it (agent needs the script visible while referencing the helpdesk).
 
+- [ ] **Telephony balance alerts (SignalWire low-balance webhook).** (Requested 2026-10-02.) SignalWire's
+      Low Balance Settings can POST a webhook (currently email only; auto top-up is always on, set to the
+      minimum $10.01 below $5). Receive it in the platform and raise a Platform Portal / platform-admin
+      dashboard alert (+ email), so a running-low account is visible where we work, not just in an inbox.
+      Signed/authenticated endpoint; one SignalWire Space covers all tenants, so this is platform-level.
+- [ ] **Support ticket system (platform back end).** (Requested 2026-10-02, future.) Tenants and their
+      admins raise support tickets to us from inside the platform; we work them in the Platform Portal
+      (status, priority, assignee, thread, attachments, linked tenant / call record). Today support is an
+      email alias (support@contactconnection.io → Stephen's inbox). Design pass first — scope vs. the
+      agent helpdesk CMS (which is tenant-facing knowledge, not tickets to us).
+
 ## Tier 4 — Advanced / specialized build-out
 
 The single biggest chunk of work on the whole list — deliberately isolated so it doesn't block
