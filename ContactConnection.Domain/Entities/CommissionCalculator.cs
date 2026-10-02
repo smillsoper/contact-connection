@@ -5,12 +5,14 @@ namespace ContactConnection.Domain.Entities;
 /// <summary>What a call earned under one rule.</summary>
 public record CommissionLine(Guid RuleId, string RuleName, string Kind, decimal Basis, decimal Rate, decimal Amount, string Description);
 
-/// <summary>The parts of a call that commission rules read.</summary>
+/// <summary>The parts of a call that commission rules read. <see cref="CallStart"/> picks the rules in
+/// effect (null = ignore effective dates).</summary>
 public record CommissionCallFacts(
     bool OrderSubmitted,
     CartDocument? Cart,
     string? TierLabel,
-    IReadOnlyDictionary<string, string> CustomFields);
+    IReadOnlyDictionary<string, string> CustomFields,
+    DateTimeOffset? CallStart = null);
 
 /// <summary>
 /// Pure commission math (S171). Rules are grouped by what they pay on — the kind plus its target
@@ -20,11 +22,22 @@ public record CommissionCallFacts(
 /// </summary>
 public static class CommissionCalculator
 {
+    /// <summary>
+    /// The rules a call is paid under: its campaign's rules in effect when it started, or (when the
+    /// campaign has none in effect) its client's.
+    /// </summary>
+    public static List<CommissionRule> RulesFor(
+        IEnumerable<CommissionRule> campaignRules, IEnumerable<CommissionRule> clientRules, DateTimeOffset callStart)
+    {
+        var campaign = campaignRules.Where(r => r.AppliesAt(callStart)).ToList();
+        return campaign.Count > 0 ? campaign : clientRules.Where(r => r.AppliesAt(callStart)).ToList();
+    }
+
     public static List<CommissionLine> Calculate(CommissionCallFacts facts, IEnumerable<CommissionRule> rules)
     {
         var lines = new List<CommissionLine>();
         var applicable = rules
-            .Where(r => r.IsActive)
+            .Where(r => facts.CallStart is { } start ? r.AppliesAt(start) : r.IsActive)
             .Where(r => r.TierLabel is null || string.Equals(r.TierLabel, facts.TierLabel, StringComparison.OrdinalIgnoreCase));
 
         foreach (var group in applicable.GroupBy(GroupKey))

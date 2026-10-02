@@ -162,4 +162,60 @@ public class CommissionTests
         Assert.Equal(current.Start.AddDays(-1), previous.End);
         Assert.Equal(current, previous.Next(PayPeriods.Biweekly, PayPeriods.DefaultAnchor));
     }
+
+    // ── Effective dates + recalculation batches (retroactive changes) ──────────
+
+    private static CommissionRule Dated(decimal percent, DateTimeOffset? from, DateTimeOffset? until, Guid? client = null)
+    {
+        var r = CommissionRule.Create(Tenant, client, client is null ? Campaign : null);
+        r.Set($"{percent}%", CommissionKind.PercentOfOrder, percent, null, null, null, null, null, true, from, until);
+        return r;
+    }
+
+    private static readonly DateTimeOffset Sep15 = new(2026, 9, 15, 15, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public void RetroactiveRateChange_EachCallUsesTheRuleInEffectWhenItStarted()
+    {
+        var old = Dated(1, null, Sep15);
+        var raised = Dated(2, Sep15, null);
+        var rules = new[] { old, raised };
+
+        var before = CommissionCalculator.Calculate(Facts() with { CallStart = Sep15.AddMinutes(-1) }, rules);
+        var after = CommissionCalculator.Calculate(Facts() with { CallStart = Sep15 }, rules);
+
+        Assert.Equal(1.20m, Assert.Single(before).Amount);
+        Assert.Equal(2.40m, Assert.Single(after).Amount);   // the start instant is inclusive
+    }
+
+    [Fact]
+    public void RulesFor_UsesCampaignRulesInEffect_ElseTheClients()
+    {
+        var client = Guid.NewGuid();
+        var campaignLater = Dated(5, Sep15, null);
+        var clientDefault = Dated(1, null, null, client);
+
+        Assert.Same(clientDefault, Assert.Single(CommissionCalculator.RulesFor([campaignLater], [clientDefault], Sep15.AddDays(-1))));
+        Assert.Same(campaignLater, Assert.Single(CommissionCalculator.RulesFor([campaignLater], [clientDefault], Sep15.AddDays(1))));
+    }
+
+    [Fact]
+    public void Rule_CantEndBeforeItStarts() =>
+        Assert.Throws<ArgumentException>(() => Dated(1, Sep15, Sep15));
+
+    [Fact]
+    public void RecalcBatch_Validation_AndRestartResetsCounters()
+    {
+        Assert.Throws<ArgumentException>(() => CommissionRecalcBatch.Create(Tenant, null, Campaign, null, Sep15, Sep15, "current", "x", null));
+        Assert.Throws<ArgumentException>(() => CommissionRecalcBatch.Create(Tenant, null, Campaign, null, Sep15, Sep15.AddDays(1), "later", "x", null));
+        Assert.Throws<ArgumentException>(() => CommissionRecalcBatch.Create(Tenant, null, Campaign, null, Sep15, Sep15.AddDays(1), "current", " ", null));
+
+        var batch = CommissionRecalcBatch.Create(Tenant, null, Campaign, null, Sep15, Sep15.AddDays(1), CommissionPostTo.CallDate, "set up late", "Sue");
+        batch.Start(10);
+        batch.Progress(10, 4, 12.50m);
+        batch.Start(10);   // a Worker restart re-runs it
+        Assert.Equal(0, batch.ProcessedCalls);
+        Assert.Equal(0m, batch.Difference);
+        Assert.Equal(CommissionRecalcStatus.Running, batch.Status);
+    }
 }

@@ -4,6 +4,7 @@ using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
 using ContactConnection.Domain.Entities;
 using ContactConnection.Domain.ValueObjects;
+using ContactConnection.Infrastructure.Commerce;
 using ContactConnection.Infrastructure.Data;
 using ContactConnection.Infrastructure.Media;
 using Microsoft.EntityFrameworkCore;
@@ -25,6 +26,12 @@ public static class CommissionsEndpoints
         rules.MapPost("", CreateRule);
         rules.MapPut("{id:guid}", UpdateRule);
         rules.MapDelete("{id:guid}", DeleteRule);
+
+        // Recalculate past calls under the rules in effect when each started (preview, then a Worker batch).
+        var recalc = app.MapGroup("/api/v1/commissions/recalc").RequireAuthorization("TenantAdmin");
+        recalc.MapPost("preview", PreviewRecalc);
+        recalc.MapPost("", StartRecalc);
+        recalc.MapGet("", ListRecalcs);
 
         app.MapGet("/api/v1/commission-settings", GetSettings).RequireAuthorization();
         app.MapPut("/api/v1/commission-settings", UpdateSettings).RequireAuthorization("TenantAdmin");
@@ -50,8 +57,9 @@ public static class CommissionsEndpoints
         var q = db.CommissionRules.AsNoTracking();
         if (campaignId is not null) q = q.Where(r => r.CampaignId == campaignId);
         else if (clientId is not null) q = q.Where(r => r.ClientId == clientId);
-        var list = await q.OrderBy(r => r.Kind).ThenBy(r => r.TierLabel == null).ThenBy(r => r.Name).ToListAsync(ct);
-        return Results.Ok(list);
+        var list = await q.OrderBy(r => r.Kind).ThenBy(r => r.TierLabel == null).ThenBy(r => r.EffectiveFrom).ThenBy(r => r.Name).ToListAsync(ct);
+        var tz = Zone(tenant);
+        return Results.Ok(list.Select(r => RuleJson(r, tz)));
     }
 
     private static async Task<IResult> CreateRule(RuleRequest req, TenantContext tenant, ScopedTenantDbContextFactory dbFactory, CancellationToken ct)
@@ -60,12 +68,13 @@ public static class CommissionsEndpoints
         await using var db = dbFactory.Create();
         try
         {
+            var tz = Zone(tenant);
             var rule = CommissionRule.Create(tenant.Current!.Id, req.CampaignId is null ? req.ClientId : null, req.CampaignId);
             rule.Set(req.Name ?? "", req.Kind ?? "", req.Amount, req.ProductId, await ProductLabelAsync(db, req.ProductId, ct),
-                req.FieldName, req.FieldValue, req.TierLabel, req.IsActive ?? true);
+                req.FieldName, req.FieldValue, req.TierLabel, req.IsActive ?? true, Local(req.EffectiveFrom, tz), Local(req.EffectiveUntil, tz));
             db.CommissionRules.Add(rule);
             await db.SaveChangesAsync(ct);
-            return Results.Created($"/api/v1/commission-rules/{rule.Id}", rule);
+            return Results.Created($"/api/v1/commission-rules/{rule.Id}", RuleJson(rule, tz));
         }
         catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
     }
@@ -78,10 +87,11 @@ public static class CommissionsEndpoints
         if (rule is null) return Results.NotFound();
         try
         {
+            var tz = Zone(tenant);
             rule.Set(req.Name ?? "", req.Kind ?? "", req.Amount, req.ProductId, await ProductLabelAsync(db, req.ProductId, ct),
-                req.FieldName, req.FieldValue, req.TierLabel, req.IsActive ?? rule.IsActive);
+                req.FieldName, req.FieldValue, req.TierLabel, req.IsActive ?? rule.IsActive, Local(req.EffectiveFrom, tz), Local(req.EffectiveUntil, tz));
             await db.SaveChangesAsync(ct);
-            return Results.Ok(rule);
+            return Results.Ok(RuleJson(rule, tz));
         }
         catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
     }
@@ -97,6 +107,91 @@ public static class CommissionsEndpoints
         await db.SaveChangesAsync(ct);
         return Results.NoContent();
     }
+
+    /// <summary>A rule with its effective window as tenant-local "yyyy-MM-ddTHH:mm" (what the form edits).</summary>
+    private static object RuleJson(CommissionRule r, TimeZoneInfo tz) => new
+    {
+        r.Id, r.ClientId, r.CampaignId, r.Name, r.Kind, r.Amount, r.ProductId, r.ProductLabel, r.FieldName, r.FieldValue,
+        r.TierLabel, r.IsActive, effectiveFrom = LocalText(r.EffectiveFrom, tz), effectiveUntil = LocalText(r.EffectiveUntil, tz),
+    };
+
+    // ── Recalculate past calls ────────────────────────────────────────────────
+
+    private static async Task<IResult> PreviewRecalc(RecalcRequest req, TenantContext tenant, ScopedTenantDbContextFactory dbFactory, CancellationToken ct)
+    {
+        if (!tenant.HasTenant) return Results.Unauthorized();
+        if (ToScope(req, Zone(tenant)) is not { } scope) return Results.BadRequest(new { error = "Choose a start and an end, the end after the start." });
+        await using var db = dbFactory.Create();
+        var p = await CommissionRecalculator.PreviewAsync(db, scope, ct);
+        var names = await AgentNamesAsync(db, p.Agents.Select(a => a.AgentId), ct);
+        return Results.Ok(new
+        {
+            p.Calls, p.ChangedCalls, p.Current, p.Recalculated, difference = p.Recalculated - p.Current,
+            agents = p.Agents.Select(a => new
+            {
+                a.AgentId, agentName = names.GetValueOrDefault(a.AgentId, "(unknown agent)"),
+                a.Current, a.Recalculated, difference = a.Recalculated - a.Current, a.ChangedCalls,
+            }).OrderBy(a => a.agentName),
+        });
+    }
+
+    private static async Task<IResult> StartRecalc(
+        RecalcRequest req, HttpContext http, TenantContext tenant, ScopedTenantDbContextFactory dbFactory, CancellationToken ct)
+    {
+        if (!tenant.HasTenant) return Results.Unauthorized();
+        if (ToScope(req, Zone(tenant)) is not { } scope) return Results.BadRequest(new { error = "Choose a start and an end, the end after the start." });
+        await using var db = dbFactory.Create();
+        if (await db.CommissionRecalcBatches.AnyAsync(b => b.Status == CommissionRecalcStatus.Pending || b.Status == CommissionRecalcStatus.Running, ct))
+            return Results.Conflict(new { error = "A recalculation is already running — wait for it to finish." });
+        try
+        {
+            var by = $"{http.User.FindFirst("given_name")?.Value} {http.User.FindFirst("family_name")?.Value}".Trim();
+            var batch = CommissionRecalcBatch.Create(tenant.Current!.Id, scope.ClientId, scope.CampaignId, scope.AgentId,
+                scope.From, scope.To, req.PostTo ?? CommissionPostTo.Current, req.Reason ?? "", by.Length == 0 ? null : by);
+            db.CommissionRecalcBatches.Add(batch);
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(new { batch.Id });
+        }
+        catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    }
+
+    private static async Task<IResult> ListRecalcs(TenantContext tenant, ScopedTenantDbContextFactory dbFactory, CancellationToken ct)
+    {
+        if (!tenant.HasTenant) return Results.Unauthorized();
+        await using var db = dbFactory.Create();
+        var batches = await db.CommissionRecalcBatches.AsNoTracking().OrderByDescending(b => b.CreatedAt).Take(20).ToListAsync(ct);
+        var clients = await db.Clients.AsNoTracking().ToDictionaryAsync(c => c.Id, c => c.Name, ct);
+        var campaigns = await db.Campaigns.AsNoTracking().ToDictionaryAsync(c => c.Id, c => c.Name, ct);
+        var agents = await AgentNamesAsync(db, batches.Where(b => b.AgentId is not null).Select(b => b.AgentId!.Value), ct);
+        var tz = Zone(tenant);
+        return Results.Ok(batches.Select(b => new
+        {
+            b.Id, b.Status, b.PostTo, b.Reason, b.RequestedBy, b.TotalCalls, b.ProcessedCalls, b.ChangedCalls, b.Difference, b.Error,
+            b.CreatedAt, b.CompletedAt,
+            from = LocalText(b.From, tz), to = LocalText(b.To, tz),
+            scope = string.Join(" · ", new[]
+            {
+                b.CampaignId is { } cp ? campaigns.GetValueOrDefault(cp, "(campaign)") : b.ClientId is { } cl ? clients.GetValueOrDefault(cl, "(client)") + " — all campaigns" : "All clients",
+                b.AgentId is { } a ? agents.GetValueOrDefault(a, "(agent)") : null,
+            }.Where(x => x is not null)),
+        }));
+    }
+
+    private static CommissionRecalculator.Scope? ToScope(RecalcRequest req, TimeZoneInfo tz) =>
+        Local(req.From, tz) is { } from && Local(req.To, tz) is { } to && to > from
+            ? new(req.CampaignId is null ? req.ClientId : null, req.CampaignId, req.AgentId, from, to)
+            : null;
+
+    /// <summary>Tenant-local "yyyy-MM-ddTHH:mm" (or a date) → UTC instant.</summary>
+    private static DateTimeOffset? Local(string? text, TimeZoneInfo tz)
+    {
+        if (string.IsNullOrWhiteSpace(text) || !DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var local)) return null;
+        local = DateTime.SpecifyKind(local, DateTimeKind.Unspecified);
+        return new DateTimeOffset(local, tz.GetUtcOffset(local)).ToUniversalTime();
+    }
+
+    private static string? LocalText(DateTimeOffset? at, TimeZoneInfo tz) =>
+        at is { } v ? TimeZoneInfo.ConvertTime(v, tz).ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture) : null;
 
     private static async Task<string?> ProductLabelAsync(TenantDbContext db, Guid? productId, CancellationToken ct) =>
         productId is null ? null : await db.Products.AsNoTracking().Where(p => p.Id == productId)
@@ -348,9 +443,16 @@ public static class CommissionsEndpoints
     }
 }
 
+/// <summary>EffectiveFrom / EffectiveUntil are tenant-local "yyyy-MM-ddTHH:mm"; blank = open.</summary>
 public record RuleRequest(
     Guid? ClientId, Guid? CampaignId, string? Name, string? Kind, decimal Amount, Guid? ProductId,
-    string? FieldName, string? FieldValue, string? TierLabel, bool? IsActive);
+    string? FieldName, string? FieldValue, string? TierLabel, bool? IsActive,
+    string? EffectiveFrom = null, string? EffectiveUntil = null);
+
+/// <summary>From / To are tenant-local "yyyy-MM-ddTHH:mm"; calls that STARTED in [From, To).
+/// PostTo = current | call_date.</summary>
+public record RecalcRequest(
+    Guid? ClientId, Guid? CampaignId, Guid? AgentId, string? From, string? To, string? PostTo = null, string? Reason = null);
 
 public record SettingsRequest(string? Frequency, string? Start);
 

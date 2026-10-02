@@ -17,6 +17,10 @@ namespace ContactConnection.Domain.Entities;
 /// <see cref="TierLabel"/> limits a rule to calls won through that routing tier ("Alpha"). A matching
 /// tier rule REPLACES the general rules of the same kind and target for that call — so "10% · Alpha" plus
 /// "1%" pays Alpha calls 10% and every other call 1%. See <see cref="CommissionCalculator"/>.
+///
+/// <see cref="EffectiveFrom"/> / <see cref="EffectiveUntil"/> date a rule (S171): a call is paid under the
+/// rules in effect when it started, so a retroactive change ("2% from the start of this pay period") is
+/// ending the old rule, adding the new one, and recalculating past calls; earlier calls keep their rate.
 /// </summary>
 public class CommissionRule
 {
@@ -34,6 +38,10 @@ public class CommissionRule
     public string? FieldName { get; private set; }
     public string? FieldValue { get; private set; }
     public string? TierLabel { get; private set; }
+    /// <summary>Applies to calls started at or after this instant; null = always.</summary>
+    public DateTimeOffset? EffectiveFrom { get; private set; }
+    /// <summary>Applies to calls started before this instant; null = open-ended.</summary>
+    public DateTimeOffset? EffectiveUntil { get; private set; }
     public bool IsActive { get; private set; } = true;
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -54,8 +62,11 @@ public class CommissionRule
 
     public void Set(
         string name, string kind, decimal amount, Guid? productId, string? productLabel,
-        string? fieldName, string? fieldValue, string? tierLabel, bool isActive)
+        string? fieldName, string? fieldValue, string? tierLabel, bool isActive,
+        DateTimeOffset? effectiveFrom = null, DateTimeOffset? effectiveUntil = null)
     {
+        if (effectiveFrom is { } f && effectiveUntil is { } u && u <= f)
+            throw new ArgumentException("A rule has to end after it starts.");
         if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("Name is required.");
         if (!CommissionKind.IsValid(kind)) throw new ArgumentException($"Unknown commission kind '{kind}'.");
         if (amount < 0) throw new ArgumentException("Amount can't be negative.");
@@ -73,8 +84,14 @@ public class CommissionRule
         FieldValue = kind == CommissionKind.FlatPerField ? fieldValue!.Trim() : null;
         TierLabel = Blank(tierLabel);
         IsActive = isActive;
+        EffectiveFrom = effectiveFrom;
+        EffectiveUntil = effectiveUntil;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
+
+    /// <summary>Active and in effect for a call that started at <paramref name="callStart"/>.</summary>
+    public bool AppliesAt(DateTimeOffset callStart) =>
+        IsActive && (EffectiveFrom is null || callStart >= EffectiveFrom) && (EffectiveUntil is null || callStart < EffectiveUntil);
 
     private static string? Blank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 }
@@ -119,13 +136,16 @@ public class CommissionEntry
     public bool IsReversed { get; private set; }
     public Guid? ReversesEntryId { get; private set; }
     public string? Note { get; private set; }
+    /// <summary>The recalculation run that wrote this entry, if any.</summary>
+    public Guid? BatchId { get; private set; }
     public DateTimeOffset OccurredAt { get; private set; }
 
     private CommissionEntry() { }
 
     public static CommissionEntry Earned(
-        Guid tenantId, CallRecord call, Guid agentId, CommissionLine line, DateTimeOffset at) => new()
+        Guid tenantId, CallRecord call, Guid agentId, CommissionLine line, DateTimeOffset at, Guid? batchId = null) => new()
     {
+        BatchId = batchId,
         Id = Guid.NewGuid(), TenantId = tenantId, CallRecordId = call.Id, AgentId = agentId,
         ClientId = call.ClientId, CampaignId = call.CampaignId, EntryType = CommissionEntryType.Earned,
         RuleId = line.RuleId, RuleName = line.RuleName, Kind = line.Kind, Basis = line.Basis, Rate = line.Rate,
@@ -133,7 +153,7 @@ public class CommissionEntry
     };
 
     /// <summary>Cancels this earned entry: marks it reversed and returns the offsetting entry.</summary>
-    public CommissionEntry Reverse(string note, DateTimeOffset at)
+    public CommissionEntry Reverse(string note, DateTimeOffset at, Guid? batchId = null)
     {
         if (EntryType != CommissionEntryType.Earned || IsReversed)
             throw new InvalidOperationException("Only an earned entry still in force can be reversed.");
@@ -144,6 +164,7 @@ public class CommissionEntry
             ClientId = ClientId, CampaignId = CampaignId, EntryType = CommissionEntryType.Reversal,
             RuleId = RuleId, RuleName = RuleName, Kind = Kind, Basis = Basis, Rate = Rate,
             Amount = -Amount, Description = Description, ReversesEntryId = Id, Note = note, OccurredAt = at,
+            BatchId = batchId,
         };
     }
 }
@@ -152,4 +173,87 @@ public static class CommissionEntryType
 {
     public const string Earned   = "earned";
     public const string Reversal = "reversal";
+}
+
+/// <summary>
+/// One "recalculate past calls" run (S171): every call in the scope started in [From, To) is recalculated
+/// under the rules in effect when it started. Previewed first; applied by the Worker in chunks with
+/// progress. <see cref="PostTo"/> says where corrections count: <c>current</c> (now, for periods already
+/// paid) or <c>call_date</c> (back-dated to each call's start, for periods not yet paid).
+/// </summary>
+public class CommissionRecalcBatch
+{
+    public Guid Id { get; private set; }
+    public Guid TenantId { get; private set; }
+    public Guid? ClientId { get; private set; }
+    public Guid? CampaignId { get; private set; }
+    public Guid? AgentId { get; private set; }
+    public DateTimeOffset From { get; private set; }
+    public DateTimeOffset To { get; private set; }
+    public string PostTo { get; private set; } = CommissionPostTo.Current;
+    public string Reason { get; private set; } = "";
+    public string? RequestedBy { get; private set; }
+    public string Status { get; private set; } = CommissionRecalcStatus.Pending;
+    public int TotalCalls { get; private set; }
+    public int ProcessedCalls { get; private set; }
+    public int ChangedCalls { get; private set; }
+    public decimal Difference { get; private set; }
+    public string? Error { get; private set; }
+    public DateTimeOffset CreatedAt { get; private set; }
+    public DateTimeOffset? StartedAt { get; private set; }
+    public DateTimeOffset? CompletedAt { get; private set; }
+
+    private CommissionRecalcBatch() { }
+
+    public static CommissionRecalcBatch Create(
+        Guid tenantId, Guid? clientId, Guid? campaignId, Guid? agentId, DateTimeOffset from, DateTimeOffset to,
+        string postTo, string reason, string? requestedBy)
+    {
+        if (to <= from) throw new ArgumentException("The end has to be after the start.");
+        if (postTo is not (CommissionPostTo.Current or CommissionPostTo.CallDate)) throw new ArgumentException($"Unknown posting '{postTo}'.");
+        if (string.IsNullOrWhiteSpace(reason)) throw new ArgumentException("Give a reason; it's noted on every correction.");
+        return new CommissionRecalcBatch
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, ClientId = clientId, CampaignId = campaignId, AgentId = agentId,
+            From = from, To = to, PostTo = postTo, Reason = reason.Trim(), RequestedBy = requestedBy,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+    }
+
+    /// <summary>Begins (or, after a Worker restart, re-begins) the run — counters start over since a
+    /// re-run only rewrites what still differs.</summary>
+    public void Start(int totalCalls)
+    {
+        Status = CommissionRecalcStatus.Running;
+        TotalCalls = totalCalls;
+        ProcessedCalls = 0;
+        ChangedCalls = 0;
+        Difference = 0;
+        StartedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void Progress(int processed, int changed, decimal difference)
+    {
+        ProcessedCalls += processed;
+        ChangedCalls += changed;
+        Difference += difference;
+    }
+
+    public void Complete() { Status = CommissionRecalcStatus.Completed; CompletedAt = DateTimeOffset.UtcNow; }
+
+    public void Fail(string error) { Status = CommissionRecalcStatus.Failed; Error = error; CompletedAt = DateTimeOffset.UtcNow; }
+}
+
+public static class CommissionPostTo
+{
+    public const string Current  = "current";
+    public const string CallDate = "call_date";
+}
+
+public static class CommissionRecalcStatus
+{
+    public const string Pending   = "pending";
+    public const string Running   = "running";
+    public const string Completed = "completed";
+    public const string Failed    = "failed";
 }

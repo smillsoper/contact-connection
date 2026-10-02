@@ -26,6 +26,9 @@ export interface CommissionRule {
   fieldValue: string | null
   tierLabel: string | null
   isActive: boolean
+  /** Tenant-local "yyyy-MM-ddTHH:mm"; null = open. */
+  effectiveFrom: string | null
+  effectiveUntil: string | null
 }
 
 export interface RuleInput {
@@ -39,6 +42,46 @@ export interface RuleInput {
   fieldValue?: string | null
   tierLabel?: string | null
   isActive: boolean
+  effectiveFrom?: string | null
+  effectiveUntil?: string | null
+}
+
+/** Recalculate past calls: calls that started in [from, to), tenant-local "yyyy-MM-ddTHH:mm". */
+export interface RecalcInput {
+  clientId?: string | null
+  campaignId?: string | null
+  agentId?: string | null
+  from: string
+  to: string
+  postTo?: 'current' | 'call_date'
+  reason?: string
+}
+
+export interface RecalcPreview {
+  calls: number
+  changedCalls: number
+  current: number
+  recalculated: number
+  difference: number
+  agents: { agentId: string; agentName: string; current: number; recalculated: number; difference: number; changedCalls: number }[]
+}
+
+export interface RecalcBatch {
+  id: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  postTo: 'current' | 'call_date'
+  reason: string
+  requestedBy: string | null
+  totalCalls: number
+  processedCalls: number
+  changedCalls: number
+  difference: number
+  error: string | null
+  createdAt: string
+  completedAt: string | null
+  from: string
+  to: string
+  scope: string
 }
 
 export interface Period { start: string; end: string; label: string }
@@ -91,6 +134,10 @@ export const commissionsApi = {
   createRule: (input: RuleInput) => api.post<CommissionRule>('/api/v1/commission-rules', input),
   updateRule: (id: string, input: RuleInput) => api.put<CommissionRule>(`/api/v1/commission-rules/${id}`, input),
   deleteRule: (id: string) => api.delete<void>(`/api/v1/commission-rules/${id}`),
+
+  previewRecalc: (input: RecalcInput) => api.post<RecalcPreview>('/api/v1/commissions/recalc/preview', input),
+  startRecalc: (input: RecalcInput) => api.post<{ id: string }>('/api/v1/commissions/recalc', input),
+  recalcs: () => api.get<RecalcBatch[]>('/api/v1/commissions/recalc'),
 
   settings: () => api.get<CommissionSettings>('/api/v1/commission-settings'),
   saveSettings: (frequency: string, start: string) => api.put<CommissionSettings>('/api/v1/commission-settings', { frequency, start }),

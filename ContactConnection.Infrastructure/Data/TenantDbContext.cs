@@ -68,6 +68,7 @@ public class TenantDbContext : DbContext
     public DbSet<MediaAssignment> MediaAssignments => Set<MediaAssignment>();
     public DbSet<CommissionRule> CommissionRules => Set<CommissionRule>();
     public DbSet<CommissionEntry> CommissionEntries => Set<CommissionEntry>();
+    public DbSet<CommissionRecalcBatch> CommissionRecalcBatches => Set<CommissionRecalcBatch>();
     public DbSet<CallRecordAuditEntry> CallRecordAuditEntries => Set<CallRecordAuditEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -126,6 +127,7 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new MediaAssignmentConfiguration());
         modelBuilder.ApplyConfiguration(new CommissionRuleConfiguration());
         modelBuilder.ApplyConfiguration(new CommissionEntryConfiguration());
+        modelBuilder.ApplyConfiguration(new CommissionRecalcBatchConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 

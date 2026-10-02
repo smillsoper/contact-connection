@@ -11,27 +11,27 @@ namespace ContactConnection.Infrastructure.Commerce;
 public class CommissionService(ScopedTenantDbContextFactory dbFactory) : ICommissionService
 {
     public Task RecalculateAsync(Guid callRecordId, string trigger, CancellationToken ct = default) =>
-        WithRecordAsync(callRecordId, (db, record) => SyncAsync(db, record, trigger, ct), ct);
+        WithRecordAsync(callRecordId, (db, record) => CommissionLedger.SyncAsync(db, record, trigger, ct), ct);
 
     public Task OrderSubmittedAsync(Guid callRecordId, CancellationToken ct = default) =>
         WithRecordAsync(callRecordId, (db, record) =>
         {
             record.MarkOrderSubmitted(DateTimeOffset.UtcNow);
-            return SyncAsync(db, record, CommissionTrigger.OrderSubmitted, ct);
+            return CommissionLedger.SyncAsync(db, record, CommissionTrigger.OrderSubmitted, ct);
         }, ct);
 
     public Task ReverseAsync(Guid callRecordId, string reason, CancellationToken ct = default) =>
         WithRecordAsync(callRecordId, (db, record) =>
         {
             record.ReverseCommissions(reason, DateTimeOffset.UtcNow);
-            return SyncAsync(db, record, string.IsNullOrWhiteSpace(reason) ? CommissionTrigger.OrderCancelled : reason.Trim(), ct);
+            return CommissionLedger.SyncAsync(db, record, string.IsNullOrWhiteSpace(reason) ? CommissionTrigger.OrderCancelled : reason.Trim(), ct);
         }, ct);
 
     public Task RestoreAsync(Guid callRecordId, CancellationToken ct = default) =>
         WithRecordAsync(callRecordId, (db, record) =>
         {
             record.RestoreCommissions();
-            return SyncAsync(db, record, CommissionTrigger.Restored, ct);
+            return CommissionLedger.SyncAsync(db, record, CommissionTrigger.Restored, ct);
         }, ct);
 
     private async Task WithRecordAsync(Guid callRecordId, Func<TenantDbContext, CallRecord, Task> work, CancellationToken ct)
@@ -42,40 +42,74 @@ public class CommissionService(ScopedTenantDbContextFactory dbFactory) : ICommis
         await work(db, record);
         await db.SaveChangesAsync(ct);
     }
+}
 
-    private static async Task SyncAsync(TenantDbContext db, CallRecord record, string trigger, CancellationToken ct)
+/// <summary>
+/// The commission ledger mechanics shared by single-call recalculation and "recalculate past calls"
+/// (S171): what a call should earn under the rules in effect when it started, whether that differs from
+/// the entries in force, and writing the reversals + new entries when it does.
+/// </summary>
+public static class CommissionLedger
+{
+    /// <summary>A tenant's commission rules indexed by campaign and client.</summary>
+    public sealed class RuleBook(List<CommissionRule> rules)
     {
-        var desired = await DesiredAsync(db, record, ct);
-        var inForce = await db.CommissionEntries
-            .Where(e => e.CallRecordId == record.Id && e.EntryType == CommissionEntryType.Earned && !e.IsReversed)
-            .ToListAsync(ct);
+        private readonly ILookup<Guid, CommissionRule> _byCampaign = rules.Where(r => r.CampaignId is not null).ToLookup(r => r.CampaignId!.Value);
+        private readonly ILookup<Guid, CommissionRule> _byClient = rules.Where(r => r.ClientId is not null).ToLookup(r => r.ClientId!.Value);
 
-        static string Key(Guid agent, Guid? rule, decimal amount) => $"{agent}|{rule}|{amount:0.00}";
-        var want = desired.Lines.Select(l => Key(desired.AgentId, l.RuleId, l.Amount)).Order().ToList();
-        var have = inForce.Select(e => Key(e.AgentId, e.RuleId, e.Amount)).Order().ToList();
-        if (want.SequenceEqual(have)) return;
-
-        var now = DateTimeOffset.UtcNow;
-        foreach (var entry in inForce) db.CommissionEntries.Add(entry.Reverse(trigger, now));
-        foreach (var line in desired.Lines)
-            db.CommissionEntries.Add(CommissionEntry.Earned(record.TenantId, record, desired.AgentId, line, now));
+        public List<CommissionRule> For(CallRecord r) =>
+            CommissionCalculator.RulesFor(_byCampaign[r.CampaignId], r.ClientId == Guid.Empty ? [] : _byClient[r.ClientId], r.CreatedAt);
     }
 
-    private static async Task<(Guid AgentId, List<CommissionLine> Lines)> DesiredAsync(TenantDbContext db, CallRecord record, CancellationToken ct)
+    public static async Task<RuleBook> LoadRulesAsync(TenantDbContext db, CancellationToken ct) =>
+        new(await db.CommissionRules.AsNoTracking().ToListAsync(ct));
+
+    public record Desired(Guid AgentId, List<CommissionLine> Lines)
     {
-        if (record.AgentId is not { } agentId || record.CommissionsReversedAt is not null) return (Guid.Empty, []);
+        public decimal Total => Lines.Sum(l => l.Amount);
+    }
 
-        // A campaign with any active rules uses only its own; otherwise its client's.
-        var rules = await db.CommissionRules.AsNoTracking()
-            .Where(r => r.IsActive && r.CampaignId == record.CampaignId).ToListAsync(ct);
-        if (rules.Count == 0 && record.ClientId != Guid.Empty)
-            rules = await db.CommissionRules.AsNoTracking()
-                .Where(r => r.IsActive && r.ClientId == record.ClientId).ToListAsync(ct);
-        if (rules.Count == 0) return (agentId, []);
-
+    /// <summary>What the call should earn now — nothing without an agent or while reversed by an admin.</summary>
+    public static Desired DesiredFor(CallRecord record, RuleBook rules)
+    {
+        if (record.AgentId is not { } agentId || record.CommissionsReversedAt is not null) return new(Guid.Empty, []);
         var facts = new CommissionCallFacts(
-            record.OrderSubmittedAt is not null, record.Cart, record.RoutedTierLabel, CustomFieldValues(record.CustomFields));
-        return (agentId, CommissionCalculator.Calculate(facts, rules));
+            record.OrderSubmittedAt is not null, record.Cart, record.RoutedTierLabel,
+            CustomFieldValues(record.CustomFields), record.CreatedAt);
+        return new(agentId, CommissionCalculator.Calculate(facts, rules.For(record)));
+    }
+
+    public static bool Matches(Desired desired, IEnumerable<CommissionEntry> inForce)
+    {
+        static string Key(Guid agent, Guid? rule, decimal amount) => $"{agent}|{rule}|{amount:0.00}";
+        var want = desired.Lines.Select(l => Key(desired.AgentId, l.RuleId, l.Amount)).Order();
+        var have = inForce.Select(e => Key(e.AgentId, e.RuleId, e.Amount)).Order();
+        return want.SequenceEqual(have);
+    }
+
+    /// <summary>Reverses the entries in force and writes the desired ones, posted at <paramref name="at"/>.
+    /// Returns the change in the call's net commission.</summary>
+    public static decimal Replace(
+        TenantDbContext db, CallRecord record, Desired desired, List<CommissionEntry> inForce,
+        string note, DateTimeOffset at, Guid? batchId = null)
+    {
+        foreach (var entry in inForce) db.CommissionEntries.Add(entry.Reverse(note, at, batchId));
+        foreach (var line in desired.Lines)
+            db.CommissionEntries.Add(CommissionEntry.Earned(record.TenantId, record, desired.AgentId, line, at, batchId));
+        return desired.Total - inForce.Sum(e => e.Amount);
+    }
+
+    public static Task<List<CommissionEntry>> InForceAsync(TenantDbContext db, Guid callRecordId, CancellationToken ct) =>
+        db.CommissionEntries
+            .Where(e => e.CallRecordId == callRecordId && e.EntryType == CommissionEntryType.Earned && !e.IsReversed)
+            .ToListAsync(ct);
+
+    /// <summary>Single-call recalculation, posted now.</summary>
+    public static async Task SyncAsync(TenantDbContext db, CallRecord record, string trigger, CancellationToken ct)
+    {
+        var desired = DesiredFor(record, await LoadRulesAsync(db, ct));
+        var inForce = await InForceAsync(db, record.Id, ct);
+        if (!Matches(desired, inForce)) Replace(db, record, desired, inForce, trigger, DateTimeOffset.UtcNow);
     }
 
     /// <summary>The call_records.custom_fields snapshot as field name → text.</summary>

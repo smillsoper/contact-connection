@@ -470,6 +470,20 @@ immediately once calls are live, not deferrable.
       setting. Admin → Commissions (rules + pay period), `/commissions` report (reports.view: per
       agent, drill-down, CSV), agent top-bar "Commission" (this/last period, today), Call Records
       panel with Reverse/Restore (calls.manage).
+      **Retroactive commission (S171, live-verified):** rules carry Effective from / until (tenant-local
+      date+time) and every call is paid under the rules in effect when it STARTED. Admin → Commissions →
+      "Recalculate past calls": scope (client/campaign) + window → preview (calls changing, per-agent
+      now / recalculated / difference) → apply as a Worker batch (`CommissionRecalcService`, chunked,
+      idempotent, resumable) posting corrections either to the current pay period (periods already
+      paid) or on each call's date (not yet paid). Each run is logged with reason/who/result; its
+      entries carry `batch_id`. Real TMS pattern (Stephen): commission provided weeks after launch, or
+      "change X to Y from the start of this pay period".
+- [ ] **Media attribution replay (retroactive).** (S171, agreed next.) Same shape as commission
+      recalculation: change log for media-assignment edits; "replay" re-resolves past calls' media
+      attribution for chosen number(s) + window against the assignments in effect on each call's date
+      and the caller location already on the call (zip / area code); preview (calls changing station /
+      agency) → apply as a batch, keeping each call's previous attribution in its change history. TMS
+      did this when agencies sent assignment changes late.
       Depends on Tier 1's order/payment existing (commissions are computed
       off real order data) and on the flow engine's variable resolution (already built) for
       script-driven flags:

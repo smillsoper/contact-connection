@@ -50,6 +50,7 @@ builder.Services.AddHostedService<ScheduledCallbackProcessingService>();
 builder.Services.AddHostedService<SensitiveDataRetentionService>();
 builder.Services.AddHostedService<StoredValueRetentionService>();
 builder.Services.AddHostedService<BroadcastStationImportService>();
+builder.Services.AddHostedService<CommissionRecalcService>();
 
 // Historical note: a legacy FreeSwitchEslService (CHANNEL_PARK→create-CallRecord translator)
 // once lived here. It predated ContactConnection.Api's EslBackgroundService, which now owns the
