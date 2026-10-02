@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from './stores/authStore'
 import { usePortalAuthStore } from './stores/portalAuthStore'
-import { getSubdomainFromHostname } from './utils/subdomain'
+import { getSubdomainFromHostname, isPublicSiteHost } from './utils/subdomain'
 import LoginPage from './pages/LoginPage'
 import MfaSetupPage from './pages/MfaSetupPage'
 import MfaVerifyPage from './pages/MfaVerifyPage'
@@ -40,6 +40,8 @@ import PortalApiDefinitionsPage from './pages/portal/PortalApiDefinitionsPage'
 import PortalApiDefinitionDetailPage from './pages/portal/PortalApiDefinitionDetailPage'
 import PortalCredentialsPage from './pages/portal/PortalCredentialsPage'
 import MaintenancePage from './pages/portal/MaintenancePage'
+import LandingPage from './pages/public/LandingPage'
+import { PrivacyPage, TermsPage, AcceptableUsePage } from './pages/public/LegalPages'
 import CallTraceWindowPage from './pages/CallTraceWindowPage'
 import DashboardsPage from './pages/DashboardsPage'
 import DashboardBuilderPage from './pages/DashboardBuilderPage'
@@ -92,6 +94,13 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        {/* ── Public website (S171): www / bare domain; legal pages on every host. /site previews it. ── */}
+        {isPublicSiteHost() && <Route path="/" element={<LandingPage />} />}
+        <Route path="/site" element={<LandingPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
+        <Route path="/terms" element={<TermsPage />} />
+        <Route path="/acceptable-use" element={<AcceptableUsePage />} />
+
         {/* ── Agent routes ── */}
         <Route path="/login" element={isAdminSubdomain ? <PortalLoginPage /> : <LoginPage />} />
         <Route path="/mfa/setup" element={<MfaSetupPage />} />

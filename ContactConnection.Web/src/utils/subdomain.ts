@@ -8,6 +8,12 @@ const PLATFORM_DOMAINS = ['contactconnection.cc', 'contactconnection.io', 'cc.lo
  *     so custom *.cc.local hostnames crash MSAL; use localhost:5173/login?subdomain=tms instead)
  *  2. Hostname subdomain       — production (tms.contactconnection.cc → "tms")
  */
+/** The public website host (www or the bare domain) — shows the landing page instead of a login. */
+export function isPublicSiteHost(): boolean {
+  const host = window.location.hostname
+  return PLATFORM_DOMAINS.some((d) => host === d || host === `www.${d}`)
+}
+
 export function getSubdomainFromHostname(): string | null {
   // Dev override via query param
   const params = new URLSearchParams(window.location.search)
@@ -20,7 +26,8 @@ export function getSubdomainFromHostname(): string | null {
   for (const domain of PLATFORM_DOMAINS) {
     if (hostname.endsWith(`.${domain}`)) {
       const sub = hostname.slice(0, hostname.length - domain.length - 1)
-      if (sub && !sub.includes('.')) return sub
+      // www is the public website, not a tenant.
+      if (sub && !sub.includes('.') && sub !== 'www') return sub
     }
   }
 
