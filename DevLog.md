@@ -180,6 +180,7 @@
 | 168 | 2026-09-29 | 6:45 PM PDT | 7:53 PM PDT | 68 min | ~19310 min |
 | 169 | 2026-09-30 | 7:53 AM PDT | 5:37 PM PDT | 584 min | ~19894 min |
 | 170 | 2026-09-30 | 7:08 PM PDT | 9:50 PM PDT | 162 min | ~20056 min |
+| 171 | 2026-10-01 | 9:03 AM PDT | 6:13 PM PDT | 550 min | ~20606 min |
 
 ---
 
@@ -11074,3 +11075,92 @@ logging + card brand, the Authorize.Net decline test, and an API request preview
   supervisor-tool tests (Monitor / Coach / Barge / Take Over / 📞) with the new audio picker.
 - Life Seasons Order API: staging key from Clint → first real test order (preview first).
 
+## Session 171
+
+**Date:** 2026-10-01
+**Start:** 9:03 AM PDT
+**End:** 6:13 PM PDT
+**Duration:** 550 minutes
+**Total Duration:** ~20606 minutes
+
+### Focus
+
+Fixes from S170 testing (cart on disconnect, script restore, remote softphone audio), parallel-queuing
+live tests, then the media-agency system (Phase A + B with FCC stations and nearest-station
+attribution), commissions, and retroactive recalculation for both. Also the custom unavailable-code
+bug, SignalWire vetting reply, and dashboard additions to the plan.
+
+### Done — agent portal & softphone
+
+- **Cart vanished on call disconnect** — restored from the active tab when the call goes idle. Live-verified.
+- **Open scripts reopen on portal load** (`GET /flow-sessions/mine`, "Reopened…" banner) — an internet
+  blip or refresh no longer loses the agent's script tabs. Live-verified.
+- **Remote softphone audio** — coturn TURN relay (`cc_coturn`, port 3478, relays only to the Docker
+  network), TURN REST credentials (`GET /softphone/ice-servers`), bounded ICE gathering (4 s), `X-CC-Leg`
+  SIP header so supervisor intercom/monitor legs auto-answer even when the INVITE beats SignalR.
+  Needed router forwards (3478, RTP 16384–16393) + Windows Firewall Private-profile rules. Two-way
+  audio live-verified on LAN and cellular. Commits `61de569`, `fdff8d7`.
+- **Custom unavailable codes** were listed but never selectable: the softphone sent the code's GUID as
+  the state code, overflowing `agent_state_history.state_code` (varchar 30); the error was swallowed.
+  Now stored as `unavailable_custom` + CustomCodeId, named and role-checked server-side; engine-owned
+  states rejected from the client; dashboard counter splits custom codes by label; softphone shows
+  failures. Live-verified on the dashboard. Commit `5734d60`.
+
+### Done — parallel queuing (live tests)
+
+- Alpha tier (`routed_tier` 10, label stamped), regular tier, abandon (pre_queue → in_queue → abandoned)
+  and offer withdrawal all verified on real SignalWire calls. Elite untested (needs RingSquared X-Elite).
+
+### Done — media agency attribution
+
+- **Phase A** (`4eda226`): managed agency list with per-agency field names; per-number assignments
+  (National one-at-a-time with automatic hand-over, Local several with a default) and history; the
+  assignment in effect is COPIED onto `call_records.media_attribution` at arrival;
+  `{{call_record.media.*}}` in scripts. "Market" removed per Stephen — mapping stations to markets is
+  the agency's job; ours is attributing the call to the right station.
+- **Phase B** (`80f5d00`): FCC LMS daily import into `public.broadcast_stations` (~33k full-power,
+  Class A, LPTV digital, AM/FM/LPFM; Worker job; FCC WAF needs a descriptive User-Agent); searchable
+  station picker storing facility id + transmitter coordinates (media type only ranks TV/Radio first —
+  a hard filter hid radio stations). zip-codes.com Standard CSV importer (Platform Portal → Maintenance
+  upload; sample loaded, full edition not bought) → `public.zip_codes` + derived `public.area_codes`.
+  Local calls go to the nearest located station: caller area code at arrival, re-attributed when a zip
+  is captured (address node, or an input node with a ZIP mask + "Perform local media station
+  attribution"); newest zip wins, unknown zip → area code → default. SIP carries no caller location on
+  non-911 calls. Live-verified (KNAZ-TV / WJAR / KPIC tests).
+- **Retroactive** (`62bdc98`): assignment change log with field diffs; "Replay attribution onto past
+  calls" (number dialog or all numbers) — preview now → becomes, Worker batch, each changed call keeps
+  its previous attribution in its history; market / agency / start date editable with the National
+  history re-fitted; National end dates so a number switches National ↔ Local on a date (verified
+  CNN Sep 29–30 → KQEN from Oct 1).
+
+### Done — commissions
+
+- **Commissions** (`1d108c5`): rules per campaign (client default) — % of order (total − shipping −
+  tax − fees, the NeuroQ V1 basis), $ per order, $ per product unit, $ when a custom field equals a
+  value; tier rules (Alpha) replace the general rule of the same kind. Append-only ledger with
+  reversals; recalculated on order submission (API node marked "Order submission", stamps
+  `order_submitted_at`), script end and custom-field edits. Pay-period setting; admin rules page;
+  `/commissions` report (per agent, drill-down, CSV); agent top-bar earnings; Call Records panel with
+  Reverse/Restore. Fixed: period bounds must be UTC for Npgsql. Flag-rule path live-verified; % path
+  awaits a successful Order API submission (staging key).
+- **Retroactive commission** (`11246c7`): effective-dated rules (each call paid under the rules in
+  effect when it started) and "Recalculate past calls" — preview per agent, Worker batch, corrections
+  posted to the current period or back-dated to each call's date. Live-verified. Rules page now flags
+  campaigns with their own rules (Stephen thought his rules had vanished — they were campaign-scoped).
+
+### Other
+
+- SignalWire STIR/SHAKEN vetting reply drafted (tenant model, traffic, outbound controls). Stephen
+  committed to building the dialer compliance controls named in it (DNC scrub, calling hours, 3%
+  abandonment, robocall consent, admin-gated dialer) — saved as hard requirements.
+- Checklist: Active Calls dashboard widget (QA by client/campaign, drill-down with supervisor tools)
+  added to Tier 2.
+- 1,446 tests passing (Domain 249, Application 20, Api 125, Infrastructure 1,052).
+
+### Next
+
+- William's supervisor-tool tests (Monitor / Coach / Barge / Take Over / 📞) — `npm run prod`.
+- SignalWire: identity + business verification + attestation form, then send the vetting reply.
+- Life Seasons Order API staging key (Clint) → first real order; verify % commission live.
+- Active Calls widget; remaining Life Seasons scripts; scheduled export engine; buy the full
+  zip-codes.com database before go-live.
