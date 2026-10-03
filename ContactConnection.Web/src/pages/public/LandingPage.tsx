@@ -90,6 +90,8 @@ export default function LandingPage() {
               <li>Outbound caller ID is limited to numbers the customer owns or has verified.</li>
               <li>Outbound dialing campaigns are enabled only after we review the customer's use case and consent practices.</li>
               <li>We respond to traceback requests and suspend customers whose calling generates complaints or abuse.</li>
+              <li>Callers can always choose to talk to a person — any automated agent must say it's automated and hand off on request.</li>
+              <li>Account decisions are made by people, never by automation alone, and every customer can ask for a human review.</li>
             </ul>
             <p className="mt-4 text-xs text-gray-500">
               See our <a href="/acceptable-use" className="text-sky-400 hover:text-sky-300">Acceptable Use Policy</a>. Report abuse to {COMPANY.abuseEmail}.

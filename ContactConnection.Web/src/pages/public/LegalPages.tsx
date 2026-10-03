@@ -52,6 +52,14 @@ export function PrivacyPage() {
       </UL>
       <p>We do not sell personal information, and we do not use our customers' call data for advertising.</p>
 
+      <H>AI features</H>
+      <p>
+        When a customer uses AI features (for example, call summaries), details of the call are sent to our AI service provider to
+        produce the result. Before anything is sent we remove payment card data and withhold or minimize personal details such as
+        names, phone numbers, email and postal addresses. Our AI provider processes this data only to return the result to us, under
+        terms that do not allow it to be used to train their models. AI output is a suggestion reviewed by a person.
+      </p>
+
       <H>Payment card data</H>
       <p>
         Where a customer takes card payments, card numbers can be entered by the caller on the phone keypad so agents never
@@ -127,6 +135,27 @@ export function TermsPage() {
         suspected unlawful or abusive calling, a traceback or carrier complaint, a security risk, or non-payment. Where
         practical we will give notice first.
       </p>
+      <p>
+        <b>Account decisions are made by people.</b> We never suspend or terminate a customer's account based solely on an
+        automated decision. Automated systems may alert us to a problem, but a person reviews it and decides. If your
+        service is suspended, you can ask for a human review at <a href={`mailto:${COMPANY.email}`} className="text-sky-400">{COMPANY.email}</a>,
+        and a person will look at it and respond.
+      </p>
+
+      <H>AI features</H>
+      <p>The platform offers optional AI features. Wherever they are used, these commitments apply:</p>
+      <UL>
+        <li><b>A caller can always choose a person.</b> Any automated (AI) agent on the platform must identify itself as automated
+          and must transfer the caller to a human agent — or, when none is available, to the customer's human alternative such as a
+          scheduled callback — whenever the caller asks. Customers may not configure an automated agent that prevents a caller from
+          reaching a person.</li>
+        <li><b>People confirm AI suggestions.</b> AI suggestions shown to agents, such as call summaries and dispositions, are reviewed
+          by the agent before they are saved.</li>
+        <li><b>Automated calls are reviewed.</b> Calls handled by automated agents are subject to review by people after the call,
+          prioritized by risk, so problems are found and corrected.</li>
+        <li><b>Sensitive data stays out.</b> Payment card numbers are never sent to AI models, and other personal details are removed
+          or minimized first.</li>
+      </UL>
 
       <H>Fees</H>
       <p>Fees are set out in the customer's order or agreement.</p>
@@ -179,6 +208,7 @@ export function AcceptableUsePage() {
         <li>Harassment, threats, or abusive calling.</li>
         <li>Calling numbers on the National Do Not Call Registry or an internal do-not-call list without a lawful exemption.</li>
         <li>Attempting to bypass platform limits, security controls, or carrier authentication.</li>
+        <li>Configuring an automated (AI) agent to hide that it is automated, or to prevent a caller from reaching a person.</li>
         <li>Unlawful content, or use that infringes others' rights.</li>
       </UL>
 
