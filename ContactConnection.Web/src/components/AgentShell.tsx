@@ -13,6 +13,7 @@ import FlowPanel from './FlowPanel'
 import ChatPanel from './ChatPanel'
 import CartPanel from './cart/CartPanel'
 import MyCommissions from './MyCommissions'
+import WrapUpSummaries from './WrapUpSummaries'
 
 export default function AgentShell() {
   const clearAuth = useAuthStore((s) => s.clearAuth)
@@ -142,6 +143,7 @@ export default function AgentShell() {
         {/* Center — Flow/Script (flex grow) */}
         <div className="flex-1 flex flex-col overflow-hidden">
           <CartPanel />
+          <WrapUpSummaries />
           <div className="flex-1 overflow-y-auto">
             <FlowPanel />
           </div>

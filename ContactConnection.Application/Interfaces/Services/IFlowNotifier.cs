@@ -33,4 +33,7 @@ public interface IFlowNotifier
 
     /// <summary>Push an error to the agent's connection.</summary>
     Task PushErrorAsync(Guid sessionId, string message, CancellationToken ct = default);
+
+    /// <summary>An automatic AI call summary is ready for the agent to review (S171).</summary>
+    Task PushAiSummaryReadyAsync(Guid agentId, Guid callRecordId, CancellationToken ct = default);
 }

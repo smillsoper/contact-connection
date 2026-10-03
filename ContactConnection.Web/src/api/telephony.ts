@@ -56,6 +56,7 @@ export interface Campaign {
   sensitiveDataRetentionMinutes?: number | null
   /** 'until_script_ends' (default) | 'until_order_submitted' */
   cardDataRetention?: string
+  aiSummaryEnabled?: boolean
   taxProvider?: TaxProviderKey
   taxSettings?: CampaignTaxSettings | null
   /** How this campaign answers external routers — see updateCampaignExternalRouting. */
@@ -330,6 +331,9 @@ export interface CampaignTaxSettings {
 
 export const updateCampaignTax = (id: string, taxProvider: TaxProviderKey, taxSettings: CampaignTaxSettings | null) =>
   api.put<Campaign>(`/api/v1/campaigns/${id}/tax`, { taxProvider, taxSettings })
+
+export const updateCampaignAiSettings = (id: string, aiSummaryEnabled: boolean) =>
+  api.put<Campaign>(`/api/v1/campaigns/${id}/ai-settings`, { aiSummaryEnabled })
 
 export const updateCampaignSensitiveDataRetention = (id: string, sensitiveDataRetentionMinutes: number | null, cardDataRetention?: string) =>
   api.put<Campaign>(`/api/v1/campaigns/${id}/sensitive-data-retention`, { sensitiveDataRetentionMinutes, cardDataRetention })

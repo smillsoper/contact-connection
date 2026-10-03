@@ -72,6 +72,7 @@ builder.Services.AddScoped<ContactConnection.Api.Telephony.SupervisorCallService
 
 // ESL background service â€” connects to FreeSWITCH and handles CHANNEL_PARK / CHANNEL_HANGUP
 builder.Services.AddHostedService<EslBackgroundService>();
+builder.Services.AddHostedService<ContactConnection.Api.Ai.AiSummaryProcessor>();
 
 // Queue poller â€” every 1 second, notifies newly-available agents of parked calls
 builder.Services.AddHostedService<QueuePollingService>();

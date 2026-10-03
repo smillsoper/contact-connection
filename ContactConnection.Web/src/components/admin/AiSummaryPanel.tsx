@@ -55,7 +55,14 @@ const inputCls = 'w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-1
  *   reviewer must choose explicitly; Confirm & save or Discard. Nothing the AI writes reaches the call until
  *   a person confirms it. The confirmed summary then shows with who confirmed it and whether it was edited.
  */
-export default function AiSummaryPanel({ callId, canManage, onChanged }: { callId: string; canManage: boolean; onChanged?: () => void }) {
+export default function AiSummaryPanel({ callId, canManage, onChanged, agentMode = false, title }: {
+  callId: string
+  canManage: boolean
+  onChanged?: () => void
+  /** Agent wrap-up: compact — no context preview or spend line, and the parent removes the card once reviewed. */
+  agentMode?: boolean
+  title?: string
+}) {
   const [ctx, setCtx] = useState<AiContext | null>(null)
   const [open, setOpen] = useState(false)
   const [suggestion, setSuggestion] = useState<AiSuggestion | null>(null)
@@ -71,9 +78,26 @@ export default function AiSummaryPanel({ callId, canManage, onChanged }: { callI
   const [disposition, setDisposition] = useState('')
   const [followUp, setFollowUp] = useState('')
 
+  // Fill the review form from a suggestion. When the AI and the recorded disposition disagree, start with NO
+  // choice — the reviewer must pick.
+  function startReview(r: AiSuggestion) {
+    setSuggestion(r)
+    setText(r.summary.text)
+    setReason(r.summary.reasonForCall)
+    setOutcome(r.summary.outcome)
+    const ai = r.summary.dispositionValid ? r.summary.suggestedDisposition : null
+    setDisposition(ai && r.recordedDisposition && ai !== r.recordedDisposition ? '' : (ai ?? r.recordedDisposition ?? ''))
+    setFollowUp(r.summary.followUp ?? '')
+  }
+
   const loadConfirmed = () =>
-    api.get<{ confirmed: Confirmed | null; generated: number; totalCostUsd: number }>(`/api/v1/call-review/calls/${callId}/ai/summaries`)
-      .then((r) => { setConfirmed(r.confirmed); setStats({ generated: r.generated, totalCostUsd: r.totalCostUsd }) })
+    api.get<{ confirmed: Confirmed | null; pending: AiSuggestion | null; generated: number; totalCostUsd: number }>(`/api/v1/call-review/calls/${callId}/ai/summaries`)
+      .then((r) => {
+        setConfirmed(r.confirmed)
+        setStats({ generated: r.generated, totalCostUsd: r.totalCostUsd })
+        // An automatic (wrap-up) suggestion already waiting — show it for review.
+        if (r.pending) setSuggestion((current) => { if (!current) startReview(r.pending!); return current ?? r.pending })
+      })
       .catch(() => {})
   useEffect(() => { loadConfirmed() }, [callId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -87,14 +111,7 @@ export default function AiSummaryPanel({ callId, canManage, onChanged }: { callI
     setBusy(true); setError(null)
     try {
       const r = await api.post<AiSuggestion>(`/api/v1/call-review/calls/${callId}/ai/summary`)
-      setSuggestion(r)
-      setText(r.summary.text)
-      setReason(r.summary.reasonForCall)
-      setOutcome(r.summary.outcome)
-      // When the AI and the recorded disposition disagree, start with NO choice — the reviewer must pick.
-      const ai = r.summary.dispositionValid ? r.summary.suggestedDisposition : null
-      setDisposition(ai && r.recordedDisposition && ai !== r.recordedDisposition ? '' : (ai ?? r.recordedDisposition ?? ''))
-      setFollowUp(r.summary.followUp ?? '')
+      startReview(r)
       loadConfirmed()
     }
     catch (e) { setError(e instanceof Error ? e.message : 'Summary unavailable.') }
@@ -127,16 +144,18 @@ export default function AiSummaryPanel({ callId, canManage, onChanged }: { callI
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-          AI summary
-          {stats && stats.generated > 0 && (
+        <p className={agentMode ? 'text-xs font-semibold text-gray-300' : 'text-xs font-semibold uppercase tracking-wide text-gray-500'}>
+          {title ?? 'AI summary'}
+          {!agentMode && stats && stats.generated > 0 && (
             <span className="normal-case font-normal"> — {stats.generated} generated · ${stats.totalCostUsd.toFixed(4)} total</span>
           )}
         </p>
         <div className="flex items-center gap-4">
-          <button onClick={() => (open ? setOpen(false) : loadContext())} className="text-xs text-gray-400 hover:text-gray-200">
-            {open ? 'Hide what the AI sees' : 'Show what the AI would see'}
-          </button>
+          {!agentMode && (
+            <button onClick={() => (open ? setOpen(false) : loadContext())} className="text-xs text-gray-400 hover:text-gray-200">
+              {open ? 'Hide what the AI sees' : 'Show what the AI would see'}
+            </button>
+          )}
           <button onClick={generate} disabled={busy}
             className="px-3 py-1 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded-md disabled:opacity-50">
             {busy && !suggestion ? 'Summarizing…' : suggestion ? 'Regenerate' : confirmed ? 'Generate a new summary' : 'Generate summary'}
@@ -240,11 +259,11 @@ export default function AiSummaryPanel({ callId, canManage, onChanged }: { callI
               </div>
             </div>
           )}
-          <p className="text-[11px] text-gray-500 border-t border-gray-800 pt-2">
+          {!agentMode && <p className="text-[11px] text-gray-500 border-t border-gray-800 pt-2">
             {u.model} · {u.inputTokens.toLocaleString()} tokens in, {u.outputTokens.toLocaleString()} out ·
             ≈ ${u.estimatedCostUsd.toFixed(4)} · {(u.elapsedMs / 1000).toFixed(1)}s
             {u.attempts > 1 ? ` · ${u.attempts} attempts` : ''} · chose from {suggestion.allowedDispositions.length} allowed dispositions
-          </p>
+          </p>}
         </div>
       )}
 

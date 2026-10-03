@@ -22,6 +22,9 @@ namespace ContactConnection.Worker;
 /// </summary>
 internal sealed class NoOpFlowNotifier : IFlowNotifier
 {
+    public Task PushAiSummaryReadyAsync(Guid agentId, Guid callRecordId, CancellationToken ct = default) =>
+        Task.CompletedTask;
+
     public Task PushNodeStateAsync(Guid sessionId, FlowNodeState state, CancellationToken ct = default) =>
         Task.CompletedTask;
 

@@ -87,6 +87,12 @@ public class Campaign
     // above stays the backstop in both modes.
     public string CardDataRetention { get; private set; } = CardDataRetentionMode.UntilScriptEnds;
 
+    /// <summary>AI call summary in wrap-up (S171): when the script finishes, generate a summary for the agent
+    /// to confirm. Off by default — AI use is a per-campaign choice (cost, and the client's consent).</summary>
+    public bool AiSummaryEnabled { get; private set; }
+
+    public void SetAiSummaryEnabled(bool enabled) { AiSummaryEnabled = enabled; UpdatedAt = DateTimeOffset.UtcNow; }
+
     // Sales tax — which ITaxProvider prices this campaign's carts (TaxProviderKey.*), and that
     // provider's campaign-level settings as JSON (flat rate: {"rate":0.0725}; Avalara: tax codes,
     // company code, ship-from address — see AvalaraTaxSettings). Credentials are NOT here; they

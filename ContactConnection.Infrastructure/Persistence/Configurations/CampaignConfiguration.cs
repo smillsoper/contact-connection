@@ -48,6 +48,7 @@ public class CampaignConfiguration : IEntityTypeConfiguration<Campaign>
         builder.Property(c => c.RecordingRetentionDays).HasColumnName("recording_retention_days").HasDefaultValue(90);
         builder.Property(c => c.SensitiveDataRetentionMinutes).HasColumnName("sensitive_data_retention_minutes");
         builder.Property(c => c.CardDataRetention).HasColumnName("card_data_retention").HasMaxLength(30).HasDefaultValue(CardDataRetentionMode.UntilScriptEnds);
+        builder.Property(c => c.AiSummaryEnabled).HasColumnName("ai_summary_enabled");
         builder.Property(c => c.TaxProvider).HasColumnName("tax_provider").HasMaxLength(50).IsRequired();
         builder.Property(c => c.TaxSettings).HasColumnName("tax_settings").HasColumnType("jsonb");
         builder.Property(c => c.ExternalRoutingAcceptMode).HasColumnName("external_routing_accept_mode")

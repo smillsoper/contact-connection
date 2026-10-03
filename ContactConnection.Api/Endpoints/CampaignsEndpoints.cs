@@ -16,6 +16,7 @@ public static class CampaignsEndpoints
         group.MapPut("{id:guid}",                     Update);
         group.MapPut("{id:guid}/recording",           UpdateRecording);
         group.MapPut("{id:guid}/sensitive-data-retention", UpdateSensitiveDataRetention);
+        group.MapPut("{id:guid}/ai-settings", UpdateAiSettings);
         group.MapPut("{id:guid}/tax",                 UpdateTax).RequireAuthorization("TenantAdmin");
         group.MapPut("{id:guid}/external-routing",    UpdateExternalRouting).RequireAuthorization("TenantAdmin");
         group.MapPut("{id:guid}/flow",                SetFlow);
@@ -135,6 +136,20 @@ public static class CampaignsEndpoints
             autoMaskOnHold:         req.AutoMaskOnHold,
             recordingRetentionDays: req.RecordingRetentionDays);
 
+        await repo.SaveChangesAsync(ct);
+        return Results.Ok(ToSummaryResponse(campaign));
+    }
+
+    // ── PUT /api/v1/campaigns/{id}/ai-settings ─────────────────────────────
+    // AI call summary in wrap-up (S171) — opt-in per campaign.
+
+    private static async Task<IResult> UpdateAiSettings(
+        Guid id, AiSettingsRequest req, ICampaignRepository repo, TenantContext tenantContext, CancellationToken ct)
+    {
+        if (!tenantContext.HasTenant) return Results.Unauthorized();
+        var campaign = await repo.GetByIdAsync(id, ct);
+        if (campaign is null) return Results.NotFound();
+        campaign.SetAiSummaryEnabled(req.AiSummaryEnabled);
         await repo.SaveChangesAsync(ct);
         return Results.Ok(ToSummaryResponse(campaign));
     }
@@ -538,7 +553,7 @@ public static class CampaignsEndpoints
         c.RingStrategy, c.RingTopN,
         c.RecordingMode, c.ConsentModel, c.RecordingRequired, c.RecordStereo,
         c.RecordingBeepEnabled, c.AutoMaskOnHold, c.RecordingRetentionDays,
-        c.SensitiveDataRetentionMinutes, c.CardDataRetention,
+        c.SensitiveDataRetentionMinutes, c.CardDataRetention, c.AiSummaryEnabled,
         c.TaxProvider, TaxSettings = ParseTaxSettings(c.TaxSettings),
         c.ExternalRoutingAcceptMode, c.ExternalRoutingLimit,
         Client = c.Client is null ? null : new { c.Client.Id, c.Client.Name },
@@ -554,7 +569,7 @@ public static class CampaignsEndpoints
         c.RingStrategy, c.RingTopN,
         c.RecordingMode, c.ConsentModel, c.RecordingRequired, c.RecordStereo,
         c.RecordingBeepEnabled, c.AutoMaskOnHold, c.RecordingRetentionDays,
-        c.SensitiveDataRetentionMinutes, c.CardDataRetention,
+        c.SensitiveDataRetentionMinutes, c.CardDataRetention, c.AiSummaryEnabled,
         c.TaxProvider, TaxSettings = ParseTaxSettings(c.TaxSettings),
         c.ExternalRoutingAcceptMode, c.ExternalRoutingLimit,
         Client = c.Client is null ? null : new { c.Client.Id, c.Client.Name },
@@ -610,3 +625,5 @@ public record AssignGroupRequest(Guid GroupId, int Proficiency = 50,
     int RoutingTier = 0, int? ExclusiveWindowSeconds = null, string? TierLabel = null);
 public record SetGroupRoutingRequest(int RoutingTier, int? ExclusiveWindowSeconds = null, string? TierLabel = null);
 public record SetProficiencyRequest(int Proficiency);
+
+public record AiSettingsRequest(bool AiSummaryEnabled);

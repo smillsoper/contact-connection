@@ -5,7 +5,7 @@ import SearchableSelect from '../../components/SearchableSelect'
 import PaymentGatewaysForm from '../../components/admin/PaymentGatewaysForm'
 import CampaignCredentialCards from '../../components/admin/CampaignCredentialCards'
 import {
-  getCampaign, updateCampaign, updateCampaignRecording, updateCampaignSensitiveDataRetention, updateCampaignExternalRouting, setCampaignFlow, removeCampaignFlow,
+  getCampaign, updateCampaign, updateCampaignRecording, updateCampaignSensitiveDataRetention, updateCampaignAiSettings, updateCampaignExternalRouting, setCampaignFlow, removeCampaignFlow,
   updateCampaignTax, type TaxProviderKey, type CampaignTaxSettings, type AvalaraFeeLine,
   setCampaignInboundFlow, removeCampaignInboundFlow,
   setCampaignOutboundFlow, removeCampaignOutboundFlow,
@@ -213,6 +213,12 @@ function SettingsForm({ campaign, flows, onSaved }: SettingsFormProps) {
             onChange={(e) => setAcwSeconds(Number(e.target.value))}
             className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
           />
+          {campaign.aiSummaryEnabled && (
+            <p className="text-[11px] text-amber-300 mt-1 leading-snug">
+              AI call summaries are on for this campaign — agents review the summary during wrap-up. Allow roughly 20–30 extra
+              seconds of after-call work time for it.
+            </p>
+          )}
         </div>
 
         {/* Caller ID — outbound only */}
@@ -578,6 +584,53 @@ interface SensitiveDataRetentionFormProps {
 }
 
 const SENSITIVE_DATA_RETENTION_MAX_MINUTES = 43200 // 30 days — matches the backend clamp
+
+/** AI call summary in wrap-up (S171) — opt-in per campaign. */
+function AiSettingsForm({ campaign, onSaved }: { campaign: CampaignDetail; onSaved: (updated: CampaignDetail) => void }) {
+  const [enabled, setEnabled] = useState(!!campaign.aiSummaryEnabled)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function toggle(next: boolean) {
+    setSaving(true); setError(null)
+    try {
+      const updated = await updateCampaignAiSettings(campaign.id, next)
+      setEnabled(next)
+      onSaved({ ...campaign, ...updated })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Save failed.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+      <h2 className="text-white text-sm font-semibold mb-1">AI Call Summary</h2>
+      <p className="text-xs text-gray-500 mb-4">
+        When a call's script finishes, the AI drafts a short summary, the reason for the call and a suggested disposition. The agent
+        reviews it during wrap-up — edits it, confirms it or discards it — and only then is it saved to the call. Payment card data is
+        never sent to the AI, and personal details are withheld. Costs a fraction of a cent per call. Turn on only with the client's
+        agreement.
+      </p>
+      <div className="flex items-start gap-3">
+        <button
+          type="button" disabled={saving} onClick={() => toggle(!enabled)}
+          className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer items-center rounded-full transition-colors mt-0.5 disabled:opacity-50 ${enabled ? 'bg-indigo-600' : 'bg-gray-700'}`}
+        >
+          <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${enabled ? 'translate-x-5' : 'translate-x-1'}`} />
+        </button>
+        <div>
+          <span className="text-sm text-gray-300 font-medium">AI call summary in wrap-up</span>
+          <p className="text-xs text-gray-500 mt-0.5 leading-snug">
+            {enabled ? 'On — allow agents some extra after-call work time to review it.' : 'Off — agents can still open a summary from Call Records.'}
+          </p>
+        </div>
+      </div>
+      {error && <p className="text-red-400 text-xs mt-3">{error}</p>}
+    </div>
+  )
+}
 
 function SensitiveDataRetentionForm({ campaign, onSaved }: SensitiveDataRetentionFormProps) {
   const [useOverride, setUseOverride] = useState(campaign.sensitiveDataRetentionMinutes != null)
@@ -1773,6 +1826,10 @@ export default function CampaignDetailPage() {
             onSaved={(updated) => setCampaign(updated)}
           />
           <RecordingSettingsForm
+            campaign={campaign}
+            onSaved={(updated) => setCampaign(updated)}
+          />
+          <AiSettingsForm
             campaign={campaign}
             onSaved={(updated) => setCampaign(updated)}
           />

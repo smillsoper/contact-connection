@@ -468,6 +468,11 @@ export default function FlowPanel() {
       agentState.setAgentStateCode('unavailable')
     })
 
+    // An automatic AI call summary is ready for review (S171) — the wrap-up card listens for this.
+    connection.on('receiveAiSummaryReady', (callRecordId: string) => {
+      window.dispatchEvent(new CustomEvent('cc:ai-summary-ready', { detail: callRecordId }))
+    })
+
     // Sign-in lock: sign out now. AgentShell owns the sign-out (it clears SIP + auth).
     connection.on('receiveForceSignOut', (message: string) => {
       window.dispatchEvent(new CustomEvent('cc:force-signout', { detail: message }))

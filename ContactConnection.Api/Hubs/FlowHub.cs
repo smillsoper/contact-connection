@@ -90,6 +90,7 @@ public interface IFlowHubClient
     /// <summary>The agent's supervisor lock changed — the softphone disables / re-enables the status
     /// picker; <paramref name="message"/> says who locked them and why.</summary>
     Task ReceiveAgentLockChanged(bool locked, string? message);
+    Task ReceiveAiSummaryReady(Guid callRecordId);
 
     /// <summary>Sign-in lock: the agent UI signs out immediately and shows the message at login.</summary>
     Task ReceiveForceSignOut(string message);

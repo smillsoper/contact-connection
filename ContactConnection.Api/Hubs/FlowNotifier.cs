@@ -30,4 +30,7 @@ public class FlowNotifier(IHubContext<FlowHub, IFlowHubClient> hubContext) : IFl
 
     public Task PushErrorAsync(Guid sessionId, string message, CancellationToken ct = default) =>
         hubContext.Clients.Group($"session:{sessionId}").ReceiveError(message);
+
+    public Task PushAiSummaryReadyAsync(Guid agentId, Guid callRecordId, CancellationToken ct = default) =>
+        hubContext.Clients.Group($"agent:{agentId}").ReceiveAiSummaryReady(callRecordId);
 }

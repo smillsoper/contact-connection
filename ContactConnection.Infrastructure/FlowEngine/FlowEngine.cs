@@ -55,6 +55,7 @@ public class FlowEngine : IFlowEngine
     private static readonly TimeSpan SessionTtl = TimeSpan.FromHours(12);
 
     private readonly ICommissionService? _commissions;
+    private readonly ContactConnection.Infrastructure.Ai.AiSummaryQueue? _aiSummaries;
 
     public FlowEngine(
         IFlowRepository flows,
@@ -69,8 +70,10 @@ public class FlowEngine : IFlowEngine
         IEnumerable<INodeHandler> handlers,
         ILogger<FlowEngine> logger,
         ICardDataRetentionService cardRetention,
-        ICommissionService? commissions = null)
+        ICommissionService? commissions = null,
+        ContactConnection.Infrastructure.Ai.AiSummaryQueue? aiSummaries = null)
     {
+        _aiSummaries = aiSummaries;
         _cardRetention = cardRetention;
         _commissions   = commissions;
         _flows         = flows;
@@ -994,6 +997,10 @@ public class FlowEngine : IFlowEngine
             try { await _commissions.RecalculateAsync(ctx.CallRecordId, CommissionTrigger.ScriptCompleted, ct); }
             catch (Exception ex) { _logger.LogWarning(ex, "Commission recalculation failed for call {CallRecordId}", ctx.CallRecordId); }
         }
+
+        // AI wrap-up summary (S171): the context is complete now — every answer and the disposition. Queued, so
+        // the agent's last click returns immediately; the processor checks the campaign's opt-in.
+        _aiSummaries?.Enqueue(new(ctx.TenantId, ctx.CallRecordId, ctx.AgentId));
     }
 
     /// <summary>The disposition the flow recorded, if any.</summary>
