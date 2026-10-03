@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import * as signalR from '@microsoft/signalr'
 import AdminShell from '../../components/admin/AdminShell'
 import CallCommissionsPanel from '../../components/admin/CallCommissionsPanel'
+import AiSummaryPanel from '../../components/admin/AiSummaryPanel'
 import { useAuthStore } from '../../stores/authStore'
 import {
   callReviewApi,
@@ -235,6 +236,8 @@ export default function AdminCallDetailPage() {
         <FinalizePanel call={call} canManage={canManage} onChanged={load} />
 
         <CallCommissionsPanel callId={call.id} canManage={canManage} version={call} />
+
+        <AiSummaryPanel callId={call.id} />
 
         <CardOnFileNote call={call} />
 

@@ -210,6 +210,7 @@ app.MapCampaignCredentialsEndpoints();
 app.MapSoftphoneEndpoints();
 app.MapMediaEndpoints();
 app.MapCommissionsEndpoints();
+app.MapAiEndpoints();
 app.MapCallRecordingsEndpoints();
 app.MapScreenRecordingsEndpoints();
 app.MapVoicemailsEndpoints();
