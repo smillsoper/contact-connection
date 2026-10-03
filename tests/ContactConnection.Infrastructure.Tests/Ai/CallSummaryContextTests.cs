@@ -91,4 +91,22 @@ public class CallSummaryContextTests
     [Fact]
     public void Build_NoScript_SaysSo() =>
         Assert.Contains("(no script steps recorded)", CallSummaryContextBuilder.Build(Call(), null, null, []).Text);
+
+    [Fact]
+    public void Build_FlagsPlaceholderAnswersAsAPossibleTestCall()
+    {
+        var history = History(
+            Step("input", "Probe 1", "Memory issues"),
+            Step("input", "Probe 2", "test"),
+            Step("input", "Probe 3", "TEST"),
+            Step("input", "Probe 4", "asdf"));
+
+        var text = CallSummaryContextBuilder.Build(Call(), null, null, [history]).Text;
+        Assert.Contains("Possible test call: placeholder answers (\"test\", \"TEST\", \"asdf\") at Probe 2, Probe 3, Probe 4", text);
+    }
+
+    [Fact]
+    public void Build_RealAnswers_NoTestCallFlag() =>
+        Assert.DoesNotContain("Possible test call",
+            CallSummaryContextBuilder.Build(Call(), null, null, [History(Step("input", "Probe 1", "Testimonials helped me decide"))]).Text);
 }

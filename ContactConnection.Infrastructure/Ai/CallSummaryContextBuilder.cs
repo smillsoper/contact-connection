@@ -51,6 +51,11 @@ public static partial class CallSummaryContextBuilder
     private static readonly HashSet<string> NavigationAnswers = new(StringComparer.OrdinalIgnoreCase)
         { "continue", "next", "ok", "okay", "done", "proceed" };
 
+    // Answers typed as placeholders on test calls. Detected here in code — reliable — and handed to the
+    // model as a plain fact, instead of asking the model to notice the pattern (it often doesn't).
+    private static readonly HashSet<string> PlaceholderAnswers = new(StringComparer.OrdinalIgnoreCase)
+        { "test", "testing", "test test", "asdf", "asdfasdf", "qwerty", "xxx", "xx", "abc", "abc123", "123", "1234", "foo", "dummy" };
+
     // Script plumbing, plus read-aloud text and the end marker: the section headings already show how far
     // the call got, and the script wording is the same on every call.
     private static readonly HashSet<string> SkippedNodeTypes =
@@ -77,6 +82,7 @@ public static partial class CallSummaryContextBuilder
     {
         var r = new AiRedactor();
         var withheld = new List<string>();
+        var placeholders = new List<(string Label, string Value)>();
 
         // The script first, so CALL FACTS can name the customer details that were captured.
         var script = new StringBuilder();
@@ -88,6 +94,8 @@ public static partial class CallSummaryContextBuilder
             {
                 if (SkippedNodeTypes.Contains(step.NodeType)) continue;
                 var line = FormatStep(step, r, withheld);
+                if (line is not null && step.NodeType == "input" && step.InputValue?.Trim() is { } answer && PlaceholderAnswers.Contains(answer))
+                    placeholders.Add((r.Scrub(step.Label), answer));
                 // The engine can record a step twice (shown, then continued) — collapse identical
                 // back-to-back lines: repeats cost tokens and could read as "asked twice".
                 if (line is null || line == previous) continue;
@@ -107,6 +115,8 @@ public static partial class CallSummaryContextBuilder
         if (!string.IsNullOrWhiteSpace(record.PaymentStatus)) sb.AppendLine($"Payment status: {record.PaymentStatus}");
         if (record.RoutedTierLabel is { } tier) sb.AppendLine($"Routed through tier: {tier}");
         if (withheld.Count > 0) sb.AppendLine($"Captured: {string.Join(", ", withheld.Distinct())}");
+        if (placeholders.Count > 0)
+            sb.AppendLine($"Possible test call: placeholder answers ({string.Join(", ", placeholders.Select(p => $"\"{p.Value}\"").Distinct())}) at {string.Join(", ", placeholders.Select(p => p.Label).Distinct())}");
 
         if (record.Cart is { Items.Count: > 0 } cart)
         {
