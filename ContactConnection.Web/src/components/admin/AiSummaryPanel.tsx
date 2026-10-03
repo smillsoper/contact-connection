@@ -236,6 +236,13 @@ export default function AiSummaryPanel({ callId, canManage, onChanged, agentMode
                   </select>
                 </label>
               </div>
+              {suggestion.allowedDispositions.length === 0 && (
+                <p className="text-xs text-amber-300">
+                  This call's script doesn't save a disposition the AI can choose from
+                  {s.suggestedDisposition ? <> (the AI suggested <b>{s.suggestedDisposition}</b>)</> : ''}. Check that the script's
+                  "Set Call Record Value" step for the disposition field copies the variable its disposition question saves into.
+                </p>
+              )}
               {disagree && (
                 <p className="text-xs text-amber-300">
                   The AI suggests <b>{aiDisp}</b> but the call is recorded as <b>{suggestion.recordedDisposition}</b> — choose which is right.
