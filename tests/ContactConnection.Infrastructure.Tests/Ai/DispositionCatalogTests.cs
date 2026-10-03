@@ -26,4 +26,15 @@ public class DispositionCatalogTests
     [Fact]
     public void NoDispositionField_NoValues() =>
         Assert.Empty(DispositionCatalog.FromDefinitions(["""{ "nodes": { "a": { "type": "input", "outputVariable": "disposition", "options": [ { "value": "X" } ] } } }"""]));
+
+    [Fact]
+    public void VariableNames_AreCaseSensitive_LikeTheEngine() =>
+        // The field copies {{flow.disposition}}; a question saving into "Disposition" never reaches it.
+        Assert.Equal(["Order"], DispositionCatalog.FromDefinitions(["""
+        { "nodes": {
+            "cf": { "type": "set_custom_field", "definitionFieldName": "disposition", "value": "{{flow.disposition}}" },
+            "q":  { "type": "input", "outputVariable": "Disposition", "options": [ { "value": "Wrong Number" } ] },
+            "o":  { "type": "set_variable", "assignments": [ { "variable": "{{flow.disposition}}", "value": "Order" } ] }
+        } }
+        """]));
 }
