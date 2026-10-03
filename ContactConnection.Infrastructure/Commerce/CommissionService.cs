@@ -113,7 +113,7 @@ public static class CommissionLedger
     }
 
     /// <summary>The call_records.custom_fields snapshot as field name → text.</summary>
-    internal static Dictionary<string, string> CustomFieldValues(string? snapshotJson)
+    public static Dictionary<string, string> CustomFieldValues(string? snapshotJson)
     {
         var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (string.IsNullOrWhiteSpace(snapshotJson)) return values;

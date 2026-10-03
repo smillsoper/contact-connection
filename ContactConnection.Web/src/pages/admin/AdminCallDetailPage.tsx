@@ -237,7 +237,7 @@ export default function AdminCallDetailPage() {
 
         <CallCommissionsPanel callId={call.id} canManage={canManage} version={call} />
 
-        <AiSummaryPanel callId={call.id} />
+        <AiSummaryPanel callId={call.id} canManage={canManage} onChanged={load} />
 
         <CardOnFileNote call={call} />
 

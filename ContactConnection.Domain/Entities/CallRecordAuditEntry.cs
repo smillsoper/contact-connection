@@ -12,6 +12,7 @@ public static class CallAuditAction
     public const string Finalized        = "finalized";
     public const string Supervisor       = "supervisor";   // monitor / coach / barge / take-over
     public const string MediaReattributed = "media_reattributed"; // replay media attribution (S171); detail holds before/after
+    public const string AiSummaryConfirmed = "ai_summary_confirmed"; // AI call summary confirmed by a person (S171)
 }
 
 /// <summary>
