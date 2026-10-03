@@ -367,6 +367,11 @@ public static class ServiceCollectionExtensions
         // HTTP client for AvalaraTaxProvider
         services.AddHttpClient("Avalara");
 
+        // AI (learning track, S171): Anthropic Messages API + the call summarizer.
+        services.AddHttpClient("Anthropic");
+        services.AddScoped<ContactConnection.Infrastructure.Ai.AnthropicClient>();
+        services.AddScoped<ContactConnection.Infrastructure.Ai.CallSummarizer>();
+
         // FCC LMS broadcast station import (Media Agency Phase B, S171) — run daily by the Worker.
         // The FCC's WAF returns 403 to requests with no (or a bare) User-Agent; a descriptive one with a
         // contact URL is accepted (checked S171).
