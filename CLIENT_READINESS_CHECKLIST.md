@@ -432,6 +432,17 @@ Nothing else matters if an agent can't take an order and get paid on a call.
         internal test call to NeuroQ (+18001234567) stuck in pre-queue, and hanging up during
         pre-queue wrote no terminal call-state row (phantom on the dashboard, cleaned up by hand).
 
+- [ ] **Usage metering + automatic billing (added S174).** Pricing decided S174: Life Seasons pays
+      **all-in per billed minute** (plus a monthly minimum, with a one-time setup fee covering launch costs:
+      FCC filings, zip-codes.com, hosting, storage). The worksheet lives outside the repo (Documents\LifeSeasons_Pricing_Worksheet.md).
+      Needs:
+      - per-tenant billable minutes from call records (PSTN legs, rounded the way SignalWire bills);
+      - a per-tenant rate and monthly minimum in the Platform Portal;
+      - a live revenue view (Portal);
+      - a monthly invoice generated automatically (minutes × rate, minimum applied, setup fee as a one-off line);
+      - a reconciliation report against the SignalWire usage bill.
+      The first month can be invoiced by hand if this isn't ready in time.
+
 ## Tier 2 — Attribution & compliance
 
 How the client measures success and enforces their strict-scripting requirement — needed almost
