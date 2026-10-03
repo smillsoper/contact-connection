@@ -109,4 +109,13 @@ public class CallSummaryContextTests
     public void Build_RealAnswers_NoTestCallFlag() =>
         Assert.DoesNotContain("Possible test call",
             CallSummaryContextBuilder.Build(Call(), null, null, [History(Step("input", "Probe 1", "Testimonials helped me decide"))]).Text);
+
+    [Fact]
+    public void Build_StatesPaymentResults_WithoutCardDetails()
+    {
+        var text = CallSummaryContextBuilder.Build(Call(), null, null, [],
+            [new CallSummaryContextBuilder.Payment("auth_only", "approved", 144.85m, false),
+             new CallSummaryContextBuilder.Payment("auth_only", "declined", 10m, false)]).Text;
+        Assert.Contains("Payments: authorization approved $144.85; authorization declined $10.00", text);
+    }
 }

@@ -25,6 +25,7 @@ public class CallSummarizerTests
         ["suggested_disposition"] = disposition,
         ["confidence"] = confidence,
         ["follow_up"] = null,
+        ["is_test_call"] = true,
     };
 
     [Fact]
@@ -36,6 +37,7 @@ public class CallSummarizerTests
         Assert.True(s.DispositionValid);
         Assert.Equal("order_failed", s.Outcome);
         Assert.Null(s.FollowUp);
+        Assert.True(s.IsTestCall);
     }
 
     [Fact]

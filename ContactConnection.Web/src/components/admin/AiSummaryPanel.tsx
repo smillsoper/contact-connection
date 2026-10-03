@@ -18,9 +18,11 @@ interface AiSummaryResult {
     dispositionValid: boolean
     confidence: number
     followUp: string | null
+    isTestCall: boolean
   }
   usage: { model: string; inputTokens: number; outputTokens: number; estimatedCostUsd: number; elapsedMs: number; attempts: number }
   allowedDispositions: string[]
+  possibleTestCall: boolean
 }
 
 const OUTCOME_LABELS: Record<string, string> = {
@@ -79,6 +81,14 @@ export default function AiSummaryPanel({ callId }: { callId: string }) {
 
       {s && u && (
         <div className="mt-3 space-y-2">
+          {(result.possibleTestCall || s.isTestCall) && (
+            <p className="inline-block text-[11px] font-medium text-amber-200 bg-amber-950/50 border border-amber-800 rounded px-2 py-0.5">
+              Possible test call
+              <span className="font-normal text-amber-300/80">
+                {' — '}{result.possibleTestCall ? 'placeholder answers found in the script' : 'flagged by the AI'}
+              </span>
+            </p>
+          )}
           <p className="text-sm text-gray-100 leading-relaxed">{s.text}</p>
           <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-400">
             <span>Reason: <span className="text-gray-200">{s.reasonForCall || '—'}</span></span>

@@ -29,7 +29,10 @@ namespace ContactConnection.Infrastructure.Ai;
 /// </summary>
 public static partial class CallSummaryContextBuilder
 {
-    public record Result(string Text, Dictionary<string, int> Redactions, int ScriptSteps);
+    public record Result(string Text, Dictionary<string, int> Redactions, int ScriptSteps, bool PossibleTestCall);
+
+    /// <summary>A payment transaction as the model sees it — what happened, never card details.</summary>
+    public record Payment(string Type, string Status, decimal Amount, bool Voided);
 
     // Steps that capture personal data → the kind of detail, named once in CALL FACTS.
     private static readonly Dictionary<string, string> WithheldNodeTypes = new()
@@ -73,12 +76,18 @@ public static partial class CallSummaryContextBuilder
         var histories = await db.FlowSessions.AsNoTracking()
             .Where(s => s.CallRecordId == callRecordId).OrderBy(s => s.StartedAt)
             .Select(s => s.ExecutionHistory).ToListAsync(ct);
+        // Payment results are facts we have — give them to the model rather than let it guess what
+        // "Authorize Payment (step reached)" led to.
+        var payments = await db.PaymentTransactions.AsNoTracking()
+            .Where(p => p.CallRecordId == callRecordId).OrderBy(p => p.CreatedAt)
+            .Select(p => new Payment(p.TransactionType, p.Status, p.Amount, p.VoidedAt != null)).ToListAsync(ct);
 
-        return Build(record, client, campaign, histories);
+        return Build(record, client, campaign, histories, payments);
     }
 
     /// <summary>Pure formatting — everything the model will see is decided here.</summary>
-    internal static Result Build(CallRecord record, string? client, string? campaign, IEnumerable<string> executionHistories)
+    internal static Result Build(
+        CallRecord record, string? client, string? campaign, IEnumerable<string> executionHistories, IEnumerable<Payment>? payments = null)
     {
         var r = new AiRedactor();
         var withheld = new List<string>();
@@ -113,6 +122,10 @@ public static partial class CallSummaryContextBuilder
         sb.AppendLine($"Call status: {record.OverallStatus}");
         sb.AppendLine($"Order placed: {(record.OrderSubmittedAt is null ? "no" : "yes")}");
         if (!string.IsNullOrWhiteSpace(record.PaymentStatus)) sb.AppendLine($"Payment status: {record.PaymentStatus}");
+        var paid = (payments ?? []).ToList();
+        if (paid.Count > 0)
+            sb.AppendLine("Payments: " + string.Join("; ", paid.Select(p =>
+                $"{(p.Type == PaymentTransactionType.AuthOnly ? "authorization" : p.Type.Replace('_', ' '))} {p.Status} {Money(p.Amount)}{(p.Voided ? " (voided)" : "")}")));
         if (record.RoutedTierLabel is { } tier) sb.AppendLine($"Routed through tier: {tier}");
         if (withheld.Count > 0) sb.AppendLine($"Captured: {string.Join(", ", withheld.Distinct())}");
         if (placeholders.Count > 0)
@@ -140,7 +153,7 @@ public static partial class CallSummaryContextBuilder
         sb.Append(script);
         if (steps == 0) sb.AppendLine("(no script steps recorded)");
 
-        return new Result(sb.ToString().TrimEnd(), r.Counts, steps);
+        return new Result(sb.ToString().TrimEnd(), r.Counts, steps, placeholders.Count > 0);
     }
 
     private static string? FormatStep(Step s, AiRedactor r, List<string> withheld)
