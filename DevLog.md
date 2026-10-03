@@ -182,6 +182,7 @@
 | 170 | 2026-09-30 | 7:08 PM PDT | 9:50 PM PDT | 162 min | ~20056 min |
 | 171 | 2026-10-01 | 9:03 AM PDT | 6:13 PM PDT | 550 min | ~20606 min |
 | 172 | 2026-10-02 | 2:00 PM PDT | 11:09 PM PDT | 549 min | ~21155 min |
+| 173 | 2026-10-02 | 11:21 PM PDT | 11:24 PM PDT | 3 min | ~21158 min |
 
 ---
 
@@ -11234,3 +11235,19 @@ LinkedIn. Not all coding: a large part was compliance paperwork, policy and care
 - William's supervisor-tool tests (postponed); wait on SignalWire compliance + vetting review.
 - Optional AI follow-ups: eval set, prompt caching; then AI feature 2 (intent detection for routing).
 - Life Seasons Order API staging key (Clint) → verify % commission live; tenant migrations for other tenants.
+
+## Session 173
+
+**Date:** 2026-10-02
+**Start:** 11:21 PM PDT
+**End:** 11:24 PM PDT
+**Duration:** 3 minutes
+**Total Duration:** ~21158 minutes
+
+### Done
+
+- Landing page (www.contactconnection.io) now says "Currently in a limited pilot — not accepting new customers
+  yet" (hero badge replaces the "Talk to us" button; contact section reworded, support email kept for
+  availability questions). Pilot-first: run Life Seasons alone, fix and solidify, then grow — the page stays up
+  for carrier reviewers without inviting onboarding inquiries. Commit `8bc653f`. Remove the badge when ready
+  to take on more tenants.
