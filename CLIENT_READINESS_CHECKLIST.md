@@ -437,7 +437,7 @@ Nothing else matters if an agent can't take an order and get paid on a call.
 How the client measures success and enforces their strict-scripting requirement — needed almost
 immediately once calls are live, not deferrable.
 
-- [ ] **Media Agency assignment — Phase A (simple, no FCC/geo yet).** The full media-agency system
+- [x] **Media Agency assignment — Phase A (simple, no FCC/geo yet).** *(S171 — done, live-verified, `4eda226`.)* The full media-agency system
       (Tier 4) is large; this phase captures the minimum needed to attribute a call to a media
       source and write it onto the call record from day one:
       - Media agency assignment record per campaign: media station, National vs. Local, plus
@@ -589,7 +589,7 @@ immediately once calls are live, not deferrable.
 The single biggest chunk of work on the whole list — deliberately isolated so it doesn't block
 everything above it, but genuinely important given Life Seasons' media-driven business model.
 
-- [ ] **Media Agency — Phase B (FCC station database, geo lookup, station history, Cannella export,
+- [x] **Media Agency — Phase B *(S171 — FCC stations, zip/area-code location, nearest-station attribution, replay; live-verified. Cannella export still belongs to the export engine.)* (FCC station database, geo lookup, station history, Cannella export,
       key management).** Builds on Tier 2's Phase A data model.
       - **FCC station database ingestion** — pull down the FCC's database of all radio/TV stations
         on a recurring basis (source/format/cadence not yet researched); this gives us a
@@ -758,9 +758,9 @@ now end "complete"; softphone no longer drops registration on token refresh; Sig
 TLS (no more duplicate INVITEs); outbound works (callback + idle dial); softphone-dialed records close
 on hang-up. Campaign settings gained **Payment Gateways** and Avalara credential cards with Test.
 
-- [ ] **Cart vanishes on call disconnect (added S170)** — with several script tabs open, the cart strip
+- [x] **Cart vanishes on call disconnect (added S170)** *(S171 — fixed, live-verified.)* — with several script tabs open, the cart strip
       disappears when the call hangs up; selecting another tab and back restores it. Fix next session.
-- [ ] **Remote softphone audio (added S170)** — off-LAN agents register but get no audio (internal profile
+- [x] **Remote softphone audio (added S170)** *(S171 — coturn TURN relay, LAN + cellular live-verified.)* — off-LAN agents register but get no audio (internal profile
       `ext-rtp-ip=auto-nat` advertises the Docker IP); set it to STUN + profile restart, then test from a
       phone off Wi-Fi. Needed before Clint can test as an agent.
 - [ ] **Manual outbound dialing (added S169)** — CXOne-style: client → manual outbound campaign → address
