@@ -183,6 +183,7 @@
 | 171 | 2026-10-01 | 9:03 AM PDT | 6:13 PM PDT | 550 min | ~20606 min |
 | 172 | 2026-10-02 | 2:00 PM PDT | 11:09 PM PDT | 549 min | ~21155 min |
 | 173 | 2026-10-02 | 11:21 PM PDT | 11:24 PM PDT | 3 min | ~21158 min |
+| 174 | 2026-10-03 | 2:22 PM PDT | 3:31 PM PDT | 69 min | ~21227 min |
 
 ---
 
@@ -11251,3 +11252,44 @@ LinkedIn. Not all coding: a large part was compliance paperwork, policy and care
   availability questions). Pilot-first: run Life Seasons alone, fix and solidify, then grow — the page stays up
   for carrier reviewers without inviting onboarding inquiries. Commit `8bc653f`. Remove the badge when ready
   to take on more tenants.
+
+## Session 174
+
+**Date:** 2026-10-03
+**Start:** 2:22 PM PDT
+**End:** 3:31 PM PDT
+**Duration:** 69 minutes
+**Total Duration:** ~21227 minutes
+
+### Focus
+
+Business groundwork for the Life Seasons deal, since the platform is now the fastest path to income: pricing and
+production hosting. Kept token-light, because Stephen was near the weekly usage limit.
+
+### Done
+
+- **Checklist cleanup:** ticked Media Phase A and B, cart vanishing on disconnect, and remote softphone audio (all finished S171).
+- **Pricing worksheet:** `Documents\LifeSeasons_Pricing_Worksheet.md`, outside the repo because it holds client deal numbers.
+  - Volume from the CXone CDR; cost per line; three pricing models compared.
+  - Plugged in SignalWire's published rates: toll-free inbound $0.0147, local $0.0066, outbound $0.008, SIP $0.003;
+    numbers $0.80 toll-free / $0.50 local; porting in is free, porting out $5 a number.
+  - The Oct 1 usage graph showed SignalWire **bills the SIP leg to our FreeSWITCH on top of inbound** (38.37 × 0.0066 +
+    37.97 × 0.003 = $0.37). Real cost is ~$5.2k/mo if the numbers are toll-free, ~$3.2k if local.
+  - **Decided: all-in per minute** (easy for the tenant, easy to meter and bill). Proposed $0.035/min on local numbers
+    plus a $0.01 toll-free surcharge, which gives about the same margin per minute either way. Monthly minimum, plus a setup fee
+    covering launch costs (FCC filing, zip-codes.com, hosting, storage, porting).
+- **Checklist added:**
+  - **Usage metering + automatic billing**: rate by number type, Portal rate/minimum, live revenue view, auto
+    invoice, reconciliation against SignalWire.
+  - **Number porting** as an onboarding step: Clint's inputs, a cutover plan so TV numbers never go dark, the overlap month.
+- **Production hosting plan:** `docs/production-hosting-plan.md`.
+  - Azure West US 2: telephony VM + app VM (D4as_v5), managed PostgreSQL, cool Blob storage. **~$510–545/mo**
+    (about $370–400 with 1-year reservations). Matches a second estimate Stephen got from Google's AI.
+  - Covers RTP range 16384–32768, NSG rules (5061 restricted to SignalWire; DB, Redis and ESL never public), the code changes
+    (recordings to MP3 + Blob, compose split), go-live checks (SIPp to 120 calls, restore test) and the single-telephony-VM risk.
+
+### Next
+
+- From Clint: current Five9 cost, number list and type, current carrier info for porting.
+- Ask counsel about USF/regulatory fees. Price the remaining setup-fee items.
+- William's supervisor-tool tests; Order API staging key; build the hosting prep (recordings → Blob, compose split).
