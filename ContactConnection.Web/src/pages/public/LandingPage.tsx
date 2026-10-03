@@ -46,9 +46,11 @@ export default function LandingPage() {
             commissions and supervisor tools into one platform — for businesses running customer service and sales lines.
           </p>
           <div className="mt-10 flex flex-wrap justify-center gap-3">
-            <a href="#contact" className="px-6 py-3 text-sm font-medium text-white bg-sky-600 hover:bg-sky-500 rounded-lg">Talk to us</a>
-            <a href="#platform" className="px-6 py-3 text-sm font-medium text-gray-200 bg-gray-800 hover:bg-gray-700 rounded-lg">See the platform</a>
+            <a href="#platform" className="px-6 py-3 text-sm font-medium text-white bg-sky-600 hover:bg-sky-500 rounded-lg">See the platform</a>
           </div>
+          <p className="mt-6 inline-block text-sm text-amber-200 bg-amber-950/40 border border-amber-900/60 rounded-full px-4 py-1.5">
+            Currently in a limited pilot — not accepting new customers yet.
+          </p>
         </div>
       </section>
 
@@ -103,8 +105,11 @@ export default function LandingPage() {
       {/* Contact */}
       <section id="contact" className="max-w-6xl mx-auto px-6 py-16 scroll-mt-20">
         <div className="bg-gradient-to-br from-sky-950/60 to-gray-900 border border-sky-900/50 rounded-2xl p-10 text-center">
-          <h2 className="text-2xl font-semibold text-white">Let's talk about your contact center</h2>
-          <p className="mt-3 text-gray-400">Tell us about your lines, your volume and what you need from a platform.</p>
+          <h2 className="text-2xl font-semibold text-white">Currently in a limited pilot</h2>
+          <p className="mt-3 text-gray-400">
+            ContactConnection is in a limited pilot and isn't taking on new customers yet. For questions or availability
+            updates, email us.
+          </p>
           <a href={`mailto:${COMPANY.email}`} className="inline-block mt-6 px-6 py-3 text-sm font-medium text-white bg-sky-600 hover:bg-sky-500 rounded-lg">
             {COMPANY.email}
           </a>
