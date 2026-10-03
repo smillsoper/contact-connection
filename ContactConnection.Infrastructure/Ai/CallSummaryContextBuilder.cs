@@ -106,7 +106,7 @@ public static partial class CallSummaryContextBuilder
         sb.AppendLine($"Order placed: {(record.OrderSubmittedAt is null ? "no" : "yes")}");
         if (!string.IsNullOrWhiteSpace(record.PaymentStatus)) sb.AppendLine($"Payment status: {record.PaymentStatus}");
         if (record.RoutedTierLabel is { } tier) sb.AppendLine($"Routed through tier: {tier}");
-        if (withheld.Count > 0) sb.AppendLine($"Customer details captured (values withheld): {string.Join(", ", withheld.Distinct())}");
+        if (withheld.Count > 0) sb.AppendLine($"Captured: {string.Join(", ", withheld.Distinct())}");
 
         if (record.Cart is { Items.Count: > 0 } cart)
         {

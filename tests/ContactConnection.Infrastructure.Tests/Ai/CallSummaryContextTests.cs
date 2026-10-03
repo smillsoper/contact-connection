@@ -45,7 +45,7 @@ public class CallSummaryContextTests
         Assert.Contains("== Opening ==", r.Text);
         Assert.Contains("Probe 1 → Memory issues and forgetfulness", r.Text);
         Assert.Contains("Submit Order (step reached)", r.Text);
-        Assert.Contains("Customer details captured (values withheld): name, zip, address, payment card", r.Text);
+        Assert.Contains("Captured: name, zip, address, payment card", r.Text);
         foreach (var leaked in new[] { "Margaret", "97470", "1 Main St", "4111", "670-4541", "Billing first name", "Billing Address" })
             Assert.DoesNotContain(leaked, r.Text);
         Assert.Equal(4, r.Redactions["personal details"]);
