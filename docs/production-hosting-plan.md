@@ -24,6 +24,11 @@ reuses the same compose setup with prod settings (no dev rebuild loop, no pgAdmi
 | 8 | Key Vault, container registry (or free GitHub registry) | | | $5 |
 | | **Total** | | | **≈ $510/mo** |
 
+A second-opinion estimate (S174) came to **$515–545/mo**. It used Intel D4s/D4ds_v5 VMs (~$140 each, vs ~$126 for the AMD
+D4as_v5) and a memory-optimized E2ds_v5 database (~$175–195). The AMD VMs are the cheaper equivalent. Upgrade the database
+to E-series only if monitoring shows memory pressure. **Budget $510–545; make the final quote in the Azure Pricing
+Calculator (West US 2) before signing.**
+
 - A **1-year reservation** on both VMs and the database cuts about 35%, to roughly **$370/mo**. Do it once the contract is signed.
 - The worksheet's $600 hosting line is covered, with room left.
 
