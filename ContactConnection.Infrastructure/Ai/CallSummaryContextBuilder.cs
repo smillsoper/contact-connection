@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using ContactConnection.Domain.Entities;
 using ContactConnection.Infrastructure.Commerce;
 using ContactConnection.Infrastructure.Data;
@@ -11,37 +12,51 @@ namespace ContactConnection.Infrastructure.Ai;
 /// <summary>
 /// Builds the "context" for AI call summarization (AI step 1, S171) — the text the model will read.
 /// The model has no access to the platform and no memory: this text is everything it knows about the
-/// call, so what goes in here decides the quality (and the safety) of the summary.
+/// call, so what goes in here decides the quality, the cost and the safety of the summary.
 ///
 /// What goes in — the call's facts, in plain labelled text:
 /// <list type="bullet">
 /// <item>campaign, how the call ended, handle time, whether an order was placed and what was in the cart;</item>
 /// <item>the call's custom fields (call type, disposition, …);</item>
-/// <item>the script as it was worked — each section, each question with the agent's answer, each order or
-/// payment step with its result. This is our stand-in for a transcript until recordings are transcribed.</item>
+/// <item>the script as it was worked — each section, each question with the answer given, each order or
+/// payment step reached. Our stand-in for a transcript until recordings are transcribed.</item>
 /// </list>
-/// What stays out (data minimization): caller name, phone, email and address are withheld entirely; card
-/// and payment-capture steps show only that they happened; everything else is scrubbed by
-/// <see cref="AiRedactor"/>. The secure-collect card blob on the call record is never read here at all.
+/// What stays out (data minimization — every token costs, and nothing leaves that a summary doesn't
+/// need): personal details (name, zip, address, phone, email, card capture) are only NAMED once as
+/// "captured", never shown; navigation clicks ("Continue") and read-aloud script text are dropped;
+/// timestamps are stripped; everything else is scrubbed by <see cref="AiRedactor"/>. The secure-collect
+/// card blob on the call record is never read here at all.
 /// </summary>
-public static class CallSummaryContextBuilder
+public static partial class CallSummaryContextBuilder
 {
     public record Result(string Text, Dictionary<string, int> Redactions, int ScriptSteps);
 
-    // Steps whose captured value is personal data — show the step happened, never the value.
+    // Steps that capture personal data → the kind of detail, named once in CALL FACTS.
     private static readonly Dictionary<string, string> WithheldNodeTypes = new()
     {
-        ["address"] = "[address captured — withheld]",
-        ["phone"] = "[phone captured — withheld]",
-        ["email"] = "[email captured — withheld]",
-        ["tf_secure_collect"] = "[payment details captured securely — withheld]",
+        ["address"] = "address",
+        ["phone"] = "phone",
+        ["email"] = "email",
+        ["tf_secure_collect"] = "payment card",
     };
 
-    // Script plumbing the model doesn't need (it would only add noise and tokens).
-    private static readonly HashSet<string> SkippedNodeTypes =
-        ["set_variable", "set_custom_field", "branch", "start", "delay", "set_shared_variable"];
+    // Questions whose answer is personal data, recognized by their label.
+    private static readonly (string LabelContains, string Kind)[] WithheldLabels =
+    [
+        ("name", "name"), ("zip", "zip"), ("postal", "zip"), ("birth", "date of birth"),
+        ("ssn", "SSN"), ("social security", "SSN"),
+    ];
 
-    private record Step(string NodeType, string Label, string? InputValue, string? TransitionTaken);
+    // Answers that only move the script along — not something the caller said or chose.
+    private static readonly HashSet<string> NavigationAnswers = new(StringComparer.OrdinalIgnoreCase)
+        { "continue", "next", "ok", "okay", "done", "proceed" };
+
+    // Script plumbing, plus read-aloud text and the end marker: the section headings already show how far
+    // the call got, and the script wording is the same on every call.
+    private static readonly HashSet<string> SkippedNodeTypes =
+        ["set_variable", "set_custom_field", "branch", "start", "delay", "set_shared_variable", "script", "end"];
+
+    private record Step(string NodeType, string Label, string? InputValue);
 
     public static async Task<Result?> BuildAsync(TenantDbContext db, Guid callRecordId, CancellationToken ct)
     {
@@ -61,8 +76,28 @@ public static class CallSummaryContextBuilder
     internal static Result Build(CallRecord record, string? client, string? campaign, IEnumerable<string> executionHistories)
     {
         var r = new AiRedactor();
-        var sb = new StringBuilder();
+        var withheld = new List<string>();
 
+        // The script first, so CALL FACTS can name the customer details that were captured.
+        var script = new StringBuilder();
+        var steps = 0;
+        string? previous = null;
+        foreach (var json in executionHistories)
+        {
+            foreach (var step in Parse(json))
+            {
+                if (SkippedNodeTypes.Contains(step.NodeType)) continue;
+                var line = FormatStep(step, r, withheld);
+                // The engine can record a step twice (shown, then continued) — collapse identical
+                // back-to-back lines: repeats cost tokens and could read as "asked twice".
+                if (line is null || line == previous) continue;
+                previous = line;
+                script.AppendLine(line);
+                steps++;
+            }
+        }
+
+        var sb = new StringBuilder();
         sb.AppendLine("CALL FACTS");
         sb.AppendLine($"Client / campaign: {client ?? "unknown"} / {campaign ?? "unknown"}");
         sb.AppendLine($"Direction: {record.Source}");
@@ -71,6 +106,7 @@ public static class CallSummaryContextBuilder
         sb.AppendLine($"Order placed: {(record.OrderSubmittedAt is null ? "no" : "yes")}");
         if (!string.IsNullOrWhiteSpace(record.PaymentStatus)) sb.AppendLine($"Payment status: {record.PaymentStatus}");
         if (record.RoutedTierLabel is { } tier) sb.AppendLine($"Routed through tier: {tier}");
+        if (withheld.Count > 0) sb.AppendLine($"Customer details captured (values withheld): {string.Join(", ", withheld.Distinct())}");
 
         if (record.Cart is { Items.Count: > 0 } cart)
         {
@@ -86,47 +122,47 @@ public static class CallSummaryContextBuilder
         {
             sb.AppendLine();
             sb.AppendLine("RECORDED FIELDS");
-            foreach (var (name, value) in fields) sb.AppendLine($"- {name}: {r.Scrub(value)}");
+            foreach (var (name, value) in fields) sb.AppendLine($"- {name}: {r.Scrub(StripTimestamps(value))}");
         }
 
-        var steps = 0;
         sb.AppendLine();
-        sb.AppendLine("SCRIPT AS WORKED (each step in order; \"→\" is the agent's answer or the step's result)");
-        foreach (var json in executionHistories)
-        {
-            foreach (var step in Parse(json))
-            {
-                if (SkippedNodeTypes.Contains(step.NodeType)) continue;
-                var line = FormatStep(step, r);
-                if (line is null) continue;
-                sb.AppendLine(line);
-                steps++;
-            }
-        }
+        sb.AppendLine("SCRIPT AS WORKED");
+        sb.Append(script);
         if (steps == 0) sb.AppendLine("(no script steps recorded)");
 
         return new Result(sb.ToString().TrimEnd(), r.Counts, steps);
     }
 
-    private static string? FormatStep(Step s, AiRedactor r)
+    private static string? FormatStep(Step s, AiRedactor r, List<string> withheld)
     {
         var label = r.Scrub(s.Label);
         if (s.NodeType == "section") return $"== {label} ==";
-        if (WithheldNodeTypes.TryGetValue(s.NodeType, out var placeholder))
-            return $"- {label} → {r.Withhold("personal details", placeholder)}";
+        if (WithheldNodeTypes.TryGetValue(s.NodeType, out var kind))
+        {
+            withheld.Add(r.Withhold("personal details", kind));
+            return null;
+        }
         // The history records which step came next, not the result — so only say the step was reached;
         // the real outcome is in CALL FACTS (order placed, payment status).
         if (s.NodeType is "authorize_payment" or "void_payment" or "api_call") return $"- {label} (step reached)";
 
-        if (s.InputValue is { } value && !string.IsNullOrWhiteSpace(value))
-        {
-            // A question whose answer is the caller's name: withhold it (the summary doesn't need it).
-            if (s.Label.Contains("name", StringComparison.OrdinalIgnoreCase) && s.NodeType == "input")
-                return $"- {label} → {r.Withhold("names", "[name withheld]")}";
-            return $"- {label} → {r.Scrub(value.Trim())}";
-        }
-        return s.NodeType is "input" or "script" or "end" ? $"- {label}" : null;
+        var value = s.InputValue?.Trim();
+        if (string.IsNullOrEmpty(value) || NavigationAnswers.Contains(value)) return null;
+        if (s.NodeType == "input")
+            foreach (var (contains, personal) in WithheldLabels)
+                if (s.Label.Contains(contains, StringComparison.OrdinalIgnoreCase))
+                {
+                    withheld.Add(r.Withhold("personal details", personal));
+                    return null;
+                }
+        return $"- {label} → {r.Scrub(value)}";
     }
+
+    /// <summary>"Yes at 2026-10-01T23:53:04.147+00:00" → "Yes" — the time adds tokens, not meaning.</summary>
+    internal static string StripTimestamps(string value) => Timestamp().Replace(value, "").Trim();
+
+    [GeneratedRegex(@"\s*(?:at\s+)?\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?")]
+    private static partial Regex Timestamp();
 
     private static IEnumerable<Step> Parse(string? json)
     {
@@ -137,7 +173,7 @@ public static class CallSummaryContextBuilder
         {
             if (doc.RootElement.ValueKind != JsonValueKind.Array) yield break;
             foreach (var e in doc.RootElement.EnumerateArray())
-                yield return new Step(Str(e, "NodeType") ?? "", Str(e, "Label") ?? "", Str(e, "InputValue"), Str(e, "TransitionTaken"));
+                yield return new Step(Str(e, "NodeType") ?? "", Str(e, "Label") ?? "", Str(e, "InputValue"));
         }
     }
 

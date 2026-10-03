@@ -23,38 +23,72 @@ public class CallSummaryContextTests
     private static object Step(string type, string label, string? input = null) =>
         new { NodeType = type, Label = label, InputValue = input, TransitionTaken = "next" };
 
+    private static CallRecord Call() => CallRecord.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+
     [Fact]
     public void Build_ShowsTheScriptAsWorked_AndWithholdsPersonalData()
     {
-        var call = CallRecord.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
         var history = History(
             Step("section", "Opening"),
             Step("input", "First Name", "Margaret"),
+            Step("input", "Zip Code", "97470"),
             Step("set_variable", "Billing first name = first name"),
             Step("input", "Probe 1", "Memory issues and forgetfulness"),
-            Step("address", "Billing Address", "{\"address1\":\"1 Main St\",\"zip\":\"97470\"}"),
+            Step("address", "Billing Address", "{\"address1\":\"1 Main St\"}"),
             Step("tf_secure_collect", "Card", "4111111111111111"),
             Step("input", "Callback number", "541-670-4541"),
             Step("api_call", "Submit Order"));
 
-        var r = CallSummaryContextBuilder.Build(call, "Life Seasons", "NeuroQ - LF TV", [history]);
+        var r = CallSummaryContextBuilder.Build(Call(), "Life Seasons", "NeuroQ - LF TV", [history]);
 
         Assert.Contains("Life Seasons / NeuroQ - LF TV", r.Text);
         Assert.Contains("== Opening ==", r.Text);
         Assert.Contains("Probe 1 → Memory issues and forgetfulness", r.Text);
         Assert.Contains("Submit Order (step reached)", r.Text);
-        Assert.DoesNotContain("Margaret", r.Text);
-        Assert.DoesNotContain("1 Main St", r.Text);
-        Assert.DoesNotContain("4111", r.Text);
-        Assert.DoesNotContain("670-4541", r.Text);
-        Assert.DoesNotContain("Billing first name", r.Text);   // script plumbing skipped
-        Assert.Equal(1, r.Redactions["names"]);
-        Assert.Equal(2, r.Redactions["personal details"]);
+        Assert.Contains("Customer details captured (values withheld): name, zip, address, payment card", r.Text);
+        foreach (var leaked in new[] { "Margaret", "97470", "1 Main St", "4111", "670-4541", "Billing first name", "Billing Address" })
+            Assert.DoesNotContain(leaked, r.Text);
+        Assert.Equal(4, r.Redactions["personal details"]);
         Assert.Equal(1, r.Redactions["phone numbers"]);
     }
 
     [Fact]
+    public void Build_DropsNavigationClicksAndReadAloudText()
+    {
+        var history = History(
+            Step("script", "Closing — Order"),
+            Step("input", "Press Hot Button", "Continue"),
+            Step("input", "Main Offer", "Yes - Place Order"),
+            Step("end", "End"));
+
+        var text = CallSummaryContextBuilder.Build(Call(), null, null, [history]).Text;
+        Assert.Contains("Main Offer → Yes - Place Order", text);
+        Assert.DoesNotContain("Hot Button", text);
+        Assert.DoesNotContain("Closing — Order", text);
+        Assert.DoesNotContain("- End", text);
+    }
+
+    [Fact]
+    public void Build_CollapsesBackToBackRepeats_ButKeepsGenuineRepeatsLater()
+    {
+        var history = History(
+            Step("input", "Upsell", "Not Interested"),
+            Step("input", "Upsell", "Not Interested"),   // recorded twice — one step
+            Step("input", "Main Offer", "Yes"),
+            Step("input", "Upsell", "Not Interested"));  // revisited later — keep it
+
+        var text = CallSummaryContextBuilder.Build(Call(), null, null, [history]).Text;
+        Assert.Equal(2, text.Split("Upsell → Not Interested").Length - 1);
+    }
+
+    [Theory]
+    [InlineData("Yes at 2026-10-01T23:53:04.1471780+00:00", "Yes")]
+    [InlineData("2026-10-01T23:53:04Z", "")]
+    [InlineData("Order", "Order")]
+    public void StripTimestamps(string input, string expected) =>
+        Assert.Equal(expected, CallSummaryContextBuilder.StripTimestamps(input));
+
+    [Fact]
     public void Build_NoScript_SaysSo() =>
-        Assert.Contains("(no script steps recorded)",
-            CallSummaryContextBuilder.Build(CallRecord.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()), null, null, []).Text);
+        Assert.Contains("(no script steps recorded)", CallSummaryContextBuilder.Build(Call(), null, null, []).Text);
 }
