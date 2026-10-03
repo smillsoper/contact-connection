@@ -800,6 +800,9 @@ on hang-up. Campaign settings gained **Payment Gateways** and Avalara credential
       counsel's answers before the rules lock.
 - [ ] **Production hosting (added S169)** — cloud FreeSWITCH + API with static IP; widest stable RTP
       range (Life Seasons peaks at 104 concurrent calls); load test near peak before go-live.
+      **Plan drafted S174: `docs/production-hosting-plan.md`.** Azure West US 2: a telephony VM and an app VM (both D4as_v5), managed
+      PostgreSQL and cool Blob storage, about $510/mo (about $370 with 1-year reservations). Covers ports and NSG rules, the code changes
+      (recordings compressed and moved to Blob, compose split) and go-live checks (SIPp to 120 calls, restore test).
 - [ ] **Recording storage (added S169)** — compress (MP3 audio, MP4 when screen recording is on);
       cloud storage with tiering; allowance in the flat fee + overage per GB (monthly average);
       storage-provider model (S3, Azure Blob, GCS, Box, Google Drive, SFTP) with tenant-set migration
