@@ -577,6 +577,13 @@ immediately once calls are live, not deferrable.
       changes billing and the data-processing contract, NOT the guardrails — redaction, minimization, validation,
       human review and logging stay platform-side regardless of whose key is used.
 
+- [ ] **Move a phone number to another campaign (admin UI).** (Requested 2026-10-02 — done by hand in SQL for
+      +15416413945 → Test Campaign 1.) A number's campaign lives in TWO places that must change together:
+      `tenant_x.phone_numbers.campaign_id` and `public.phone_number_routing."CampaignId"` (what inbound routing reads).
+      Build a "Move to campaign…" action on Telephony → Phone Numbers: one transaction for both, warn about a
+      number-level telephony-flow override and existing media assignments (attribution history stays with the number),
+      log it in the change history.
+
 ## Tier 4 — Advanced / specialized build-out
 
 The single biggest chunk of work on the whole list — deliberately isolated so it doesn't block
