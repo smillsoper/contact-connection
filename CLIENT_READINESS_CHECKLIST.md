@@ -443,6 +443,18 @@ Nothing else matters if an agent can't take an order and get paid on a call.
       - a reconciliation report against the SignalWire usage bill.
       The first month can be invoiced by hand if this isn't ready in time.
 
+- [ ] **Number porting — onboarding step (added S174).** Life Seasons' numbers (main + every media-station
+      number) move from their current carrier to SignalWire. Numbers that can't be ported (or a short-term
+      fallback) can forward instead.
+      Needs:
+      - from Clint: the number list and type (toll-free or local), the current carrier and RespOrg, account
+        number and PIN, a recent bill (CSR), and any port-out fee;
+      - SignalWire's per-number port fee and lead time (toll-free ports go through a RespOrg change);
+      - a cutover plan so TV-media numbers never go dark: schedule ports outside airtime, assign the
+        campaigns and media in our platform before the port completes, and test-call each number right after;
+      - budget for the overlap month when both providers bill.
+      These costs come out of the setup fee.
+
 ## Tier 2 — Attribution & compliance
 
 How the client measures success and enforces their strict-scripting requirement — needed almost
