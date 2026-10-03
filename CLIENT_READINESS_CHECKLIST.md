@@ -436,7 +436,9 @@ Nothing else matters if an agent can't take an order and get paid on a call.
       **all-in per billed minute** (plus a monthly minimum, with a one-time setup fee covering launch costs:
       FCC filings, zip-codes.com, hosting, storage). The worksheet lives outside the repo (Documents\LifeSeasons_Pricing_Worksheet.md).
       Needs:
-      - per-tenant billable minutes from call records (PSTN legs, rounded the way SignalWire bills);
+      - per-tenant billable minutes from call records (PSTN legs, rounded the way SignalWire bills), split by
+        **number type**: local $0.035/min, toll-free $0.035 + a $0.01 surcharge (proposed S174). The rate depends on the DID dialed, so
+        phone numbers need a type (local or toll-free);
       - a per-tenant rate and monthly minimum in the Platform Portal;
       - a live revenue view (Portal);
       - a monthly invoice generated automatically (minutes × rate, minimum applied, setup fee as a one-off line);
