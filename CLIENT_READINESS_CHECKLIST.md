@@ -571,6 +571,12 @@ immediately once calls are live, not deferrable.
       email alias (support@contactconnection.io → Stephen's inbox). Design pass first — scope vs. the
       agent helpdesk CMS (which is tenant-facing knowledge, not tickets to us).
 
+- [ ] **AI: tenant-owned keys (BYOK).** (Requested 2026-10-02.) AI features (call summary today) run on the
+      platform's Anthropic key (`Anthropic:ApiKey`). Add a per-tenant choice through the existing API Preferences
+      + tenant credential store pattern: use the tenant's own provider key when set, else the platform key. BYOK
+      changes billing and the data-processing contract, NOT the guardrails — redaction, minimization, validation,
+      human review and logging stay platform-side regardless of whose key is used.
+
 ## Tier 4 — Advanced / specialized build-out
 
 The single biggest chunk of work on the whole list — deliberately isolated so it doesn't block
