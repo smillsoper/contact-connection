@@ -181,6 +181,7 @@
 | 169 | 2026-09-30 | 7:53 AM PDT | 5:37 PM PDT | 584 min | ~19894 min |
 | 170 | 2026-09-30 | 7:08 PM PDT | 9:50 PM PDT | 162 min | ~20056 min |
 | 171 | 2026-10-01 | 9:03 AM PDT | 6:13 PM PDT | 550 min | ~20606 min |
+| 172 | 2026-10-02 | 2:00 PM PDT | 11:09 PM PDT | 549 min | ~21155 min |
 
 ---
 
@@ -11164,3 +11165,72 @@ bug, SignalWire vetting reply, and dashboard additions to the plan.
 - Life Seasons Order API staging key (Clint) → first real order; verify % commission live.
 - Active Calls widget; remaining Life Seasons scripts; scheduled export engine; buy the full
   zip-codes.com database before go-live.
+
+## Session 172
+
+**Date:** 2026-10-02
+**Start:** 2:00 PM PDT
+**End:** 11:09 PM PDT
+**Duration:** 549 minutes
+**Total Duration:** ~21155 minutes
+
+### Focus
+
+Carrier compliance and the public face of the business (SignalWire vetting, FCC RMD filing, website and
+policies), then — with household income now the priority — the first AI feature, built as a teach-first
+learning track for Stephen's job search (CXone roles now require AI/LLM experience), plus his resume and
+LinkedIn. Not all coding: a large part was compliance paperwork, policy and career work.
+
+### Done — compliance & business setup
+
+- **SignalWire STIR/SHAKEN vetting submitted:** identity verified; business verification (Articles of
+  Organization, as a merged image) in manual review; attestation form done (industry Software/SaaS, reseller,
+  US, no high-throughput / caller-ID addendum); vetting reply with tenant model + outbound controls posted.
+  Auto top-up turned out to be mandatory — set to the minimum ($10.01 below $5) with a low-balance email.
+- **FCC Robocall Mitigation Database filed and accepted — RMD0041894** (Option 3, "Voice Service Provider
+  without a STIR/SHAKEN obligation", lack of control over network infrastructure; SignalWire signs calls).
+  Program description rewritten for SignalWire and narrowed to what the platform does today; counsel (WLR
+  Law) reviewed it on a call before filing. No fee; filing must be updated within 10 business days of changes.
+- **Public website** at www.contactconnection.io: landing page, Privacy, Terms, Acceptable Use; "Sign in"
+  asks for the workspace; www no longer treated as a tenant. Cloudflare redirect bare domain → www (with a
+  discard-address placeholder record, not the office IP). support@ and abuse@ aliases created.
+- **Policies** added: callers can always reach a person (AI agents must say they're automated and hand off on
+  request); account decisions are made by people with human review on request (the Telnyx lesson); AI data
+  handling. Saved as standing platform principles.
+- Email signature + hosted logo PNG. Dialer compliance commitments and the tenant-vetting principle saved as
+  hard requirements. National DNC integration designed (no build).
+
+### Done — AI feature 1: call summarization (live-verified)
+
+- **Step 1 — context:** builder turns a call into labelled facts + "script as worked"; redaction (card/SSN/
+  phone/email patterns), personal details named once as "Captured: …", duplicates/navigation/read-aloud
+  steps dropped, timestamps stripped, placeholder answers → "Possible test call", payment results as facts
+  (fixed a confident "authorization failed" error). "What the AI would see" preview with token estimate.
+- **Step 2 — the call:** Anthropic Messages API (Haiku 4.5, temperature 0, server-side key in User Secrets),
+  forced `record_call_summary` tool with dispositions read from the script (DispositionCatalog —
+  case-sensitive like the engine), validation, one retry, ~$0.003 and ~2.5 s per call.
+- **(b) human review:** `call_summaries` (every generation saved with model/tokens/cost; confirm/edit/
+  discard; edit flag, reviewer, supersede); forced choice when AI ≠ recorded disposition; disposition change
+  goes through custom field + audit + commission recalculation.
+- **(c) wrap-up:** per-campaign opt-in (Campaign > AI Call Summary + ACW-time note), triggered when the
+  script finishes (Stephen's call — full context incl. disposition), background queue + processor, push to the
+  agent; wrap-up cards identify each call (time, campaign, caller, number, order #, length); agents review
+  their own calls. Exposed a real script bug in Test Script 1 (misspelled/mixed-case disposition variables —
+  dispositions were never saved); Stephen fixed it in the designer.
+- Lessons captured: rule adherence is probabilistic → schema field + code badge; grounding beats prompting;
+  temperature 0 ≠ deterministic; confidence ≠ probability; ~80% of input tokens are fixed overhead (prompt
+  caching later); evals over eyeballing.
+
+### Other
+
+- Phone number +15416413945 moved to Test Campaign 1 (SQL, both tenant + platform routing) for a demo call.
+- Resume (`Stephen_Soper_Resume_AI.docx`), AI case-study write-up, LinkedIn role/headline/skills/media
+  (screenshots from neutral test data).
+- Checklist: SignalWire low-balance webhook alerts, platform support ticket system, AI BYOK, move-number UI.
+- Tests passing: 1,474+ (Domain 254, Application 20, Api 125, Infrastructure 1,075+).
+
+### Next
+
+- William's supervisor-tool tests (postponed); wait on SignalWire compliance + vetting review.
+- Optional AI follow-ups: eval set, prompt caching; then AI feature 2 (intent detection for routing).
+- Life Seasons Order API staging key (Clint) → verify % commission live; tenant migrations for other tenants.
