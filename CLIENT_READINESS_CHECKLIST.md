@@ -483,6 +483,16 @@ Nothing else matters if an agent can't take an order and get paid on a call.
       - Platform Portal side: per-tenant billing view (balance, invoices, payment status), plus manual adjustments and
         credits with a reason.
 
+- [ ] **Stripe as a campaign payment gateway (added S175).** A second `IPaymentGatewayClient` next to
+      `AuthorizeNetGatewayClient`, with credentials on the campaign credential card (secret key, Test button) and the
+      same authorize / capture / void / refund paths the order flow uses today. Build it alongside the tenant billing work,
+      which shares the Stripe client.
+      **Gate first:** by default Stripe will not accept raw card numbers through its API. Our phone payments are captured
+      by keypad (`tf_secure_collect`) and sent server-side, which needs Stripe's **raw card data API access**. Stripe
+      grants that on request, after proof of PCI compliance (SAQ D / AOC). Apply early; until it's approved, Stripe works
+      for tenant billing (hosted UI) but not for keyed call payments. Alternative to evaluate: an agent-free
+      payment-link/SMS flow, where the customer pays on Stripe's page.
+
 - [ ] **Number porting — onboarding step (added S174).** Life Seasons' numbers (main + every media-station
       number) move from their current carrier to SignalWire. Numbers that can't be ported (or a short-term
       fallback) can forward instead.
