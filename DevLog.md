@@ -185,6 +185,7 @@
 | 173 | 2026-10-02 | 11:21 PM PDT | 11:24 PM PDT | 3 min | ~21158 min |
 | 174 | 2026-10-03 | 2:22 PM PDT | 3:31 PM PDT | 69 min | ~21227 min |
 | 175 | 2026-10-03 | 4:02 PM PDT | 7:03 PM PDT | 181 min | ~21408 min |
+| 176 | 2026-10-04 | 12:30 PM PDT | 1:13 PM PDT | 43 min | ~21451 min |
 
 ---
 
@@ -11345,3 +11346,44 @@ payments and compliance. Business blocker found: the LLC is inactive in the Oreg
 - The six telephony node handlers' `ctx.Esl` null warnings: add the guard pattern, then test with a live call.
 - Stephen: talk with William about funding the LLC reinstatement; a letter of intent from Life Seasons; Clint's figures
   (Five9 cost, number counts by type, minutes, agents); SignalWire sales/vetting replies (likely Monday).
+
+## Session 176
+
+**Date:** 2026-10-04
+**Start:** 12:30 PM PDT
+**End:** 1:13 PM PDT
+**Duration:** 43 minutes
+**Total Duration:** ~21451 minutes
+
+### Focus
+
+Support-partner prep, reconciling the meter against the SignalWire CDR, and planning the remaining build so next week's
+sessions go to code.
+
+### Done
+
+- **SupportTier brief:** a one-page overview for Nick Kovalevich, a prospective outsourced Tier 1/2 support partner. It covers
+  the platform, users, a proposed Tier 1/2/3 split, severity and response levels, data access, and meeting questions. Published as a
+  private artifact; Stephen sent it with a Zoom invite for Wed 2026-10-14 8:00 AM.
+- **SignalWire CDR reconciliation (Oct 1, UTC):** our meter matched exactly: 27 inbound calls, 54 rounded minutes, and outbound
+  2 calls / 3 minutes. Findings:
+  - SignalWire bills **each call rounded up to the whole minute**.
+  - The **SIP leg to FreeSWITCH is free**. This corrects S174's "SIP leg billed" reading: the $0.37 was explained by rounding.
+  - Outbound costs **$0.0051/min**.
+  - Agent dials to our own DIDs hairpin through SignalWire and are billed both ways; the meter counts both, correctly.
+- **Metering rounds each call up to the whole minute** (`5918580`, Stephen's decision; it matches the carrier). The card shows
+  actual and billed minutes. 279 Domain tests pass.
+- Pricing worksheet + memory corrected: real cost ~$4,470/mo toll-free or ~$2,450 local, plus ~5% for rounding.
+- **Sprint plan** (3 weeks) at the top of the checklist. New checklist items: script launch modes, client dashboards + client invite,
+  Chrome Extension.
+- **Sprint 1 spec** (`docs/sprint-1-spec.md`), with Stephen's decisions:
+  - training data kept and flagged (excluded from billing, commissions, KPIs and exports);
+  - no sandbox credentials → simulated responses, never a production fallback;
+  - new TrainingMode permission; production launch requires an active call;
+  - invoices are drafts that Stephen issues (`INV-YYYY-NNNN`, credit notes for corrections).
+
+  The spec also maps the code touch points for launch modes, invoices, null guards and Stripe test mode.
+
+### Next
+
+- Sprint 1 (week of Oct 5, after the usage reset): script launch modes → invoices → null guards + live call → Stripe test mode.
