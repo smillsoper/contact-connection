@@ -37,6 +37,13 @@ helpdesk CMS, and team chat. This is a multi-month roadmap, not a single session
 
 ## Tier 1 — Revenue-critical MVP
 
+- [ ] **BLOCKER — reinstate Call Center Solutions, LLC with the Oregon Secretary of State (added S175, 2026-10-03).**
+      The registry shows the LLC **inactive**: WLR Law withdrew as registered agent about 2 years ago. Reinstatement ≈ $300,
+      plus naming a new registered agent (Stephen can serve, with an Oregon street address). The name is protected for 5 years after the
+      inactive date. **Must be active before any business with Life Seasons**: contract, setup-fee invoice, Stripe, and
+      the business bank account. After reinstatement, tell SignalWire (their business verification asked for state and entity
+      number) and confirm the FCC RMD filing (RMD0041894) details still match.
+
 Nothing else matters if an agent can't take an order and get paid on a call.
 
 - [x] **CRM cart/product handling + inventory awareness.** *Closed S170: scoped offers wired into the agent
