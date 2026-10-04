@@ -35,6 +35,32 @@ helpdesk CMS, and team chat. This is a multi-month roadmap, not a single session
 
 ---
 
+## Sprint plan (set S175, 2026-10-04)
+
+Sized to roughly one week of Claude usage per sprint (the limit resets Monday nights). Work top to bottom; carry over what
+doesn't fit. Business blockers (LLC reinstatement, letter of intent, Clint's figures) run alongside.
+
+**Sprint 1: go-live foundations (week of Oct 5)**
+1. **Script launch modes**: production (active call required), training (sandbox credentials for APIs, tax and
+   payment gateways), designer sandbox (choose sandbox or production credentials). Every later test depends on it. (2 sessions)
+2. **Billing, metering side:** reconcile against the SignalWire CDR, then **invoice generation** (numbering, month close,
+   adjustments, printable view). (1–2)
+3. **Telephony handler null guards** plus one live test call that also checks `disconnected_at` is stamped. (½)
+4. **Billing, Stripe side** in Stripe test mode: payment methods (hosted, tokenized), Pay now, webhooks. (1–2)
+
+**Sprint 2: supervisors and reporting (week of Oct 12; SupportTier meeting Oct 14)**
+1. **Active Calls widget**: list + drill-down modal reusing the supervisor tools from the agent-state widget. (1–2)
+2. **Export Worker framework** + its first real export (media-agency / Cannella report). (2)
+3. **Internal KPI widgets** (campaign KPIs) on the existing dashboards. (1)
+
+**Sprint 3: client-facing (week of Oct 19)**
+1. **Client dashboards + client invite**: clients log in to see their assigned dashboards (TMS View as reference). (2)
+2. **Agent Helpdesk CMS**, shaped by the SupportTier meeting. (2)
+3. **Recordings → compressed MP3** (code only; moving them to Azure Blob waits for hosting). (1)
+
+**After the deal is signed (funds):** Azure hosting build-out, load test, number porting, PCI scans.
+**Post-launch (respecting the change freeze):** Team Chat, Chrome Extension (screen recording, raise agent tab).
+
 ## Tier 1 — Revenue-critical MVP
 
 - [ ] **BLOCKER — reinstate Call Center Solutions, LLC with the Oregon Secretary of State (added S175, 2026-10-03).**
@@ -739,6 +765,19 @@ everything above it, but genuinely important given Life Seasons' media-driven bu
         a full vendor portal for media agencies and a separate one for fulfillment agencies. Do not
         build this speculatively — only the assignment/export/key-management pieces above are
         actually being asked for right now.
+- [ ] **Script launch modes (added S175).** Manual CRM script launch splits into three:
+      **production** (requires an active call), **training** (APIs, tax providers and payment gateways use the campaign's
+      *sandbox* credentials, so trainees never post real orders or charges), and **designer sandbox** (script designers
+      choose sandbox or production credentials per run). Needs a sandbox credential set on each campaign credential card, a
+      run-mode stamp on the call record (excluded from billing, commissions and KPIs), and a clear on-screen mode banner.
+
+- [ ] **Client-facing dashboards + client invite (added S175).** Clients (the tenant's own customers, e.g. Life Seasons'
+      leadership) are invited to log in and view only the dashboards assigned to them. Read-only, scoped to their
+      client/campaigns. Reference: TMS View (Stephen has it).
+
+- [ ] **Chrome Extension (added S175 to the checklist).** Screen recording merged with call audio (server ingest exists);
+      raise the agent-portal tab on Take Over and when the queue selects the agent. See memory: chrome extension scope.
+
 - [ ] **Team Chat.** Valuable but internal-only — doesn't affect the client's service or reportable
       results, hence lowest priority on this list. Full requirements (expands on the existing
       "planned, not yet built" architecture note in CLAUDE.md's Chat System Architecture section):
