@@ -186,6 +186,7 @@
 | 174 | 2026-10-03 | 2:22 PM PDT | 3:31 PM PDT | 69 min | ~21227 min |
 | 175 | 2026-10-03 | 4:02 PM PDT | 7:03 PM PDT | 181 min | ~21408 min |
 | 176 | 2026-10-04 | 12:30 PM PDT | 1:13 PM PDT | 43 min | ~21451 min |
+| 177 | 2026-10-04 | 3:30 PM PDT | 3:55 PM PDT | 25 min | ~21476 min |
 
 ---
 
@@ -11387,3 +11388,34 @@ sessions go to code.
 ### Next
 
 - Sprint 1 (week of Oct 5, after the usage reset): script launch modes → invoices → null guards + live call → Stripe test mode.
+
+## Session 177
+
+**Date:** 2026-10-04
+**Start:** 3:30 PM PDT
+**End:** 3:55 PM PDT
+**Duration:** 25 minutes
+**Total Duration:** ~21476 minutes
+
+### Focus
+
+Bugs Stephen found while building a CS Transfer section in the NeuroQ - LF TV script.
+
+### Done
+
+- **Usage card crash:** `MissingMethodException` on `UsageLine.BilledMinutes`. Hot reload reported success but never
+  loaded the new Domain member; fixed by restarting the API. Memory note added: after Domain changes, restart, don't trust hot reload.
+- **Shared variables stale after `trigger_telephony_event`** (`61f68ed`). The fired branch (time of day → set
+  `shared.outside_hours` → tf_end) ran and finished inside `FireEventAsync`. Redis held the right values, but `ctx.SharedVars` had been
+  loaded when the CRM advance began, so the branch nodes that auto-advanced next saw stale values. The handler now reloads shared vars
+  after firing. Regression test added. (I overwrote the existing test file by mistake, then restored it from git and added the
+  test; 1,077 Infrastructure tests pass.)
+- **Mid-call transfer to the CS queue fails** (diagnosed, planned): event branches fired from the CRM run with no ESL connection, and
+  `TransferNodeHandler` takes `failed` immediately. Design per ARCHITECTURE §22: same call record, new interaction with its own
+  agent and campaign; the record keeps the sales campaign; cold transfer first. Added as **Sprint 1 item 0** in
+  `docs/sprint-1-spec.md` (`83eddb3`).
+- Rebuilt the production web app for Stephen's AgentShell change (Flows link removed from the agent view; uncommitted, Stephen's).
+
+### Next
+
+- Tuesday: Sprint 1 item 0 (mid-call CS transfer), then launch modes. Stephen will bring any other bugs he finds while testing.
