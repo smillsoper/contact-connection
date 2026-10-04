@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import PortalShell from '../../components/portal/PortalShell'
+import TenantUsageCard from '../../components/portal/TenantUsageCard'
 import {
   getTenant,
   updateTenant,
@@ -452,6 +453,8 @@ export default function TenantDetailPage() {
             Save feature flags
           </button>
         </section>
+
+        {id && <TenantUsageCard tenantId={id} />}
       </div>
     </PortalShell>
   )

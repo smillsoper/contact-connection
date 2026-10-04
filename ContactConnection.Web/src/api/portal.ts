@@ -519,3 +519,31 @@ export async function migrateTenants(): Promise<MigrateTenantsResult> {
     method: 'POST',
   })
 }
+
+// ── Usage metering (S174) ────────────────────────────────────────────────────
+
+export interface UsageLine { calls: number; seconds: number; minutes: number }
+
+export interface TenantUsage {
+  month: string
+  timezone: string
+  inboundLocal: UsageLine
+  inboundTollFree: UsageLine
+  outbound: UsageLine
+  totalMinutes: number
+  byNumber: { number: string; tollFree: boolean; calls: number; minutes: number }[]
+  unended: number
+  internal: number
+  rates: { rate: number; tollFreeSurcharge: number; minimum: number }
+  charges: { localAndOutbound: number; tollFree: number; usage: number; minimum: number; total: number }
+}
+
+export async function getTenantUsage(
+  id: string,
+  q: { month: string; rate: number; tollFreeSurcharge: number; minimum: number },
+): Promise<TenantUsage> {
+  const params = new URLSearchParams({
+    month: q.month, rate: String(q.rate), tollFreeSurcharge: String(q.tollFreeSurcharge), minimum: String(q.minimum),
+  })
+  return portalFetch<TenantUsage>(`/api/v1/portal/tenants/${id}/usage?${params}`)
+}

@@ -2,6 +2,9 @@ using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
 using ContactConnection.Domain.Entities;
+using ContactConnection.Domain.ValueObjects;
+using ContactConnection.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
 using ContactConnection.Infrastructure.Email;
 using Microsoft.Extensions.Logging;
 
@@ -25,6 +28,7 @@ public static class PortalTenantsEndpoints
         group.MapPost("{id:guid}/reset-onboarding", ResetOnboarding);
         group.MapPost("{id:guid}/invite-admin", InviteAdmin);
         group.MapGet("{id:guid}/agents", ListTenantAgents);
+        group.MapGet("{id:guid}/usage", Usage);
         group.MapPost("{id:guid}/agents/{agentId:guid}/reset-password", ResetTenantAgentPassword);
 
         return app;
@@ -275,6 +279,70 @@ public static class PortalTenantsEndpoints
         }
 
         return Results.Ok(new { message = $"Invitation sent to {invite.Email}." });
+    }
+
+    /// <summary>
+    /// Billable carrier minutes for one calendar month in the tenant's time zone (S174 usage metering), with the
+    /// charge at the given per-minute rate, toll-free surcharge and monthly minimum. Rates are query parameters
+    /// until per-tenant billing settings exist.
+    /// </summary>
+    private static async Task<IResult> Usage(
+        Guid id, string? month, decimal? rate, decimal? tollFreeSurcharge, decimal? minimum,
+        ITenantRepository tenants, TenantContext tenantContext, ScopedTenantDbContextFactory dbFactory, CancellationToken ct)
+    {
+        var tenant = await tenants.GetByIdAsync(id, ct);
+        if (tenant is null) return Results.NotFound();
+
+        TimeZoneInfo zone;
+        try { zone = TimeZoneInfo.FindSystemTimeZoneById(string.IsNullOrWhiteSpace(tenant.Timezone) ? "America/Los_Angeles" : tenant.Timezone); }
+        catch (TimeZoneNotFoundException) { zone = TimeZoneInfo.Utc; }
+
+        var nowLocal = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, zone);
+        var first = new DateTime(nowLocal.Year, nowLocal.Month, 1);
+        if (!string.IsNullOrWhiteSpace(month))
+        {
+            if (!DateTime.TryParseExact(month + "-01", "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out first))
+                return Results.BadRequest(new { error = "month must be yyyy-MM" });
+        }
+        var from = new DateTimeOffset(first, zone.GetUtcOffset(first)).ToUniversalTime();
+        var nextMonth = first.AddMonths(1);
+        var to = new DateTimeOffset(nextMonth, zone.GetUtcOffset(nextMonth)).ToUniversalTime();
+
+        tenantContext.Current = tenant;
+        await using var db = dbFactory.Create();
+        var calls = await db.CallRecords.AsNoTracking()
+            .Where(r => r.CallStartAt >= from && r.CallStartAt < to)
+            .Select(r => new
+            {
+                r.Source, r.CallerId, r.Dnis, r.CallStartAt, r.CallEndAt,
+                // The caller's leg ends at the terminal call state; the record itself stays open through wrap-up.
+                LegEnd = db.CallStateHistory
+                    .Where(h => h.CallRecordId == r.Id && (h.State == CallHistoryState.Completed || h.State == CallHistoryState.Abandoned))
+                    .Max(h => (DateTimeOffset?)h.EnteredAt),
+            })
+            .ToListAsync(ct);
+
+        var tally = new UsageTally();
+        foreach (var c in calls)
+            tally.Add(new MeteredCall(c.Source, c.CallerId, c.Dnis, c.CallStartAt, c.LegEnd ?? c.CallEndAt));
+
+        var charges = UsageCharges.Calculate(tally, rate ?? 0.035m, tollFreeSurcharge ?? 0.01m, minimum ?? 0m);
+        return Results.Ok(new
+        {
+            month = first.ToString("yyyy-MM"),
+            timezone = zone.Id,
+            from, to,
+            inboundLocal = tally.InboundLocal,
+            inboundTollFree = tally.InboundTollFree,
+            outbound = tally.Outbound,
+            totalMinutes = tally.InboundLocal.Minutes + tally.InboundTollFree.Minutes + tally.Outbound.Minutes,
+            byNumber = tally.ByNumber.OrderByDescending(kv => kv.Value.Seconds)
+                .Select(kv => new { number = kv.Key, tollFree = BillableNumber.IsTollFree(kv.Key), kv.Value.Calls, kv.Value.Minutes }),
+            unended = tally.Unended,
+            @internal = tally.Internal,
+            rates = new { rate = rate ?? 0.035m, tollFreeSurcharge = tollFreeSurcharge ?? 0.01m, minimum = minimum ?? 0m },
+            charges,
+        });
     }
 
     private static async Task<IResult> ListTenantAgents(
