@@ -12,7 +12,7 @@ DevLog.md needs to be updated every session with the session start date and time
 
 ## Current Project Status
 
-**As of:** 2026-10-03 (Session 174 complete)
+**As of:** 2026-10-03 (Session 175 complete)
 
 ### Solution Structure
 
@@ -27,7 +27,7 @@ ContactConnection.slnx
 
 Clean Architecture dependency chain: `Domain ← Application ← Infrastructure ← Api`
 Target framework: **net10.0** across all projects.
-Build status: **0 warnings, 0 errors.**
+Build status: **0 errors; 6 known warnings** (telephony node handlers' `ctx.Esl` nullability — see DevLog S175 Next).
 
 ---
 

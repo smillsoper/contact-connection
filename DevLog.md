@@ -184,6 +184,7 @@
 | 172 | 2026-10-02 | 2:00 PM PDT | 11:09 PM PDT | 549 min | ~21155 min |
 | 173 | 2026-10-02 | 11:21 PM PDT | 11:24 PM PDT | 3 min | ~21158 min |
 | 174 | 2026-10-03 | 2:22 PM PDT | 3:31 PM PDT | 69 min | ~21227 min |
+| 175 | 2026-10-03 | 4:02 PM PDT | 7:03 PM PDT | 181 min | ~21408 min |
 
 ---
 
@@ -11293,3 +11294,54 @@ production hosting. Kept token-light, because Stephen was near the weekly usage 
 - From Clint: current Five9 cost, number list and type, current carrier info for porting.
 - Ask counsel about USF/regulatory fees. Price the remaining setup-fee items.
 - William's supervisor-tool tests; Order API staging key; build the hosting prep (recordings → Blob, compose split).
+
+## Session 175
+
+**Date:** 2026-10-03
+**Start:** 4:02 PM PDT
+**End:** 7:03 PM PDT
+**Duration:** 181 minutes
+**Total Duration:** ~21408 minutes
+
+### Focus
+
+The metering half of per-minute billing, splitting a call's hang-up time from its record-close time, and planning
+payments and compliance. Business blocker found: the LLC is inactive in the Oregon registry.
+
+### Done
+
+- **Usage metering** (`672de81`): Platform Portal tenant page "Usage & billing" card.
+  - Counts billable carrier minutes for a month in the tenant's time zone: PSTN calls only (real ANI to real DID; real number dialed).
+  - Splits local and toll-free inbound by the DID's area code; outbound counted separately.
+  - Per-number breakdown for reconciliation; internal and test calls excluded.
+  - Domain `UsageTally` / `UsageCharges` with tests (rounding away from zero; monthly minimum).
+- **`disconnected_at`** (`f097f08`, Stephen's call): the hang-up time is separate from `call_end_at` (record closed) and
+  `finalized_at` (supervisor close-out).
+  - Stamped at every real hang-up: ESL CHANNEL_HANGUP, the tenant-scan fallback, both queue-callback abandons, and the softphone outbound end.
+  - The startup orphan sweep closes records without one, so those show as "needs review" and aren't billed.
+  - Migration backfilled existing records; tenant migrations run on all tenants.
+  - Corrected my earlier claim: softphone outbound records already closed at hang-up.
+- **Per-tenant billing rates** (`3b7796a`): rate, toll-free surcharge and monthly minimum on `public.tenants`. The card
+  previews what-if prices and saves them. Browser-verified.
+- **Security:** `Microsoft.AspNetCore.OpenApi` 10.0.5 → 10.0.12, pulling `Microsoft.OpenApi` 2.12.0. Clears a high-severity
+  advisory (`45524dd`).
+- **Warnings:** cleared 4 (nullable Avalara fee-line state via `[NotNullWhen]`; two unread constructor parameters) (`f58ff85`).
+- **Checklist additions:**
+  - payment collection: Stripe ACH Direct Debit, contract terms, sales-tax question, bookkeeping;
+  - **tenant billing area**: Billing permission, Stripe-tokenized payment methods (raw bank and card data never reach us),
+    invoices with printable view and PDF, Pay now, payment history, webhooks, audit trail, Portal view;
+  - **Stripe as a campaign gateway**: raw-card-API gate, a capability probe on Test, live detection that flags
+    the gateway, a hosted-field agent-entry fallback (SMS links ruled out), and the `failed` path designed per tenant;
+  - **PCI DSS attestation** as a service provider;
+  - **BLOCKER: reinstate Call Center Solutions, LLC** in the Oregon registry. It went inactive because WLR Law withdrew as
+    registered agent over no activity. $300, 1–2 business days; must be done before any Life Seasons contract or money.
+- Tests: 1,494 passing (Domain 273, Application 20, Infrastructure 1,076, Api 125).
+
+### Next
+
+- Reconcile metering against the SignalWire CDR export when it arrives: are agent dials to our own DIDs routed through
+  SignalWire? Does SignalWire's clock start earlier? Then place a live test call to confirm `disconnected_at` is stamped.
+- Invoice generation (design first: numbering, month close, adjustments).
+- The six telephony node handlers' `ctx.Esl` null warnings: add the guard pattern, then test with a live call.
+- Stephen: talk with William about funding the LLC reinstatement; a letter of intent from Life Seasons; Clint's figures
+  (Five9 cost, number counts by type, minutes, agents); SignalWire sales/vetting replies (likely Monday).
