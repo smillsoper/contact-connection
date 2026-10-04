@@ -452,7 +452,17 @@ Nothing else matters if an agent can't take an order and get paid on a call.
       settings; invoice generation.
       **S175 — `disconnected_at` (`f097f08`):** the hang-up time is now its own column, separate from `call_end_at`
       (record closed) and `finalized_at`. It is stamped at every real hang-up, and billing meters to it. Calls closed by the startup
-      sweep have no disconnect time and show as "needs review", not billed. Run tenant migrations for other tenants.
+      sweep have no disconnect time and show as "needs review", not billed. Tenant migrations run on all tenants (Portal).
+      **Payment collection (added S175). Set up BEFORE the first invoice, not after:**
+      - **Stripe with ACH Direct Debit** (about 0.8%, capped at $5, vs ~3% by card). The tenant signs the debit authorization once
+        during onboarding. Our monthly invoice is charged through the Stripe API. Card only as a fallback, if at all.
+        Setting up the Stripe account is free; do it close to launch.
+      - The setup fee can come by ACH or wire to the business bank if Stripe isn't ready yet.
+      - Contract payment terms: automatic monthly charge (e.g. on day 5), ACH required, late fee and **suspension
+        clause** (we pay SignalWire on their behalf).
+      - Ask counsel or an accountant about **sales tax on SaaS/telecom** in the tenant's billing state (Oregon has none),
+        alongside the USF question.
+      - Bookkeeping: business bank account + accounting software (QuickBooks, Wave or Xero) connected to Stripe.
 
 - [ ] **Number porting — onboarding step (added S174).** Life Seasons' numbers (main + every media-station
       number) move from their current carrier to SignalWire. Numbers that can't be ported (or a short-term
