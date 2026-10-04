@@ -33,6 +33,7 @@ public class TriggerTelephonyEventNodeHandler(
     IVariableResolver resolver,
     ITelephonyCallSessionStore sessionStore,
     ITelephonyFlowEngine telephonyEngine,
+    ISharedCallVariableStore sharedVars,
     ILogger<TriggerTelephonyEventNodeHandler> logger) : NodeHandlerBase(resolver), INodeHandler
 {
     public string NodeType => "trigger_telephony_event";
@@ -88,6 +89,12 @@ public class TriggerTelephonyEventNodeHandler(
                         "TriggerTelephonyEventNodeHandler [{Session}]: fired '{Event}' on channel " +
                         "{Uuid} — handled={Handled}",
                         ctx.SessionId, eventName, callSession.ChannelUuid, result.Handled);
+
+                    // The event branch runs inside FireEventAsync and may have finished already (e.g.
+                    // time-of-day → set shared vars → tf_end, with no waits). ctx.SharedVars was loaded when
+                    // this advance began, so reload it: nodes that auto-advance right after this one (a branch
+                    // on {{shared.x}}) must see what the branch just wrote (S176 — CS transfer bug).
+                    ctx.SharedVars = await sharedVars.GetAllAsync(ctx.CallRecordId, ct);
                 }
                 catch (Exception ex)
                 {

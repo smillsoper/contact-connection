@@ -20,9 +20,16 @@ public class TriggerTelephonyEventNodeHandlerTests
 
     private readonly Mock<ITelephonyCallSessionStore> _sessionStore = new();
     private readonly Mock<ITelephonyFlowEngine> _telephonyEngine = new();
+    private readonly Mock<ISharedCallVariableStore> _sharedVars = new();
+    private readonly Dictionary<string, string> _storedShared = [];
+
+    public TriggerTelephonyEventNodeHandlerTests() =>
+        _sharedVars.Setup(s => s.GetAllAsync(CallId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new Dictionary<string, string>(_storedShared));
 
     private TriggerTelephonyEventNodeHandler NewHandler() => new(
-        new VariableResolver(), _sessionStore.Object, _telephonyEngine.Object, NullLogger<TriggerTelephonyEventNodeHandler>.Instance);
+        new VariableResolver(), _sessionStore.Object, _telephonyEngine.Object, _sharedVars.Object,
+        NullLogger<TriggerTelephonyEventNodeHandler>.Instance);
 
     private static FlowExecutionContext Ctx() => new()
     {
@@ -134,5 +141,26 @@ public class TriggerTelephonyEventNodeHandlerTests
         _telephonyEngine.Verify(e => e.FireEventAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<FireEventContext>(), It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    // S176 regression: the fired branch can finish inside FireEventAsync and write {{shared.*}} (CS transfer:
+    // time-of-day → set shared.outside_hours → tf_end). CRM nodes that auto-advance right after this one must see
+    // those values, not the snapshot loaded when the advance began.
+    [Fact]
+    public async Task ReloadsSharedVariables_WrittenByTheEventBranch()
+    {
+        _storedShared["outside_hours"] = "false";
+        _sessionStore.Setup(s => s.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new TelephonyCallSession { ChannelUuid = "uuid-123", CallRecordId = CallId }]);
+        _telephonyEngine.Setup(e => e.FireEventAsync(
+                "uuid-123", "custom:capture_card", It.IsAny<FireEventContext>(), It.IsAny<CancellationToken>()))
+            .Callback(() => _storedShared["outside_hours"] = "true")
+            .ReturnsAsync(new FireEventResult { Handled = true });
+
+        var ctx = Ctx();
+        ctx.SharedVars = new Dictionary<string, string> { ["outside_hours"] = "false" };   // loaded at advance start
+        await NewHandler().ExecuteAsync(Node(), ctx, agentInput: null, agentTransition: "");
+
+        Assert.Equal("true", ctx.SharedVars["outside_hours"]);
     }
 }
