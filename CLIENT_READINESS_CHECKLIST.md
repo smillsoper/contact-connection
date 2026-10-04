@@ -464,6 +464,25 @@ Nothing else matters if an agent can't take an order and get paid on a call.
         alongside the USF question.
       - Bookkeeping: business bank account + accounting software (QuickBooks, Wave or Xero) connected to Stripe.
 
+- [ ] **Tenant billing area: invoices, payments, payment methods (added S175).** A section of the tenant app,
+      visible only to users with a new **Billing** permission (tenant admins by default; assignable through custom roles).
+      - **Payment methods:** add, replace or remove the bank account (ACH) or card. **Raw bank/card details never touch our
+        servers.** Entry is through Stripe's hosted UI (Payment Element / Financial Connections bank login with a
+        SetupIntent). We store only the Stripe customer ID and payment-method token plus display info (bank name, last 4).
+        Default method and an autopay on/off switch.
+      - **Invoices:** list (open / paid / past due), invoice detail with usage lines (local / toll-free / outbound minutes,
+        minimum, setup fee), **printable view** and a PDF download.
+      - **Pay now** on any open invoice: charges the saved method or takes a one-time method; ACH shows "processing" until it
+        clears.
+      - **Payment history** with receipts; refunds and credits shown against their invoice.
+      - **Status from Stripe webhooks** (signature-verified): paid, failed and disputed update the invoice. A failed payment
+        emails the tenant's billing contacts and alerts the platform. Past-due banners in the app lead into
+        the suspension rules in the contract.
+      - Billing contacts (who gets invoices and receipts), separate from login users.
+      - Audit trail for every change to payment methods and every payment action (who, when).
+      - Platform Portal side: per-tenant billing view (balance, invoices, payment status), plus manual adjustments and
+        credits with a reason.
+
 - [ ] **Number porting — onboarding step (added S174).** Life Seasons' numbers (main + every media-station
       number) move from their current carrier to SignalWire. Numbers that can't be ported (or a short-term
       fallback) can forward instead.
