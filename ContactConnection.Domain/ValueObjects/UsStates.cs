@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace ContactConnection.Domain.ValueObjects;
 
 /// <summary>US state, DC and territory postal codes — for validating state-keyed configuration
@@ -12,5 +14,5 @@ public static class UsStates
         "DC","PR","GU","VI","AS","MP",
     };
 
-    public static bool IsValid(string? code) => code is not null && _codes.Contains(code);
+    public static bool IsValid([NotNullWhen(true)] string? code) => code is not null && _codes.Contains(code);
 }

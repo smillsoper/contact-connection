@@ -32,7 +32,6 @@ public sealed class QueueCallbackDeliveryService(
     IAgentStateStore stateStore,
     IHubContext<FlowHub, IFlowHubClient> hub,
     ICallStateHistoryRecorder callStateRecorder,
-    QueuedCallDeliveryService queuedCallDelivery,
     IServiceScopeFactory scopeFactory,
     IConfiguration config,
     ILogger<QueueCallbackDeliveryService> logger,

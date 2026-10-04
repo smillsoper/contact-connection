@@ -51,7 +51,6 @@ public sealed class SupervisorCallService(
     IAgentRegistrationStore registrations,
     IAgentStateStore agentStates,
     ICampaignRepository campaigns,
-    IFlowSessionRepository flowSessions,
     IFlowEngine flowEngine,
     ICallRecordAuditRepository audit,
     IHubContext<FlowHub, IFlowHubClient> hub,

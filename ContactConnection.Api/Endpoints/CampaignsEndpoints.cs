@@ -254,12 +254,13 @@ public static class CampaignsEndpoints
                 var feeStates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var f in avalara?.FeeLines ?? [])
                 {
-                    if (!ContactConnection.Domain.ValueObjects.UsStates.IsValid(f.State?.Trim()))
+                    var state = f.State?.Trim();
+                    if (!ContactConnection.Domain.ValueObjects.UsStates.IsValid(state))
                         return $"Fee line state '{f.State}' is not a valid US state code.";
                     if (string.IsNullOrWhiteSpace(f.TaxCode) || string.IsNullOrWhiteSpace(f.Description))
-                        return $"The {f.State.Trim().ToUpperInvariant()} fee line needs an Avalara tax code and a description.";
-                    if (!feeStates.Add($"{f.State.Trim()}|{f.TaxCode.Trim()}"))
-                        return $"The {f.State.Trim().ToUpperInvariant()} fee line {f.TaxCode} is listed more than once.";
+                        return $"The {state.ToUpperInvariant()} fee line needs an Avalara tax code and a description.";
+                    if (!feeStates.Add($"{state}|{f.TaxCode.Trim()}"))
+                        return $"The {state.ToUpperInvariant()} fee line {f.TaxCode} is listed more than once.";
                 }
             }
         }
