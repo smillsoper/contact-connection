@@ -448,8 +448,11 @@ Nothing else matters if an agent can't take an order and get paid on a call.
       caller leg ending at the terminal call state (not wrap-up), local vs toll-free by the DID's area code, and rates entered
       on the card. Oct 1 came to 36.33 min against SignalWire's 38.37. **Remaining:** reconcile against the
       SignalWire CDR (are agent dials to our own DIDs routed through SignalWire? Does SignalWire's clock start
-      earlier?); outbound minutes still run to the record end (includes wrap-up); per-tenant rate/minimum
+      earlier?); per-tenant rate/minimum
       settings; invoice generation.
+      **S175 — `disconnected_at` (`f097f08`):** the hang-up time is now its own column, separate from `call_end_at`
+      (record closed) and `finalized_at`. It is stamped at every real hang-up, and billing meters to it. Calls closed by the startup
+      sweep have no disconnect time and show as "needs review", not billed. Run tenant migrations for other tenants.
 
 - [ ] **Number porting — onboarding step (added S174).** Life Seasons' numbers (main + every media-station
       number) move from their current carrier to SignalWire. Numbers that can't be ported (or a short-term
