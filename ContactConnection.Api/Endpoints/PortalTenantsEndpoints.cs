@@ -29,6 +29,7 @@ public static class PortalTenantsEndpoints
         group.MapPost("{id:guid}/invite-admin", InviteAdmin);
         group.MapGet("{id:guid}/agents", ListTenantAgents);
         group.MapGet("{id:guid}/usage", Usage);
+        group.MapPut("{id:guid}/billing-rates", UpdateBillingRates);
         group.MapPost("{id:guid}/agents/{agentId:guid}/reset-password", ResetTenantAgentPassword);
 
         return app;
@@ -283,8 +284,7 @@ public static class PortalTenantsEndpoints
 
     /// <summary>
     /// Billable carrier minutes for one calendar month in the tenant's time zone (S174 usage metering), with the
-    /// charge at the given per-minute rate, toll-free surcharge and monthly minimum. Rates are query parameters
-    /// until per-tenant billing settings exist.
+    /// charge at the tenant's saved rates (S175). Rate query parameters override them, for trying "what if" prices.
     /// </summary>
     private static async Task<IResult> Usage(
         Guid id, string? month, decimal? rate, decimal? tollFreeSurcharge, decimal? minimum,
@@ -322,7 +322,10 @@ public static class PortalTenantsEndpoints
         foreach (var c in calls)
             tally.Add(new MeteredCall(c.Source, c.CallerId, c.Dnis, c.CallStartAt, c.DisconnectedAt, c.Closed));
 
-        var charges = UsageCharges.Calculate(tally, rate ?? 0.035m, tollFreeSurcharge ?? 0.01m, minimum ?? 0m);
+        var r = rate ?? tenant.BillingRatePerMinute ?? Tenant.DefaultRatePerMinute;
+        var tf = tollFreeSurcharge ?? tenant.BillingTollFreeSurcharge ?? Tenant.DefaultTollFreeSurcharge;
+        var min = minimum ?? tenant.BillingMonthlyMinimum ?? 0m;
+        var charges = UsageCharges.Calculate(tally, r, tf, min);
         return Results.Ok(new
         {
             month = first.ToString("yyyy-MM"),
@@ -337,10 +340,30 @@ public static class PortalTenantsEndpoints
             unended = tally.Unended,
             needsReview = tally.NeedsReview,
             @internal = tally.Internal,
-            rates = new { rate = rate ?? 0.035m, tollFreeSurcharge = tollFreeSurcharge ?? 0.01m, minimum = minimum ?? 0m },
+            rates = new { rate = r, tollFreeSurcharge = tf, minimum = min },
+            savedRates = new
+            {
+                rate = tenant.BillingRatePerMinute, tollFreeSurcharge = tenant.BillingTollFreeSurcharge,
+                minimum = tenant.BillingMonthlyMinimum,
+            },
             charges,
         });
     }
+
+    private static async Task<IResult> UpdateBillingRates(
+        Guid id, BillingRatesRequest request, ITenantRepository tenants, CancellationToken ct)
+    {
+        var tenant = await tenants.GetByIdAsync(id, ct);
+        if (tenant is null) return Results.NotFound();
+        if (request.Rate < 0 || request.TollFreeSurcharge < 0 || request.Minimum < 0)
+            return Results.BadRequest(new { error = "Rates can't be negative." });
+
+        tenant.SetBillingRates(request.Rate, request.TollFreeSurcharge, request.Minimum);
+        await tenants.SaveChangesAsync(ct);
+        return Results.NoContent();
+    }
+
+    public record BillingRatesRequest(decimal Rate, decimal TollFreeSurcharge, decimal Minimum);
 
     private static async Task<IResult> ListTenantAgents(
         Guid id,

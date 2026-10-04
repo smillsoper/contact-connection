@@ -61,6 +61,10 @@ public class TenantConfiguration : IEntityTypeConfiguration<Tenant>
 
         builder.Property(t => t.TrialExpiresAt).HasColumnName("trial_expires_at");
 
+        builder.Property(t => t.BillingRatePerMinute).HasColumnName("billing_rate_per_minute").HasPrecision(10, 4);
+        builder.Property(t => t.BillingTollFreeSurcharge).HasColumnName("billing_toll_free_surcharge").HasPrecision(10, 4);
+        builder.Property(t => t.BillingMonthlyMinimum).HasColumnName("billing_monthly_minimum").HasPrecision(12, 2);
+
         builder.Property(t => t.BillingContact)
             .HasColumnName("billing_contact")
             .HasMaxLength(200);

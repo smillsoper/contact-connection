@@ -16,6 +16,15 @@ public class Tenant
     public bool IsActive { get; private set; }
     public DateTimeOffset? TrialExpiresAt { get; private set; }
     public string? BillingContact { get; private set; }
+
+    // Per-minute billing (S175): every billed carrier minute at the rate, toll-free minutes plus the surcharge,
+    // raised to the monthly minimum. Null = not set yet (platform defaults apply).
+    public decimal? BillingRatePerMinute { get; private set; }
+    public decimal? BillingTollFreeSurcharge { get; private set; }
+    public decimal? BillingMonthlyMinimum { get; private set; }
+
+    public const decimal DefaultRatePerMinute = 0.035m;
+    public const decimal DefaultTollFreeSurcharge = 0.01m;
     public string? InviteEmail { get; private set; }
     public TenantFeatureFlags FeatureFlags { get; private set; } = TenantFeatureFlags.Default();
     public TenantSettings Settings { get; private set; } = TenantSettings.Default();
@@ -51,6 +60,15 @@ public class Tenant
 
     public void SetCustomDomain(string? customDomain) => CustomDomain = customDomain;
     public void SetBillingContact(string? billingContact) => BillingContact = billingContact;
+
+    public void SetBillingRates(decimal ratePerMinute, decimal tollFreeSurcharge, decimal monthlyMinimum)
+    {
+        if (ratePerMinute < 0 || tollFreeSurcharge < 0 || monthlyMinimum < 0)
+            throw new ArgumentException("Billing rates can't be negative.");
+        BillingRatePerMinute = ratePerMinute;
+        BillingTollFreeSurcharge = tollFreeSurcharge;
+        BillingMonthlyMinimum = monthlyMinimum;
+    }
     public void SetInviteEmail(string? email) => InviteEmail = email;
     public void SetTrialExpiry(DateTimeOffset? expiresAt) => TrialExpiresAt = expiresAt;
     public void SetDisplayName(string? displayName) => DisplayName = displayName;

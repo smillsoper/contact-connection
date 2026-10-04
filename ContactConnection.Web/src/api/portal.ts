@@ -536,15 +536,24 @@ export interface TenantUsage {
   needsReview: number
   internal: number
   rates: { rate: number; tollFreeSurcharge: number; minimum: number }
+  savedRates: { rate: number | null; tollFreeSurcharge: number | null; minimum: number | null }
   charges: { localAndOutbound: number; tollFree: number; usage: number; minimum: number; total: number }
 }
 
+/** Without rates, the tenant's saved rates apply; with them, a "what if" price for the same usage. */
 export async function getTenantUsage(
   id: string,
-  q: { month: string; rate: number; tollFreeSurcharge: number; minimum: number },
+  q: { month: string; rate?: number; tollFreeSurcharge?: number; minimum?: number },
 ): Promise<TenantUsage> {
-  const params = new URLSearchParams({
-    month: q.month, rate: String(q.rate), tollFreeSurcharge: String(q.tollFreeSurcharge), minimum: String(q.minimum),
-  })
+  const params = new URLSearchParams({ month: q.month })
+  if (q.rate !== undefined) params.set('rate', String(q.rate))
+  if (q.tollFreeSurcharge !== undefined) params.set('tollFreeSurcharge', String(q.tollFreeSurcharge))
+  if (q.minimum !== undefined) params.set('minimum', String(q.minimum))
   return portalFetch<TenantUsage>(`/api/v1/portal/tenants/${id}/usage?${params}`)
+}
+
+export async function saveTenantBillingRates(
+  id: string, rates: { rate: number; tollFreeSurcharge: number; minimum: number },
+): Promise<void> {
+  await portalFetch<void>(`/api/v1/portal/tenants/${id}/billing-rates`, { method: 'PUT', body: JSON.stringify(rates) })
 }

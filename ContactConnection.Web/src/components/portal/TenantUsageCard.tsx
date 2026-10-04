@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getTenantUsage, type TenantUsage } from '../../api/portal'
+import { getTenantUsage, saveTenantBillingRates, type TenantUsage } from '../../api/portal'
 
 const money = (n: number) => n.toLocaleString(undefined, { style: 'currency', currency: 'USD' })
 const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 2 })
@@ -14,25 +14,44 @@ function thisMonth() {
 }
 
 /**
- * Billable carrier minutes for a month (S174 usage metering). Rates are entered here until per-tenant billing
- * settings exist: every minute at the base rate, toll-free minutes plus the surcharge, raised to the monthly minimum.
+ * Billable carrier minutes for a month (S174 usage metering), charged at the tenant's saved rates (S175): every minute
+ * at the base rate, toll-free minutes plus the surcharge, raised to the monthly minimum. Editing the rates previews a
+ * "what if" price; Save makes them the tenant's rates.
  */
 export default function TenantUsageCard({ tenantId }: { tenantId: string }) {
   const [month, setMonth] = useState(thisMonth())
-  const [rate, setRate] = useState(0.035)
-  const [surcharge, setSurcharge] = useState(0.01)
-  const [minimum, setMinimum] = useState(0)
+  // null = use the tenant's saved rates; a number = previewing an edit
+  const [rate, setRate] = useState<number | null>(null)
+  const [surcharge, setSurcharge] = useState<number | null>(null)
+  const [minimum, setMinimum] = useState<number | null>(null)
   const [usage, setUsage] = useState<TenantUsage | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [saveMsg, setSaveMsg] = useState<string | null>(null)
+  const [reload, setReload] = useState(0)
 
   useEffect(() => {
     const t = setTimeout(() => {
-      getTenantUsage(tenantId, { month, rate, tollFreeSurcharge: surcharge, minimum })
+      getTenantUsage(tenantId, {
+        month, rate: rate ?? undefined, tollFreeSurcharge: surcharge ?? undefined, minimum: minimum ?? undefined,
+      })
         .then((u) => { setUsage(u); setError(null) })
         .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load usage'))
     }, 300)
     return () => clearTimeout(t)
-  }, [tenantId, month, rate, surcharge, minimum])
+  }, [tenantId, month, rate, surcharge, minimum, reload])
+
+  const shown = usage?.rates
+  const saved = usage?.savedRates
+  const notSaved = !!saved && saved.rate === null
+  const edited = !!shown && !!saved && (shown.rate !== saved.rate || shown.tollFreeSurcharge !== saved.tollFreeSurcharge
+    || shown.minimum !== saved.minimum)
+
+  const save = () => {
+    if (!shown) return
+    saveTenantBillingRates(tenantId, shown)
+      .then(() => { setRate(null); setSurcharge(null); setMinimum(null); setReload((n) => n + 1); setSaveMsg('Rates saved') })
+      .catch((e) => setSaveMsg(e instanceof Error ? e.message : 'Save failed'))
+  }
 
   const input = 'bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-sm text-white w-28'
   const rows = usage ? [
@@ -51,10 +70,27 @@ export default function TenantUsageCard({ tenantId }: { tenantId: string }) {
 
       <div className="flex flex-wrap gap-4 mb-4 text-xs text-gray-400">
         <label className="flex flex-col gap-1">Month<input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className={input} /></label>
-        <label className="flex flex-col gap-1">Rate / min<input type="number" step="0.001" min="0" value={rate} onChange={(e) => setRate(Number(e.target.value))} className={input} /></label>
-        <label className="flex flex-col gap-1">Toll-free surcharge / min<input type="number" step="0.001" min="0" value={surcharge} onChange={(e) => setSurcharge(Number(e.target.value))} className={input} /></label>
-        <label className="flex flex-col gap-1">Monthly minimum<input type="number" step="100" min="0" value={minimum} onChange={(e) => setMinimum(Number(e.target.value))} className={input} /></label>
+        <label className="flex flex-col gap-1">Rate / min<input type="number" step="0.001" min="0" value={rate ?? shown?.rate ?? ''} onChange={(e) => { setRate(Number(e.target.value)); setSaveMsg(null) }} className={input} /></label>
+        <label className="flex flex-col gap-1">Toll-free surcharge / min<input type="number" step="0.001" min="0" value={surcharge ?? shown?.tollFreeSurcharge ?? ''} onChange={(e) => { setSurcharge(Number(e.target.value)); setSaveMsg(null) }} className={input} /></label>
+        <label className="flex flex-col gap-1">Monthly minimum<input type="number" step="100" min="0" value={minimum ?? shown?.minimum ?? ''} onChange={(e) => { setMinimum(Number(e.target.value)); setSaveMsg(null) }} className={input} /></label>
+        <div className="flex items-end gap-2">
+          {(edited || notSaved) && (
+            <button onClick={save} className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg px-3 py-1.5 text-sm font-medium">
+              Save as tenant rates
+            </button>
+          )}
+          {edited && !notSaved && (
+            <button onClick={() => { setRate(null); setSurcharge(null); setMinimum(null); setSaveMsg(null) }}
+              className="text-gray-400 hover:text-white text-sm px-2 py-1.5">Reset</button>
+          )}
+        </div>
       </div>
+      <p className="text-xs mb-4 -mt-2">
+        {saveMsg ? <span className="text-emerald-400">{saveMsg}</span>
+          : notSaved ? <span className="text-amber-400">No rates saved for this tenant yet: showing platform defaults.</span>
+          : edited ? <span className="text-amber-400">Previewing unsaved rates.</span>
+          : <span className="text-gray-500">Tenant's saved rates.</span>}
+      </p>
 
       {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
 
