@@ -1,6 +1,37 @@
 # Sprint 1 Spec: Go-Live Foundations (decided S175, 2026-10-04)
 
-Decisions were settled ahead of the sprint so the sessions go to code. Order of work: **1 → 2 → 3 → 4**.
+Decisions were settled ahead of the sprint so the sessions go to code. Order of work: **0 → 1 → 2 → 3 → 4**.
+
+---
+
+## 0. Mid-call transfer to another campaign's queue (sales → CS) (≈2 sessions, FIRST)
+
+Found S176: a sales agent's script fires `trigger_telephony_event` → the telephony branch's `tf_transfer` (another campaign's queue)
+**always takes `failed`**. Event branches fired from the CRM side run with `ctx.Esl == null`, and `TransferNodeHandler`
+bails on that (traces 2026-10-04 2:57 PM and 3:18 PM). `SecureCollectNodeHandler`/`DelayNodeHandler` already open a fresh ESL
+through `_eslFactory` in that case. Life Seasons needs this: callers often redial the sales number to reach customer service, and
+Life Seasons doesn't want an IVR menu on the sales line.
+
+### Decisions (Stephen, S176)
+
+- **Same call record, a new interaction** (ARCHITECTURE §22 multi-interaction model), not a new record.
+- **Cold transfer first.** Warm (3-way until CS answers) comes later.
+
+### Build
+
+1. `TransferNodeHandler`: when `ctx.Esl` is null, open one through `_eslFactory` (the Secure Collect pattern).
+2. Mid-bridge mechanics: unbridge the caller from the sales agent, **park with MOH** (not hang up; `park_after_bridge` is
+   already set at `tf_answer`), release the sales agent into ACW, then enqueue for the target campaign. Reuse the queue
+   delivery path so the CS agent is rung normally.
+3. **Stop `record.SetCampaign(target)`** for this path. The call record keeps its entry (sales) campaign: media
+   attribution, DNIS, the original order. The session's *current* campaign switches for routing only.
+4. `CallInteraction` gains **`AgentId`, `CampaignId`** (+ migration; backfill existing interactions from their record).
+   Interaction 1 = sales agent/campaign; the CS agent's answer opens **interaction 2** on the same record with the CS
+   campaign's screen-pop flow. Commissions, KPIs and agent stats read agent/campaign per interaction.
+5. CS agent screen: their own script, plus the caller and the original order from interaction 1 (read-only).
+6. Call state history: `transferred` then `in_queue` under the CS campaign; the sales agent's handle time ends at the unbridge.
+7. Billing: one caller leg, so the minutes are counted once (the meter is already per record).
+8. Live test: a sales call → the agent fires the CS transfer → the caller hears hold music → a CS agent answers with interaction 2 → check commissions and media attribution still sit on sales.
 
 ---
 
