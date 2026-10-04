@@ -522,7 +522,8 @@ export async function migrateTenants(): Promise<MigrateTenantsResult> {
 
 // ── Usage metering (S174) ────────────────────────────────────────────────────
 
-export interface UsageLine { calls: number; seconds: number; minutes: number }
+/** minutes = actual connected time; billedMinutes = each call rounded up to the whole minute (what's charged). */
+export interface UsageLine { calls: number; seconds: number; minutes: number; billedMinutes: number }
 
 export interface TenantUsage {
   month: string
@@ -531,7 +532,8 @@ export interface TenantUsage {
   inboundTollFree: UsageLine
   outbound: UsageLine
   totalMinutes: number
-  byNumber: { number: string; tollFree: boolean; calls: number; minutes: number }[]
+  totalBilledMinutes: number
+  byNumber: { number: string; tollFree: boolean; calls: number; minutes: number; billedMinutes: number }[]
   unended: number
   needsReview: number
   internal: number

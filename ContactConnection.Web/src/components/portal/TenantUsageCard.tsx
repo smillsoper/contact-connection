@@ -65,7 +65,7 @@ export default function TenantUsageCard({ tenantId }: { tenantId: string }) {
       <h2 className="text-white text-sm font-semibold mb-1">Usage &amp; billing</h2>
       <p className="text-gray-500 text-xs mb-4">
         Billable carrier minutes: real callers to real numbers, and real numbers dialed. Internal calls and tests are not counted.
-        Month boundaries use the tenant's time zone{usage ? ` (${usage.timezone})` : ''}.
+        Each call is billed in whole minutes, rounded up, the way the carrier bills. Month boundaries use the tenant's time zone{usage ? ` (${usage.timezone})` : ''}.
       </p>
 
       <div className="flex flex-wrap gap-4 mb-4 text-xs text-gray-400">
@@ -102,7 +102,8 @@ export default function TenantUsageCard({ tenantId }: { tenantId: string }) {
                 <tr className="text-gray-500 text-xs text-left">
                   <th className="py-1 font-medium">Type</th>
                   <th className="py-1 font-medium text-right">Calls</th>
-                  <th className="py-1 font-medium text-right">Minutes</th>
+                  <th className="py-1 font-medium text-right">Actual min</th>
+                  <th className="py-1 font-medium text-right">Billed min</th>
                   <th className="py-1 font-medium text-right">Price / min</th>
                   <th className="py-1 font-medium text-right">Amount</th>
                 </tr>
@@ -112,26 +113,28 @@ export default function TenantUsageCard({ tenantId }: { tenantId: string }) {
                   <tr key={r.label} className="border-t border-gray-800">
                     <td className="py-1.5">{r.label}</td>
                     <td className="py-1.5 text-right">{r.line.calls}</td>
-                    <td className="py-1.5 text-right">{num(r.line.minutes)}</td>
+                    <td className="py-1.5 text-right text-gray-500">{num(r.line.minutes)}</td>
+                    <td className="py-1.5 text-right">{r.line.billedMinutes}</td>
                     <td className="py-1.5 text-right">${r.price.toFixed(3)}</td>
-                    <td className="py-1.5 text-right">{money(r.line.minutes * r.price)}</td>
+                    <td className="py-1.5 text-right">{money(r.line.billedMinutes * r.price)}</td>
                   </tr>
                 ))}
                 <tr className="border-t border-gray-700 text-white">
                   <td className="py-1.5 font-medium">Usage</td>
                   <td />
-                  <td className="py-1.5 text-right">{num(usage.totalMinutes)}</td>
+                  <td className="py-1.5 text-right text-gray-500">{num(usage.totalMinutes)}</td>
+                  <td className="py-1.5 text-right">{usage.totalBilledMinutes}</td>
                   <td />
                   <td className="py-1.5 text-right">{money(usage.charges.usage)}</td>
                 </tr>
                 {usage.charges.minimum > 0 && (
                   <tr className="text-gray-400">
-                    <td className="py-1">Monthly minimum</td><td /><td /><td />
+                    <td className="py-1">Monthly minimum</td><td /><td /><td /><td />
                     <td className="py-1 text-right">{money(usage.charges.minimum)}</td>
                   </tr>
                 )}
                 <tr className="text-white">
-                  <td className="py-1.5 font-semibold">Amount due</td><td /><td /><td />
+                  <td className="py-1.5 font-semibold">Amount due</td><td /><td /><td /><td />
                   <td className="py-1.5 text-right font-semibold">{money(usage.charges.total)}</td>
                 </tr>
               </tbody>
@@ -161,7 +164,7 @@ export default function TenantUsageCard({ tenantId }: { tenantId: string }) {
                     <tr key={n.number} className="border-t border-gray-800">
                       <td className="py-1">{fmtNumber(n.number)}{n.tollFree && <span className="ml-2 text-amber-400">toll-free</span>}</td>
                       <td className="py-1 text-right">{n.calls} calls</td>
-                      <td className="py-1 text-right">{num(n.minutes)} min</td>
+                      <td className="py-1 text-right">{n.billedMinutes} billed min ({num(n.minutes)} actual)</td>
                     </tr>
                   ))}
                 </tbody>

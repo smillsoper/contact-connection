@@ -42,6 +42,7 @@ public class UsageMeteringTests
         Assert.Equal((1, 90L), (t.InboundLocal.Calls, t.InboundLocal.Seconds));
         Assert.Equal((2, 180L), (t.InboundTollFree.Calls, t.InboundTollFree.Seconds));
         Assert.Equal(3m, t.InboundTollFree.Minutes);
+        Assert.Equal(3L, t.InboundTollFree.BilledMinutes);   // 120 s + 60 s = 2 + 1
         Assert.Equal(2, t.ByNumber["8001234567"].Calls);
     }
 
@@ -66,6 +67,7 @@ public class UsageMeteringTests
         t.Add(Call("callback", "+15416704541", "+15419196582", 30));
 
         Assert.Equal((2, 90L), (t.Outbound.Calls, t.Outbound.Seconds));
+        Assert.Equal(2L, t.Outbound.BilledMinutes);          // 60 s → 1, 30 s → 1
         Assert.Empty(t.ByNumber);
     }
 
@@ -93,12 +95,26 @@ public class UsageMeteringTests
         Assert.Equal(0L, t.InboundLocal.Seconds + t.Outbound.Seconds);
     }
 
+    [Theory]
+    [InlineData(10, 1)]
+    [InlineData(59, 1)]
+    [InlineData(60, 1)]
+    [InlineData(61, 2)]
+    [InlineData(132, 3)]
+    [InlineData(0, 0)]
+    public void Each_call_rounds_up_to_the_whole_minute(int seconds, long billed)
+    {
+        var t = new UsageTally();
+        t.Add(Call("inbound", "+15416704541", "+15416413898", seconds));
+        Assert.Equal(billed, t.InboundLocal.BilledMinutes);
+    }
+
     [Fact]
     public void Charges_apply_surcharge_to_toll_free_and_the_minimum()
     {
         var t = new UsageTally();
-        t.Add(Call("inbound", "+15416704541", "+15416413898", 600));  // 10 min local
-        t.Add(Call("outbound", "+15416704541", null, 120));            // 2 min outbound
+        t.Add(Call("inbound", "+15416704541", "+15416413898", 590));  // 9:50 → 10 billed min local
+        t.Add(Call("outbound", "+15416704541", null, 61));             // 1:01 → 2 billed min outbound
         t.Add(Call("inbound", "+15416704541", "+18001234567", 300));   // 5 min toll-free
 
         var c = UsageCharges.Calculate(t, 0.035m, 0.01m, 0m);

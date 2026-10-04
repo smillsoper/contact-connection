@@ -335,8 +335,9 @@ public static class PortalTenantsEndpoints
             inboundTollFree = tally.InboundTollFree,
             outbound = tally.Outbound,
             totalMinutes = tally.InboundLocal.Minutes + tally.InboundTollFree.Minutes + tally.Outbound.Minutes,
+            totalBilledMinutes = tally.InboundLocal.BilledMinutes + tally.InboundTollFree.BilledMinutes + tally.Outbound.BilledMinutes,
             byNumber = tally.ByNumber.OrderByDescending(kv => kv.Value.Seconds)
-                .Select(kv => new { number = kv.Key, tollFree = BillableNumber.IsTollFree(kv.Key), kv.Value.Calls, kv.Value.Minutes }),
+                .Select(kv => new { number = kv.Key, tollFree = BillableNumber.IsTollFree(kv.Key), kv.Value.Calls, kv.Value.Minutes, kv.Value.BilledMinutes }),
             unended = tally.Unended,
             needsReview = tally.NeedsReview,
             @internal = tally.Internal,

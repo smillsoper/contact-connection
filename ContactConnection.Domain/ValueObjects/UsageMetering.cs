@@ -37,8 +37,20 @@ public sealed record MeteredCall(string Source, string? CallerId, string? Dnis, 
 public sealed class UsageLine
 {
     public int Calls { get; internal set; }
+    /// <summary>Actual connected time, for reference and reconciliation.</summary>
     public long Seconds { get; internal set; }
     public decimal Minutes => Math.Round(Seconds / 60m, 2);
+
+    /// <summary>What gets billed: each call rounded up to the whole minute, the way the carrier bills us (SignalWire CDR,
+    /// verified S175: 10 s → 1 min, 132 s → 3 min).</summary>
+    public long BilledMinutes { get; internal set; }
+
+    internal void AddCall(long seconds)
+    {
+        Calls++;
+        Seconds += seconds;
+        BilledMinutes += (seconds + 59) / 60;
+    }
 }
 
 public sealed class UsageTally
@@ -84,15 +96,13 @@ public sealed class UsageTally
             UsageCategory.InboundTollFree => InboundTollFree,
             _ => Outbound,
         };
-        line.Calls++;
-        line.Seconds += seconds;
+        line.AddCall(seconds);
 
         if (category != UsageCategory.Outbound)
         {
             var number = BillableNumber.Nanp(c.Dnis)!;
             if (!ByNumber.TryGetValue(number, out var n)) ByNumber[number] = n = new UsageLine();
-            n.Calls++;
-            n.Seconds += seconds;
+            n.AddCall(seconds);
         }
     }
 }
@@ -103,8 +113,8 @@ public sealed record UsageCharges(decimal LocalAndOutbound, decimal TollFree, de
 {
     public static UsageCharges Calculate(UsageTally t, decimal ratePerMinute, decimal tollFreeSurcharge, decimal monthlyMinimum)
     {
-        var local = Math.Round((t.InboundLocal.Minutes + t.Outbound.Minutes) * ratePerMinute, 2, MidpointRounding.AwayFromZero);
-        var tollFree = Math.Round(t.InboundTollFree.Minutes * (ratePerMinute + tollFreeSurcharge), 2, MidpointRounding.AwayFromZero);
+        var local = Math.Round((t.InboundLocal.BilledMinutes + t.Outbound.BilledMinutes) * ratePerMinute, 2, MidpointRounding.AwayFromZero);
+        var tollFree = Math.Round(t.InboundTollFree.BilledMinutes * (ratePerMinute + tollFreeSurcharge), 2, MidpointRounding.AwayFromZero);
         var usage = local + tollFree;
         return new UsageCharges(local, tollFree, usage, monthlyMinimum, Math.Max(usage, monthlyMinimum));
     }
