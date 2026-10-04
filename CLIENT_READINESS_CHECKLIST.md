@@ -490,8 +490,22 @@ Nothing else matters if an agent can't take an order and get paid on a call.
       **Gate first:** by default Stripe will not accept raw card numbers through its API. Our phone payments are captured
       by keypad (`tf_secure_collect`) and sent server-side, which needs Stripe's **raw card data API access**. Stripe
       grants that on request, after proof of PCI compliance (SAQ D / AOC). Apply early; until it's approved, Stripe works
-      for tenant billing (hosted UI) but not for keyed call payments. Alternative to evaluate: an agent-free
-      payment-link/SMS flow, where the customer pays on Stripe's page.
+      for tenant billing (hosted UI) but not for keyed call payments. **SMS payment links are ruled out** (Stephen,
+      S175): callers can't always receive texts, and it adds friction on the call.
+      **Fallback for gateways without server-side card entry:** gate per gateway with a capability flag (accepts keyed
+      card through the API or not). When a gateway doesn't, the agent enters the card on the caller's behalf in the gateway's own
+      hosted field (Stripe Payment Element in MOTO mode) instead of `tf_secure_collect`. While that field is open, the call
+      recording is paused or masked automatically. Note: this brings the agent desktop back into PCI scope, which secure capture
+      avoids, so prefer keypad capture wherever the gateway allows it.
+
+- [ ] **PCI DSS compliance attestation (added S175).** Needed for Stripe raw-card access, and expected by clients.
+      Because the platform captures, transmits and (briefly, encrypted) stores card data for tenants, we are a **service
+      provider**. That likely means **SAQ D for Service Providers**, or a QSA-led ROC at higher volumes, plus quarterly **ASV
+      external scans** (the scans TMS used) and an annual penetration test. The security-first design (keypad capture,
+      AES-GCM blob with wipe lifecycle, recording masking, no card data in dialplan args, logs or AI) covers much of it. The
+      remaining work is mostly documentation and process: written policies, key-management procedures, access
+      reviews, log retention and monitoring, a network diagram and segmentation in the Azure hosting plan, and incident response.
+      Pick an ASV/QSA vendor and scope it against the production hosting before go-live.
 
 - [ ] **Number porting — onboarding step (added S174).** Life Seasons' numbers (main + every media-station
       number) move from their current carrier to SignalWire. Numbers that can't be ported (or a short-term
