@@ -40,7 +40,7 @@ helpdesk CMS, and team chat. This is a multi-month roadmap, not a single session
 Sized to roughly one week of Claude usage per sprint (the limit resets Monday nights). Work top to bottom; carry over what
 doesn't fit. Business blockers (LLC reinstatement, letter of intent, Clint's figures) run alongside.
 
-**Sprint 1: go-live foundations (week of Oct 5)**
+**Sprint 1: go-live foundations (week of Oct 5)**, full spec with decisions: `docs/sprint-1-spec.md`
 1. **Script launch modes**: production (active call required), training (sandbox credentials for APIs, tax and
    payment gateways), designer sandbox (choose sandbox or production credentials). Every later test depends on it. (2 sessions)
 2. **Billing, metering side:** reconcile against the SignalWire CDR, then **invoice generation** (numbering, month close,
