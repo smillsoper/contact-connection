@@ -64,6 +64,9 @@ Decisions were settled ahead of the sprint so the sessions go to code. Order of 
 - `invoice_lines`: id, invoice_id, kind (`usage_local|usage_tollfree|usage_outbound|minimum|setup_fee|adjustment|credit`),
   description, quantity (billed min), unit_price, amount, reason, created_by.
 - Rates are **copied onto the lines** when the draft is built, so later rate changes don't alter past invoices.
+- **Round each line, then total = sum of the rounded lines.** Today `UsageCharges` rounds local+outbound combined, while the card
+  rounds each row, so on Oct test data the rows add to $1.13 against a $1.12 total. Fix `UsageCharges` to round per line
+  (local, toll-free, outbound) when invoices are built.
 
 ---
 
