@@ -444,6 +444,12 @@ Nothing else matters if an agent can't take an order and get paid on a call.
       - a monthly invoice generated automatically (minutes × rate, minimum applied, setup fee as a one-off line);
       - a reconciliation report against the SignalWire usage bill.
       The first month can be invoiced by hand if this isn't ready in time.
+      **S175 — metering built (`672de81`):** Portal tenant page "Usage & billing" card. It counts PSTN calls only, with the
+      caller leg ending at the terminal call state (not wrap-up), local vs toll-free by the DID's area code, and rates entered
+      on the card. Oct 1 came to 36.33 min against SignalWire's 38.37. **Remaining:** reconcile against the
+      SignalWire CDR (are agent dials to our own DIDs routed through SignalWire? Does SignalWire's clock start
+      earlier?); outbound minutes still run to the record end (includes wrap-up); per-tenant rate/minimum
+      settings; invoice generation.
 
 - [ ] **Number porting — onboarding step (added S174).** Life Seasons' numbers (main + every media-station
       number) move from their current carrier to SignalWire. Numbers that can't be ported (or a short-term
