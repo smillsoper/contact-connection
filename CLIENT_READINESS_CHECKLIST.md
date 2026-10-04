@@ -494,7 +494,11 @@ Nothing else matters if an agent can't take an order and get paid on a call.
       Until it passes, the Stripe gateway is saved but **blocked from keyed call payments**. To my knowledge Stripe has no documented
       "raw card access" flag. Planned probe, to be verified against a real Stripe account during the build: create a
       PaymentMethod (no charge) with a raw test card number. A "raw card data APIs not enabled" style error → blocked. With a
-      live key, a "known test card used in live mode" error means the raw-number path is open. Re-check on each Test and periodically. Apply early; until it's approved, Stripe works
+      live key, a "known test card used in live mode" error means the raw-number path is open. Re-check on each Test and periodically.
+      **Live detection too:** if a keyed payment on a live call gets the raw-card-not-enabled error from the gateway, flag
+      the gateway as blocked right then: alert tenant admins and the platform, and show it on the credential card. That call's payment
+      takes the node's `failed` path (the existing tf_secure_collect wipe lifecycle still applies, so the card never
+      lingers). Later calls on that campaign skip straight to the fallback until a passing Test clears the flag. Apply early; until it's approved, Stripe works
       for tenant billing (hosted UI) but not for keyed call payments. **SMS payment links are ruled out** (Stephen,
       S175): callers can't always receive texts, and it adds friction on the call.
       **Fallback for gateways without server-side card entry:** gate per gateway with a capability flag (accepts keyed
