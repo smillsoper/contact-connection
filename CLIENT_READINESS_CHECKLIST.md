@@ -489,7 +489,12 @@ Nothing else matters if an agent can't take an order and get paid on a call.
       which shares the Stripe client.
       **Gate first:** by default Stripe will not accept raw card numbers through its API. Our phone payments are captured
       by keypad (`tf_secure_collect`) and sent server-side, which needs Stripe's **raw card data API access**. Stripe
-      grants that on request, after proof of PCI compliance (SAQ D / AOC). Apply early; until it's approved, Stripe works
+      grants that on request, after proof of PCI compliance (SAQ D / AOC).
+      **Capability check (Stephen, S175):** the gateway Test (after valid credentials) must also verify raw card access.
+      Until it passes, the Stripe gateway is saved but **blocked from keyed call payments**. To my knowledge Stripe has no documented
+      "raw card access" flag. Planned probe, to be verified against a real Stripe account during the build: create a
+      PaymentMethod (no charge) with a raw test card number. A "raw card data APIs not enabled" style error → blocked. With a
+      live key, a "known test card used in live mode" error means the raw-number path is open. Re-check on each Test and periodically. Apply early; until it's approved, Stripe works
       for tenant billing (hosted UI) but not for keyed call payments. **SMS payment links are ruled out** (Stephen,
       S175): callers can't always receive texts, and it adds friction on the call.
       **Fallback for gateways without server-side card entry:** gate per gateway with a capability flag (accepts keyed
