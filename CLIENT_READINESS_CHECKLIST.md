@@ -498,7 +498,10 @@ Nothing else matters if an agent can't take an order and get paid on a call.
       **Live detection too:** if a keyed payment on a live call gets the raw-card-not-enabled error from the gateway, flag
       the gateway as blocked right then: alert tenant admins and the platform, and show it on the credential card. That call's payment
       takes the node's `failed` path (the existing tf_secure_collect wipe lifecycle still applies, so the card never
-      lingers). Later calls on that campaign skip straight to the fallback until a passing Test clears the flag. Apply early; until it's approved, Stripe works
+      lingers). Later calls on that campaign skip straight to the fallback until a passing Test clears the flag.
+      No new outcome logic is needed: each tenant designs the `failed` path in its own flow. Either a **no-sale** that stops the order
+      flow, or the order is **logged with a failed authorization attempt** for follow-up and a possible scheduled callback
+      to the customer. Apply early; until it's approved, Stripe works
       for tenant billing (hosted UI) but not for keyed call payments. **SMS payment links are ruled out** (Stephen,
       S175): callers can't always receive texts, and it adds friction on the call.
       **Fallback for gateways without server-side card entry:** gate per gateway with a capability flag (accepts keyed
