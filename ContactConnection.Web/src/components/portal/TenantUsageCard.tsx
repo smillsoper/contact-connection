@@ -102,6 +102,13 @@ export default function TenantUsageCard({ tenantId }: { tenantId: string }) {
             </table>
           </div>
 
+          {usage.needsReview > 0 && (
+            <p className="text-amber-400 text-xs mt-3">
+              {usage.needsReview} call{usage.needsReview === 1 ? ' was' : 's were'} closed without a recorded hang-up (system
+              cleanup), so the real length is unknown. Not billed: check them in Call Records.
+            </p>
+          )}
+
           {(usage.unended > 0 || usage.internal > 0) && (
             <p className="text-gray-500 text-xs mt-3">
               Not billed: {usage.internal} internal/test call{usage.internal === 1 ? '' : 's'}

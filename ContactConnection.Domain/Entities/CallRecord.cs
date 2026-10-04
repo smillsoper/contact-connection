@@ -391,6 +391,21 @@ public class CallRecord
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    /// <summary>
+    /// When the phone call itself disconnected (the caller's leg hung up), as opposed to <see cref="CallEndAt"/>
+    /// (the record was closed) and <see cref="FinalizedAt"/> (a supervisor closed it out). Billing meters
+    /// from <see cref="CallStartAt"/> to here (S175). Null on a record closed without a hang-up (the startup orphan
+    /// sweep), whose real length is unknown.
+    /// </summary>
+    public DateTimeOffset? DisconnectedAt { get; private set; }
+
+    /// <summary>The call hung up: stamp the disconnect time (first hang-up wins) and close the record.</summary>
+    public void Disconnect()
+    {
+        DisconnectedAt ??= DateTimeOffset.UtcNow;
+        Complete();
+    }
+
     // Supervisor finalization (S166, Call Records) — who closed the call out, when and why.
     public DateTimeOffset? FinalizedAt { get; private set; }
     public Guid? FinalizedById { get; private set; }

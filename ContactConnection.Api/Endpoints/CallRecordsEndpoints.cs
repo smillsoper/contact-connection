@@ -151,7 +151,7 @@ public static class CallRecordsEndpoints
         if (record is null || record.Source != CallSource.Outbound || record.AgentId != agentId) return Results.NotFound();
         if (record.CallEndAt is null)
         {
-            record.Complete();
+            record.Disconnect();
             await callRecords.SaveChangesAsync(ct);
         }
         return Results.NoContent();

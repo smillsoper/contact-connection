@@ -108,7 +108,7 @@ public class OrphanedCallReconciler : IOrphanedCallReconciler
         foreach (var record in openRecords)
         {
             if (IsLive(record.Id, record.ContactIdExternal)) continue;
-            record.Complete();
+            record.Complete();   // no Disconnect(): there was no hang-up to time, so no disconnected_at
             recordsClosed++;
         }
         if (recordsClosed > 0)

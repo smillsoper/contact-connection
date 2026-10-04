@@ -8,7 +8,7 @@ public class UsageMeteringTests
     private static readonly DateTimeOffset T0 = new(2026, 10, 1, 17, 0, 0, TimeSpan.Zero);
 
     private static MeteredCall Call(string source, string? ani, string? dnis, int seconds) =>
-        new(source, ani, dnis, T0, T0.AddSeconds(seconds));
+        new(source, ani, dnis, T0, T0.AddSeconds(seconds), Closed: true);
 
     [Theory]
     [InlineData("+15416413898", "5416413898")]
@@ -73,10 +73,24 @@ public class UsageMeteringTests
     public void Calls_without_an_end_are_held_back()
     {
         var t = new UsageTally();
-        t.Add(new MeteredCall("inbound", "+15416704541", "+15416413898", T0, null));
+        t.Add(new MeteredCall("inbound", "+15416704541", "+15416413898", T0, null, Closed: false));
 
         Assert.Equal(1, t.Unended);
         Assert.Equal(0, t.InboundLocal.Calls);
+    }
+
+    [Fact]
+    public void Calls_closed_without_a_hang_up_are_held_for_review()
+    {
+        var t = new UsageTally();
+        t.Add(new MeteredCall("outbound", "+15416704541", null, T0, null, Closed: true));
+        t.Add(new MeteredCall("inbound", "+15416704541", "+15416413898", T0, null, Closed: true));
+        t.Add(new MeteredCall("inbound", "1000", "+15416413898", T0, null, Closed: true)); // internal stays internal
+
+        Assert.Equal(2, t.NeedsReview);
+        Assert.Equal(1, t.Internal);
+        Assert.Equal(0, t.Unended);
+        Assert.Equal(0L, t.InboundLocal.Seconds + t.Outbound.Seconds);
     }
 
     [Fact]

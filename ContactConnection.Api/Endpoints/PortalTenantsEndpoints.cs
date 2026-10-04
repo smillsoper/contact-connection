@@ -314,17 +314,13 @@ public static class PortalTenantsEndpoints
             .Where(r => r.CallStartAt >= from && r.CallStartAt < to)
             .Select(r => new
             {
-                r.Source, r.CallerId, r.Dnis, r.CallStartAt, r.CallEndAt,
-                // The caller's leg ends at the terminal call state; the record itself stays open through wrap-up.
-                LegEnd = db.CallStateHistory
-                    .Where(h => h.CallRecordId == r.Id && (h.State == CallHistoryState.Completed || h.State == CallHistoryState.Abandoned))
-                    .Max(h => (DateTimeOffset?)h.EnteredAt),
+                r.Source, r.CallerId, r.Dnis, r.CallStartAt, r.DisconnectedAt, Closed = r.CallEndAt != null,
             })
             .ToListAsync(ct);
 
         var tally = new UsageTally();
         foreach (var c in calls)
-            tally.Add(new MeteredCall(c.Source, c.CallerId, c.Dnis, c.CallStartAt, c.LegEnd ?? c.CallEndAt));
+            tally.Add(new MeteredCall(c.Source, c.CallerId, c.Dnis, c.CallStartAt, c.DisconnectedAt, c.Closed));
 
         var charges = UsageCharges.Calculate(tally, rate ?? 0.035m, tollFreeSurcharge ?? 0.01m, minimum ?? 0m);
         return Results.Ok(new
@@ -339,6 +335,7 @@ public static class PortalTenantsEndpoints
             byNumber = tally.ByNumber.OrderByDescending(kv => kv.Value.Seconds)
                 .Select(kv => new { number = kv.Key, tollFree = BillableNumber.IsTollFree(kv.Key), kv.Value.Calls, kv.Value.Minutes }),
             unended = tally.Unended,
+            needsReview = tally.NeedsReview,
             @internal = tally.Internal,
             rates = new { rate = rate ?? 0.035m, tollFreeSurcharge = tollFreeSurcharge ?? 0.01m, minimum = minimum ?? 0m },
             charges,

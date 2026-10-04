@@ -533,6 +533,7 @@ export interface TenantUsage {
   totalMinutes: number
   byNumber: { number: string; tollFree: boolean; calls: number; minutes: number }[]
   unended: number
+  needsReview: number
   internal: number
   rates: { rate: number; tollFreeSurcharge: number; minimum: number }
   charges: { localAndOutbound: number; tollFree: number; usage: number; minimum: number; total: number }

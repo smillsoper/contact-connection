@@ -1721,7 +1721,7 @@ public sealed class EslBackgroundService : BackgroundService
             Campaign? campaign = null;
             if (record is not null)
             {
-                record.Complete();
+                record.Disconnect();
                 await db.SaveChangesAsync(ct);
                 _logger.LogInformation(
                     "CHANNEL_HANGUP {Uuid} cause={Cause} → CallRecord {RecordId} completed",
@@ -2776,7 +2776,7 @@ public sealed class EslBackgroundService : BackgroundService
                 return;
             }
 
-            record.Complete();
+            record.Disconnect();
             await db.SaveChangesAsync(ct);
             _logger.LogWarning(
                 "CHANNEL_HANGUP {Uuid} cause={Cause} → CallRecord {RecordId} completed (tenant scan, tenant={Tenant}) — " +

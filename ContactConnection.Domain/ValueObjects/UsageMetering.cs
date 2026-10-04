@@ -29,9 +29,10 @@ public static class BillableNumber
 
 public enum UsageCategory { InboundLocal, InboundTollFree, Outbound }
 
-/// <summary>One call as the meter sees it. <c>EndedAt</c> is when the caller's leg ended (terminal call state), else the
-/// record's end.</summary>
-public sealed record MeteredCall(string Source, string? CallerId, string? Dnis, DateTimeOffset? StartedAt, DateTimeOffset? EndedAt);
+/// <summary>One call as the meter sees it. Billed from <c>StartedAt</c> to <c>DisconnectedAt</c> (the hang-up); never to when
+/// the record was closed or finalized, which includes wrap-up. <c>Closed</c>: the record has been closed.</summary>
+public sealed record MeteredCall(string Source, string? CallerId, string? Dnis, DateTimeOffset? StartedAt,
+    DateTimeOffset? DisconnectedAt, bool Closed);
 
 public sealed class UsageLine
 {
@@ -49,8 +50,12 @@ public sealed class UsageTally
     /// <summary>Inbound minutes per number dialed, for checking against the carrier's per-number usage.</summary>
     public Dictionary<string, UsageLine> ByNumber { get; } = [];
 
-    /// <summary>Calls that crossed the PSTN but have no end time yet (still live, or never closed out).</summary>
+    /// <summary>Calls that crossed the PSTN and are still open (live now, or not yet swept).</summary>
     public int Unended { get; private set; }
+
+    /// <summary>Billable calls closed without a recorded hang-up (the startup orphan sweep): the real length is unknown,
+    /// so they are held for review, not billed.</summary>
+    public int NeedsReview { get; private set; }
 
     /// <summary>Internal calls skipped (extension-to-extension, designer tests).</summary>
     public int Internal { get; private set; }
@@ -66,7 +71,11 @@ public sealed class UsageTally
     public void Add(MeteredCall c)
     {
         if (Categorize(c) is not { } category) { Internal++; return; }
-        if (c.StartedAt is not { } start || c.EndedAt is not { } end) { Unended++; return; }
+        if (c.StartedAt is not { } start || c.DisconnectedAt is not { } end)
+        {
+            if (c.Closed) NeedsReview++; else Unended++;
+            return;
+        }
 
         var seconds = Math.Max(0, (long)Math.Round((end - start).TotalSeconds));
         var line = category switch

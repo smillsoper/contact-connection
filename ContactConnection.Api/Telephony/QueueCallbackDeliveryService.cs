@@ -353,7 +353,7 @@ public sealed class QueueCallbackDeliveryService(
             var record = await db.CallRecords.Include(r => r.Interactions).FirstOrDefaultAsync(r => r.Id == recordId);
             if (record is not null)
             {
-                record.Complete();
+                record.Disconnect();
                 await db.SaveChangesAsync();
             }
             await sessionStore.DeleteAsync(channelUuid, CancellationToken.None);
@@ -419,7 +419,7 @@ public sealed class QueueCallbackDeliveryService(
                 tenantId, tenantSchema, record.Id, CallHistoryState.Abandoned, placeholder.CampaignId,
                 agentId: null, detail: $"Queue callback abandoned after {attempts} attempt(s) (last cause {cause})",
                 abandonType: CallAbandonType.CallbackAbandon, ct: ct);
-            record.Complete();
+            record.Disconnect();
             await db.SaveChangesAsync(ct);
         }
         await sessionStore.DeleteAsync(placeholder.ChannelUuid, ct);
