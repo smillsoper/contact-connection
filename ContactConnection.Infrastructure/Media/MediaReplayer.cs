@@ -53,7 +53,8 @@ public static class MediaReplayer
     {
         var dids = book.NumbersByDid.Keys.ToList();
         return db.CallRecords
-            .Where(r => r.CreatedAt >= s.From && r.CreatedAt < s.To && r.Dnis != null && dids.Contains(r.Dnis))
+            .Where(r => r.CreatedAt >= s.From && r.CreatedAt < s.To && r.Dnis != null && dids.Contains(r.Dnis)
+                && r.RunMode == CallRunMode.Production)   // practice runs never count for media (S179)
             .OrderBy(r => r.CreatedAt).ThenBy(r => r.Id);
     }
 

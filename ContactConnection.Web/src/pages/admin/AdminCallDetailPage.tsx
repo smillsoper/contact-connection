@@ -194,6 +194,11 @@ export default function AdminCallDetailPage() {
             <span>Shipping phone: <span className="text-gray-200">{fmtPhone(call.contact.shippingPhone)}</span></span>
             <span>DNIS: <span className="text-gray-200">{fmtPhone(call.dnis)}</span></span>
             <span>Source: <span className="text-gray-200">{call.source}</span></span>
+            {call.runMode && call.runMode !== 'production' && (
+              <span className={`rounded px-1.5 py-0.5 text-xs uppercase tracking-wide font-semibold border ${call.runMode === 'training'
+                ? 'bg-amber-950/60 text-amber-300 border-amber-800' : 'bg-violet-950/60 text-violet-300 border-violet-800'}`}
+                title="Practice run — not billed, no commissions, excluded from live-call reporting">{call.runMode} run</span>
+            )}
             <span>Status: <span className="text-gray-200">{call.overallStatus}</span></span>
             {call.abandon && (
               <span>Abandoned: <span className="text-amber-300">{abandonLabel(call.abandon).replace(/^Abandoned · /, '')}</span>

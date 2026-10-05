@@ -34,6 +34,12 @@ public class CallRecordRepository : ICallRecordRepository
         if (c.From is { } from) q = q.Where(r => r.CreatedAt >= from);
         if (c.To is { } to) q = q.Where(r => r.CreatedAt < to);
         if (c.CampaignId is { } campaignId) q = q.Where(r => r.CampaignId == campaignId);
+        // Practice runs (training / sandbox) are kept for review but stay out of the live-call list unless asked for.
+        if (!string.Equals(c.RunMode, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            var mode = string.IsNullOrWhiteSpace(c.RunMode) ? CallRunMode.Production : c.RunMode.Trim().ToLowerInvariant();
+            q = q.Where(r => r.RunMode == mode);
+        }
         if (!string.IsNullOrWhiteSpace(c.OrderNumber))
         {
             var order = c.OrderNumber.Trim();

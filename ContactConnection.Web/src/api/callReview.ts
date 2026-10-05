@@ -24,6 +24,8 @@ export interface CallSummary {
   cartTotal: number | null
   hasFailedApiCall: boolean
   abandon: AbandonInfo | null
+  /** production / training / sandbox (S179 launch modes). */
+  runMode: string
 }
 
 /** The caller hung up before being served: where (pre_queue / in_queue / callback_abandon …) and short/long. */
@@ -49,6 +51,8 @@ export interface CallSearchFilters {
   orderNumber?: string
   name?: string
   failedOnly?: boolean
+  /** '' = live calls only (default), or training / sandbox / all. */
+  runMode?: string
   page?: number
   pageSize?: number
 }
@@ -146,6 +150,7 @@ export interface CallDetail {
   callEndAt: string | null
   handleTimeSeconds: number | null
   source: string
+  runMode?: string
   recordType: string
   overallStatus: string
   abandon: AbandonInfo | null

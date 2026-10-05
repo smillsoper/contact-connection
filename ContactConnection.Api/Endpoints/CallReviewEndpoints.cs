@@ -49,7 +49,7 @@ public static class CallReviewEndpoints
 
     private static async Task<IResult> Search(
         DateTimeOffset? from, DateTimeOffset? to, Guid? campaignId, string? phone, string? orderNumber,
-        string? name, bool? failedOnly, int? page, int? pageSize,
+        string? name, bool? failedOnly, int? page, int? pageSize, string? runMode,
         HttpContext http,
         ICallRecordRepository callRecords,
         ICampaignRepository campaigns,
@@ -65,7 +65,7 @@ public static class CallReviewEndpoints
         var pageNo = Math.Max(1, page ?? 1);
         var result = await callRecords.SearchAsync(new CallRecordSearchCriteria(
             from, to, campaignId, phone, orderNumber, name, failedOnly == true,
-            Skip: (pageNo - 1) * size, Take: size), ct);
+            Skip: (pageNo - 1) * size, Take: size, RunMode: runMode), ct);
 
         var failed = await callRecords.FindWithFailedApiCallsAsync(result.Items.Select(r => r.Id).ToList(), ct);
         var abandons = await AbandonsAsync(dbFactory, result.Items.Select(r => r.Id).ToList(), ct);
@@ -89,6 +89,7 @@ public static class CallReviewEndpoints
                 r.AgentId,
                 agentName = r.AgentId is { } a ? agentNames.GetValueOrDefault(a) : null,
                 r.Source,
+                r.RunMode,
                 r.OverallStatus,
                 r.CallerId,
                 r.BillingPhone,
@@ -210,6 +211,7 @@ public static class CallReviewEndpoints
             r.CallEndAt,
             r.HandleTimeSeconds,
             r.Source,
+            r.RunMode,
             r.RecordType,
             r.OverallStatus,
             abandon = (await AbandonsAsync(dbFactory, [r.Id], ct)).GetValueOrDefault(r.Id),

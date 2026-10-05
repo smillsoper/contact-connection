@@ -47,7 +47,9 @@ public record CallRecordSearchCriteria(
     string? Name = null,
     bool FailedApiCallsOnly = false,
     int Skip = 0,
-    int Take = 50);
+    int Take = 50,
+    /// <summary>S179 launch modes: production (the default — live calls only), training, sandbox, or "all".</summary>
+    string? RunMode = null);
 
 public record CallRecordSearchPage(IReadOnlyList<CallRecord> Items, int Total);
 

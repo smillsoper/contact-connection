@@ -41,6 +41,7 @@ export default function AdminCallsPage() {
     orderNumber: params.get('orderNumber') ?? '',
     name: params.get('name') ?? '',
     failedOnly: params.get('failedOnly') === 'true',
+    runMode: params.get('runMode') ?? '',
     page: Number(params.get('page') ?? '1') || 1,
   }
   const [draft, setDraft] = useState(filters)
@@ -62,6 +63,7 @@ export default function AdminCallsPage() {
       orderNumber: filters.orderNumber || undefined,
       name: filters.name || undefined,
       failedOnly: filters.failedOnly,
+      runMode: filters.runMode || undefined,
       page: filters.page,
       pageSize: 50,
     })
@@ -123,12 +125,22 @@ export default function AdminCallsPage() {
             <label className="text-gray-500 text-xs">Order #</label>
             <input value={draft.orderNumber} onChange={(e) => setDraft({ ...draft, orderNumber: e.target.value })} className={`${inputCls} w-32`} />
           </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-gray-500 text-xs">Calls</label>
+            <select value={draft.runMode} onChange={(e) => setDraft({ ...draft, runMode: e.target.value })} className={`${inputCls} w-40`}
+              title="Training and designer-sandbox runs are kept for review but never counted as live calls">
+              <option value="">Live calls</option>
+              <option value="training">Training runs</option>
+              <option value="sandbox">Sandbox runs</option>
+              <option value="all">All</option>
+            </select>
+          </div>
           <label className="flex items-center gap-2 text-sm text-gray-300 pb-2">
             <input type="checkbox" checked={draft.failedOnly} onChange={(e) => setDraft({ ...draft, failedOnly: e.target.checked })} className="accent-red-500" />
             Failed API call only
           </label>
           <div className="flex gap-2 ml-auto">
-            <button type="button" onClick={() => { const empty = { from: '', to: '', campaignId: '', phone: '', orderNumber: '', name: '', failedOnly: false, page: 1 }; setDraft(empty); apply(empty) }}
+            <button type="button" onClick={() => { const empty = { from: '', to: '', campaignId: '', phone: '', orderNumber: '', name: '', failedOnly: false, runMode: '', page: 1 }; setDraft(empty); apply(empty) }}
               className="text-gray-400 hover:text-white text-sm px-3 py-2">Clear</button>
             <button type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg px-4 py-2 text-sm font-medium">Search</button>
           </div>
@@ -178,6 +190,10 @@ export default function AdminCallsPage() {
                   <td className="px-4 py-2 text-gray-400">{fmtDuration(c.handleTimeSeconds)}</td>
                   <td className="px-4 py-2 text-gray-500 text-xs">
                     {c.source}
+                    {c.runMode && c.runMode !== 'production' && (
+                      <span className={`block w-fit mt-1 rounded px-1.5 py-0.5 uppercase tracking-wide font-semibold border ${c.runMode === 'training'
+                        ? 'bg-amber-950/60 text-amber-300 border-amber-800' : 'bg-violet-950/60 text-violet-300 border-violet-800'}`}>{c.runMode}</span>
+                    )}
                     {c.abandon && (
                       <span className="block w-fit mt-1 bg-amber-900/40 text-amber-300 border border-amber-800 rounded px-1.5 py-0.5 whitespace-nowrap">{abandonLabel(c.abandon)}</span>
                     )}
