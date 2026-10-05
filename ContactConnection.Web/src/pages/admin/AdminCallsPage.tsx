@@ -176,11 +176,13 @@ export default function AdminCallsPage() {
                   <td className="px-4 py-2 text-gray-300 font-mono text-xs">{c.orderNumber ?? '—'}</td>
                   <td className="px-4 py-2 text-gray-300 text-right">{c.cartTotal != null ? `$${c.cartTotal.toFixed(2)}` : '—'}</td>
                   <td className="px-4 py-2 text-gray-400">{fmtDuration(c.handleTimeSeconds)}</td>
-                  <td className="px-4 py-2 text-gray-500 text-xs">{c.source}</td>
-                  <td className="px-4 py-2 text-right whitespace-nowrap">
+                  <td className="px-4 py-2 text-gray-500 text-xs">
+                    {c.source}
                     {c.abandon && (
-                      <span className="inline-block bg-amber-900/40 text-amber-300 border border-amber-800 rounded px-1.5 py-0.5 text-xs mr-2">{abandonLabel(c.abandon)}</span>
+                      <span className="block w-fit mt-1 bg-amber-900/40 text-amber-300 border border-amber-800 rounded px-1.5 py-0.5 whitespace-nowrap">{abandonLabel(c.abandon)}</span>
                     )}
+                  </td>
+                  <td className="px-4 py-2 text-right whitespace-nowrap">
                     {c.hasFailedApiCall && (
                       <span className="inline-block bg-red-900/50 text-red-300 border border-red-800 rounded px-1.5 py-0.5 text-xs mr-2">API failed</span>
                     )}
