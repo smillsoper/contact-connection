@@ -14,6 +14,7 @@ public class PaymentTransactionConfiguration : IEntityTypeConfiguration<PaymentT
         builder.Property(t => t.Id).HasColumnName("id");
         builder.Property(t => t.TenantId).HasColumnName("tenant_id");
         builder.Property(t => t.CallRecordId).HasColumnName("call_record_id");
+        builder.Property(t => t.InteractionId).HasColumnName("interaction_id");
         builder.Property(t => t.ClientId).HasColumnName("client_id");
         builder.Property(t => t.CampaignId).HasColumnName("campaign_id");
 
@@ -38,6 +39,7 @@ public class PaymentTransactionConfiguration : IEntityTypeConfiguration<PaymentT
         builder.Property(t => t.VoidedAt).HasColumnName("voided_at");
 
         builder.HasIndex(t => t.CallRecordId).HasDatabaseName("ix_payment_transactions_call_record_id");
+        builder.HasIndex(t => t.InteractionId).HasDatabaseName("ix_payment_transactions_interaction_id");
         builder.HasIndex(t => new { t.TenantId, t.CreatedAt }).HasDatabaseName("ix_payment_transactions_tenant_created");
     }
 }

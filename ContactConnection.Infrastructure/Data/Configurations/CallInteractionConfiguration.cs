@@ -9,6 +9,8 @@ namespace ContactConnection.Infrastructure.Data.Configurations;
 
 public class CallInteractionConfiguration : IEntityTypeConfiguration<CallInteraction>
 {
+    private static readonly System.Text.Json.JsonSerializerOptions CartJson = new(System.Text.Json.JsonSerializerDefaults.Web);
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     // JSONB list properties are mutated in place (list.Add(...)) — without an explicit comparer
@@ -28,6 +30,20 @@ public class CallInteractionConfiguration : IEntityTypeConfiguration<CallInterac
         builder.Property(i => i.CallRecordId).HasColumnName("call_record_id");
         builder.Property(i => i.InteractionNumber).HasColumnName("interaction_number");
         builder.Property(i => i.AgentId).HasColumnName("agent_id");
+        builder.Property(i => i.Cart)
+            .HasColumnName("cart")
+            .HasColumnType("jsonb")
+            .HasConversion(
+                v => System.Text.Json.JsonSerializer.Serialize(v, CartJson),
+                v => System.Text.Json.JsonSerializer.Deserialize<ContactConnection.Domain.ValueObjects.Commerce.CartDocument>(v, CartJson));
+        builder.Property(i => i.OrderNumber).HasColumnName("order_number").HasMaxLength(20);
+        builder.Property(i => i.OrderSubmittedAt).HasColumnName("order_submitted_at");
+        builder.Property(i => i.TotalAmount).HasColumnName("total_amount").HasPrecision(10, 2);
+        builder.Property(i => i.TaxAmount).HasColumnName("tax_amount").HasPrecision(10, 2);
+        builder.Property(i => i.PaymentStatus).HasColumnName("payment_status").HasMaxLength(30);
+        builder.Property(i => i.RoutedGroupId).HasColumnName("routed_group_id");
+        builder.Property(i => i.RoutedTier).HasColumnName("routed_tier");
+        builder.Property(i => i.RoutedTierLabel).HasColumnName("routed_tier_label").HasMaxLength(50);
         builder.Property(i => i.CampaignId).HasColumnName("campaign_id");
 
         builder.Property(i => i.Type)

@@ -1,4 +1,5 @@
 using ContactConnection.Domain.ValueObjects;
+using ContactConnection.Domain.ValueObjects.Commerce;
 
 namespace ContactConnection.Domain.Entities;
 
@@ -45,6 +46,44 @@ public class CallInteraction
     /// campaign, agent and routing tier for attribution and commissions.</summary>
     public Guid? AgentId { get; private set; }
     public Guid? CampaignId { get; private set; }
+
+    // ── Commerce (interaction-scoped, S178 — docs/interaction-scoped-commerce.md) ──────────────────────
+    // Each agent's piece of work has its own cart and order: a sales agent's order and a CS agent's free-form
+    // order on the same call stay separate. The customer and addresses stay on the call record.
+
+    public CartDocument? Cart { get; private set; }                 // JSONB
+    /// <summary>Order number from the client's sequence; assigned once, lazily, by IOrderNumberService.</summary>
+    public string? OrderNumber { get; private set; }
+    /// <summary>When this interaction's order first went through (order-based commission rules wait for it).</summary>
+    public DateTimeOffset? OrderSubmittedAt { get; private set; }
+    public decimal? TotalAmount { get; private set; }
+    public decimal? TaxAmount { get; private set; }
+    public string? PaymentStatus { get; private set; }
+    /// <summary>The parallel-queuing route this interaction's agent won the call through (commission reporting).</summary>
+    public Guid? RoutedGroupId { get; private set; }
+    public int? RoutedTier { get; private set; }
+    public string? RoutedTierLabel { get; private set; }
+
+    public void SetCart(CartDocument cart) => Cart = cart;
+
+    public void SetOrderNumber(string orderNumber) => OrderNumber ??= orderNumber;
+
+    /// <summary>Keeps the first time — resubmits don't move it.</summary>
+    public void MarkOrderSubmitted(DateTimeOffset at) => OrderSubmittedAt ??= at;
+
+    public void SetFinancials(decimal totalAmount, decimal taxAmount, string paymentStatus)
+    {
+        TotalAmount = totalAmount;
+        TaxAmount = taxAmount;
+        PaymentStatus = paymentStatus;
+    }
+
+    public void SetRoutedTier(Guid? groupId, int tier, string? tierLabel)
+    {
+        RoutedGroupId = groupId;
+        RoutedTier = tier;
+        RoutedTierLabel = tierLabel;
+    }
 
     /// <summary>Merge one field into this interaction's own custom fields (a transferred interaction's script
     /// writes, S178). Values are the typed values, serialized as JSON.</summary>

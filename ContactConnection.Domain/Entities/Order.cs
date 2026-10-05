@@ -16,6 +16,10 @@ public class Order
     public Guid TenantId { get; private set; }
     /// <summary>Null for subscription-generated orders (no call record).</summary>
     public Guid? CallRecordId { get; private set; }
+    /// <summary>The interaction whose script this belongs to (S178). Null on rows from before interaction-scoped
+    /// commerce that the backfill couldn't place, and on autoship orders (no call).</summary>
+    public Guid? InteractionId { get; private set; }
+    public void SetInteraction(Guid interactionId) => InteractionId = interactionId;
 
     // Lifecycle
     public string Status { get; private set; } = OrderStatus.Confirmed;

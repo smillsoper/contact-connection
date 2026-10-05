@@ -12,6 +12,10 @@ public class PaymentTransaction
     public Guid Id { get; private set; }
     public Guid TenantId { get; private set; }
     public Guid CallRecordId { get; private set; }
+    /// <summary>The interaction whose script this belongs to (S178). Null on rows from before interaction-scoped
+    /// commerce that the backfill couldn't place, and on autoship orders (no call).</summary>
+    public Guid? InteractionId { get; private set; }
+    public void SetInteraction(Guid interactionId) => InteractionId = interactionId;
     public Guid ClientId { get; private set; }
     public Guid CampaignId { get; private set; }
 

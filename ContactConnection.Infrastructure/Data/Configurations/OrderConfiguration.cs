@@ -19,6 +19,7 @@ public class OrderConfiguration : IEntityTypeConfiguration<Order>
         builder.Property(o => o.Id).HasColumnName("id");
         builder.Property(o => o.TenantId).HasColumnName("tenant_id");
         builder.Property(o => o.CallRecordId).HasColumnName("call_record_id").IsRequired(false);
+        builder.Property(o => o.InteractionId).HasColumnName("interaction_id");
 
         // Lifecycle
         builder.Property(o => o.Status).HasColumnName("status").HasMaxLength(50).IsRequired();
