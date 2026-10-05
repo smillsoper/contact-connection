@@ -48,6 +48,9 @@ doesn't fit. Business blockers (LLC reinstatement, letter of intent, Clint's fig
    (5 phases). Needed before Clint tests and before the CS scripts (NeuroQ / My Best Heart CS, which order free-form). (3–4)
 1. **Script launch modes**: production (active call required), training (sandbox credentials for APIs, tax and
    payment gateways), designer sandbox (choose sandbox or production credentials). Every later test depends on it. (2 sessions)
+1b. **Manual outbound, Slice A** (S179, Stephen): Place Call → Internal (role switch + presence) / External (client →
+   assigned manual outbound campaign → number + keypad; role-gated direct dial with tenant default caller ID). Caller ID set
+   server-side from the campaign; outbound records get client + campaign; calling-hours check now (DNC with Slice B). (1–2)
 2. **Billing, metering side:** reconcile against the SignalWire CDR, then **invoice generation** (numbering, month close,
    adjustments, printable view). (1–2)
 3. **Telephony handler null guards** plus one live test call that also checks `disconnected_at` is stamped. (½)

@@ -1,6 +1,6 @@
 # Sprint 1 Spec: Go-Live Foundations (decided S175, 2026-10-04)
 
-Decisions were settled ahead of the sprint so the sessions go to code. Order of work: **0 → 1 → 2 → 3 → 4**.
+Decisions were settled ahead of the sprint so the sessions go to code. Order of work: **0 → 1 → 1b → 2 → 3 → 4**.
 
 ---
 
@@ -72,6 +72,46 @@ Life Seasons doesn't want an IVR menu on the sales line.
 - Exclusions: usage meter (`PortalTenantsEndpoints.Usage`), commissions (`CommissionService`/recalc), dashboards/KPI queries,
   exports and the media snapshot all filter `RunMode = production`.
 - Permissions: add `TrainingMode` to the permission catalog and default roles (admin yes, agent no).
+
+
+---
+
+## 1b. Manual outbound: Place Call picker, campaign caller ID, keypad (Slice A, ≈1–2 sessions)
+
+Stephen's design (S179, 2026-10-05), refining the S169 manual-outbound decisions (memory: project_manual_outbound_dialing).
+Go-live need: Life Seasons makes about 800 outbound calls a month (callbacks), and the wrong caller ID is a carrier-compliance problem.
+
+### Softphone
+
+- The always-visible number field is replaced by a **Place call** button that opens an accordion:
+  1. **Internal:** users whose role has the new switch **"Included in softphone internal dial list"**, with live
+     presence (available / on call / away …), so the agent knows who can pick up. Dials their extension.
+  2. **External:**
+     - **Clients** that have **manual outbound campaigns the agent is assigned to** → click a client → its manual outbound
+       campaigns (**auto-selected when only one**) → then the **number field + keypad**.
+     - **Direct dial (role-gated):** a new role permission **"Can direct dial"** adds a Direct dial entry that dials
+       without a client or campaign, using the **tenant's default outbound caller ID** (new tenant setting).
+- **Keypad** (DTMF) on any connected call: outbound, inbound, warm/consult transfers. Sends RFC 2833 DTMF on the active
+  leg (navigating the far end's IVR, entering extensions).
+
+### Server
+
+- The dial carries the chosen campaign (or direct dial). **Caller ID is decided server-side**: the campaign's
+  `CallerIdNumber`, else the tenant default for direct dial. The softphone's `X-CC-Caller-Id` header is never trusted.
+- The outbound call record is created with the campaign's **client + campaign** (today: none). The agent's interaction
+  gets the campaign (interaction-scoped commerce), so reporting, scripts, billing and commissions attach correctly.
+- **Calling hours (now):** block an external dial outside the campaign's allowed hours in the callee's local time.
+  Time zone from the best source available (a prior call record's address/ZIP for that number → tenant time zone),
+  with a plain message to the agent and an audit entry for every block. The internal DNC list is checked if present.
+  **National DNC + the area-code time-zone database come with Slice B.**
+- Admin: role switches (internal dial list, can direct dial), tenant default outbound caller ID, and campaign allowed
+  outbound hours (if not already present).
+
+### Slice B (later)
+
+Outbound call flows (park → flow → dial node with answered / no_answer / busy / failed / machine branches),
+configurable script-pop timing, address-book entries (including internal-campaign entries), National + state DNC,
+area-code/ZIP time zones (zip-codes.com monthly DB via Worker SFTP), per-state hour overrides, call purpose.
 
 ---
 
