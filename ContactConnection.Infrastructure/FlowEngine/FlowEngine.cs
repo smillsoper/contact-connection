@@ -103,12 +103,17 @@ public class FlowEngine : IFlowEngine
         var entryNodeId = definition["entry_node"]?.GetValue<string>()
             ?? throw new InvalidOperationException("Flow definition has no entry_node.");
 
+        // Every script session runs inside a saved interaction (S178): the cart, order, payments, disposition and
+        // AI summary belong to it. Queue delivery creates its own; manual / training / outbound / callback launches
+        // didn't (and manual ones sent no id at all), so one is created here.
+        var interactionId = await EnsureInteractionAsync(request, flow.CampaignId, ct);
+
         var session = FlowSession.Create(
             tenantId:      request.TenantId,
             flowId:        flow.Id,
             flowVersion:   flow.Version,
             callRecordId:  request.CallRecordId,
-            interactionId: request.InteractionId,
+            interactionId: interactionId,
             agentId:       request.AgentId,
             entryNodeId:   entryNodeId);
 
@@ -121,7 +126,7 @@ public class FlowEngine : IFlowEngine
 
         // Populate call_record/caller context from the call record so {{call_record.*}} and
         // {{caller.*}} tags resolve correctly — previously always empty (never wired up).
-        await PopulateCallContextAsync(ctx, request.CallRecordId, request.InteractionId, ct);
+        await PopulateCallContextAsync(ctx, request.CallRecordId, interactionId, ct);
         ctx.SharedVars = await _sharedVars.GetAllAsync(ctx.CallRecordId, ct);
 
         var state = await AdvanceInternalAsync(ctx, entryNodeId, agentInput: null, transition: "default", isStart: true, ct);
@@ -986,7 +991,7 @@ public class FlowEngine : IFlowEngine
         var interaction = record.Interactions.FirstOrDefault(i => i.Id == ctx.InteractionId);
         if (interaction is not null && interaction.Status == InteractionStatus.Active)
         {
-            interaction.Complete(DispositionOf(record, ctx) ?? "");
+            interaction.Complete(DispositionOf(record, ctx, interaction) ?? "");
             record.RefreshOverallStatus();
         }
         await _callRecords.SaveChangesAsync(ct);
@@ -1003,10 +1008,39 @@ public class FlowEngine : IFlowEngine
         _aiSummaries?.Enqueue(new(ctx.TenantId, ctx.CallRecordId, ctx.AgentId));
     }
 
-    /// <summary>The disposition the flow recorded, if any.</summary>
-    internal static string? DispositionOf(CallRecord record, FlowExecutionContext ctx)
+    private async Task<Guid> EnsureInteractionAsync(StartFlowRequest request, Guid? flowCampaignId, CancellationToken ct)
     {
-        if (!string.IsNullOrWhiteSpace(record.CustomFields))
+        var record = await _callRecords.GetByIdWithInteractionsAsync(request.CallRecordId, ct);
+        if (record is null) return request.InteractionId;
+        if (request.InteractionId != Guid.Empty && record.Interactions.Any(i => i.Id == request.InteractionId))
+            return request.InteractionId;
+
+        var interaction = record.AddInteraction(InteractionType.CustomerService, request.InteractionId);
+        interaction.AssignTo(request.AgentId,
+            record.CampaignId != Guid.Empty ? record.CampaignId : flowCampaignId ?? Guid.Empty);
+        await _callRecords.AddInteractionAsync(interaction, ct);
+        await _callRecords.SaveChangesAsync(ct);
+        return interaction.Id;
+    }
+
+    /// <summary>The disposition the flow recorded, if any. A transferred interaction's own fields come first (S178):
+    /// its script's writes land there, and the record's field holds the first campaign's disposition.</summary>
+    internal static string? DispositionOf(CallRecord record, FlowExecutionContext ctx, CallInteraction? interaction = null)
+    {
+        if (!string.IsNullOrWhiteSpace(interaction?.CustomFields))
+        {
+            try
+            {
+                if (JsonNode.Parse(interaction.CustomFields)?["disposition"] is JsonValue iv
+                    && iv.TryGetValue<string>(out var own) && !string.IsNullOrWhiteSpace(own))
+                    return own;
+            }
+            catch (JsonException) { /* fall through */ }
+        }
+
+        // A transferred interaction never takes the record's disposition — that's the first campaign's.
+        var transferred = interaction?.CampaignId is { } ic && ic != record.CampaignId;
+        if (!transferred && !string.IsNullOrWhiteSpace(record.CustomFields))
         {
             try
             {

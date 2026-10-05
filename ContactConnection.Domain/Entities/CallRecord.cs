@@ -257,9 +257,9 @@ public class CallRecord
         return record;
     }
 
-    public CallInteraction AddInteraction(string type)
+    public CallInteraction AddInteraction(string type, Guid? id = null)
     {
-        var interaction = CallInteraction.Create(Id, _interactions.Count + 1, type);
+        var interaction = CallInteraction.Create(Id, _interactions.Count + 1, type, id);
         _interactions.Add(interaction);
         UpdatedAt = DateTimeOffset.UtcNow;
         return interaction;

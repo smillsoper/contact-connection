@@ -16,6 +16,9 @@ public interface ICallRecordRepository
     Task<IReadOnlySet<Guid>> FindWithFailedApiCallsAsync(IReadOnlyCollection<Guid> callRecordIds, CancellationToken ct = default);
 
     Task AddAsync(CallRecord record, CancellationToken ct = default);
+    /// <summary>Track a new interaction explicitly. Found only through the record's collection, EF treats an entity
+    /// with a pre-set Guid key as an existing row (UPDATE → concurrency exception).</summary>
+    Task AddInteractionAsync(CallInteraction interaction, CancellationToken ct = default);
     Task SaveChangesAsync(CancellationToken ct = default);
 
     /// <summary>

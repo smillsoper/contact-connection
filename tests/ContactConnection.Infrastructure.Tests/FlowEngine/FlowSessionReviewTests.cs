@@ -48,7 +48,7 @@ public class FlowSessionReviewTests
         shared.Setup(s => s.GetAllAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
         return new CrmFlowEngine(
             _flows.Object, _sessions.Object, new Mock<IAgentRepository>().Object, _callRecords.Object,
-            mux.Object, new TenantContext(), notifier, new Mock<ICallTraceRecorder>().Object,
+            mux.Object, new TenantContext { Current = Tenant.Create("Test", "test-tenant", "America/Los_Angeles") }, notifier, new Mock<ICallTraceRecorder>().Object,
             shared.Object, [_apiHandler, .. extraHandlers], NullLogger<CrmFlowEngine>.Instance,
             Mock.Of<ICardDataRetentionService>());
     }
@@ -460,5 +460,58 @@ public class FlowSessionReviewTests
             };
             return Task.FromResult(new NodeResult(state, Succeed ? "ok" : "email_reviewer"));
         }
+    }
+
+    // ── S178: every script session runs inside a saved interaction ─────────────────────────────
+
+    [Fact]
+    public async Task Start_WithoutAnInteraction_CreatesOneForTheSession()
+    {
+        var flow = AddFlow(Definition(("end_1", EndNode())));
+        flow.Publish();
+        FlowSession? saved = null;
+        _sessions.Setup(s => s.AddAsync(It.IsAny<FlowSession>(), It.IsAny<CancellationToken>()))
+                 .Callback<FlowSession, CancellationToken>((fs, _) => saved = fs).Returns(Task.CompletedTask);
+        var agent = Guid.NewGuid();
+
+        await Engine(new Mock<IFlowNotifier>().Object, new EndNodeHandler(new VariableResolver())).StartAsync(new StartFlowRequest
+        {
+            FlowId = flow.Id, CallRecordId = _record.Id, InteractionId = Guid.Empty, AgentId = agent, TenantId = _tenantId,
+        });
+
+        var created = Assert.Single(_record.Interactions);
+        Assert.NotEqual(Guid.Empty, created.Id);
+        Assert.Equal(created.Id, saved!.InteractionId);
+        Assert.Equal((agent, _record.CampaignId), (created.AgentId!.Value, created.CampaignId!.Value));
+        _callRecords.Verify(r => r.AddInteractionAsync(created, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Start_WithAnExistingInteraction_ReusesIt()
+    {
+        var flow = AddFlow(Definition(("end_1", EndNode())));
+        flow.Publish();
+        var existing = _record.AddInteraction(InteractionType.CustomerService);
+
+        await Engine(new Mock<IFlowNotifier>().Object, new EndNodeHandler(new VariableResolver())).StartAsync(new StartFlowRequest
+        {
+            FlowId = flow.Id, CallRecordId = _record.Id, InteractionId = existing.Id, AgentId = Guid.NewGuid(), TenantId = _tenantId,
+        });
+
+        Assert.Single(_record.Interactions);
+        _callRecords.Verify(r => r.AddInteractionAsync(It.IsAny<CallInteraction>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public void Disposition_TransferredInteraction_UsesItsOwnField_NeverTheRecords()
+    {
+        var cs = _record.AddInteraction(InteractionType.CustomerService);
+        cs.AssignTo(Guid.NewGuid(), Guid.NewGuid());                 // a different campaign than the record's
+        _record.UpdateCustomFieldsSnapshot("{\"disposition\":\"Transferred to Customer Service\"}");
+        var ctx = new FlowExecutionContext { CallRecordId = _record.Id };
+
+        Assert.Null(CrmFlowEngine.DispositionOf(_record, ctx, cs));   // not the sales disposition
+        cs.SetCustomField("disposition", "Customer Service");
+        Assert.Equal("Customer Service", CrmFlowEngine.DispositionOf(_record, ctx, cs));
     }
 }

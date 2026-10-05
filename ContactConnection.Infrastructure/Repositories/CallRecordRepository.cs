@@ -16,6 +16,9 @@ public class CallRecordRepository : ICallRecordRepository
     public Task<CallRecord?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
         Db.CallRecords.FirstOrDefaultAsync(r => r.Id == id, ct);
 
+    public async Task AddInteractionAsync(CallInteraction interaction, CancellationToken ct = default) =>
+        await Db.CallInteractions.AddAsync(interaction, ct);
+
     public Task<CallRecord?> GetByIdWithInteractionsAsync(Guid id, CancellationToken ct = default) =>
         Db.CallRecords
             .Include(r => r.Interactions)

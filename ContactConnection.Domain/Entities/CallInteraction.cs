@@ -27,11 +27,11 @@ public class CallInteraction
     // Required by EF Core
     private CallInteraction() { }
 
-    public static CallInteraction Create(Guid callRecordId, int interactionNumber, string type)
+    public static CallInteraction Create(Guid callRecordId, int interactionNumber, string type, Guid? id = null)
     {
         return new CallInteraction
         {
-            Id = Guid.NewGuid(),
+            Id = id is { } given && given != Guid.Empty ? given : Guid.NewGuid(),
             CallRecordId = callRecordId,
             InteractionNumber = interactionNumber,
             Type = type,
