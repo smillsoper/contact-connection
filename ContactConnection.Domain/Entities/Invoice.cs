@@ -116,7 +116,8 @@ public class Invoice
         BillToName = billToName;
         BillToEmail = billToEmail;
         IssuedAt = now;
-        DueOn = DateOnly.FromDateTime(now.UtcDateTime).AddDays(Math.Max(0, dueDays));
+        // A credit note is owed to the tenant, not by them — no due date.
+        DueOn = Kind == InvoiceKind.Invoice ? DateOnly.FromDateTime(now.UtcDateTime).AddDays(Math.Max(0, dueDays)) : null;
         Status = InvoiceStatus.Issued;
         UpdatedAt = now;
     }

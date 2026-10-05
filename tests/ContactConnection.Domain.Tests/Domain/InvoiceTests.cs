@@ -121,6 +121,7 @@ public class InvoiceTests
         Assert.Equal(-250m, note.Total);
         note.Issue("CN-2026-0001", null, null, DateTimeOffset.UtcNow, 15);   // a credit note may total below zero
         Assert.Equal(InvoiceStatus.Issued, note.Status);
+        Assert.Null(note.DueOn);   // owed to the tenant — nothing is due
     }
 
     [Fact]
