@@ -41,8 +41,11 @@ Sized to roughly one week of Claude usage per sprint (the limit resets Monday ni
 doesn't fit. Business blockers (LLC reinstatement, letter of intent, Clint's figures) run alongside.
 
 **Sprint 1: go-live foundations (week of Oct 5)**, full spec with decisions: `docs/sprint-1-spec.md`
-0. **Mid-call transfer sales → CS queue** (found S176: event-branch `tf_transfer` fails with no ESL). Same call record, new
-   interaction with its own agent and campaign; cold transfer. (2)
+0. ~~**Mid-call transfer sales → CS queue**~~ **DONE + live-verified S178**: enters through the CS campaign's
+   own call flow; same call record, new interaction with its own agent, campaign and custom fields.
+0b. **Interaction-scoped commerce** (S178, Stephen): cart, order, payments, routing tier, commissions and AI summaries move
+   onto the interaction; call detail becomes one collapsible section per interaction. Plan: `docs/interaction-scoped-commerce.md`
+   (5 phases). Needed before Clint tests and before the CS scripts (NeuroQ / My Best Heart CS, which order free-form). (3–4)
 1. **Script launch modes**: production (active call required), training (sandbox credentials for APIs, tax and
    payment gateways), designer sandbox (choose sandbox or production credentials). Every later test depends on it. (2 sessions)
 2. **Billing, metering side:** reconcile against the SignalWire CDR, then **invoice generation** (numbering, month close,
