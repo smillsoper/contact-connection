@@ -149,9 +149,8 @@ export default function AdminCallDetailPage() {
   if (error) return <AdminShell><div className="p-6 text-red-400 text-sm">{error}</div></AdminShell>
   if (!call) return <AdminShell><div className="p-6 text-gray-500 text-sm">Loading…</div></AdminShell>
 
-  const cartTotal = call.cart?.cartTotal ?? null
-  const amountMismatch = call.authorizedAmount != null && cartTotal != null
-    && Math.abs(call.authorizedAmount - cartTotal) >= 0.005
+  // Every order number on the call — one per interaction that placed an order (S178).
+  const orderNumbers = call.dispositions.map((d) => d.orderNumber).filter((n): n is string => !!n)
   const customerName = [call.contact.firstName, call.contact.lastName].filter(Boolean).join(' ')
   const agentInScript = call.sessions.some((s) => s.isLive)
 
@@ -184,7 +183,7 @@ export default function AdminCallDetailPage() {
           </div>
           <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 mt-1">
             <h1 className="text-white text-xl font-semibold">{customerName || 'Call'} — {fmtDate(call.callStartAt ?? call.createdAt)}</h1>
-            {call.orderNumber && <span className="text-gray-400 text-sm font-mono">Order #{call.orderNumber}</span>}
+            {orderNumbers.length > 0 && <span className="text-gray-400 text-sm font-mono">Order #{orderNumbers.join(', #')}</span>}
           </div>
           <div className="flex flex-wrap gap-x-5 gap-y-1 mt-2 text-xs text-gray-400">
             <span>Client: <span className="text-gray-200">{call.clientName ?? '—'}</span></span>
@@ -229,27 +228,13 @@ export default function AdminCallDetailPage() {
           )
         })()}
 
-        {amountMismatch && (
-          <div className="bg-amber-950/40 border border-amber-800 text-amber-200 rounded-lg px-4 py-3 text-sm">
-            The cart total ({money(cartTotal)}) no longer matches the authorized payment ({money(call.authorizedAmount)}).
-            {call.cardData.onFile
-              ? ' Re-authorize the card (below) before resubmitting the order.'
-              : " The card is no longer on file, so an order resubmitted now reports the authorized amount — confirm with the client that this is acceptable, or have the customer's card re-authorized."}
-          </div>
-        )}
-
         <FinalizePanel call={call} canManage={canManage} onChanged={load} />
 
         <CallCommissionsPanel callId={call.id} canManage={canManage} version={call} />
 
-        <AiSummaryPanel callId={call.id} canManage={canManage} onChanged={load} />
-
         <CardOnFileNote call={call} />
 
-        {call.sessions.map((s) => (
-          <ApiCallsPanel key={s.id} call={call} session={s} canManage={canManage} onChanged={load} />
-        ))}
-
+        {/* Shared by every interaction: the caller and their addresses travel with the call (S178). */}
         <ContactPanel call={call} canManage={canManage} onChanged={load} />
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
@@ -257,19 +242,101 @@ export default function AdminCallDetailPage() {
           <AddressPanel call={call} role="shipping" canManage={canManage} onChanged={load} />
         </div>
 
-        <CartPanel call={call} canManage={canManage} onChanged={load} />
-
         <CustomFieldsPanel call={call} canManage={canManage} onChanged={load} />
 
-        {call.sessions.map((s) => (
-          <VariablesPanel key={s.id} callId={call.id} session={s} canManage={canManage} onChanged={load} />
+        {/* One section per agent's piece of work: a transferred call has a sales and a CS section, each with its own
+            summary, script, payments and cart (interaction-scoped commerce, S178). */}
+        {call.dispositions.map((d, n) => (
+          <InteractionSection key={d.id} call={call} ix={d} defaultOpen={n === call.dispositions.length - 1 || call.dispositions.length <= 2}
+            canManage={canManage} onChanged={load} />
         ))}
+        {(() => {
+          const known = new Set(call.dispositions.map((d) => d.id))
+          const loose = call.sessions.filter((s) => !s.interactionId || !known.has(s.interactionId))
+          return loose.length === 0 ? null : (
+            <Section title="Other scripts">
+              <div className="space-y-5">
+                {loose.map((s) => <ApiCallsPanel key={`a${s.id}`} call={call} session={s} canManage={canManage} onChanged={load} />)}
+                {loose.map((s) => <VariablesPanel key={`v${s.id}`} callId={call.id} session={s} canManage={canManage} onChanged={load} />)}
+              </div>
+            </Section>
+          )
+        })()}
 
-        <PaymentsPanel call={call} />
         <OtherPanel call={call} />
         <AuditPanel call={call} />
       </div>
     </AdminShell>
+  )
+}
+
+// ── Interactions (S178) ────────────────────────────────────────────────────
+
+type InteractionView = CallDetail['dispositions'][number]
+
+function InteractionSection({ call, ix, defaultOpen, canManage, onChanged }: {
+  call: CallDetail; ix: InteractionView; defaultOpen: boolean; canManage: boolean; onChanged: () => void
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  const sessions = call.sessions.filter((s) => s.interactionId === ix.id)
+  const cartTotal = ix.cart && ix.cart.items.length > 0 ? ix.cart.cartTotal : null
+  const amountMismatch = ix.authorizedAmount != null && cartTotal != null && Math.abs(ix.authorizedAmount - cartTotal) >= 0.005
+  const ownFields = ix.customFields && Object.keys(ix.customFields).length > 0 ? ix.customFields : null
+
+  return (
+    <div className="border border-gray-800 rounded-xl bg-gray-950/40">
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
+        className="w-full flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-left hover:bg-gray-900/60 rounded-xl">
+        <span className="text-gray-500 text-xs w-4">{open ? '▾' : '▸'}</span>
+        <span className="text-white font-medium">Interaction #{ix.interactionNumber}</span>
+        <span className="text-gray-300 text-sm">{ix.campaignName ?? '—'}</span>
+        <span className="text-gray-400 text-sm">{ix.agentName ?? '—'}</span>
+        <span className="text-gray-200 text-sm">{ix.disposition ?? <span className="text-gray-500">No disposition</span>}</span>
+        <span className="ml-auto flex flex-wrap items-center gap-x-4 text-xs text-gray-500">
+          {ix.orderNumber && <span className="font-mono text-gray-400">Order #{ix.orderNumber}</span>}
+          {cartTotal != null && <span>Cart {money(cartTotal)}</span>}
+          <span>{fmtDate(ix.startedAt)}</span>
+          <span>{ix.status}</span>
+        </span>
+      </button>
+
+      {open && (
+        <div className="px-4 pb-4 space-y-5 border-t border-gray-800 pt-4">
+          {amountMismatch && (
+            <div className="bg-amber-950/40 border border-amber-800 text-amber-200 rounded-lg px-4 py-3 text-sm">
+              The cart total ({money(cartTotal)}) no longer matches the authorized payment ({money(ix.authorizedAmount)}).
+              {call.cardData.onFile
+                ? ' Re-authorize the card (below) before resubmitting the order.'
+                : " The card is no longer on file, so an order resubmitted now reports the authorized amount — confirm with the client that this is acceptable, or have the customer's card re-authorized."}
+            </div>
+          )}
+
+          <AiSummaryPanel callId={call.id} interactionId={ix.id} canManage={canManage} onChanged={onChanged} />
+
+          {ownFields && (
+            <Section title="Fields this interaction recorded">
+              <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1 text-sm">
+                {Object.entries(ownFields).map(([k, v]) => (
+                  <div key={k} className="flex gap-3"><dt className="text-gray-500 font-mono text-xs w-40 pt-0.5">{k}</dt><dd className="text-gray-200">{String(v ?? '')}</dd></div>
+                ))}
+              </dl>
+            </Section>
+          )}
+
+          {sessions.map((s) => (
+            <ApiCallsPanel key={s.id} call={call} session={s} ix={ix} canManage={canManage} onChanged={onChanged} />
+          ))}
+
+          <CartPanel call={call} ix={ix} canManage={canManage} onChanged={onChanged} />
+
+          <PaymentsPanel call={call} ix={ix} />
+
+          {sessions.map((s) => (
+            <VariablesPanel key={s.id} callId={call.id} session={s} canManage={canManage} onChanged={onChanged} />
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -443,8 +510,8 @@ function CardOnFileNote({ call }: { call: CallDetail }) {
   )
 }
 
-function ApiCallsPanel({ call, session, canManage, onChanged }: {
-  call: CallDetail; session: CallSessionView; canManage: boolean; onChanged: () => void
+function ApiCallsPanel({ call, session, ix, canManage, onChanged }: {
+  call: CallDetail; session: CallSessionView; ix?: InteractionView; canManage: boolean; onChanged: () => void
 }) {
   const callId = call.id
   const [confirming, setConfirming] = useState<string | null>(null)
@@ -500,7 +567,7 @@ function ApiCallsPanel({ call, session, canManage, onChanged }: {
                       <>
                         <span className="text-gray-300 text-xs">
                           {isPayment
-                            ? `Re-authorize ${money(call.cart?.cartTotal)} on the card on file? A different amount voids the current authorization first.`
+                            ? `Re-authorize ${money((ix?.cart ?? call.cart)?.cartTotal)} on the card on file? A different amount voids the current authorization first.`
                             : "Send it again with the call's current data?"}
                         </span>
                         <button className={btnGhost} onClick={() => setConfirming(null)}>Cancel</button>
@@ -722,8 +789,8 @@ function AddressPanel({ call, role, canManage, onChanged }: {
 
 // ── Cart ───────────────────────────────────────────────────────────────────
 
-function CartPanel({ call, canManage, onChanged }: { call: CallDetail; canManage: boolean; onChanged: () => void }) {
-  const cart = call.cart
+function CartPanel({ call, ix, canManage, onChanged }: { call: CallDetail; ix: InteractionView; canManage: boolean; onChanged: () => void }) {
+  const cart = ix.cart
   const [qty, setQty] = useState<Record<number, string>>({})
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
@@ -786,7 +853,7 @@ function CartPanel({ call, canManage, onChanged }: { call: CallDetail; canManage
                             className="bg-gray-800 text-white rounded px-2 py-1 text-sm w-16 outline-none focus:ring-2 focus:ring-indigo-500" />
                           {edited && Number(qty[i]) >= 1 && (
                             <button className="text-indigo-400 hover:text-indigo-300 text-xs" disabled={busy}
-                              onClick={() => run(() => callReviewApi.updateCartQuantity(call.id, i, Number(qty[i])))}>Apply</button>
+                              onClick={() => run(() => callReviewApi.updateCartQuantity(call.id, i, Number(qty[i]), ix.id))}>Apply</button>
                           )}
                         </div>
                       ) : item.quantity}
@@ -799,7 +866,7 @@ function CartPanel({ call, canManage, onChanged }: { call: CallDetail; canManage
                           <span className="text-xs">
                             <button className="text-gray-400 hover:text-white mr-2" onClick={() => setConfirmRemove(null)}>Keep</button>
                             <button className="text-red-400 hover:text-red-300" disabled={busy}
-                              onClick={() => run(() => callReviewApi.removeCartItem(call.id, i))}>Remove</button>
+                              onClick={() => run(() => callReviewApi.removeCartItem(call.id, i, ix.id))}>Remove</button>
                           </span>
                         ) : (
                           <button className="text-gray-500 hover:text-red-400 text-xs" onClick={() => setConfirmRemove(i)}>Remove</button>
@@ -820,8 +887,8 @@ function CartPanel({ call, canManage, onChanged }: { call: CallDetail; canManage
                 <Fragment key={f.code}><dt className="text-gray-500">{f.description}</dt><dd className="text-right text-gray-300">{money(f.amount)}</dd></Fragment>
               ))}
               <dt className="text-white font-medium">Total</dt><dd className="text-right text-white font-medium">{money(cart.cartTotal)}</dd>
-              {call.authorizedAmount != null && <>
-                <dt className="text-gray-500">Authorized</dt><dd className="text-right text-gray-300">{money(call.authorizedAmount)}</dd>
+              {ix.authorizedAmount != null && <>
+                <dt className="text-gray-500">Authorized</dt><dd className="text-right text-gray-300">{money(ix.authorizedAmount)}</dd>
               </>}
             </dl>
           </div>
@@ -1061,8 +1128,10 @@ function CustomFieldsPanel({ call, canManage, onChanged }: { call: CallDetail; c
 
 // ── Read-only panels ───────────────────────────────────────────────────────
 
-function PaymentsPanel({ call }: { call: CallDetail }) {
-  if (call.payments.length === 0) return null
+function PaymentsPanel({ call, ix }: { call: CallDetail; ix: InteractionView }) {
+  const ids = new Set(ix.paymentIds)
+  const payments = call.payments.filter((p) => ids.has(p.id))
+  if (payments.length === 0) return null
   return (
     <Section title="Payments">
       <table className="w-full text-sm">
@@ -1074,7 +1143,7 @@ function PaymentsPanel({ call }: { call: CallDetail }) {
           </tr>
         </thead>
         <tbody>
-          {call.payments.map((p) => (
+          {payments.map((p) => (
             <tr key={p.id} className="border-b border-gray-800/60">
               <td className="py-2 text-gray-400 text-xs whitespace-nowrap">{fmtDate(p.createdAt)}</td>
               <td className="py-2 text-gray-300">{p.gateway} · {p.transactionType}</td>
@@ -1092,37 +1161,15 @@ function PaymentsPanel({ call }: { call: CallDetail }) {
 }
 
 function OtherPanel({ call }: { call: CallDetail }) {
-  if (call.dispositions.length === 0 && call.commitmentEvents.length === 0) return null
+  if (call.commitmentEvents.length === 0) return null
   return (
-    <Section title="Interactions & commitments">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-sm">
-        <div className="space-y-2">
-          {call.dispositions.map((d) => (
-            <div key={d.interactionNumber} className="flex gap-3">
-              <span className="text-gray-500 text-xs w-6 shrink-0 pt-0.5">#{d.interactionNumber}</span>
-              <div className="min-w-0">
-                <div className="text-gray-200">{d.disposition ?? <span className="text-gray-500">No disposition</span>}</div>
-                <div className="text-gray-500 text-xs">
-                  {[d.campaignName, d.agentName, fmtDate(d.startedAt), d.status].filter(Boolean).join(' · ')}
-                </div>
-                {d.customFields && Object.keys(d.customFields).length > 0 && (
-                  <div className="text-xs text-gray-400 mt-0.5">
-                    {Object.entries(d.customFields).map(([k, v]) => (
-                      <span key={k} className="mr-3"><span className="text-gray-500 font-mono">{k}</span> {String(v ?? '')}</span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="space-y-1">
-          {call.commitmentEvents.map((e, i) => (
-            <div key={i} className="text-gray-400 text-xs">
-              <span className="text-gray-200">{String(e.eventName ?? 'commitment')}</span>{e.timestamp ? ` · ${fmtDate(String(e.timestamp))}` : ''}
-            </div>
-          ))}
-        </div>
+    <Section title="Commitments">
+      <div className="space-y-1 text-sm">
+        {call.commitmentEvents.map((e, i) => (
+          <div key={i} className="text-gray-400 text-xs">
+            <span className="text-gray-200">{String(e.eventName ?? 'commitment')}</span>{e.timestamp ? ` · ${fmtDate(String(e.timestamp))}` : ''}
+          </div>
+        ))}
       </div>
     </Section>
   )

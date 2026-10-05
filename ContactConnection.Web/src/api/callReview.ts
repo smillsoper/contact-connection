@@ -99,6 +99,8 @@ export interface ApiCallNodeSummary {
 
 export interface CallSessionView {
   id: string
+  /** The interaction this script session belongs to (S178). */
+  interactionId: string | null
   flowId: string
   flowName: string | null
   flowVersion: number
@@ -198,6 +200,16 @@ export interface CallDetail {
   dispositions: {
     interactionNumber: number; type: string; disposition: string | null; status: string; startedAt: string; completedAt: string | null
     agentId: string | null; agentName: string | null; campaignId: string | null; campaignName: string | null
+    /** Interaction-scoped commerce (S178): this agent's own cart, order and payments. */
+    id: string
+    cart: CartDocument | null
+    orderNumber: string | null
+    orderSubmittedAt: string | null
+    paymentStatus: string | null
+    routedTierLabel: string | null
+    authorizedAmount: number | null
+    paymentIds: string[]
+    sessionIds: string[]
     /** Fields this interaction's script wrote for itself (a transferred interaction); the record keeps the first campaign's. */
     customFields: Record<string, unknown> | null
   }[]
@@ -261,6 +273,8 @@ export interface UpdateContactRequest {
 
 const base = '/api/v1/call-review/calls'
 
+const ix = (interactionId?: string) => (interactionId ? `?interactionId=${interactionId}` : '')
+
 export const callReviewApi = {
   search: (f: CallSearchFilters) => {
     const q = new URLSearchParams()
@@ -278,11 +292,12 @@ export const callReviewApi = {
   updateAddress: (id: string, role: 'billing' | 'shipping', address: CallAddress) =>
     api.put<{ cart: CartDocument | null }>(`${base}/${id}/addresses/${role}`, address),
 
-  updateCartQuantity: (id: string, itemIndex: number, quantity: number) =>
-    api.patch<CartDocument>(`${base}/${id}/cart/items/${itemIndex}`, { quantity }),
+  // interactionId: whose cart (S178 — a transferred call has one per agent).
+  updateCartQuantity: (id: string, itemIndex: number, quantity: number, interactionId?: string) =>
+    api.patch<CartDocument>(`${base}/${id}/cart/items/${itemIndex}${ix(interactionId)}`, { quantity }),
 
-  removeCartItem: (id: string, itemIndex: number) =>
-    api.delete<CartDocument>(`${base}/${id}/cart/items/${itemIndex}`),
+  removeCartItem: (id: string, itemIndex: number, interactionId?: string) =>
+    api.delete<CartDocument>(`${base}/${id}/cart/items/${itemIndex}${ix(interactionId)}`),
 
   updateCustomField: (id: string, definitionId: string, value: string | null) =>
     api.put<void>(`${base}/${id}/custom-fields/${definitionId}`, { value }),
