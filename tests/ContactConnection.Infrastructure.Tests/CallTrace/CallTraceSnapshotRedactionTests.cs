@@ -29,4 +29,27 @@ public class CallTraceSnapshotRedactionTests
         Assert.DoesNotContain("\"k\\u0022:\\u0022pan", json); // the raw fields json is gone too
         Assert.Contains("[REDACTED]", json);
     }
+
+    // S178: {{shared.*}} variables now appear in both engines' snapshots, with the same PCI redaction.
+    [Fact]
+    public void Snapshots_IncludeSharedVars_Redacted()
+    {
+        var shared = new Dictionary<string, string>
+        {
+            ["outside_hours"] = "true",
+            ["secure.pan"]    = "4242424242424242",
+        };
+
+        var tel = CallTraceSnapshot.BuildTelephonySnapshot(
+            new Dictionary<string, string>(), new Dictionary<string, string>(), "+15551110000", "+15552220000", "uuid-1", shared);
+        var crm = CallTraceSnapshot.BuildCrmSnapshot(
+            new ContactConnection.Infrastructure.FlowEngine.FlowExecutionContext { SharedVars = shared }, []);
+
+        foreach (var json in new[] { tel, crm })
+        {
+            Assert.Contains("\"sharedVars\":{", json);
+            Assert.Contains("\"outside_hours\":\"true\"", json);
+            Assert.DoesNotContain("4242424242424242", json);
+        }
+    }
 }

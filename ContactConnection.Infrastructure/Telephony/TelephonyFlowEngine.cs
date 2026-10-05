@@ -536,7 +536,7 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
         string? transitionTaken, string? nextNodeId, string? detail, string? exitReason, CancellationToken ct)
     {
         var snapshot = CallTraceSnapshot.BuildTelephonySnapshot(
-            ctx.Vars, ctx.ChannelVars, ctx.CallerNumber, ctx.DestinationNumber, ctx.ChannelUuid);
+            ctx.Vars, ctx.ChannelVars, ctx.CallerNumber, ctx.DestinationNumber, ctx.ChannelUuid, ctx.SharedVars);
 
         return _traceRecorder.RecordStepAsync(
             ctx.TenantId, ctx.TenantSchemaName, ctx.CallRecordId, TraceEngine.Telephony, nodeId, nodeType,

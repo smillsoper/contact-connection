@@ -54,6 +54,8 @@ public static class CallTraceSnapshot
             flowVars = Redact(ctx.FlowVars, sensitiveKeys),
             inputs = Redact(ctx.Inputs, sensitiveKeys),
             apiResults = ctx.ApiResults,
+            // {{shared.*}} — call-wide variables shared with the telephony flow (S178: weren't in the trace).
+            sharedVars = RedactTelephonyVars(ctx.SharedVars),
             currentSection = ctx.CurrentSectionName,
             sectionLocked = ctx.CurrentSectionLocked,
             lockedFields = ctx.LockedFields,
@@ -64,10 +66,12 @@ public static class CallTraceSnapshot
         IReadOnlyDictionary<string, string> sipHeaders,
         string callerNumber,
         string destinationNumber,
-        string channelUuid) =>
+        string channelUuid,
+        IReadOnlyDictionary<string, string>? sharedVars = null) =>
         JsonSerializer.Serialize(new
         {
             vars = RedactTelephonyVars(vars),
+            sharedVars = RedactTelephonyVars(sharedVars ?? new Dictionary<string, string>()),
             sipHeaders,
             callerNumber,
             destinationNumber,
