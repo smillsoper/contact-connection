@@ -194,7 +194,11 @@ export interface CallDetail {
   payments: CallPayment[]
   customFields: CallCustomField[]
   commitmentEvents: { eventName?: string; timestamp?: string; [k: string]: unknown }[]
-  dispositions: { interactionNumber: number; type: string; disposition: string | null; status: string; startedAt: string; completedAt: string | null }[]
+  /** One per agent who worked the call (a sales → CS transfer has two), in start order. */
+  dispositions: {
+    interactionNumber: number; type: string; disposition: string | null; status: string; startedAt: string; completedAt: string | null
+    agentId: string | null; agentName: string | null; campaignId: string | null; campaignName: string | null
+  }[]
   sessions: CallSessionView[]
   audit: CallAuditEntry[]
   /** A caller still connected (live telephony channel); null when not. */

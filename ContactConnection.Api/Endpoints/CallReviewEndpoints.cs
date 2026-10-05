@@ -102,6 +102,19 @@ public static class CallReviewEndpoints
         });
     }
 
+    private static async Task<(Dictionary<Guid, string> Agents, Dictionary<Guid, string> Campaigns)> InteractionNamesAsync(
+        ScopedTenantDbContextFactory dbFactory, IEnumerable<CallInteraction> interactions, CancellationToken ct)
+    {
+        var agentIds = interactions.Select(i => i.AgentId).OfType<Guid>().Distinct().ToList();
+        var campaignIds = interactions.Select(i => i.CampaignId).OfType<Guid>().Distinct().ToList();
+        await using var db = dbFactory.Create();
+        var agents = await db.Agents.AsNoTracking().Where(a => agentIds.Contains(a.Id))
+            .ToDictionaryAsync(a => a.Id, a => a.FirstName + " " + a.LastName, ct);
+        var campaigns = await db.Campaigns.AsNoTracking().Where(c => campaignIds.Contains(c.Id))
+            .ToDictionaryAsync(c => c.Id, c => c.Name, ct);
+        return (agents, campaigns);
+    }
+
     /// <summary>The caller hung up before being served (S178): type (pre_queue / in_queue / callback_abandon / …) and
     /// length (short / long) from the call's latest <c>abandoned</c> state. Null for calls that weren't abandoned.</summary>
     public sealed record AbandonInfo(string? Type, string? Length, DateTimeOffset At, string? Detail);
@@ -180,6 +193,7 @@ public static class CallReviewEndpoints
         }
 
         var liveCall = await LiveCallAsync(id, telephonySessions, ct);
+        var ixNames = await InteractionNamesAsync(dbFactory, r.Interactions, ct);
         var txns = await payments.GetByCallRecordAsync(id, ct);
         var authorized = txns.LastOrDefault(t => t.Status == PaymentTransactionStatus.Approved && t.VoidedAt is null);
 
@@ -262,8 +276,15 @@ public static class CallReviewEndpoints
                 lockedBy = agent.StatusLockedByName,
                 reason = agent.StatusLockReason,
             },
-            dispositions = r.Interactions.OrderBy(i => i.InteractionNumber)
-                .Select(i => new { i.InteractionNumber, i.Type, i.Disposition, i.Status, i.StartedAt, i.CompletedAt }),
+            // Each interaction = one agent's work on the call, with its own campaign (S178: a call transferred
+            // sales → CS has two). Numbered by start order, which also tidies calls saved before the numbering fix.
+            dispositions = r.Interactions.OrderBy(i => i.StartedAt).ThenBy(i => i.InteractionNumber)
+                .Select((i, n) => new
+                {
+                    interactionNumber = n + 1, i.Type, i.Disposition, i.Status, i.StartedAt, i.CompletedAt,
+                    i.AgentId, agentName = i.AgentId is { } ia ? ixNames.Agents.GetValueOrDefault(ia) : null,
+                    i.CampaignId, campaignName = i.CampaignId is { } ic ? ixNames.Campaigns.GetValueOrDefault(ic) : null,
+                }),
             sessions = sessionViews,
             audit = (await audit.GetByCallRecordAsync(id, ct)).Select(e => new
             {

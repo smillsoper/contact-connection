@@ -49,7 +49,10 @@ public class QueuedCallDeliveryService(
         if (string.IsNullOrEmpty(agent.SipExtension))
             return new DeliveryResult(false, "Agent has no SIP extension configured.");
 
-        var record = await db.CallRecords.FirstOrDefaultAsync(r => r.Id == callRecordId, ct);
+        // Interactions included: AddInteraction numbers the new one from them (S178 — without them every
+        // delivery's interaction was #1, so a transferred call's CS interaction collided with the sales one).
+        var record = await db.CallRecords.Include(r => r.Interactions)
+            .FirstOrDefaultAsync(r => r.Id == callRecordId, ct);
         if (record is null) return new DeliveryResult(false, "Call record not found.");
         if (string.IsNullOrEmpty(record.ContactIdExternal))
             return new DeliveryResult(false, "Call record has no associated channel.");

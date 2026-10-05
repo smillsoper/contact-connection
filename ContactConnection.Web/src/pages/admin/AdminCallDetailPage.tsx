@@ -1092,13 +1092,21 @@ function PaymentsPanel({ call }: { call: CallDetail }) {
 }
 
 function OtherPanel({ call }: { call: CallDetail }) {
-  if (call.dispositions.every((d) => !d.disposition) && call.commitmentEvents.length === 0) return null
+  if (call.dispositions.length === 0 && call.commitmentEvents.length === 0) return null
   return (
-    <Section title="Dispositions & commitments">
+    <Section title="Interactions & commitments">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-sm">
-        <div className="space-y-1">
-          {call.dispositions.filter((d) => d.disposition).map((d) => (
-            <div key={d.interactionNumber} className="flex gap-3"><span className="text-gray-500 text-xs w-48">Disposition #{d.interactionNumber}</span><span className="text-gray-200">{d.disposition}</span></div>
+        <div className="space-y-2">
+          {call.dispositions.map((d) => (
+            <div key={d.interactionNumber} className="flex gap-3">
+              <span className="text-gray-500 text-xs w-6 shrink-0 pt-0.5">#{d.interactionNumber}</span>
+              <div className="min-w-0">
+                <div className="text-gray-200">{d.disposition ?? <span className="text-gray-500">No disposition</span>}</div>
+                <div className="text-gray-500 text-xs">
+                  {[d.campaignName, d.agentName, fmtDate(d.startedAt), d.status].filter(Boolean).join(' · ')}
+                </div>
+              </div>
+            </div>
           ))}
         </div>
         <div className="space-y-1">
