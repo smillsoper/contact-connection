@@ -45,6 +45,7 @@ export interface ApiDefinitionRecord {
   sandboxBaseUrl?: string | null
   sandboxTokenUrl?: string | null
   trainingUsesSandbox?: boolean
+  designerSandboxUsesSandbox?: boolean
   createdAt: string
   updatedAt: string | null
 }
@@ -118,7 +119,7 @@ export interface DetailApi {
     /** Omit to leave unchanged, 0 to clear back to unlimited, or a positive number to set a new
      *  limit. */
     rateLimitPerMinute?: number
-    sandbox?: { baseUrl: string | null; tokenUrl: string | null; trainingUsesSandbox: boolean }
+    sandbox?: { baseUrl: string | null; tokenUrl: string | null; trainingUsesSandbox: boolean; designerSandboxUsesSandbox: boolean }
   }): Promise<ApiDefinitionRecord>
   activateDefinition(id: string): Promise<ApiDefinitionRecord>
   deactivateDefinition(id: string): Promise<ApiDefinitionRecord>
@@ -184,6 +185,7 @@ interface DefFormState {
   sandboxBaseUrl: string
   sandboxTokenUrl: string
   trainingUsesSandbox: boolean
+  designerSandboxUsesSandbox: boolean
 }
 
 interface KVRow { key: string; value: string; skipIfEmpty?: boolean }
@@ -1773,6 +1775,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
       sandboxBaseUrl: def.sandboxBaseUrl ?? '',
       sandboxTokenUrl: def.sandboxTokenUrl ?? '',
       trainingUsesSandbox: def.trainingUsesSandbox ?? false,
+      designerSandboxUsesSandbox: def.designerSandboxUsesSandbox ?? true,
     })
     setDefFormError(null)
     setShowDefModal(true)
@@ -1809,6 +1812,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
             baseUrl: defForm.sandboxBaseUrl.trim() || null,
             tokenUrl: defForm.sandboxTokenUrl.trim() || null,
             trainingUsesSandbox: defForm.trainingUsesSandbox,
+            designerSandboxUsesSandbox: defForm.designerSandboxUsesSandbox,
           },
         } : {}),
       })
@@ -2005,7 +2009,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                 <>
                   <span className="text-gray-600">·</span>
                   <span className="text-xs px-2 py-0.5 rounded font-medium bg-violet-950/60 text-violet-300 border border-violet-800"
-                    title={`Sandbox: ${def.sandboxBaseUrl}${def.trainingUsesSandbox ? ' — training runs use it too' : ''}`}>
+                    title={`Sandbox: ${def.sandboxBaseUrl} — used by ${[def.designerSandboxUsesSandbox !== false ? 'sandbox mode' : null, def.trainingUsesSandbox ? 'training mode' : null].filter(Boolean).join(' and ') || 'no practice mode (Training response only)'}`}>
                     Sandbox{def.trainingUsesSandbox ? ' + training' : ''}
                   </span>
                 </>
@@ -3174,9 +3178,9 @@ function SandboxEnvironmentSection({ form, onChange, authConfig, knownCredential
       <div>
         <p className="text-violet-300 text-xs font-medium uppercase tracking-wide">Sandbox environment</p>
         <p className="text-gray-500 text-xs mt-1 leading-snug">
-          The client's test system. Designer sandbox runs send real requests here; live calls never do. Blank = no sandbox:
-          practice runs get each endpoint's Training response instead. Same authentication settings as above, with separate
-          credential values — a sandbox call never uses the production ones.
+          The client's test system — live calls never use it. Choose below which practice runs send real requests here;
+          the others get each endpoint's Training response. Blank = no sandbox. Same authentication settings as above, with
+          separate credential values — a sandbox call never uses the production ones.
         </p>
       </div>
       <div>
@@ -3192,10 +3196,18 @@ function SandboxEnvironmentSection({ form, onChange, authConfig, knownCredential
         </div>
       )}
       <label className="flex items-start gap-2 text-sm text-gray-300">
+        <input type="checkbox" checked={form.designerSandboxUsesSandbox} onChange={(e) => onChange({ designerSandboxUsesSandbox: e.target.checked })}
+          className="accent-violet-500 mt-0.5" />
+        <span>
+          Sandbox mode calls the sandbox
+          <span className="block text-gray-500 text-xs">Designer sandbox runs on sandbox credentials — e.g. the client's test orders to approve a new campaign. Off: Training response.</span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2 text-sm text-gray-300">
         <input type="checkbox" checked={form.trainingUsesSandbox} onChange={(e) => onChange({ trainingUsesSandbox: e.target.checked })}
           className="accent-violet-500 mt-0.5" />
         <span>
-          Training runs also call the sandbox
+          Training mode calls the sandbox
           <span className="block text-gray-500 text-xs">Off: trainees get the Training response, so the client's sandbox isn't filled with practice orders.</span>
         </span>
       </label>

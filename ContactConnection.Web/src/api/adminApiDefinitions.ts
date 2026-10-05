@@ -52,7 +52,7 @@ export interface UpdateApiDefinitionData {
   /** Omit to leave unchanged, 0 to clear back to unlimited, or a positive number to set a new
    * limit — same convention the backend uses. */
   rateLimitPerMinute?: number  /** S179: the client's sandbox environment. Omit to leave unchanged. */
-  sandbox?: { baseUrl: string | null; tokenUrl: string | null; trainingUsesSandbox: boolean }
+  sandbox?: { baseUrl: string | null; tokenUrl: string | null; trainingUsesSandbox: boolean; designerSandboxUsesSandbox: boolean }
 }
 
 export function listAdminApiDefinitions(): Promise<ApiDefinitionRecord[]> {

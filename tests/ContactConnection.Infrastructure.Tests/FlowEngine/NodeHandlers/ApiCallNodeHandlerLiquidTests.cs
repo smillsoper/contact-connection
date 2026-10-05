@@ -229,11 +229,11 @@ public class ApiCallNodeHandlerLiquidTests
     }
 
     // S179 — the definition's sandbox environment (e.g. Life Seasons' campaign approval runs through their sandbox).
-    private static Harness SandboxHarness(bool trainingUsesSandbox = false, bool sandboxKeySet = true)
+    private static Harness SandboxHarness(bool trainingUsesSandbox = false, bool sandboxKeySet = true, bool designerUsesSandbox = true)
     {
         var h = new Harness("{}");
         h.Definition.SetAuthConfig("""{"type":"api_key","placement":"header","paramName":"x-functions-key","credentialKey":"LS:OrderApiKey"}""");
-        h.Definition.SetSandbox("https://vendor-staging.example.com", null, trainingUsesSandbox);
+        h.Definition.SetSandbox("https://vendor-staging.example.com", null, trainingUsesSandbox, designerUsesSandbox);
         h.Endpoint.SetSandboxPath("/api/v1/test/addorder");
         h.Credentials.Setup(c => c.GetAsync("LS:OrderApiKey", It.IsAny<CancellationToken>())).ReturnsAsync("PROD-KEY");
         if (sandboxKeySet)
@@ -268,6 +268,18 @@ public class ApiCallNodeHandlerLiquidTests
         Practice(on, "training", "sandbox");
         await on.Handler().ExecuteAsync(on.Node(), on.Ctx, null, "");
         Assert.StartsWith("https://vendor-staging.example.com", on.Sent!.Url);
+    }
+
+    [Fact]
+    public async Task DesignerSandbox_WithItsCheckboxOff_GetsTheTrainingResponse()
+    {
+        var h = SandboxHarness(designerUsesSandbox: false, trainingUsesSandbox: true);
+        Practice(h, "sandbox", "sandbox");
+
+        await h.Handler().ExecuteAsync(h.Node(), h.Ctx, null, "");
+
+        h.Executor.Verify(e => e.ExecuteAsync(It.IsAny<ApiDefinitionExecutionRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Equal(ApiCallNodeHandler.SimulatedHistoryNote, h.Ctx.ExecutionHistory[^1].InputValue);
     }
 
     [Fact]

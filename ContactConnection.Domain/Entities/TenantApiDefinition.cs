@@ -33,6 +33,9 @@ public class TenantApiDefinition
     /// <summary>Training runs call the sandbox too (designer sandbox runs always do). Off = training gets the Training response,
     /// so trainees don't fill the client's sandbox with practice orders.</summary>
     public bool TrainingUsesSandbox { get; private set; }
+    /// <summary>Designer sandbox runs (on the sandbox credential set) call the sandbox. Off = they get the Training response
+    /// too. On by default — the point of a sandbox environment.</summary>
+    public bool DesignerSandboxUsesSandbox { get; private set; } = true;
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? UpdatedAt { get; private set; }
 
@@ -97,8 +100,9 @@ public class TenantApiDefinition
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
-    public void SetSandbox(string? baseUrl, string? tokenUrl, bool trainingUsesSandbox)
+    public void SetSandbox(string? baseUrl, string? tokenUrl, bool trainingUsesSandbox, bool designerSandboxUsesSandbox = true)
     {
+        DesignerSandboxUsesSandbox = designerSandboxUsesSandbox;
         SandboxBaseUrl = string.IsNullOrWhiteSpace(baseUrl) ? null : baseUrl.Trim();
         SandboxTokenUrl = string.IsNullOrWhiteSpace(tokenUrl) ? null : tokenUrl.Trim();
         TrainingUsesSandbox = trainingUsesSandbox;

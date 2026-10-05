@@ -12,7 +12,8 @@ public record ApiDefinitionSnapshot(
     int? RateLimitPerMinute = null,
     string? SandboxBaseUrl = null,
     string? SandboxTokenUrl = null,
-    bool TrainingUsesSandbox = false);
+    bool TrainingUsesSandbox = false,
+    bool DesignerSandboxUsesSandbox = true);
 
 public record ApiEndpointSnapshot(
     string ApiSubType, string Name, string? Description, string Path, string? HttpMethod,

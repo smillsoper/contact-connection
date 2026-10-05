@@ -29,6 +29,7 @@ public class TenantApiDefinitionConfiguration : IEntityTypeConfiguration<TenantA
         builder.Property(d => d.SandboxBaseUrl).HasColumnName("sandbox_base_url").HasMaxLength(500);
         builder.Property(d => d.SandboxTokenUrl).HasColumnName("sandbox_token_url").HasMaxLength(500);
         builder.Property(d => d.TrainingUsesSandbox).HasColumnName("training_uses_sandbox").HasDefaultValue(false);
+        builder.Property(d => d.DesignerSandboxUsesSandbox).HasColumnName("designer_sandbox_uses_sandbox").HasDefaultValue(true);
         builder.Property(d => d.CreatedAt).HasColumnName("created_at").IsRequired();
         builder.Property(d => d.UpdatedAt).HasColumnName("updated_at");
 

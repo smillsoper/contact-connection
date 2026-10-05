@@ -67,7 +67,7 @@ public class ApiCallNodeHandler(
         int? RateLimitPerMinute, string SensitiveResponseFields, string BodyTemplateType, string SuccessCriteria,
         string? EndpointName = null, bool IsClientApi = false, string? TrainingResponse = null,
         string? SandboxBaseUrl = null, string? SandboxPath = null, string? SandboxTokenUrl = null, bool TrainingUsesSandbox = false,
-        bool Sandbox = false)
+        bool Sandbox = false, bool DesignerSandboxUsesSandbox = true)
     {
         /// <summary>The same call, pointed at the definition's sandbox environment (S179).</summary>
         public CallTarget ForSandbox() => this with
@@ -85,15 +85,16 @@ public class ApiCallNodeHandler(
     /// <summary>
     /// Launch modes (S179). Live calls and platform APIs (address lookups, speech) always run for real, and so does a
     /// designer sandbox run that chose production credentials. Otherwise a practice run reaches the client's API only
-    /// through its sandbox environment — designer sandbox runs whenever the definition has one, training runs only when
-    /// the definition allows it — and is simulated (Training response) everywhere else.
+    /// through its sandbox environment, when the definition has one and allows it for that mode (one checkbox each for
+    /// designer sandbox and training runs), and is simulated (Training response) everywhere else.
     /// </summary>
     private static RunEnvironment EnvironmentFor(CallTarget target, FlowExecutionContext ctx)
     {
         if (!target.IsClientApi || !SimulatesClientApis(ctx)) return RunEnvironment.Production;
         if (string.IsNullOrWhiteSpace(target.SandboxBaseUrl)) return RunEnvironment.Simulated;
         var designerSandbox = ctx.CallRecord.GetValueOrDefault("run_mode") == "sandbox";
-        return designerSandbox || target.TrainingUsesSandbox ? RunEnvironment.Sandbox : RunEnvironment.Simulated;
+        var allowed = designerSandbox ? target.DesignerSandboxUsesSandbox : target.TrainingUsesSandbox;
+        return allowed ? RunEnvironment.Sandbox : RunEnvironment.Simulated;
     }
 
     public async Task<NodeResult> ExecuteAsync(
@@ -313,7 +314,8 @@ public class ApiCallNodeHandler(
             endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive, endpoint.IsRetrySafe,
             def.RateLimitPerMinute, endpoint.SensitiveResponseFields, endpoint.BodyTemplateType, endpoint.SuccessCriteria,
             $"{def.Name} → {endpoint.Name}", IsClientApi: true, endpoint.TrainingResponse,
-            def.SandboxBaseUrl, endpoint.SandboxPath, def.SandboxTokenUrl, def.TrainingUsesSandbox);
+            def.SandboxBaseUrl, endpoint.SandboxPath, def.SandboxTokenUrl, def.TrainingUsesSandbox,
+            DesignerSandboxUsesSandbox: def.DesignerSandboxUsesSandbox);
     }
 
     private async Task<CallTarget?> LoadPortalAsync(Guid endpointId, CancellationToken ct)
