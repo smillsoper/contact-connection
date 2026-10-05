@@ -60,6 +60,15 @@ public class CallAddressService(
         await callRecords.SaveChangesAsync(ct);
     }
 
+    public async Task<string?> SetPracticeDnisAsync(Guid callRecordId, string dnis, CancellationToken ct = default)
+    {
+        var record = await callRecords.GetByIdAsync(callRecordId, ct)
+            ?? throw new InvalidOperationException($"Call record {callRecordId} not found.");
+        if (!record.TrySetPracticeDnis(dnis)) return null;
+        await callRecords.SaveChangesAsync(ct);
+        return record.Dnis;
+    }
+
     public async Task SetNameAsync(Guid callRecordId, string? firstName, string? lastName, CancellationToken ct = default)
     {
         firstName = string.IsNullOrWhiteSpace(firstName) ? null : firstName.Trim();

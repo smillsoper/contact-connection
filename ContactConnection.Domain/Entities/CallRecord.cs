@@ -365,6 +365,17 @@ public class CallRecord
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    /// <summary>
+    /// A script's test DNIS on a practice run (S179) — e.g. Life Seasons ties products to the DNIS, so a sandbox order
+    /// must carry the DNIS those products belong to. Never on a production call: a live call's DNIS is what was dialed.
+    /// </summary>
+    public bool TrySetPracticeDnis(string dnis)
+    {
+        if (IsProductionRun || string.IsNullOrWhiteSpace(dnis)) return false;
+        SetDnis(new string(dnis.Where(char.IsDigit).ToArray()) is { Length: > 0 } digits ? digits : dnis.Trim());
+        return true;
+    }
+
     public void SetTelephonyTrace(string json)
     {
         TelephonyEvents = json;

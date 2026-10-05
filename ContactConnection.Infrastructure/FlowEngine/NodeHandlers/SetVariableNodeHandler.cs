@@ -18,6 +18,8 @@ namespace ContactConnection.Infrastructure.FlowEngine.NodeHandlers;
 /// {{call_record.email}} for an email node's output (the customer email, also {{caller.email}}).
 /// {{call_record.first_name}} / {{call_record.last_name}} (or the same keys under caller.) save the
 /// customer's name onto the call record — what the call detail view and order templates read.
+/// {{call_record.dnis}} sets a test DNIS on training / sandbox runs only (e.g. an order API that ties products to the
+/// DNIS); on a live call it is ignored — the DNIS is what the caller dialed.
 /// Transparent to the agent; executes and advances immediately.
 /// Commonly used to extract and store api_call response fields for later use.
 ///
@@ -83,6 +85,11 @@ public class SetVariableNodeHandler(
                                     await callAddresses.SetNameAsync(ctx.CallRecordId, null, name, ct);
                                 CallAddressVars.ApplyName(ctx, nameKey, name);
                             }
+                            break;
+                        case "call_record" when key.Equals("dnis", StringComparison.OrdinalIgnoreCase):
+                            // Practice runs only — the domain refuses it on a production call.
+                            if (await callAddresses.SetPracticeDnisAsync(ctx.CallRecordId, resolvedValue, ct) is { } dnis)
+                                ctx.CallRecord["dnis"] = dnis;
                             break;
                         case "caller": ctx.Caller[key]   = resolvedValue; break;
                         case "agent":  ctx.Agent[key]    = resolvedValue; break;

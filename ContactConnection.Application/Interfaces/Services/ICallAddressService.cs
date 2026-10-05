@@ -40,4 +40,8 @@ public interface ICallAddressService
     /// (CallRecord.FirstName/LastName — behind {{caller.first_name}} / {{call_record.first_name}}).
     /// A null or blank part is left as it is.</summary>
     Task SetNameAsync(Guid callRecordId, string? firstName, string? lastName, CancellationToken ct = default);
+
+    /// <summary>Training / sandbox runs only (S179): sets the call record's DNIS to the script's test value, returning the
+    /// saved DNIS. Null (nothing changed) on a production call or for a blank value.</summary>
+    Task<string?> SetPracticeDnisAsync(Guid callRecordId, string dnis, CancellationToken ct = default);
 }
