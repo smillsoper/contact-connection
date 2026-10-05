@@ -824,7 +824,10 @@ public class FlowEngine : IFlowEngine
     private async Task RefreshCartVarsAsync(FlowExecutionContext ctx, CancellationToken ct)
     {
         ctx.Cart.Clear();
-        var cart = (await _callRecords.GetByIdAsync(ctx.CallRecordId, ct))?.Cart;
+        // This session's interaction's cart (S178 — on a transferred call the CS script sees its own cart).
+        var record = await _callRecords.GetByIdWithInteractionsAsync(ctx.CallRecordId, ct);
+        var ix = record?.CommerceInteraction(ctx.InteractionId);
+        var cart = ix is not null ? ix.Cart : record?.Cart;
         if (cart is null) return;
 
         static string Money(decimal d) => d.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
@@ -858,7 +861,9 @@ public class FlowEngine : IFlowEngine
         ctx.CallRecord["phone_number"] = record.Phone ?? string.Empty;
         ctx.CallRecord["dnis"] = record.Dnis ?? string.Empty;
         ctx.CallRecord["account_number"] = record.AccountNumber ?? string.Empty;
-        ctx.CallRecord["order_number"] = record.OrderNumber ?? string.Empty;
+        // The interaction's own order number (S178); a legacy call without interactions uses the record's.
+        var commerceIx = record.CommerceInteraction(interactionId);
+        ctx.CallRecord["order_number"] = (commerceIx is not null ? commerceIx.OrderNumber : record.OrderNumber) ?? string.Empty;
         ctx.CallRecord[CallAddressVars.Email]         = record.Email ?? string.Empty;
         ctx.CallRecord[CallAddressVars.FirstName]     = record.FirstName ?? string.Empty;
         ctx.CallRecord[CallAddressVars.LastName]      = record.LastName ?? string.Empty;

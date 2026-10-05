@@ -60,32 +60,67 @@ public static class CommissionLedger
         private readonly ILookup<Guid, CommissionRule> _byCampaign = rules.Where(r => r.CampaignId is not null).ToLookup(r => r.CampaignId!.Value);
         private readonly ILookup<Guid, CommissionRule> _byClient = rules.Where(r => r.ClientId is not null).ToLookup(r => r.ClientId!.Value);
 
-        public List<CommissionRule> For(CallRecord r) =>
-            CommissionCalculator.RulesFor(_byCampaign[r.CampaignId], r.ClientId == Guid.Empty ? [] : _byClient[r.ClientId], r.CreatedAt);
+        public List<CommissionRule> For(CallRecord r) => For(r.CampaignId, r.ClientId, r.CreatedAt);
+
+        public List<CommissionRule> For(Guid campaignId, Guid clientId, DateTimeOffset at) =>
+            CommissionCalculator.RulesFor(_byCampaign[campaignId], clientId == Guid.Empty ? [] : _byClient[clientId], at);
     }
 
     public static async Task<RuleBook> LoadRulesAsync(TenantDbContext db, CancellationToken ct) =>
         new(await db.CommissionRules.AsNoTracking().ToListAsync(ct));
 
-    public record Desired(Guid AgentId, List<CommissionLine> Lines)
+    /// <summary>One commission line for one agent, under the campaign it was earned for.</summary>
+    public record EarnedLine(Guid AgentId, Guid CampaignId, CommissionLine Line);
+
+    public record Desired(List<EarnedLine> Lines)
     {
-        public decimal Total => Lines.Sum(l => l.Amount);
+        public decimal Total => Lines.Sum(l => l.Line.Amount);
+        public IEnumerable<Guid> Agents => Lines.Select(l => l.AgentId).Distinct();
     }
 
-    /// <summary>What the call should earn now — nothing without an agent or while reversed by an admin.</summary>
+    /// <summary>
+    /// What the call should earn now — nothing while reversed by an admin. Interaction-scoped (S178):
+    /// <list type="bullet">
+    /// <item>The call's own work — its agent, under the call's campaign rules, with the first interaction's cart / order
+    /// / routing tier and the record's custom fields. Exactly the pre-S178 calculation, so calls that weren't transferred
+    /// are unchanged, and an agent relaunching a script on the same campaign isn't paid twice.</item>
+    /// <item>Plus each transferred interaction (a different campaign, e.g. a CS agent who placed their own order) — its
+    /// agent, under its campaign's rules, with its own cart / order / tier / fields.</item>
+    /// </list>
+    /// </summary>
     public static Desired DesiredFor(CallRecord record, RuleBook rules)
     {
-        if (record.AgentId is not { } agentId || record.CommissionsReversedAt is not null) return new(Guid.Empty, []);
-        var facts = new CommissionCallFacts(
-            record.OrderSubmittedAt is not null, record.Cart, record.RoutedTierLabel,
-            CustomFieldValues(record.CustomFields), record.CreatedAt);
-        return new(agentId, CommissionCalculator.Calculate(facts, rules.For(record)));
+        if (record.CommissionsReversedAt is not null) return new([]);
+        var lines = new List<EarnedLine>();
+
+        if (record.AgentId is { } agentId)
+        {
+            var first = record.FirstInteraction;
+            var facts = new CommissionCallFacts(
+                (first?.OrderSubmittedAt ?? record.OrderSubmittedAt) is not null,
+                first is not null ? first.Cart ?? record.Cart : record.Cart,
+                first?.RoutedTierLabel ?? record.RoutedTierLabel,
+                CustomFieldValues(record.CustomFields), record.CreatedAt);
+            lines.AddRange(CommissionCalculator.Calculate(facts, rules.For(record))
+                .Select(l => new EarnedLine(agentId, record.CampaignId, l)));
+        }
+
+        foreach (var ix in record.Interactions)
+        {
+            if (ix.AgentId is not { } ixAgent || ix.CampaignId is not { } ixCampaign || ixCampaign == record.CampaignId)
+                continue;
+            var facts = new CommissionCallFacts(
+                ix.OrderSubmittedAt is not null, ix.Cart, ix.RoutedTierLabel, CustomFieldValues(ix.CustomFields), record.CreatedAt);
+            lines.AddRange(CommissionCalculator.Calculate(facts, rules.For(ixCampaign, record.ClientId, record.CreatedAt))
+                .Select(l => new EarnedLine(ixAgent, ixCampaign, l)));
+        }
+        return new(lines);
     }
 
     public static bool Matches(Desired desired, IEnumerable<CommissionEntry> inForce)
     {
         static string Key(Guid agent, Guid? rule, decimal amount) => $"{agent}|{rule}|{amount:0.00}";
-        var want = desired.Lines.Select(l => Key(desired.AgentId, l.RuleId, l.Amount)).Order();
+        var want = desired.Lines.Select(l => Key(l.AgentId, l.Line.RuleId, l.Line.Amount)).Order();
         var have = inForce.Select(e => Key(e.AgentId, e.RuleId, e.Amount)).Order();
         return want.SequenceEqual(have);
     }
@@ -97,8 +132,8 @@ public static class CommissionLedger
         string note, DateTimeOffset at, Guid? batchId = null)
     {
         foreach (var entry in inForce) db.CommissionEntries.Add(entry.Reverse(note, at, batchId));
-        foreach (var line in desired.Lines)
-            db.CommissionEntries.Add(CommissionEntry.Earned(record.TenantId, record, desired.AgentId, line, at, batchId));
+        foreach (var l in desired.Lines)
+            db.CommissionEntries.Add(CommissionEntry.Earned(record.TenantId, record, l.AgentId, l.Line, at, batchId, l.CampaignId));
         return desired.Total - inForce.Sum(e => e.Amount);
     }
 

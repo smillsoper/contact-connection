@@ -142,12 +142,15 @@ public class CommissionEntry
 
     private CommissionEntry() { }
 
+    /// <param name="campaignId">The campaign the line was earned under — a transferred interaction's (S178); defaults
+    /// to the call's.</param>
     public static CommissionEntry Earned(
-        Guid tenantId, CallRecord call, Guid agentId, CommissionLine line, DateTimeOffset at, Guid? batchId = null) => new()
+        Guid tenantId, CallRecord call, Guid agentId, CommissionLine line, DateTimeOffset at, Guid? batchId = null,
+        Guid? campaignId = null) => new()
     {
         BatchId = batchId,
         Id = Guid.NewGuid(), TenantId = tenantId, CallRecordId = call.Id, AgentId = agentId,
-        ClientId = call.ClientId, CampaignId = call.CampaignId, EntryType = CommissionEntryType.Earned,
+        ClientId = call.ClientId, CampaignId = campaignId ?? call.CampaignId, EntryType = CommissionEntryType.Earned,
         RuleId = line.RuleId, RuleName = line.RuleName, Kind = line.Kind, Basis = line.Basis, Rate = line.Rate,
         Amount = line.Amount, Description = line.Description, OccurredAt = at,
     };

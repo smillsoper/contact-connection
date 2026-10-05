@@ -39,19 +39,25 @@ public class ApiTemplateModelBuilder(
 {
     public async Task<JsonObject> BuildAsync(FlowExecutionContext ctx, CancellationToken ct = default)
     {
-        var record = await callRecords.GetByIdAsync(ctx.CallRecordId, ct);
-        var payment = record is null ? null : await payments.GetMostRecentApprovedAsync(record.Id, ct);
-        return Build(ctx, record, payment, DateTimeOffset.UtcNow);
+        // Interaction-scoped (S178): the script's own interaction's cart, order number and authorization.
+        var record = await callRecords.GetByIdWithInteractionsAsync(ctx.CallRecordId, ct);
+        var ix = record?.CommerceInteraction(ctx.InteractionId);
+        var payment = record is null ? null : await payments.GetMostRecentApprovedAsync(record.Id, ix?.Id, ct);
+        return Build(ctx, record, payment, DateTimeOffset.UtcNow, ix);
     }
 
     /// <summary>Pure assembly — internal for tests and for the builder UI's sample model.</summary>
-    internal static JsonObject Build(FlowExecutionContext ctx, CallRecord? record, PaymentTransaction? payment, DateTimeOffset now)
+    internal static JsonObject Build(FlowExecutionContext ctx, CallRecord? record, PaymentTransaction? payment, DateTimeOffset now,
+        CallInteraction? interaction = null)
     {
+        // A legacy record without interactions keeps its own cart / order number.
+        var cart = interaction is not null ? interaction.Cart : record?.Cart;
+        var orderNumber = interaction is not null ? interaction.OrderNumber : record?.OrderNumber;
         var callRecord = Namespace(ctx.CallRecord);
         if (record is not null)
         {
             callRecord["id"] = record.Id.ToString();
-            callRecord["order_number"] = record.OrderNumber ?? "";
+            callRecord["order_number"] = orderNumber ?? "";
             callRecord["dnis"] = record.Dnis ?? "";
             callRecord["caller_id"] = record.CallerId ?? "";
             callRecord["contact_id_external"] = record.ContactIdExternal ?? "";
@@ -75,7 +81,7 @@ public class ApiTemplateModelBuilder(
             ["shared"]      = Namespace(ctx.SharedVars),
             ["input"]       = Namespace(ctx.Inputs),
             ["api"]         = Namespace(ctx.ApiResults),
-            ["cart"]        = Cart(record?.Cart),
+            ["cart"]        = Cart(cart),
             ["payment"]     = Payment(payment),
             ["now_utc"]     = now.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture),
         };

@@ -22,12 +22,15 @@ public static class CommissionRecalculator
 
     public static IQueryable<CallRecord> Calls(TenantDbContext db, Scope s)
     {
-        var q = db.CallRecords.Where(r => r.CreatedAt >= s.From && r.CreatedAt < s.To);
-        if (s.CampaignId is not null) q = q.Where(r => r.CampaignId == s.CampaignId);
+        // Interactions included: a transferred interaction earns under its own campaign / agent (S178).
+        var q = db.CallRecords.Include(r => r.Interactions).Where(r => r.CreatedAt >= s.From && r.CreatedAt < s.To);
+        if (s.CampaignId is { } campaign)
+            q = q.Where(r => r.CampaignId == campaign || r.Interactions.Any(i => i.CampaignId == campaign));
         else if (s.ClientId is not null) q = q.Where(r => r.ClientId == s.ClientId);
-        // An agent filter matches the call's agent now, or anyone holding commission on it.
+        // An agent filter matches the call's agent now, an interaction's agent, or anyone holding commission on it.
         if (s.AgentId is { } agent)
-            q = q.Where(r => r.AgentId == agent || db.CommissionEntries.Any(e => e.CallRecordId == r.Id && e.AgentId == agent));
+            q = q.Where(r => r.AgentId == agent || r.Interactions.Any(i => i.AgentId == agent)
+                || db.CommissionEntries.Any(e => e.CallRecordId == r.Id && e.AgentId == agent));
         return q.OrderBy(r => r.CreatedAt).ThenBy(r => r.Id);
     }
 
@@ -51,11 +54,12 @@ public static class CommissionRecalculator
                 var desired = CommissionLedger.DesiredFor(record, rules);
                 var have = inForce[record.Id].ToList();
                 foreach (var e in have) current[e.AgentId] = current.GetValueOrDefault(e.AgentId) + e.Amount;
-                if (desired.Lines.Count > 0) recalculated[desired.AgentId] = recalculated.GetValueOrDefault(desired.AgentId) + desired.Total;
+                foreach (var g in desired.Lines.GroupBy(l => l.AgentId))
+                    recalculated[g.Key] = recalculated.GetValueOrDefault(g.Key) + g.Sum(l => l.Line.Amount);
                 if (CommissionLedger.Matches(desired, have)) continue;
 
                 changed++;
-                foreach (var agent in have.Select(e => e.AgentId).Append(desired.AgentId).Where(a => a != Guid.Empty).Distinct())
+                foreach (var agent in have.Select(e => e.AgentId).Concat(desired.Agents).Where(a => a != Guid.Empty).Distinct())
                     changedByAgent[agent] = changedByAgent.GetValueOrDefault(agent) + 1;
             }
         }
