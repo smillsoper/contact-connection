@@ -32,7 +32,7 @@ public class PaymentService(
         // Interaction-scoped (S178): this interaction's cart, its own authorization, its campaign's gateway
         // credentials, its order number. A legacy record with no interactions behaves as before.
         var ix = record.CommerceInteraction(interactionId);
-        var cart = ix is null ? record.Cart : ix.Cart;
+        var cart = ix?.Cart;
         var campaignId = ix?.CampaignId ?? record.CampaignId;
         var amount = fixedAmount ?? cart?.CartTotal ?? 0m;
         if (amount <= 0)

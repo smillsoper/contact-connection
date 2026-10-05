@@ -41,7 +41,7 @@ public class CartService : ICartService
         // (an address change), every interaction's cart is re-priced: the address belongs to the whole call.
         List<CallInteraction?> targets = interactionId is { } one && one != Guid.Empty
             ? [record.CommerceInteraction(one)]
-            : record.Interactions.Count > 0 ? [.. record.Interactions] : [null];
+            : [.. record.Interactions];
         CartDocument? last = null;
         foreach (var ix in targets)
         {
@@ -58,7 +58,7 @@ public class CartService : ICartService
     public async Task<CartOperationResult> ReplaceCartAsync(Guid callRecordId, CartDocument newCart, CancellationToken ct = default, Guid? interactionId = null)
     {
         var record = await LoadRecordAsync(callRecordId, ct);
-        return await ApplyAsync(record, record.CommerceInteraction(interactionId), newCart, ct);
+        return await ApplyAsync(record, await ResolveAsync(record, interactionId, ct), newCart, ct);
     }
 
     public async Task<CartOperationResult> AddItemAsync(Guid callRecordId, Guid offerId, int quantity, CancellationToken ct = default, bool enforceScope = false, Guid? interactionId = null)
@@ -66,7 +66,7 @@ public class CartService : ICartService
         if (quantity < 1) throw new InvalidOperationException("Quantity must be at least 1.");
 
         var record = await LoadRecordAsync(callRecordId, ct);
-        var ix = record.CommerceInteraction(interactionId);
+        var ix = await ResolveAsync(record, interactionId, ct);
         var offer = await _offers.GetByIdAsync(offerId, ct)
             ?? throw new InvalidOperationException($"Offer {offerId} not found");
         if (enforceScope && !OfferFitsCall(offer, record, ix))
@@ -95,7 +95,7 @@ public class CartService : ICartService
         if (quantity < 1) throw new InvalidOperationException("Quantity must be at least 1.");
 
         var record = await LoadRecordAsync(callRecordId, ct);
-        var ix = record.CommerceInteraction(interactionId);
+        var ix = await ResolveAsync(record, interactionId, ct);
         var offer = await _offers.GetByIdAsync(addOfferId, ct)
             ?? throw new InvalidOperationException($"Offer {addOfferId} not found");
 
@@ -111,7 +111,7 @@ public class CartService : ICartService
     public async Task<CartOperationResult> RemoveOffersAsync(Guid callRecordId, IReadOnlyList<Guid> offerIds, CancellationToken ct = default, Guid? interactionId = null)
     {
         var record = await LoadRecordAsync(callRecordId, ct);
-        var ix = record.CommerceInteraction(interactionId);
+        var ix = await ResolveAsync(record, interactionId, ct);
         var current = CartOf(record, ix);
         var removeSet = offerIds.ToHashSet();
         var newItems = (current?.Items ?? []).Where(i => !removeSet.Contains(i.OfferId)).ToList();
@@ -123,7 +123,7 @@ public class CartService : ICartService
     public async Task<CartOperationResult> RemoveItemAsync(Guid callRecordId, int itemIndex, CancellationToken ct = default, Guid? interactionId = null)
     {
         var record = await LoadRecordAsync(callRecordId, ct);
-        var ix = record.CommerceInteraction(interactionId);
+        var ix = await ResolveAsync(record, interactionId, ct);
         var current = CartOf(record, ix);
         var items = current?.Items ?? [];
         if (itemIndex < 0 || itemIndex >= items.Count)
@@ -139,7 +139,7 @@ public class CartService : ICartService
         if (quantity < 1) throw new InvalidOperationException("Quantity must be at least 1 — use RemoveItemAsync to remove an item.");
 
         var record = await LoadRecordAsync(callRecordId, ct);
-        var ix = record.CommerceInteraction(interactionId);
+        var ix = await ResolveAsync(record, interactionId, ct);
         var current = CartOf(record, ix);
         var items = current?.Items ?? [];
         if (itemIndex < 0 || itemIndex >= items.Count)
@@ -164,16 +164,20 @@ public class CartService : ICartService
         => await _callRecords.GetByIdWithInteractionsAsync(callRecordId, ct)
             ?? throw new InvalidOperationException($"Call record {callRecordId} not found");
 
-    /// <summary>The cart a change applies to: the interaction's (S178). A legacy record with no interactions uses
-    /// the record's own column.</summary>
-    private static CartDocument? CartOf(CallRecord record, CallInteraction? ix) => ix is null ? record.Cart : ix.Cart;
+    /// <summary>The cart a change applies to: the interaction's (S178).</summary>
+    private static CartDocument? CartOf(CallRecord record, CallInteraction? ix) => ix?.Cart;
 
-    /// <summary>Saves a cart onto its interaction, mirroring it onto the record's legacy column while that interaction is
-    /// the call's first (readers move to the interaction in phase 4).</summary>
-    private static void Store(CallRecord record, CallInteraction? ix, CartDocument cart)
+    private static void Store(CallRecord record, CallInteraction? ix, CartDocument cart) => ix?.SetCart(cart);
+
+    /// <summary>The interaction a cart change applies to. Every script session has one; a cart touched on a call with
+    /// none yet (no script started) gets one, so the cart always has an owner.</summary>
+    private async Task<CallInteraction> ResolveAsync(CallRecord record, Guid? interactionId, CancellationToken ct)
     {
-        ix?.SetCart(cart);
-        if (record.MirrorsCommerceOf(ix)) record.SetCart(cart);
+        if (record.CommerceInteraction(interactionId) is { } existing) return existing;
+        var created = record.AddInteraction(InteractionType.CustomerService);
+        created.AssignTo(record.AgentId ?? Guid.Empty, record.CampaignId);
+        await _callRecords.AddInteractionAsync(created, ct);
+        return created;
     }
 
     private async Task<CartOperationResult> ApplyAsync(CallRecord record, CallInteraction? ix, CartDocument newCart, CancellationToken ct)

@@ -16,7 +16,7 @@ public class CallAddressService(
         if (!CallAddressRole.IsValid(role))
             throw new ArgumentException($"Unknown address role '{role}'.", nameof(role));
 
-        var record = await callRecords.GetByIdAsync(callRecordId, ct)
+        var record = await callRecords.GetByIdWithInteractionsAsync(callRecordId, ct)
             ?? throw new InvalidOperationException($"Call record {callRecordId} not found.");
 
         // Always assign a NEW CallAddresses — the JSONB column has no value comparer, so EF only
@@ -45,7 +45,7 @@ public class CallAddressService(
         // Tax depends on the ship-to address — re-price. A billing-only change can matter too when
         // there's no shipping address (providers fall back to billing), so re-price in that case.
         var affectsTax = setsShipping || current?.Shipping is null;
-        if (!affectsTax || record.Cart is null || record.Cart.Items.Count == 0) return null;
+        if (!affectsTax || !record.Interactions.Any(i => i.Cart is { Items.Count: > 0 })) return null;
 
         var result = await carts.RecalculateAsync(callRecordId, ct);
         return result.Cart;

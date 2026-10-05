@@ -50,9 +50,10 @@ public class ApiTemplateModelBuilder(
     internal static JsonObject Build(FlowExecutionContext ctx, CallRecord? record, PaymentTransaction? payment, DateTimeOffset now,
         CallInteraction? interaction = null)
     {
-        // A legacy record without interactions keeps its own cart / order number.
-        var cart = interaction is not null ? interaction.Cart : record?.Cart;
-        var orderNumber = interaction is not null ? interaction.OrderNumber : record?.OrderNumber;
+        // The interaction's cart / order number (S178); without one given, the call's first interaction's.
+        var commerce = interaction ?? record?.FirstInteraction;
+        var cart = commerce?.Cart;
+        var orderNumber = commerce?.OrderNumber;
         var callRecord = Namespace(ctx.CallRecord);
         if (record is not null)
         {
@@ -201,12 +202,13 @@ public class ApiTemplateModelBuilder(
         record.SetAddresses(new CallAddresses { Billing = address, Shipping = address });
         record.SetDnis("8005550100");
         record.SetContactPhones("3035550100", "3035550199");
-        typeof(CallRecord).GetProperty(nameof(CallRecord.OrderNumber))!.SetValue(record, "LIFSEA-10000123");
+        var sample = record.AddInteraction(InteractionType.OrderSale);
+        sample.SetOrderNumber("LIFSEA-10000123");
 
         var item = new CartItem(Guid.Empty, Guid.Empty, "283-1-CTY-P10-SN", "Neuro-Q 1 Bottle", 1, 49.95m, 49.95m,
             6.95m, 0m, 1.45m, false, false, false, false, 0, false, 0, null, "REG", null, null, [], [], [],
             0m, 0m, 0m, 0m, "PF050714");
-        record.SetCart(CartDocument.Empty() with
+        sample.SetCart(CartDocument.Empty() with
         {
             Items = [item], ShipMethod = "REG", CartSubtotal = 49.95m, Shipping = 6.95m, SalesTax = 1.65m,
             ShippingTax = 0.20m, CartTotal = 58.83m, TaxStatus = TaxCalculationStatus.Calculated,
@@ -217,6 +219,6 @@ public class ApiTemplateModelBuilder(
             "authorize_net", 58.83m, PaymentTransactionStatus.Approved, "60123456789", "ABC123", "1",
             "This transaction has been approved.", "Y", "M", "1111", "Visa", "LIFSEA-10000123");
 
-        return Build(ctx, record, payment, new DateTimeOffset(2026, 9, 27, 17, 30, 0, TimeSpan.Zero));
+        return Build(ctx, record, payment, new DateTimeOffset(2026, 9, 27, 17, 30, 0, TimeSpan.Zero), sample);
     }
 }

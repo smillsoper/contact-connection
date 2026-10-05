@@ -94,8 +94,11 @@ public static class CallReviewEndpoints
                 r.BillingPhone,
                 r.ShippingPhone,
                 customerName = FullName(r.FirstName, r.LastName),
-                r.OrderNumber,
-                cartTotal = r.Cart?.CartTotal,
+                // Per interaction (S178): every order number on the call, and the carts' combined total.
+                orderNumber = string.Join(", ", r.Interactions.OrderBy(i => i.StartedAt)
+                    .Select(i => i.OrderNumber).Where(n => !string.IsNullOrEmpty(n))) is { Length: > 0 } nums ? nums : null,
+                cartTotal = r.Interactions.Any(i => i.Cart is { Items.Count: > 0 })
+                    ? r.Interactions.Where(i => i.Cart is not null).Sum(i => i.Cart!.CartTotal) : (decimal?)null,
                 hasFailedApiCall = failed.Contains(r.Id),
                 abandon = abandons.GetValueOrDefault(r.Id),
             }),
@@ -178,6 +181,7 @@ public static class CallReviewEndpoints
             sessionViews.Add(new
             {
                 s.Id,
+                s.InteractionId,
                 s.FlowId,
                 flowName = flow?.Name,
                 s.FlowVersion,
@@ -218,7 +222,7 @@ public static class CallReviewEndpoints
             r.CallerId,
             r.Dnis,
             r.MediaAttribution,
-            r.OrderNumber,
+            orderNumber = r.FirstInteraction?.OrderNumber,
             r.RecordingUrl,
             contact = new
             {
@@ -230,7 +234,7 @@ public static class CallReviewEndpoints
                 r.ShippingPhone,
             },
             r.Addresses,
-            r.Cart,
+            cart = r.FirstInteraction?.Cart,
             authorizedAmount = authorized?.Amount,
             // Card on file (never the data itself) — decides whether a re-authorization is possible.
             cardData = new
@@ -286,6 +290,12 @@ public static class CallReviewEndpoints
                     i.CampaignId, campaignName = i.CampaignId is { } ic ? ixNames.Campaigns.GetValueOrDefault(ic) : null,
                     // A transferred interaction's own script-written fields (S178); null otherwise.
                     customFields = string.IsNullOrEmpty(i.CustomFields) ? null : ParseJson(i.CustomFields),
+                    // Interaction-scoped commerce (S178): this agent's own cart, order and payments.
+                    i.Id, i.Cart, i.OrderNumber, i.OrderSubmittedAt, i.PaymentStatus, i.RoutedTierLabel,
+                    authorizedAmount = txns.LastOrDefault(t => t.InteractionId == i.Id
+                        && t.Status == PaymentTransactionStatus.Approved && t.VoidedAt is null)?.Amount,
+                    paymentIds = txns.Where(t => t.InteractionId == i.Id).Select(t => t.Id),
+                    sessionIds = callSessionRows.Where(s => s.InteractionId == i.Id).Select(s => s.Id),
                 }),
             sessions = sessionViews,
             audit = (await audit.GetByCallRecordAsync(id, ct)).Select(e => new
@@ -359,10 +369,10 @@ public static class CallReviewEndpoints
         if (role is not (CallAddressRole.Billing or CallAddressRole.Shipping))
             return Results.BadRequest(new { error = "Address role must be 'billing' or 'shipping'." });
 
-        var r = await callRecords.GetByIdAsync(id, ct);
+        var r = await callRecords.GetByIdWithInteractionsAsync(id, ct);
         if (r is null) return Results.NotFound();
         var before = role == CallAddressRole.Billing ? r.Addresses?.Billing : r.Addresses?.Shipping;
-        var totalBefore = r.Cart?.CartTotal;
+        var totalBefore = r.FirstInteraction?.Cart?.CartTotal;
 
         // An admin-typed address hasn't been through a validation service.
         address.IsVerified = false;
@@ -379,39 +389,41 @@ public static class CallReviewEndpoints
 
     // ── Cart edits ──────────────────────────────────────────────────────────
 
+    // Each edit names the interaction whose cart it changes (S178 — a transferred call has one per agent).
     private static Task<IResult> AddCartItem(
-        Guid id, ReviewAddCartItemRequest req, HttpContext http, ICartService cart, ICallRecordRepository callRecords,
+        Guid id, Guid? interactionId, ReviewAddCartItemRequest req, HttpContext http, ICartService cart, ICallRecordRepository callRecords,
         ICallRecordAuditRepository audit, TenantContext tenantContext, CancellationToken ct) =>
-        CartEdit(id, http, callRecords, audit, tenantContext,
-            () => cart.AddItemAsync(id, req.OfferId, req.Quantity, ct, enforceScope: true), $"Added offer to cart (qty {req.Quantity})",
-            new { req.OfferId, req.Quantity }, ct);
+        CartEdit(id, interactionId, http, callRecords, audit, tenantContext,
+            () => cart.AddItemAsync(id, req.OfferId, req.Quantity, ct, enforceScope: true, interactionId: interactionId),
+            $"Added offer to cart (qty {req.Quantity})", new { req.OfferId, req.Quantity }, ct);
 
     private static Task<IResult> UpdateCartItem(
-        Guid id, int itemIndex, ReviewUpdateCartItemRequest req, HttpContext http, ICartService cart,
+        Guid id, int itemIndex, Guid? interactionId, ReviewUpdateCartItemRequest req, HttpContext http, ICartService cart,
         ICallRecordRepository callRecords, ICallRecordAuditRepository audit, TenantContext tenantContext, CancellationToken ct) =>
-        CartEdit(id, http, callRecords, audit, tenantContext,
-            () => cart.UpdateQuantityAsync(id, itemIndex, req.Quantity, ct), $"Changed cart line {itemIndex + 1} quantity to {req.Quantity}",
-            new { itemIndex, req.Quantity }, ct);
+        CartEdit(id, interactionId, http, callRecords, audit, tenantContext,
+            () => cart.UpdateQuantityAsync(id, itemIndex, req.Quantity, ct, interactionId),
+            $"Changed cart line {itemIndex + 1} quantity to {req.Quantity}", new { itemIndex, req.Quantity }, ct);
 
     private static Task<IResult> RemoveCartItem(
-        Guid id, int itemIndex, HttpContext http, ICartService cart, ICallRecordRepository callRecords,
+        Guid id, int itemIndex, Guid? interactionId, HttpContext http, ICartService cart, ICallRecordRepository callRecords,
         ICallRecordAuditRepository audit, TenantContext tenantContext, CancellationToken ct) =>
-        CartEdit(id, http, callRecords, audit, tenantContext,
-            () => cart.RemoveItemAsync(id, itemIndex, ct), $"Removed cart line {itemIndex + 1}",
+        CartEdit(id, interactionId, http, callRecords, audit, tenantContext,
+            () => cart.RemoveItemAsync(id, itemIndex, ct, interactionId), $"Removed cart line {itemIndex + 1}",
             new { itemIndex }, ct);
 
     private static async Task<IResult> CartEdit(
-        Guid id, HttpContext http, ICallRecordRepository callRecords, ICallRecordAuditRepository audit,
+        Guid id, Guid? interactionId, HttpContext http, ICallRecordRepository callRecords, ICallRecordAuditRepository audit,
         TenantContext tenantContext, Func<Task<CartOperationResult>> edit, string summary, object change,
         CancellationToken ct)
     {
         if (!tenantContext.HasTenant) return Results.Unauthorized();
         if (!CanManage(http, out var actor)) return Results.Forbid();
 
-        var r = await callRecords.GetByIdAsync(id, ct);
+        var r = await callRecords.GetByIdWithInteractionsAsync(id, ct);
         if (r is null) return Results.NotFound();
-        var before = r.Cart?.Items.Select(i => new { i.Sku, i.Description, i.Quantity }).ToList();
-        var totalBefore = r.Cart?.CartTotal;
+        var ixCart = r.CommerceInteraction(interactionId)?.Cart;
+        var before = ixCart?.Items.Select(i => new { i.Sku, i.Description, i.Quantity }).ToList();
+        var totalBefore = ixCart?.CartTotal;
 
         CartOperationResult result;
         try { result = await edit(); }

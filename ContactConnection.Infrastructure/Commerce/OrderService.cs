@@ -40,7 +40,7 @@ public class OrderService : IOrderService
         if (existing is not null)
             return (existing, Created: false);
 
-        var cart = ix is null ? callRecord.Cart : ix.Cart;
+        var cart = ix?.Cart;
         if (cart is null || cart.Items.Count == 0)
             throw new InvalidOperationException(
                 $"Call record {callRecordId} has no active cart to commit.");

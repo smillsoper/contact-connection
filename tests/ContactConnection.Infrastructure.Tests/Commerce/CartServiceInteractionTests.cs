@@ -51,7 +51,6 @@ public class CartServiceInteractionTests
 
         Assert.Equal(0.01m, _sales.Cart!.TaxRate);
         Assert.Equal(0.02m, _cs.Cart!.TaxRate);
-        Assert.Equal(0.01m, _record.Cart!.TaxRate);     // mirrors the first interaction only
     }
 
     [Fact]

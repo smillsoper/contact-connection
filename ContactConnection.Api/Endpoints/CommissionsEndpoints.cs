@@ -323,8 +323,13 @@ public static class CommissionsEndpoints
         if (!tenant.HasTenant) return Results.Unauthorized();
         if (!Has(http, Permission.CallsView)) return Results.Forbid();
         await using var db = dbFactory.Create();
+        // Order submitted = the first time any of the call's interactions submitted an order (S178).
         var record = await db.CallRecords.AsNoTracking().Where(r => r.Id == id)
-            .Select(r => new { r.OrderSubmittedAt, r.CommissionsReversedAt, r.CommissionsReversedReason }).FirstOrDefaultAsync(ct);
+            .Select(r => new
+            {
+                OrderSubmittedAt = r.Interactions.Min(i => i.OrderSubmittedAt),
+                r.CommissionsReversedAt, r.CommissionsReversedReason,
+            }).FirstOrDefaultAsync(ct);
         if (record is null) return Results.NotFound();
         var entries = await db.CommissionEntries.AsNoTracking().Where(e => e.CallRecordId == id).OrderBy(e => e.OccurredAt).ToListAsync(ct);
         var names = await AgentNamesAsync(db, entries.Select(e => e.AgentId), ct);
@@ -372,14 +377,18 @@ public static class CommissionsEndpoints
 
         var names = await AgentNamesAsync(db, entries.Select(e => e.AgentId), ct);
         var callIds = entries.Select(e => e.CallRecordId).Distinct().ToList();
-        var orders = await db.CallRecords.AsNoTracking().Where(r => callIds.Contains(r.Id))
-            .ToDictionaryAsync(r => r.Id, r => r.OrderNumber, ct);
+        // The order number of the interaction an entry was earned on (S178): same agent + campaign, else the call's first.
+        var ixOrders = await db.CallInteractions.AsNoTracking().Where(i => callIds.Contains(i.CallRecordId))
+            .Select(i => new { i.CallRecordId, i.AgentId, i.CampaignId, i.OrderNumber, i.StartedAt }).ToListAsync(ct);
+        string? OrderFor(CommissionEntry e) =>
+            (ixOrders.FirstOrDefault(i => i.CallRecordId == e.CallRecordId && i.AgentId == e.AgentId && i.CampaignId == e.CampaignId)
+             ?? ixOrders.Where(i => i.CallRecordId == e.CallRecordId).OrderBy(i => i.StartedAt).FirstOrDefault())?.OrderNumber;
         var clients = await db.Clients.AsNoTracking().ToDictionaryAsync(c => c.Id, c => c.Name, ct);
         var campaigns = await db.Campaigns.AsNoTracking().ToDictionaryAsync(c => c.Id, c => c.Name, ct);
         var tz = Zone(tenant);
 
         return entries.Select(e => new EntryRow(
-            e.Id, e.AgentId, names.GetValueOrDefault(e.AgentId, "(unknown agent)"), e.CallRecordId, orders.GetValueOrDefault(e.CallRecordId),
+            e.Id, e.AgentId, names.GetValueOrDefault(e.AgentId, "(unknown agent)"), e.CallRecordId, OrderFor(e),
             clients.GetValueOrDefault(e.ClientId, ""), campaigns.GetValueOrDefault(e.CampaignId, ""),
             e.EntryType, e.RuleName, e.Description, e.Amount, e.Note, e.OccurredAt,
             TimeZoneInfo.ConvertTime(e.OccurredAt, tz).ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture))).ToList();

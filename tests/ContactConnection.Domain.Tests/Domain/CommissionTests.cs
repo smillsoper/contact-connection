@@ -133,7 +133,7 @@ public class CommissionTests
     [Fact]
     public void OrderSubmitted_KeepsTheFirstTime()
     {
-        var call = CallRecord.Create(Tenant, Guid.NewGuid(), Campaign);
+        var call = CallRecord.Create(Tenant, Guid.NewGuid(), Campaign).AddInteraction(InteractionType.OrderSale);
         var first = DateTimeOffset.UtcNow.AddMinutes(-5);
         call.MarkOrderSubmitted(first);
         call.MarkOrderSubmitted(DateTimeOffset.UtcNow);

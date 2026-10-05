@@ -29,14 +29,15 @@ public class CallRecordRepository : ICallRecordRepository
 
     public async Task<CallRecordSearchPage> SearchAsync(CallRecordSearchCriteria c, CancellationToken ct = default)
     {
-        var q = Db.CallRecords.AsNoTracking().AsQueryable();
+        // Interactions included: the list shows each interaction's order number and cart total (S178).
+        var q = Db.CallRecords.AsNoTracking().Include(r => r.Interactions).AsQueryable();
         if (c.From is { } from) q = q.Where(r => r.CreatedAt >= from);
         if (c.To is { } to) q = q.Where(r => r.CreatedAt < to);
         if (c.CampaignId is { } campaignId) q = q.Where(r => r.CampaignId == campaignId);
         if (!string.IsNullOrWhiteSpace(c.OrderNumber))
         {
             var order = c.OrderNumber.Trim();
-            q = q.Where(r => r.OrderNumber == order);
+            q = q.Where(r => r.Interactions.Any(i => i.OrderNumber == order));
         }
         var digits = new string((c.Phone ?? "").Where(char.IsDigit).ToArray());
         if (digits.Length > 0)

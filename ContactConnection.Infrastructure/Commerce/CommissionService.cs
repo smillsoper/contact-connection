@@ -19,7 +19,6 @@ public class CommissionService(ScopedTenantDbContextFactory dbFactory) : ICommis
             var now = DateTimeOffset.UtcNow;
             var ix = record.CommerceInteraction(interactionId);
             ix?.MarkOrderSubmitted(now);
-            if (record.MirrorsCommerceOf(ix)) record.MarkOrderSubmitted(now);
             return CommissionLedger.SyncAsync(db, record, CommissionTrigger.OrderSubmitted, ct);
         }, ct);
 
@@ -97,9 +96,9 @@ public static class CommissionLedger
         {
             var first = record.FirstInteraction;
             var facts = new CommissionCallFacts(
-                (first?.OrderSubmittedAt ?? record.OrderSubmittedAt) is not null,
-                first is not null ? first.Cart ?? record.Cart : record.Cart,
-                first?.RoutedTierLabel ?? record.RoutedTierLabel,
+                first?.OrderSubmittedAt is not null,
+                first?.Cart,
+                first?.RoutedTierLabel,
                 CustomFieldValues(record.CustomFields), record.CreatedAt);
             lines.AddRange(CommissionCalculator.Calculate(facts, rules.For(record))
                 .Select(l => new EarnedLine(agentId, record.CampaignId, l)));

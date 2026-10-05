@@ -15,9 +15,9 @@ public class CallAddressServiceTests
     private static (CallAddressService Service, Mock<ICartService> Carts, CallRecord Record) Setup(bool withCart)
     {
         var record = CallRecord.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
-        if (withCart) record.SetCart(Cart(Item()));
+        if (withCart) record.AddInteraction(InteractionType.OrderSale).SetCart(Cart(Item()));   // S178: carts live on interactions
         var repo = new Mock<ICallRecordRepository>();
-        repo.Setup(r => r.GetByIdAsync(record.Id, It.IsAny<CancellationToken>())).ReturnsAsync(record);
+        repo.Setup(r => r.GetByIdWithInteractionsAsync(record.Id, It.IsAny<CancellationToken>())).ReturnsAsync(record);
         var carts = new Mock<ICartService>();
         carts.Setup(c => c.RecalculateAsync(record.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(CartOperationResult.Success(CartDocument.Empty()));

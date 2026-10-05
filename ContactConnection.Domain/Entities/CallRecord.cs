@@ -27,12 +27,6 @@ public class CallRecord
     public string? Dnis { get; private set; }             // dialed number (telephony calls only)
     /// <summary>Who delivered the call — the NumberProvider of the number it arrived on.</summary>
     public Guid? NumberProviderId { get; private set; }
-    /// <summary>How the call was won by an agent (parallel queuing): the agent group and tier it was
-    /// delivered through (tier 0 / null group = the regular pool) and the tier's label ("Alpha",
-    /// "Elite") — what commission reporting keys on.</summary>
-    public Guid? RoutedGroupId { get; private set; }
-    public int? RoutedTier { get; private set; }
-    public string? RoutedTierLabel { get; private set; }
     /// <summary>For calls delivered by a routing platform: the public number the caller actually
     /// dialed (Dnis is then our delivery number / pseudo-DNIS). Null for hosted numbers.</summary>
     public string? ClientNumber { get; private set; }
@@ -53,21 +47,8 @@ public class CallRecord
     public DateTimeOffset? CallEndAt { get; private set; }
     public int? HandleTimeSeconds { get; private set; }  // Generated stored column in PostgreSQL
 
-    // Financial summary — relational, reporting
-    public decimal? TotalAmount { get; private set; }
-    public decimal? TaxAmount { get; private set; }
-    public string? PaymentStatus { get; private set; }
-    /// <summary>The call's order number from its client's OrderNumberSequence (e.g.
-    /// "LIFSEA-10000123"). Assigned at most once per call, lazily, the first time something needs
-    /// it (a payment authorization, an order submission) — and only via
-    /// IOrderNumberService, which writes it with a conditional database update so two concurrent
-    /// first-uses can't give one call two numbers. Null when the client has no sequence configured
-    /// or nothing has needed a number yet.</summary>
-    public string? OrderNumber { get; private set; }
-
-    /// <summary>When the call's order first went through (the flow's order-submission API node
-    /// succeeded, S171). Order-based commission rules apply only once this is set.</summary>
-    public DateTimeOffset? OrderSubmittedAt { get; private set; }
+    // Cart, order number, order submitted, payment status, totals and routing tier live on each interaction
+    // (S178, interaction-scoped commerce — docs/interaction-scoped-commerce.md).
 
     /// <summary>Set when an admin reverses the call's commissions (e.g. the order was cancelled) —
     /// recalculation then earns nothing until they're restored.</summary>
@@ -95,7 +76,6 @@ public class CallRecord
     public CallAddresses? Addresses { get; private set; }
     public List<CommitmentEvent> CommitmentEvents { get; private set; } = [];
     public List<RecordingEvent> RecordingEvents { get; private set; } = [];   // JSONB — recording audit trail / merge EDL
-    public CartDocument? Cart { get; private set; }             // JSONB — commerce engine owns this
     public string? FlowExecutionState { get; private set; }   // JSONB — flow engine owns this
     public string? CustomFields { get; private set; }         // JSONB — denormalized snapshot
 
@@ -268,15 +248,9 @@ public class CallRecord
             ?? _interactions.OrderByDescending(i => i.StartedAt).FirstOrDefault();
     }
 
-    /// <summary>The call's first piece of work (earliest start). Until phase 4 moves the readers, its cart / order is
-    /// mirrored onto the record's legacy columns.</summary>
+    /// <summary>The call's first piece of work (earliest start) — on a call that wasn't transferred, its only one.</summary>
     public CallInteraction? FirstInteraction =>
         _interactions.OrderBy(i => i.StartedAt).ThenBy(i => i.InteractionNumber).FirstOrDefault();
-
-    /// <summary>True when writes to <paramref name="interaction"/> should also be mirrored onto the record's legacy
-    /// commerce columns (phase 3 → 4 transition): no interaction at all, or the first one.</summary>
-    public bool MirrorsCommerceOf(CallInteraction? interaction) =>
-        interaction is null || ReferenceEquals(interaction, FirstInteraction);
 
     public CallInteraction AddInteraction(string type, Guid? id = null)
     {
@@ -342,21 +316,6 @@ public class CallRecord
     public void SetAddresses(CallAddresses addresses)
     {
         Addresses = addresses;
-        UpdatedAt = DateTimeOffset.UtcNow;
-    }
-
-    public void SetRoutedTier(Guid? groupId, int tier, string? tierLabel)
-    {
-        RoutedGroupId   = groupId;
-        RoutedTier      = tier;
-        RoutedTierLabel = tierLabel;
-        UpdatedAt       = DateTimeOffset.UtcNow;
-    }
-
-    /// <summary>Records the order as submitted — keeps the first time (resubmits don't move it).</summary>
-    public void MarkOrderSubmitted(DateTimeOffset at)
-    {
-        OrderSubmittedAt ??= at;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
@@ -468,23 +427,9 @@ public class CallRecord
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
-    public void SetCart(CartDocument cart)
-    {
-        Cart      = cart;
-        UpdatedAt = DateTimeOffset.UtcNow;
-    }
-
     public void UpdateCustomFieldsSnapshot(string? snapshotJson)
     {
         CustomFields = snapshotJson;
-        UpdatedAt = DateTimeOffset.UtcNow;
-    }
-
-    public void SetFinancials(decimal totalAmount, decimal taxAmount, string paymentStatus)
-    {
-        TotalAmount = totalAmount;
-        TaxAmount = taxAmount;
-        PaymentStatus = paymentStatus;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 

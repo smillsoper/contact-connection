@@ -113,10 +113,7 @@ public class QueuedCallDeliveryService(
         // record's agent and routing tier (the first agent's sale and commissions); the new agent's work is
         // their own interaction either way.
         if (preSession?.Vars.GetValueOrDefault("_keep_record_agent") != "true")
-        {
             record.SetAgent(agentId);
-            record.SetRoutedTier(route?.GroupId, route?.Tier ?? 0, route?.TierLabel);
-        }
         var interaction = record.AddInteraction(InteractionType.CustomerService);
         interaction.AssignTo(agentId, routingCampaignId);
         interaction.SetRoutedTier(route?.GroupId, route?.Tier ?? 0, route?.TierLabel);

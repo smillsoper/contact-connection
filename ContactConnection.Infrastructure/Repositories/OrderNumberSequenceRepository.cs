@@ -76,17 +76,4 @@ public class OrderNumberSequenceRepository : IOrderNumberSequenceRepository
             .Select(i => i.OrderNumber)
             .FirstOrDefaultAsync(ct);
     }
-
-    public async Task<string?> AssignToCallRecordAsync(Guid callRecordId, string orderNumber, CancellationToken ct = default)
-    {
-        await Ctx.Database.ExecuteSqlAsync($"""
-            UPDATE call_records SET order_number = {orderNumber}
-            WHERE id = {callRecordId} AND order_number IS NULL
-            """, ct);
-
-        return await Ctx.CallRecords
-            .Where(r => r.Id == callRecordId)
-            .Select(r => r.OrderNumber)
-            .FirstOrDefaultAsync(ct);
-    }
 }

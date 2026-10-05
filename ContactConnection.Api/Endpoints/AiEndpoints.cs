@@ -259,7 +259,7 @@ public static class AiEndpoints
         // never added to what's sent to the AI.
         var ids = pending.Select(p => p.CallRecordId).ToList();
         var calls = await db.CallRecords.AsNoTracking().Where(r => ids.Contains(r.Id))
-            .Select(r => new { r.Id, r.CreatedAt, r.CampaignId, r.FirstName, r.LastName, r.CallerId, r.OrderNumber, r.HandleTimeSeconds })
+            .Select(r => new { r.Id, r.CreatedAt, r.CampaignId, r.FirstName, r.LastName, r.CallerId, r.HandleTimeSeconds })
             .ToDictionaryAsync(r => r.Id, ct);
         var campaignIds = calls.Values.Select(c => c.CampaignId)
             .Concat(ixInfo.Values.Select(i => i.CampaignId).OfType<Guid>()).Distinct().ToList();
@@ -278,7 +278,7 @@ public static class AiEndpoints
                 campaign = ix?.CampaignId is { } ic ? campaigns.GetValueOrDefault(ic) : c is null ? null : campaigns.GetValueOrDefault(c.CampaignId),
                 callerName = c is null ? null : $"{c.FirstName} {c.LastName}".Trim() is { Length: > 0 } n ? n : null,
                 callerNumber = c?.CallerId,
-                orderNumber = ix is not null ? ix.OrderNumber : c?.OrderNumber,
+                orderNumber = ix?.OrderNumber,
                 handleTimeSeconds = c?.HandleTimeSeconds,
             };
         }));

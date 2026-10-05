@@ -226,7 +226,7 @@ public static class CallRecordsEndpoints
 
         // The tab's interaction's cart (S178); a legacy record with no interactions uses its own column.
         var ix = record.CommerceInteraction(await InteractionOfSessionAsync(sessions, id, sessionId, ct));
-        var cart = ix is null ? record.Cart : ix.Cart;
+        var cart = ix?.Cart;
         return cart is null ? Results.NoContent() : Results.Ok(cart);
     }
 
@@ -427,12 +427,7 @@ public static class CallRecordsEndpoints
             r.CallEndAt,
             r.HandleTimeSeconds
         },
-        Financial = new
-        {
-            r.TotalAmount,
-            r.TaxAmount,
-            r.PaymentStatus
-        },
+        // Per interaction since S178 — see Interactions[].
         Fulfillment = new
         {
             r.FulfillmentStatus,
@@ -440,10 +435,17 @@ public static class CallRecordsEndpoints
         },
         r.Addresses,
         r.CommitmentEvents,
-        r.Cart,
         r.RecordingUrl,
         Interactions = r.Interactions.Select(i => new
         {
+            i.Cart,
+            i.OrderNumber,
+            i.OrderSubmittedAt,
+            i.PaymentStatus,
+            i.TotalAmount,
+            i.TaxAmount,
+            i.AgentId,
+            i.CampaignId,
             i.Id,
             i.InteractionNumber,
             i.Type,

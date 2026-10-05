@@ -97,10 +97,11 @@ public static partial class CallSummaryContextBuilder
         // One interaction's commerce (S178), else the record's (legacy). A transferred interaction (a different campaign
         // than the call's) has its own fields; others share the record's.
         var transferred = interaction?.CampaignId is { } ixc && ixc != record.CampaignId;
-        var orderSubmittedAt = interaction is not null ? interaction.OrderSubmittedAt : record.OrderSubmittedAt;
-        var paymentStatus = interaction is not null ? interaction.PaymentStatus : record.PaymentStatus;
-        var routedTier = interaction is not null ? interaction.RoutedTierLabel : record.RoutedTierLabel;
-        var cartDoc = interaction is not null ? interaction.Cart : record.Cart;
+        var commerce = interaction ?? record.FirstInteraction;
+        var orderSubmittedAt = commerce?.OrderSubmittedAt;
+        var paymentStatus = commerce?.PaymentStatus;
+        var routedTier = commerce?.RoutedTierLabel;
+        var cartDoc = commerce?.Cart;
         var fieldsJson = transferred ? interaction!.CustomFields : record.CustomFields;
         var r = new AiRedactor();
         var withheld = new List<string>();

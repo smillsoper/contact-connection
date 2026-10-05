@@ -54,7 +54,7 @@ public class ParallelQueuingTierTests
     [Fact]
     public void CallRecord_SetRoutedTier()
     {
-        var record = CallRecord.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var record = CallRecord.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()).AddInteraction(InteractionType.CustomerService);
         var group = Guid.NewGuid();
         record.SetRoutedTier(group, 10, "Alpha");
         Assert.Equal(group, record.RoutedGroupId);

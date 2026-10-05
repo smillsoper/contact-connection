@@ -59,11 +59,6 @@ public class CallRecordConfiguration : IEntityTypeConfiguration<CallRecord>
                 stored: true);
 
         // Financial
-        builder.Property(r => r.TotalAmount).HasColumnName("total_amount").HasPrecision(10, 2);
-        builder.Property(r => r.TaxAmount).HasColumnName("tax_amount").HasPrecision(10, 2);
-        builder.Property(r => r.PaymentStatus).HasColumnName("payment_status").HasMaxLength(30);
-        builder.Property(r => r.OrderNumber).HasColumnName("order_number").HasMaxLength(20);
-        builder.Property(r => r.OrderSubmittedAt).HasColumnName("order_submitted_at");
         builder.Property(r => r.CommissionsReversedAt).HasColumnName("commissions_reversed_at");
         builder.Property(r => r.CommissionsReversedReason).HasColumnName("commissions_reversed_reason").HasMaxLength(500);
         builder.Property(r => r.FinalizedAt).HasColumnName("finalized_at");
@@ -72,9 +67,6 @@ public class CallRecordConfiguration : IEntityTypeConfiguration<CallRecord>
         builder.Property(r => r.FinalizedByName).HasColumnName("finalized_by_name").HasMaxLength(200);
         builder.Property(r => r.FinalizeReason).HasColumnName("finalize_reason").HasMaxLength(1000);
         builder.Property(r => r.NumberProviderId).HasColumnName("number_provider_id");
-        builder.Property(r => r.RoutedGroupId).HasColumnName("routed_group_id");
-        builder.Property(r => r.RoutedTier).HasColumnName("routed_tier");
-        builder.Property(r => r.RoutedTierLabel).HasColumnName("routed_tier_label").HasMaxLength(50);
         builder.Property(r => r.ClientNumber).HasColumnName("client_number").HasMaxLength(20);
         builder.Property(r => r.BillingPhone).HasColumnName("billing_phone").HasMaxLength(30);
         builder.Property(r => r.ShippingPhone).HasColumnName("shipping_phone").HasMaxLength(30);
@@ -126,13 +118,6 @@ public class CallRecordConfiguration : IEntityTypeConfiguration<CallRecord>
                 v => JsonSerializer.Serialize(v, JsonOptions),
                 v => JsonSerializer.Deserialize<List<RecordingEvent>>(v, JsonOptions) ?? new())
             .HasDefaultValueSql("'[]'::jsonb");
-
-        builder.Property(r => r.Cart)
-            .HasColumnName("cart")
-            .HasColumnType("jsonb")
-            .HasConversion(
-                v => JsonSerializer.Serialize(v, JsonOptions),
-                v => JsonSerializer.Deserialize<CartDocument>(v, JsonOptions));
 
         // JSONB — opaque strings (owned by future engine components)
         builder.Property(r => r.FlowExecutionState)
