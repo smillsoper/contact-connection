@@ -17,6 +17,8 @@ const STATIC_NAMESPACES: StaticNamespace[] = [
       { key: 'campaign_id' }, { key: 'disposition' }, { key: 'notes' },
       { key: 'call_started_at' }, { key: 'call_ended_at' }, { key: 'handle_time_seconds' },
       { key: 'order_number' },
+      // Launch modes (S179): production / training / sandbox, and true on practice runs (training or sandbox).
+      { key: 'run_mode' }, { key: 'practice_run' },
       // Address objects — settable from set_variable (saves to the call record), readable with
       // nested fields like {{call_record.shipping_address.city}}.
       { key: 'billing_address' }, { key: 'shipping_address' },

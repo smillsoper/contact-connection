@@ -857,7 +857,10 @@ public class FlowEngine : IFlowEngine
         ctx.CallRecord["id"] = record.Id.ToString();
         ctx.CallRecord["status"] = record.OverallStatus;
         ctx.CallRecord["call_source"] = record.Source;
-        ctx.CallRecord["run_mode"] = record.RunMode;   // S179 launch modes
+        // S179 launch modes — lets a script bypass steps a practice run can't do (e.g. a {{shared.*}} result only the live
+        // call flow sets): branch on {{call_record.practice_run}} == true, or {{call_record.run_mode}} == training.
+        ctx.CallRecord["run_mode"] = record.RunMode;
+        ctx.CallRecord["practice_run"] = record.IsProductionRun ? "false" : "true";
         ctx.CallRecord["record_type"] = record.RecordType;
         ctx.CallRecord["phone_number"] = record.Phone ?? string.Empty;
         ctx.CallRecord["dnis"] = record.Dnis ?? string.Empty;
