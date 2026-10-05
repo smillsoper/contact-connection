@@ -53,7 +53,10 @@ public class InvoiceService(
         if (invoice.PeriodStart is not { } start) throw new InvalidOperationException("This invoice has no usage period.");
         var tenant = await TenantAsync(invoice.TenantId, ct);
         var usage = await meter.TallyMonthAsync(tenant, start.Year, start.Month, ct);
-        invoice.ReplaceUsageLines(UsageLines(tenant, usage));
+        var lines = UsageLines(tenant, usage).ToList();
+        invoice.ReplaceUsageLines(lines);
+        // New lines carry their own ids, so EF would take them for existing rows (an UPDATE of nothing) — say they're new.
+        db.InvoiceLines.AddRange(lines);
         await SaveAsync(ct);
         return invoice;
     }
