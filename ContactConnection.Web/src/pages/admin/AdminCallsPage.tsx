@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import AdminShell from '../../components/admin/AdminShell'
-import { callReviewApi, type CallSearchPage } from '../../api/callReview'
+import { abandonLabel, callReviewApi, type CallSearchPage } from '../../api/callReview'
 import { listCampaigns, type Campaign } from '../../api/telephony'
 
 const inputCls = 'bg-gray-900 border border-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500'
@@ -178,6 +178,9 @@ export default function AdminCallsPage() {
                   <td className="px-4 py-2 text-gray-400">{fmtDuration(c.handleTimeSeconds)}</td>
                   <td className="px-4 py-2 text-gray-500 text-xs">{c.source}</td>
                   <td className="px-4 py-2 text-right whitespace-nowrap">
+                    {c.abandon && (
+                      <span className="inline-block bg-amber-900/40 text-amber-300 border border-amber-800 rounded px-1.5 py-0.5 text-xs mr-2">{abandonLabel(c.abandon)}</span>
+                    )}
                     {c.hasFailedApiCall && (
                       <span className="inline-block bg-red-900/50 text-red-300 border border-red-800 rounded px-1.5 py-0.5 text-xs mr-2">API failed</span>
                     )}

@@ -23,6 +23,15 @@ export interface CallSummary {
   orderNumber: string | null
   cartTotal: number | null
   hasFailedApiCall: boolean
+  abandon: AbandonInfo | null
+}
+
+/** The caller hung up before being served: where (pre_queue / in_queue / callback_abandon …) and short/long. */
+export interface AbandonInfo { type: string | null; length: string | null; at: string; detail: string | null }
+
+export function abandonLabel(a: AbandonInfo) {
+  const where = (a.type ?? '').replace(/_/g, ' ')
+  return ['Abandoned', where || null, a.length].filter(Boolean).join(' · ')
 }
 
 export interface CallSearchPage {
@@ -137,6 +146,7 @@ export interface CallDetail {
   source: string
   recordType: string
   overallStatus: string
+  abandon: AbandonInfo | null
   clientId: string
   clientName: string | null
   campaignId: string

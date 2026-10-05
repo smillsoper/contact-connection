@@ -6,6 +6,7 @@ import CallCommissionsPanel from '../../components/admin/CallCommissionsPanel'
 import AiSummaryPanel from '../../components/admin/AiSummaryPanel'
 import { useAuthStore } from '../../stores/authStore'
 import {
+  abandonLabel,
   callReviewApi,
   type ApiCallNodeSummary,
   type ApiCallRerunResult,
@@ -195,6 +196,10 @@ export default function AdminCallDetailPage() {
             <span>DNIS: <span className="text-gray-200">{fmtPhone(call.dnis)}</span></span>
             <span>Source: <span className="text-gray-200">{call.source}</span></span>
             <span>Status: <span className="text-gray-200">{call.overallStatus}</span></span>
+            {call.abandon && (
+              <span>Abandoned: <span className="text-amber-300">{abandonLabel(call.abandon).replace(/^Abandoned · /, '')}</span>
+                <span className="text-gray-500"> at {fmtDate(call.abandon.at)}</span></span>
+            )}
             {call.handleTimeSeconds != null && <span>Handle time: <span className="text-gray-200">{Math.floor(call.handleTimeSeconds / 60)}m {call.handleTimeSeconds % 60}s</span></span>}
           </div>
         </div>

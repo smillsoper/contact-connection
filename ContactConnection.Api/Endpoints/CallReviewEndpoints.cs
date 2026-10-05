@@ -5,6 +5,8 @@ using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
 using ContactConnection.Domain.Entities;
 using ContactConnection.Domain.ValueObjects;
+using ContactConnection.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
 
 namespace ContactConnection.Api.Endpoints;
 
@@ -53,6 +55,7 @@ public static class CallReviewEndpoints
         ICampaignRepository campaigns,
         IAgentRepository agents,
         TenantContext tenantContext,
+        ScopedTenantDbContextFactory dbFactory,
         CancellationToken ct)
     {
         if (!tenantContext.HasTenant) return Results.Unauthorized();
@@ -65,6 +68,7 @@ public static class CallReviewEndpoints
             Skip: (pageNo - 1) * size, Take: size), ct);
 
         var failed = await callRecords.FindWithFailedApiCallsAsync(result.Items.Select(r => r.Id).ToList(), ct);
+        var abandons = await AbandonsAsync(dbFactory, result.Items.Select(r => r.Id).ToList(), ct);
         var campaignNames = (await campaigns.GetAllAsync(null, ct)).ToDictionary(c => c.Id, c => c.Name);
         var agentNames = (await agents.GetAllAsync(ct)).ToDictionary(a => a.Id, a => a.FullName);
 
@@ -93,8 +97,30 @@ public static class CallReviewEndpoints
                 r.OrderNumber,
                 cartTotal = r.Cart?.CartTotal,
                 hasFailedApiCall = failed.Contains(r.Id),
+                abandon = abandons.GetValueOrDefault(r.Id),
             }),
         });
+    }
+
+    /// <summary>The caller hung up before being served (S178): type (pre_queue / in_queue / callback_abandon / …) and
+    /// length (short / long) from the call's latest <c>abandoned</c> state. Null for calls that weren't abandoned.</summary>
+    public sealed record AbandonInfo(string? Type, string? Length, DateTimeOffset At, string? Detail);
+
+    private static async Task<Dictionary<Guid, AbandonInfo>> AbandonsAsync(
+        ScopedTenantDbContextFactory dbFactory, List<Guid> ids, CancellationToken ct)
+    {
+        if (ids.Count == 0) return [];
+        await using var db = dbFactory.Create();
+        var rows = await db.CallStateHistory.AsNoTracking()
+            .Where(h => ids.Contains(h.CallRecordId) && h.State == CallHistoryState.Abandoned)
+            .Select(h => new { h.CallRecordId, h.Sequence, h.AbandonType, h.AbandonLength, h.EnteredAt, h.Detail })
+            .ToListAsync(ct);
+        return rows.GroupBy(h => h.CallRecordId)
+            .ToDictionary(g => g.Key, g =>
+            {
+                var h = g.MaxBy(x => x.Sequence)!;
+                return new AbandonInfo(h.AbandonType, h.AbandonLength, h.EnteredAt, h.Detail);
+            });
     }
 
     // ── GET /api/v1/call-review/calls/{id} ──────────────────────────────────
@@ -116,6 +142,7 @@ public static class CallReviewEndpoints
         ICustomFieldDefinitionRepository customFieldDefinitions,
         ITelephonyCallSessionStore telephonySessions,
         TenantContext tenantContext,
+        ScopedTenantDbContextFactory dbFactory,
         CancellationToken ct)
     {
         if (!tenantContext.HasTenant) return Results.Unauthorized();
@@ -167,6 +194,7 @@ public static class CallReviewEndpoints
             r.Source,
             r.RecordType,
             r.OverallStatus,
+            abandon = (await AbandonsAsync(dbFactory, [r.Id], ct)).GetValueOrDefault(r.Id),
             r.ClientId,
             clientName = client?.Name,
             r.CampaignId,
