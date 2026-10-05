@@ -33,91 +33,115 @@ public class CartService : ICartService
         _campaigns = campaigns;
     }
 
-    public async Task<CartOperationResult> RecalculateAsync(Guid callRecordId, CancellationToken ct = default)
+    public async Task<CartOperationResult> RecalculateAsync(Guid callRecordId, CancellationToken ct = default, Guid? interactionId = null)
     {
         var record = await LoadRecordAsync(callRecordId, ct);
-        if (record.Cart is null) return CartOperationResult.Success(CartDocument.Empty());
 
-        // Items are unchanged, so reservations are too — just re-price and save.
-        var calculated = await _pricing.CalculateTotalsAsync(record.Cart, await BuildTaxContextAsync(record, ct), ct);
-        record.SetCart(calculated);
+        // Items are unchanged, so reservations are too — just re-price and save. Without a specific interaction
+        // (an address change), every interaction's cart is re-priced: the address belongs to the whole call.
+        List<CallInteraction?> targets = interactionId is { } one && one != Guid.Empty
+            ? [record.CommerceInteraction(one)]
+            : record.Interactions.Count > 0 ? [.. record.Interactions] : [null];
+        CartDocument? last = null;
+        foreach (var ix in targets)
+        {
+            var cart = CartOf(record, ix);
+            if (cart is null) continue;
+            last = await _pricing.CalculateTotalsAsync(cart, await BuildTaxContextAsync(record, ix, ct), ct);
+            Store(record, ix, last);
+        }
+        if (last is null) return CartOperationResult.Success(CartDocument.Empty());
         await _callRecords.SaveChangesAsync(ct);
-        return CartOperationResult.Success(calculated);
+        return CartOperationResult.Success(interactionId is null ? CartOf(record, record.CommerceInteraction()) ?? last : last);
     }
 
-    public async Task<CartOperationResult> ReplaceCartAsync(Guid callRecordId, CartDocument newCart, CancellationToken ct = default)
+    public async Task<CartOperationResult> ReplaceCartAsync(Guid callRecordId, CartDocument newCart, CancellationToken ct = default, Guid? interactionId = null)
     {
         var record = await LoadRecordAsync(callRecordId, ct);
-        return await ApplyAsync(record, newCart, ct);
+        return await ApplyAsync(record, record.CommerceInteraction(interactionId), newCart, ct);
     }
 
-    public async Task<CartOperationResult> AddItemAsync(Guid callRecordId, Guid offerId, int quantity, CancellationToken ct = default, bool enforceScope = false)
+    public async Task<CartOperationResult> AddItemAsync(Guid callRecordId, Guid offerId, int quantity, CancellationToken ct = default, bool enforceScope = false, Guid? interactionId = null)
     {
         if (quantity < 1) throw new InvalidOperationException("Quantity must be at least 1.");
 
         var record = await LoadRecordAsync(callRecordId, ct);
+        var ix = record.CommerceInteraction(interactionId);
         var offer = await _offers.GetByIdAsync(offerId, ct)
             ?? throw new InvalidOperationException($"Offer {offerId} not found");
-        if (enforceScope && !OfferFitsCall(offer, record))
+        if (enforceScope && !OfferFitsCall(offer, record, ix))
             throw new InvalidOperationException("This offer isn't available for this call's client/campaign.");
 
-        var existingItems = record.Cart?.Items ?? [];
+        var current = CartOf(record, ix);
+        var existingItems = current?.Items ?? [];
         var newItem = BuildPricedItem(offer, quantity, existingItems);
 
-        var newCart = (record.Cart ?? CartDocument.Empty()) with { Items = [.. existingItems, newItem] };
-        return await ApplyAsync(record, newCart, ct);
+        var newCart = (current ?? CartDocument.Empty()) with { Items = [.. existingItems, newItem] };
+        return await ApplyAsync(record, ix, newCart, ct);
     }
 
     /// <summary>Same rule as IOfferRepository.GetAvailableForContextAsync: a tenant-wide offer fits any
     /// call; a client-scoped offer only fits that client's calls, and only its listed campaigns if any.</summary>
-    internal static bool OfferFitsCall(Offer offer, CallRecord record)
-        => offer.AvailableFor(record.ClientId == Guid.Empty ? null : record.ClientId,
-                              record.CampaignId == Guid.Empty ? null : record.CampaignId);
+    /// The interaction's campaign decides (S178: a CS agent on a transferred call gets CS's offers).
+    internal static bool OfferFitsCall(Offer offer, CallRecord record, CallInteraction? interaction = null)
+    {
+        var campaignId = interaction?.CampaignId ?? record.CampaignId;
+        return offer.AvailableFor(record.ClientId == Guid.Empty ? null : record.ClientId,
+                                  campaignId == Guid.Empty ? null : campaignId);
+    }
 
-    public async Task<CartOperationResult> ReplaceItemsAsync(Guid callRecordId, IReadOnlyList<Guid> removeOfferIds, Guid addOfferId, int quantity, CancellationToken ct = default)
+    public async Task<CartOperationResult> ReplaceItemsAsync(Guid callRecordId, IReadOnlyList<Guid> removeOfferIds, Guid addOfferId, int quantity, CancellationToken ct = default, Guid? interactionId = null)
     {
         if (quantity < 1) throw new InvalidOperationException("Quantity must be at least 1.");
 
         var record = await LoadRecordAsync(callRecordId, ct);
+        var ix = record.CommerceInteraction(interactionId);
         var offer = await _offers.GetByIdAsync(addOfferId, ct)
             ?? throw new InvalidOperationException($"Offer {addOfferId} not found");
 
+        var current = CartOf(record, ix);
         var removeSet = removeOfferIds.ToHashSet();
-        var survivingItems = (record.Cart?.Items ?? []).Where(i => !removeSet.Contains(i.OfferId)).ToList();
+        var survivingItems = (current?.Items ?? []).Where(i => !removeSet.Contains(i.OfferId)).ToList();
         var newItem = BuildPricedItem(offer, quantity, survivingItems);
 
-        var newCart = (record.Cart ?? CartDocument.Empty()) with { Items = [.. survivingItems, newItem] };
-        return await ApplyAsync(record, newCart, ct);
+        var newCart = (current ?? CartDocument.Empty()) with { Items = [.. survivingItems, newItem] };
+        return await ApplyAsync(record, ix, newCart, ct);
     }
 
-    public async Task<CartOperationResult> RemoveOffersAsync(Guid callRecordId, IReadOnlyList<Guid> offerIds, CancellationToken ct = default)
+    public async Task<CartOperationResult> RemoveOffersAsync(Guid callRecordId, IReadOnlyList<Guid> offerIds, CancellationToken ct = default, Guid? interactionId = null)
     {
         var record = await LoadRecordAsync(callRecordId, ct);
+        var ix = record.CommerceInteraction(interactionId);
+        var current = CartOf(record, ix);
         var removeSet = offerIds.ToHashSet();
-        var newItems = (record.Cart?.Items ?? []).Where(i => !removeSet.Contains(i.OfferId)).ToList();
+        var newItems = (current?.Items ?? []).Where(i => !removeSet.Contains(i.OfferId)).ToList();
 
-        var newCart = (record.Cart ?? CartDocument.Empty()) with { Items = newItems };
-        return await ApplyAsync(record, newCart, ct);
+        var newCart = (current ?? CartDocument.Empty()) with { Items = newItems };
+        return await ApplyAsync(record, ix, newCart, ct);
     }
 
-    public async Task<CartOperationResult> RemoveItemAsync(Guid callRecordId, int itemIndex, CancellationToken ct = default)
+    public async Task<CartOperationResult> RemoveItemAsync(Guid callRecordId, int itemIndex, CancellationToken ct = default, Guid? interactionId = null)
     {
         var record = await LoadRecordAsync(callRecordId, ct);
-        var items = record.Cart?.Items ?? [];
+        var ix = record.CommerceInteraction(interactionId);
+        var current = CartOf(record, ix);
+        var items = current?.Items ?? [];
         if (itemIndex < 0 || itemIndex >= items.Count)
             throw new InvalidOperationException($"Item index {itemIndex} is out of range (cart has {items.Count} item(s)).");
 
         var newItems = items.Where((_, i) => i != itemIndex).ToList();
-        var newCart = record.Cart! with { Items = newItems };
-        return await ApplyAsync(record, newCart, ct);
+        var newCart = current! with { Items = newItems };
+        return await ApplyAsync(record, ix, newCart, ct);
     }
 
-    public async Task<CartOperationResult> UpdateQuantityAsync(Guid callRecordId, int itemIndex, int quantity, CancellationToken ct = default)
+    public async Task<CartOperationResult> UpdateQuantityAsync(Guid callRecordId, int itemIndex, int quantity, CancellationToken ct = default, Guid? interactionId = null)
     {
         if (quantity < 1) throw new InvalidOperationException("Quantity must be at least 1 — use RemoveItemAsync to remove an item.");
 
         var record = await LoadRecordAsync(callRecordId, ct);
-        var items = record.Cart?.Items ?? [];
+        var ix = record.CommerceInteraction(interactionId);
+        var current = CartOf(record, ix);
+        var items = current?.Items ?? [];
         if (itemIndex < 0 || itemIndex >= items.Count)
             throw new InvalidOperationException($"Item index {itemIndex} is out of range (cart has {items.Count} item(s)).");
 
@@ -130,8 +154,8 @@ public class CartService : ICartService
 
         var newItems = items.ToList();
         newItems[itemIndex] = repriced;
-        var newCart = record.Cart! with { Items = newItems };
-        return await ApplyAsync(record, newCart, ct);
+        var newCart = current! with { Items = newItems };
+        return await ApplyAsync(record, ix, newCart, ct);
     }
 
     // ── Shared helpers ──────────────────────────────────────────────────────
@@ -140,22 +164,35 @@ public class CartService : ICartService
         => await _callRecords.GetByIdWithInteractionsAsync(callRecordId, ct)
             ?? throw new InvalidOperationException($"Call record {callRecordId} not found");
 
-    private async Task<CartOperationResult> ApplyAsync(CallRecord record, CartDocument newCart, CancellationToken ct)
+    /// <summary>The cart a change applies to: the interaction's (S178). A legacy record with no interactions uses
+    /// the record's own column.</summary>
+    private static CartDocument? CartOf(CallRecord record, CallInteraction? ix) => ix is null ? record.Cart : ix.Cart;
+
+    /// <summary>Saves a cart onto its interaction, mirroring it onto the record's legacy column while that interaction is
+    /// the call's first (readers move to the interaction in phase 4).</summary>
+    private static void Store(CallRecord record, CallInteraction? ix, CartDocument cart)
     {
-        await _inventory.ReleaseCartAsync(record.Cart, ct);
+        ix?.SetCart(cart);
+        if (record.MirrorsCommerceOf(ix)) record.SetCart(cart);
+    }
+
+    private async Task<CartOperationResult> ApplyAsync(CallRecord record, CallInteraction? ix, CartDocument newCart, CancellationToken ct)
+    {
+        var current = CartOf(record, ix);
+        await _inventory.ReleaseCartAsync(current, ct);
 
         var unavailable = await _inventory.ReserveCartAsync(newCart, ct);
         if (unavailable.Count > 0)
         {
             // Restore the old cart's reservations so the call record is left consistent.
-            if (record.Cart is not null)
-                await _inventory.ReserveCartAsync(record.Cart, ct);
+            if (current is not null)
+                await _inventory.ReserveCartAsync(current, ct);
 
             return CartOperationResult.Conflict(unavailable);
         }
 
-        var calculated = await _pricing.CalculateTotalsAsync(newCart, await BuildTaxContextAsync(record, ct), ct);
-        record.SetCart(calculated);
+        var calculated = await _pricing.CalculateTotalsAsync(newCart, await BuildTaxContextAsync(record, ix, ct), ct);
+        Store(record, ix, calculated);
         await _callRecords.SaveChangesAsync(ct);
 
         return CartOperationResult.Success(calculated);
@@ -166,11 +203,13 @@ public class CartService : ICartService
     /// taxed by whatever the campaign is configured for) and the call record's addresses. A call
     /// with no campaign yet prices with the flat-rate default.
     /// </summary>
-    private async Task<TaxContext> BuildTaxContextAsync(CallRecord record, CancellationToken ct)
+    private async Task<TaxContext> BuildTaxContextAsync(CallRecord record, CallInteraction? ix, CancellationToken ct)
     {
-        var campaign = record.CampaignId == Guid.Empty ? null : await _campaigns.GetByIdAsync(record.CampaignId, ct);
+        // The interaction's campaign taxes its cart (S178: a CS order uses CS's tax provider).
+        var campaignId = ix?.CampaignId ?? record.CampaignId;
+        var campaign = campaignId == Guid.Empty ? null : await _campaigns.GetByIdAsync(campaignId, ct);
         return new TaxContext(
-            CampaignId:   record.CampaignId,
+            CampaignId:   campaignId,
             ClientId:     record.ClientId,
             ProviderKey:  campaign?.TaxProvider ?? TaxProviderKey.FlatRate,
             SettingsJson: campaign?.TaxSettings,

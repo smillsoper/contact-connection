@@ -23,12 +23,18 @@ public class PaymentService(
         Guid callRecordId, string provider,
         string cardNumberField, string expField, string cvvField, string? zipField, string? zipOverride,
         decimal? fixedAmount,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        Guid? interactionId = null)
     {
-        var record = await callRecords.GetByIdAsync(callRecordId, ct)
+        var record = await callRecords.GetByIdWithInteractionsAsync(callRecordId, ct)
             ?? throw new InvalidOperationException($"Call record {callRecordId} not found.");
 
-        var amount = fixedAmount ?? record.Cart?.CartTotal ?? 0m;
+        // Interaction-scoped (S178): this interaction's cart, its own authorization, its campaign's gateway
+        // credentials, its order number. A legacy record with no interactions behaves as before.
+        var ix = record.CommerceInteraction(interactionId);
+        var cart = ix is null ? record.Cart : ix.Cart;
+        var campaignId = ix?.CampaignId ?? record.CampaignId;
+        var amount = fixedAmount ?? cart?.CartTotal ?? 0m;
         if (amount <= 0)
             return new PaymentAuthResult(false, PaymentTransactionStatus.Error, null, null, null,
                 "No amount to authorize — cart is empty and no fixed amount was configured.");
@@ -37,7 +43,7 @@ public class PaymentService(
         // amount on the same card capture needs nothing; anything else is voided first so the caller
         // is never holding two authorizations.
         var action = PaymentAuthAction.Authorized;
-        var existing = await transactions.GetMostRecentApprovedAsync(callRecordId, ct);
+        var existing = await transactions.GetMostRecentApprovedAsync(callRecordId, ix?.Id, ct);
         if (existing is not null)
         {
             var cardRecaptured = record.SensitiveDataStoredAt is { } storedAt && storedAt > existing.CreatedAt;
@@ -89,16 +95,16 @@ public class PaymentService(
             : zipField is not null && fields.TryGetValue(zipField, out var zipValue) ? zipValue : null;
 
         var client = gatewayClients.Resolve(provider);
-        var orderNumber = await orderNumbers.GetOrAssignAsync(record, ct);
+        var orderNumber = await orderNumbers.GetOrAssignAsync(record, ix, ct);
         var result = await client.AuthorizeAsync(
-            record.CampaignId, record.ClientId, amount, cardNumber, expirationMMYY, cvv, zip, orderNumber, ct);
+            campaignId, record.ClientId, amount, cardNumber, expirationMMYY, cvv, zip, orderNumber, ct);
 
         var transaction = PaymentTransaction.Create(
             id: Guid.NewGuid(),
             tenantId: record.TenantId,
             callRecordId: callRecordId,
             clientId: record.ClientId,
-            campaignId: record.CampaignId,
+            campaignId: campaignId,
             gateway: provider,
             amount: amount,
             status: result.Status,
@@ -112,6 +118,7 @@ public class PaymentService(
             cardType: result.CardType,
             orderNumber: orderNumber);
 
+        if (ix is not null) transaction.SetInteraction(ix.Id);
         await transactions.AddAsync(transaction, ct);
         await transactions.SaveChangesAsync(ct);
 
@@ -124,9 +131,9 @@ public class PaymentService(
             result.AuthCode, result.ResponseReasonText, orderNumber, action, amount, result.CardLast4);
     }
 
-    public async Task<PaymentVoidResult> VoidMostRecentAsync(Guid callRecordId, CancellationToken ct = default)
+    public async Task<PaymentVoidResult> VoidMostRecentAsync(Guid callRecordId, CancellationToken ct = default, Guid? interactionId = null)
     {
-        var transaction = await transactions.GetMostRecentApprovedAsync(callRecordId, ct);
+        var transaction = await transactions.GetMostRecentApprovedAsync(callRecordId, interactionId, ct);
         if (transaction is null)
             return new PaymentVoidResult(false, "No approved, un-voided transaction found for this call.");
 

@@ -257,6 +257,27 @@ public class CallRecord
         return record;
     }
 
+    /// <summary>The interaction a cart / order / payment action applies to (S178, interaction-scoped commerce):
+    /// the given one when known (a script step, an agent tab), else the most recently started still-active one,
+    /// else the latest. Null when the call has no interactions yet (legacy rows).</summary>
+    public CallInteraction? CommerceInteraction(Guid? interactionId = null)
+    {
+        if (interactionId is { } id && id != Guid.Empty)
+            return _interactions.FirstOrDefault(i => i.Id == id);
+        return _interactions.Where(i => i.Status == InteractionStatus.Active).OrderByDescending(i => i.StartedAt).FirstOrDefault()
+            ?? _interactions.OrderByDescending(i => i.StartedAt).FirstOrDefault();
+    }
+
+    /// <summary>The call's first piece of work (earliest start). Until phase 4 moves the readers, its cart / order is
+    /// mirrored onto the record's legacy columns.</summary>
+    public CallInteraction? FirstInteraction =>
+        _interactions.OrderBy(i => i.StartedAt).ThenBy(i => i.InteractionNumber).FirstOrDefault();
+
+    /// <summary>True when writes to <paramref name="interaction"/> should also be mirrored onto the record's legacy
+    /// commerce columns (phase 3 → 4 transition): no interaction at all, or the first one.</summary>
+    public bool MirrorsCommerceOf(CallInteraction? interaction) =>
+        interaction is null || ReferenceEquals(interaction, FirstInteraction);
+
     public CallInteraction AddInteraction(string type, Guid? id = null)
     {
         var interaction = CallInteraction.Create(Id, _interactions.Count + 1, type, id);

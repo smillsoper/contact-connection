@@ -57,9 +57,10 @@ public interface IPaymentService
         Guid callRecordId, string provider,
         string cardNumberField, string expField, string cvvField, string? zipField, string? zipOverride,
         decimal? fixedAmount,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        Guid? interactionId = null);
 
     /// <summary>Voids the call's most recent approved, not-yet-voided transaction. Fails with no
     /// gateway call at all if there's nothing eligible to void.</summary>
-    Task<PaymentVoidResult> VoidMostRecentAsync(Guid callRecordId, CancellationToken ct = default);
+    Task<PaymentVoidResult> VoidMostRecentAsync(Guid callRecordId, CancellationToken ct = default, Guid? interactionId = null);
 }

@@ -119,6 +119,7 @@ public class QueuedCallDeliveryService(
         }
         var interaction = record.AddInteraction(InteractionType.CustomerService);
         interaction.AssignTo(agentId, routingCampaignId);
+        interaction.SetRoutedTier(route?.GroupId, route?.Tier ?? 0, route?.TierLabel);
         db.CallInteractions.Add(interaction);
         await db.SaveChangesAsync(ct);
 

@@ -13,4 +13,8 @@ public interface IOrderNumberService
     /// call has no client, or its client has no OrderNumberSequence configured (order numbers are
     /// opt-in per client; callers must treat null as "send no order number", not as an error).</summary>
     Task<string?> GetOrAssignAsync(CallRecord record, CancellationToken ct = default);
+    /// <summary>The interaction's order number (S178): each interaction's order has its own. The call's first interaction
+    /// keeps the record's number (mirrored onto the record until readers move to the interaction). Null interaction =
+    /// the record-level behaviour.</summary>
+    Task<string?> GetOrAssignAsync(CallRecord record, CallInteraction? interaction, CancellationToken ct = default);
 }

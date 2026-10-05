@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useCallStore } from '../../stores/callStore'
+import { useFlowSessionsStore } from '../../stores/flowSessionsStore'
 import { cartApi, type CartDocument } from '../../api/cart'
 import CartModal from './CartModal'
 
@@ -8,13 +9,16 @@ import CartModal from './CartModal'
 export default function CartPanel() {
   const callRecordId = useCallStore((s) => s.callRecordId)
   const cartVersion = useCallStore((s) => s.cartVersion)
+  // The active tab's script session: its interaction owns the cart (S178 — a transferred call's CS agent has
+  // their own cart, separate from the sales agent's).
+  const sessionId = useFlowSessionsStore((s) => s.activeSessionId)
   const [cart, setCart] = useState<CartDocument | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
 
   const refresh = useCallback(() => {
     if (!callRecordId) { setCart(null); return }
-    cartApi.get(callRecordId).then((c) => setCart(c ?? null)).catch(() => setCart(null))
-  }, [callRecordId])
+    cartApi.get(callRecordId, sessionId).then((c) => setCart(c ?? null)).catch(() => setCart(null))
+  }, [callRecordId, sessionId])
 
   // Refetch on every flow advance/jump/start too (cartVersion), not just when callRecordId first
   // appears — cart-mutating CRM nodes (add_to_cart/remove_cart_item/reset_cart) have no display or
@@ -54,6 +58,7 @@ export default function CartPanel() {
       {modalOpen && (
         <CartModal
           callRecordId={callRecordId}
+          sessionId={sessionId}
           cart={cart}
           onChanged={setCart}
           onClose={() => setModalOpen(false)}

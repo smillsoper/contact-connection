@@ -24,17 +24,23 @@ public class OrderService : IOrderService
     }
 
     public async Task<(Order Order, bool Created)> CreateFromCartAsync(
-        Guid callRecordId, CancellationToken ct = default)
+        Guid callRecordId, CancellationToken ct = default, Guid? interactionId = null)
     {
-        var callRecord = await _callRecords.GetByIdAsync(callRecordId, ct)
+        var callRecord = await _callRecords.GetByIdWithInteractionsAsync(callRecordId, ct)
             ?? throw new InvalidOperationException($"Call record {callRecordId} not found.");
 
+        // One order per interaction (S178): a sales order and a CS order on the same call are separate. A legacy
+        // record with no interactions keeps one order per call.
+        var ix = callRecord.CommerceInteraction(interactionId);
+
         // Idempotent — return existing order if already committed
-        var existing = await _orders.GetByCallRecordIdAsync(callRecordId, ct);
+        var existing = ix is not null
+            ? await _orders.GetByInteractionIdAsync(ix.Id, ct)
+            : await _orders.GetByCallRecordIdAsync(callRecordId, ct);
         if (existing is not null)
             return (existing, Created: false);
 
-        var cart = callRecord.Cart;
+        var cart = ix is null ? callRecord.Cart : ix.Cart;
         if (cart is null || cart.Items.Count == 0)
             throw new InvalidOperationException(
                 $"Call record {callRecordId} has no active cart to commit.");
@@ -56,6 +62,7 @@ public class OrderService : IOrderService
             cart:         cart,
             lines:        lines);
 
+        if (ix is not null) order.SetInteraction(ix.Id);
         await _orders.AddAsync(order, ct);
         await _orders.SaveChangesAsync(ct);
 

@@ -40,15 +40,19 @@ export interface CartConflictError {
 // `unavailableSkus` from once caught here, so its message is already composed server-side to be
 // directly renderable (see CallRecordsEndpoints.CartResult).
 
+const sq = (sessionId?: string | null) => (sessionId ? `?sessionId=${sessionId}` : '')
+
 export const cartApi = {
-  get: (callRecordId: string) => api.get<CartDocument | undefined>(`/api/v1/call-records/${callRecordId}/cart`),
+  // sessionId = the agent tab's script session: the cart is that session's interaction's (S178, interaction-scoped).
+  get: (callRecordId: string, sessionId?: string | null) =>
+    api.get<CartDocument | undefined>(`/api/v1/call-records/${callRecordId}/cart${sq(sessionId)}`),
 
-  addItem: (callRecordId: string, offerId: string, quantity: number) =>
-    api.post<CartDocument>(`/api/v1/call-records/${callRecordId}/cart/items`, { offerId, quantity }),
+  addItem: (callRecordId: string, offerId: string, quantity: number, sessionId?: string | null) =>
+    api.post<CartDocument>(`/api/v1/call-records/${callRecordId}/cart/items${sq(sessionId)}`, { offerId, quantity }),
 
-  updateQuantity: (callRecordId: string, itemIndex: number, quantity: number) =>
-    api.patch<CartDocument>(`/api/v1/call-records/${callRecordId}/cart/items/${itemIndex}`, { quantity }),
+  updateQuantity: (callRecordId: string, itemIndex: number, quantity: number, sessionId?: string | null) =>
+    api.patch<CartDocument>(`/api/v1/call-records/${callRecordId}/cart/items/${itemIndex}${sq(sessionId)}`, { quantity }),
 
-  removeItem: (callRecordId: string, itemIndex: number) =>
-    api.delete<CartDocument>(`/api/v1/call-records/${callRecordId}/cart/items/${itemIndex}`),
+  removeItem: (callRecordId: string, itemIndex: number, sessionId?: string | null) =>
+    api.delete<CartDocument>(`/api/v1/call-records/${callRecordId}/cart/items/${itemIndex}${sq(sessionId)}`),
 }

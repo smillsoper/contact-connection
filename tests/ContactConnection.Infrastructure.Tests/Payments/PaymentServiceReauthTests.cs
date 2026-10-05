@@ -29,7 +29,7 @@ public class PaymentServiceReauthTests
         var record = CallRecord.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
         record.StoreSensitiveData("ciphertext");
         var callRecords = new Mock<ICallRecordRepository>();
-        callRecords.Setup(r => r.GetByIdAsync(record.Id, It.IsAny<CancellationToken>())).ReturnsAsync(record);
+        callRecords.Setup(r => r.GetByIdWithInteractionsAsync(record.Id, It.IsAny<CancellationToken>())).ReturnsAsync(record);
         var protector = new Mock<ISensitiveDataProtector>();
         protector.Setup(p => p.Unprotect(It.IsAny<string>())).Returns(CardJson);
 
@@ -47,10 +47,10 @@ public class PaymentServiceReauthTests
         {
             Service = null!, Gateway = gateway, Transactions = new Mock<IPaymentTransactionRepository>(), Record = record,
         };
-        h.Transactions.Setup(t => t.GetMostRecentApprovedAsync(record.Id, It.IsAny<CancellationToken>()))
+        h.Transactions.Setup(t => t.GetMostRecentApprovedAsync(record.Id, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => h.Existing is { VoidedAt: null } ? h.Existing : null);
         var orderNumbers = new Mock<IOrderNumberService>();
-        orderNumbers.Setup(o => o.GetOrAssignAsync(record, It.IsAny<CancellationToken>())).ReturnsAsync("LIFSEA-10000001");
+        orderNumbers.Setup(o => o.GetOrAssignAsync(record, It.IsAny<CallInteraction?>(), It.IsAny<CancellationToken>())).ReturnsAsync("LIFSEA-10000001");
         h.Service = new PaymentService(callRecords.Object, protector.Object, factory.Object, h.Transactions.Object, orderNumbers.Object);
         return h;
     }

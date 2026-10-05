@@ -29,7 +29,7 @@ public class RemoveCartItemNodeHandler(IVariableResolver resolver, ICartService 
         string transitionKey;
         try
         {
-            var result = await cart.RemoveOffersAsync(ctx.CallRecordId, GuidList(node, "removeOfferIds"), ct);
+            var result = await cart.RemoveOffersAsync(ctx.CallRecordId, GuidList(node, "removeOfferIds"), ct, ctx.InteractionId);
             transitionKey = result.Succeeded ? "removed" : "failed";
         }
         catch (InvalidOperationException)

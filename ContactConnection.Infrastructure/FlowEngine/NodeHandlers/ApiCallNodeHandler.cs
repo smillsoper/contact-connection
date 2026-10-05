@@ -140,7 +140,7 @@ public class ApiCallNodeHandler(
             // The order is placed: stamp it and record the agent's commission (S171). Never fails the flow.
             if (commissions is not null)
             {
-                try { await commissions.OrderSubmittedAsync(ctx.CallRecordId, ct); }
+                try { await commissions.OrderSubmittedAsync(ctx.CallRecordId, ct, ctx.InteractionId); }
                 catch (Exception ex) { logger?.LogWarning(ex, "Commission recording failed for call {CallRecordId}", ctx.CallRecordId); }
             }
         }

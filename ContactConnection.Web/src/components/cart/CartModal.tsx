@@ -5,6 +5,8 @@ import { offersApi, type OfferSummary } from '../../api/offers'
 
 interface CartModalProps {
   callRecordId: string
+  /** The tab's script session — the cart is its interaction's. */
+  sessionId?: string | null
   cart: CartDocument | null
   onChanged: (cart: CartDocument) => void
   onClose: () => void
@@ -12,7 +14,7 @@ interface CartModalProps {
 
 type View = 'cart' | 'search'
 
-export default function CartModal({ callRecordId, cart, onChanged, onClose }: CartModalProps) {
+export default function CartModal({ callRecordId, sessionId, cart, onChanged, onClose }: CartModalProps) {
   const [view, setView] = useState<View>('cart')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -56,7 +58,7 @@ export default function CartModal({ callRecordId, cart, onChanged, onClose }: Ca
     setError(null)
     setBusy(true)
     try {
-      const updated = await cartApi.addItem(callRecordId, offer.id, addQty)
+      const updated = await cartApi.addItem(callRecordId, offer.id, addQty, sessionId)
       onChanged(updated)
       setView('cart')
       setSelectedProduct(null)
@@ -75,7 +77,7 @@ export default function CartModal({ callRecordId, cart, onChanged, onClose }: Ca
     setError(null)
     setBusy(true)
     try {
-      onChanged(await cartApi.updateQuantity(callRecordId, itemIndex, newQty))
+      onChanged(await cartApi.updateQuantity(callRecordId, itemIndex, newQty, sessionId))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not update quantity.')
     } finally {
@@ -87,7 +89,7 @@ export default function CartModal({ callRecordId, cart, onChanged, onClose }: Ca
     setError(null)
     setBusy(true)
     try {
-      onChanged(await cartApi.removeItem(callRecordId, itemIndex))
+      onChanged(await cartApi.removeItem(callRecordId, itemIndex, sessionId))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not remove item.')
     } finally {

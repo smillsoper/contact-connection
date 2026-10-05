@@ -20,13 +20,17 @@ public record CartOperationResult(CartDocument? Cart, IReadOnlyList<string> Unav
 /// place this happens, used by both the cart HTTP endpoints and (eventually) CRM flow node
 /// handlers that need to mutate a cart mid-script.
 /// </summary>
+/// <remarks>Interaction-scoped (S178): every method takes an optional <c>interactionId</c> — the cart belongs to that
+/// interaction (a script step's own, the agent tab's). Without one, the call's current interaction
+/// (<see cref="ContactConnection.Domain.Entities.CallRecord.CommerceInteraction"/>). RecalculateAsync without one re-prices
+/// every interaction's cart (an address change affects them all).</remarks>
 public interface ICartService
 {
     /// <summary>
     /// Replaces the entire cart document (the original whole-document PUT behavior).
     /// Throws <see cref="InvalidOperationException"/> if the call record doesn't exist.
     /// </summary>
-    Task<CartOperationResult> ReplaceCartAsync(Guid callRecordId, CartDocument newCart, CancellationToken ct = default);
+    Task<CartOperationResult> ReplaceCartAsync(Guid callRecordId, CartDocument newCart, CancellationToken ct = default, Guid? interactionId = null);
 
     /// <summary>
     /// Adds one line item for the given offer/quantity to the existing cart, snapshotting the
@@ -42,7 +46,7 @@ public interface ICartService
     /// <param name="enforceScope">True when a person picked the offer (agent cart, call review): an offer
     /// scoped to a different client/campaign than the call's is refused. Flow nodes pass false — the flow
     /// designer chose those offers deliberately.</param>
-    Task<CartOperationResult> AddItemAsync(Guid callRecordId, Guid offerId, int quantity, CancellationToken ct = default, bool enforceScope = false);
+    Task<CartOperationResult> AddItemAsync(Guid callRecordId, Guid offerId, int quantity, CancellationToken ct = default, bool enforceScope = false, Guid? interactionId = null);
 
     /// <summary>
     /// Removes every existing line whose OfferId is in <paramref name="removeOfferIds"/> (0, 1, or
@@ -56,7 +60,7 @@ public interface ICartService
     /// doesn't exist. An empty or not-found <paramref name="removeOfferIds"/> entry is a no-op for
     /// that id, not an error — there's nothing wrong with "replacing" an item that was never added.
     /// </summary>
-    Task<CartOperationResult> ReplaceItemsAsync(Guid callRecordId, IReadOnlyList<Guid> removeOfferIds, Guid addOfferId, int quantity, CancellationToken ct = default);
+    Task<CartOperationResult> ReplaceItemsAsync(Guid callRecordId, IReadOnlyList<Guid> removeOfferIds, Guid addOfferId, int quantity, CancellationToken ct = default, Guid? interactionId = null);
 
     /// <summary>
     /// Removes every existing line whose OfferId is in <paramref name="offerIds"/> — no add step,
@@ -65,14 +69,14 @@ public interface ICartService
     ///
     /// Throws <see cref="InvalidOperationException"/> if the call record doesn't exist.
     /// </summary>
-    Task<CartOperationResult> RemoveOffersAsync(Guid callRecordId, IReadOnlyList<Guid> offerIds, CancellationToken ct = default);
+    Task<CartOperationResult> RemoveOffersAsync(Guid callRecordId, IReadOnlyList<Guid> offerIds, CancellationToken ct = default, Guid? interactionId = null);
 
     /// <summary>
     /// Removes the item at <paramref name="itemIndex"/> (0-based, into <c>CartDocument.Items</c>).
     /// Throws <see cref="InvalidOperationException"/> if the call record doesn't exist or the
     /// index is out of range.
     /// </summary>
-    Task<CartOperationResult> RemoveItemAsync(Guid callRecordId, int itemIndex, CancellationToken ct = default);
+    Task<CartOperationResult> RemoveItemAsync(Guid callRecordId, int itemIndex, CancellationToken ct = default, Guid? interactionId = null);
 
     /// <summary>
     /// Updates the quantity of the item at <paramref name="itemIndex"/>, re-resolving its payment
@@ -80,7 +84,7 @@ public interface ICartService
     /// <see cref="InvalidOperationException"/> if the call record doesn't exist, the index is out
     /// of range, or <paramref name="quantity"/> is less than 1 (use RemoveItemAsync to remove).
     /// </summary>
-    Task<CartOperationResult> UpdateQuantityAsync(Guid callRecordId, int itemIndex, int quantity, CancellationToken ct = default);
+    Task<CartOperationResult> UpdateQuantityAsync(Guid callRecordId, int itemIndex, int quantity, CancellationToken ct = default, Guid? interactionId = null);
 
     /// <summary>
     /// Re-prices the call's current cart without changing its items — for when something the
@@ -88,5 +92,5 @@ public interface ICartService
     /// when the call has no cart. Throws <see cref="InvalidOperationException"/> if the call record
     /// doesn't exist.
     /// </summary>
-    Task<CartOperationResult> RecalculateAsync(Guid callRecordId, CancellationToken ct = default);
+    Task<CartOperationResult> RecalculateAsync(Guid callRecordId, CancellationToken ct = default, Guid? interactionId = null);
 }

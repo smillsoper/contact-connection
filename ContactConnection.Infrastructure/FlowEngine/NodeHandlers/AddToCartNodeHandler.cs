@@ -43,8 +43,8 @@ public class AddToCartNodeHandler(IVariableResolver resolver, ICartService cart)
             try
             {
                 var result = mode == "replace"
-                    ? await cart.ReplaceItemsAsync(ctx.CallRecordId, GuidList(node, "replacesOfferIds"), offerId, quantity, ct)
-                    : await cart.AddItemAsync(ctx.CallRecordId, offerId, quantity, ct);
+                    ? await cart.ReplaceItemsAsync(ctx.CallRecordId, GuidList(node, "replacesOfferIds"), offerId, quantity, ct, ctx.InteractionId)
+                    : await cart.AddItemAsync(ctx.CallRecordId, offerId, quantity, ct, interactionId: ctx.InteractionId);
 
                 transitionKey = result.Succeeded ? "added" : "failed";
             }

@@ -19,4 +19,6 @@ public interface IOrderNumberSequenceRepository
     /// won, or the one a concurrent first-use already wrote (the given number is then simply
     /// unused, leaving a gap in the sequence, which is harmless).</summary>
     Task<string?> AssignToCallRecordAsync(Guid callRecordId, string orderNumber, CancellationToken ct = default);
+    /// <summary>Same conditional write for an interaction's order number (S178, interaction-scoped commerce).</summary>
+    Task<string?> AssignToInteractionAsync(Guid interactionId, string orderNumber, CancellationToken ct = default);
 }

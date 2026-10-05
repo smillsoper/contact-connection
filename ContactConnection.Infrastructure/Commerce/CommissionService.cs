@@ -13,10 +13,13 @@ public class CommissionService(ScopedTenantDbContextFactory dbFactory) : ICommis
     public Task RecalculateAsync(Guid callRecordId, string trigger, CancellationToken ct = default) =>
         WithRecordAsync(callRecordId, (db, record) => CommissionLedger.SyncAsync(db, record, trigger, ct), ct);
 
-    public Task OrderSubmittedAsync(Guid callRecordId, CancellationToken ct = default) =>
+    public Task OrderSubmittedAsync(Guid callRecordId, CancellationToken ct = default, Guid? interactionId = null) =>
         WithRecordAsync(callRecordId, (db, record) =>
         {
-            record.MarkOrderSubmitted(DateTimeOffset.UtcNow);
+            var now = DateTimeOffset.UtcNow;
+            var ix = record.CommerceInteraction(interactionId);
+            ix?.MarkOrderSubmitted(now);
+            if (record.MirrorsCommerceOf(ix)) record.MarkOrderSubmitted(now);
             return CommissionLedger.SyncAsync(db, record, CommissionTrigger.OrderSubmitted, ct);
         }, ct);
 
@@ -37,7 +40,7 @@ public class CommissionService(ScopedTenantDbContextFactory dbFactory) : ICommis
     private async Task WithRecordAsync(Guid callRecordId, Func<TenantDbContext, CallRecord, Task> work, CancellationToken ct)
     {
         await using var db = dbFactory.Create();
-        var record = await db.CallRecords.FirstOrDefaultAsync(r => r.Id == callRecordId, ct);
+        var record = await db.CallRecords.Include(r => r.Interactions).FirstOrDefaultAsync(r => r.Id == callRecordId, ct);
         if (record is null) return;
         await work(db, record);
         await db.SaveChangesAsync(ct);

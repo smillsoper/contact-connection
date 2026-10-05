@@ -25,7 +25,7 @@ public class ResetCartNodeHandler(IVariableResolver resolver, ICartService cart)
         JsonObject node, FlowExecutionContext ctx,
         string? agentInput, string agentTransition, CancellationToken ct = default)
     {
-        await cart.ReplaceCartAsync(ctx.CallRecordId, CartDocument.Empty(), ct);
+        await cart.ReplaceCartAsync(ctx.CallRecordId, CartDocument.Empty(), ct, ctx.InteractionId);
 
         var next = Transition(node, "default");
         AppendHistory(ctx, node, input: null, transition: "default");

@@ -64,6 +64,19 @@ public class OrderNumberSequenceRepository : IOrderNumberSequenceRepository
         }
     }
 
+    public async Task<string?> AssignToInteractionAsync(Guid interactionId, string orderNumber, CancellationToken ct = default)
+    {
+        await Ctx.Database.ExecuteSqlAsync($"""
+            UPDATE call_interactions SET order_number = {orderNumber}
+            WHERE id = {interactionId} AND order_number IS NULL
+            """, ct);
+
+        return await Ctx.CallInteractions
+            .Where(i => i.Id == interactionId)
+            .Select(i => i.OrderNumber)
+            .FirstOrDefaultAsync(ct);
+    }
+
     public async Task<string?> AssignToCallRecordAsync(Guid callRecordId, string orderNumber, CancellationToken ct = default)
     {
         await Ctx.Database.ExecuteSqlAsync($"""

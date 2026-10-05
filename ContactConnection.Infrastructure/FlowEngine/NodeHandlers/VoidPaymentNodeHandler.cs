@@ -31,7 +31,7 @@ public class VoidPaymentNodeHandler(IVariableResolver resolver, IPaymentService 
         JsonObject node, FlowExecutionContext ctx,
         string? agentInput, string agentTransition, CancellationToken ct = default)
     {
-        var result = await payments.VoidMostRecentAsync(ctx.CallRecordId, ct);
+        var result = await payments.VoidMostRecentAsync(ctx.CallRecordId, ct, ctx.InteractionId);
         var transitionKey = result.Succeeded ? "voided" : "failed";
 
         var outputVariable = Str(node, "outputVariable")?.Trim();

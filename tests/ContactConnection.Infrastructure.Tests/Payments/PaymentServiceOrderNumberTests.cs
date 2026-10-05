@@ -15,7 +15,7 @@ public class PaymentServiceOrderNumberTests
         NewService(CallRecord record, string? orderNumber)
     {
         var callRecords = new Mock<ICallRecordRepository>();
-        callRecords.Setup(r => r.GetByIdAsync(record.Id, It.IsAny<CancellationToken>())).ReturnsAsync(record);
+        callRecords.Setup(r => r.GetByIdWithInteractionsAsync(record.Id, It.IsAny<CancellationToken>())).ReturnsAsync(record);
 
         var protector = new Mock<ISensitiveDataProtector>();
         protector.Setup(p => p.Unprotect(It.IsAny<string>())).Returns(CardJson);
@@ -31,7 +31,7 @@ public class PaymentServiceOrderNumberTests
 
         var transactions = new Mock<IPaymentTransactionRepository>();
         var orderNumbers = new Mock<IOrderNumberService>();
-        orderNumbers.Setup(o => o.GetOrAssignAsync(record, It.IsAny<CancellationToken>())).ReturnsAsync(orderNumber);
+        orderNumbers.Setup(o => o.GetOrAssignAsync(record, It.IsAny<CallInteraction?>(), It.IsAny<CancellationToken>())).ReturnsAsync(orderNumber);
 
         var service = new PaymentService(callRecords.Object, protector.Object, factory.Object, transactions.Object, orderNumbers.Object);
         return (service, gateway, transactions);

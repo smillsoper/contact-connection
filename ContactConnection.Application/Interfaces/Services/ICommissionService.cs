@@ -12,7 +12,9 @@ public interface ICommissionService
     Task RecalculateAsync(Guid callRecordId, string trigger, CancellationToken ct = default);
 
     /// <summary>The call's order went through: stamp the order time (first time only) and recompute.</summary>
-    Task OrderSubmittedAsync(Guid callRecordId, CancellationToken ct = default);
+    /// <summary>Marks the order submitted on the interaction whose script submitted it (S178; null = the call's current
+    /// interaction), mirrored onto the record while that's the first interaction, then recalculates.</summary>
+    Task OrderSubmittedAsync(Guid callRecordId, CancellationToken ct = default, Guid? interactionId = null);
 
     /// <summary>Admin: the call earns nothing (e.g. the order was cancelled) — reverses what's in force.</summary>
     Task ReverseAsync(Guid callRecordId, string reason, CancellationToken ct = default);

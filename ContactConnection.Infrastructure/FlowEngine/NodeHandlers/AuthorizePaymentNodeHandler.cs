@@ -72,7 +72,8 @@ public class AuthorizePaymentNodeHandler(IVariableResolver resolver, IPaymentSer
         try
         {
             result = await payments.AuthorizeAsync(
-                ctx.CallRecordId, provider, cardNumberField, expField, cvvField, zipField, zipOverride, fixedAmount, ct);
+                ctx.CallRecordId, provider, cardNumberField, expField, cvvField, zipField, zipOverride, fixedAmount, ct,
+                ctx.InteractionId);
             transitionKey = result.Status switch
             {
                 PaymentTransactionStatus.Approved => "approved",

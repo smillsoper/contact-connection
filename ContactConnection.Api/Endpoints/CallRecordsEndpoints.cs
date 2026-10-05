@@ -212,6 +212,8 @@ public static class CallRecordsEndpoints
 
     private static async Task<IResult> GetCart(
         Guid id,
+        Guid? sessionId,
+        IFlowSessionRepository sessions,
         ICallRecordRepository callRecords,
         TenantContext tenantContext,
         CancellationToken ct)
@@ -222,7 +224,20 @@ public static class CallRecordsEndpoints
         var record = await callRecords.GetByIdWithInteractionsAsync(id, ct);
         if (record is null) return Results.NotFound();
 
-        return record.Cart is null ? Results.NoContent() : Results.Ok(record.Cart);
+        // The tab's interaction's cart (S178); a legacy record with no interactions uses its own column.
+        var ix = record.CommerceInteraction(await InteractionOfSessionAsync(sessions, id, sessionId, ct));
+        var cart = ix is null ? record.Cart : ix.Cart;
+        return cart is null ? Results.NoContent() : Results.Ok(cart);
+    }
+
+    /// <summary>The interaction a tab's script session belongs to (S178 — the agent UI knows its session, not its
+    /// interaction). Null when not given or not this call's, so the cart service falls back to the call's current one.</summary>
+    private static async Task<Guid?> InteractionOfSessionAsync(
+        IFlowSessionRepository sessions, Guid callRecordId, Guid? sessionId, CancellationToken ct)
+    {
+        if (sessionId is not { } sid || sid == Guid.Empty) return null;
+        var session = await sessions.GetByIdAsync(sid, ct);
+        return session is not null && session.CallRecordId == callRecordId ? session.InteractionId : null;
     }
 
     // ── PUT /api/v1/call-records/{id}/cart ──────────────────────────────────
@@ -231,8 +246,10 @@ public static class CallRecordsEndpoints
 
     private static async Task<IResult> SetCart(
         Guid id,
+        Guid? sessionId,
         CartDocument cartRequest,
         ICartService cart,
+        IFlowSessionRepository sessions,
         TenantContext tenantContext,
         CancellationToken ct)
     {
@@ -241,7 +258,7 @@ public static class CallRecordsEndpoints
 
         try
         {
-            var result = await cart.ReplaceCartAsync(id, cartRequest, ct);
+            var result = await cart.ReplaceCartAsync(id, cartRequest, ct, await InteractionOfSessionAsync(sessions, id, sessionId, ct));
             return CartResult(result);
         }
         catch (InvalidOperationException ex)
@@ -256,8 +273,10 @@ public static class CallRecordsEndpoints
 
     private static async Task<IResult> AddCartItem(
         Guid id,
+        Guid? sessionId,
         AddCartItemRequest request,
         ICartService cart,
+        IFlowSessionRepository sessions,
         TenantContext tenantContext,
         CancellationToken ct)
     {
@@ -265,7 +284,8 @@ public static class CallRecordsEndpoints
 
         try
         {
-            var result = await cart.AddItemAsync(id, request.OfferId, request.Quantity, ct, enforceScope: true);
+            var result = await cart.AddItemAsync(id, request.OfferId, request.Quantity, ct, enforceScope: true,
+                interactionId: await InteractionOfSessionAsync(sessions, id, sessionId, ct));
             return CartResult(result);
         }
         catch (InvalidOperationException ex)
@@ -281,8 +301,10 @@ public static class CallRecordsEndpoints
     private static async Task<IResult> UpdateCartItemQuantity(
         Guid id,
         int itemIndex,
+        Guid? sessionId,
         UpdateCartItemQuantityRequest request,
         ICartService cart,
+        IFlowSessionRepository sessions,
         TenantContext tenantContext,
         CancellationToken ct)
     {
@@ -290,7 +312,7 @@ public static class CallRecordsEndpoints
 
         try
         {
-            var result = await cart.UpdateQuantityAsync(id, itemIndex, request.Quantity, ct);
+            var result = await cart.UpdateQuantityAsync(id, itemIndex, request.Quantity, ct, await InteractionOfSessionAsync(sessions, id, sessionId, ct));
             return CartResult(result);
         }
         catch (InvalidOperationException ex)
@@ -304,7 +326,9 @@ public static class CallRecordsEndpoints
     private static async Task<IResult> RemoveCartItem(
         Guid id,
         int itemIndex,
+        Guid? sessionId,
         ICartService cart,
+        IFlowSessionRepository sessions,
         TenantContext tenantContext,
         CancellationToken ct)
     {
@@ -312,7 +336,7 @@ public static class CallRecordsEndpoints
 
         try
         {
-            var result = await cart.RemoveItemAsync(id, itemIndex, ct);
+            var result = await cart.RemoveItemAsync(id, itemIndex, ct, await InteractionOfSessionAsync(sessions, id, sessionId, ct));
             return CartResult(result);
         }
         catch (InvalidOperationException ex)

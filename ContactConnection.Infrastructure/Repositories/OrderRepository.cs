@@ -20,6 +20,11 @@ public class OrderRepository : IOrderRepository
             .Include(o => o.Lines)
             .FirstOrDefaultAsync(o => o.Id == id, ct);
 
+    public Task<Order?> GetByInteractionIdAsync(Guid interactionId, CancellationToken ct = default)
+        => Ctx.Orders
+            .Include(o => o.Lines)
+            .FirstOrDefaultAsync(o => o.InteractionId == interactionId, ct);
+
     public Task<Order?> GetByCallRecordIdAsync(Guid callRecordId, CancellationToken ct = default)
         => Ctx.Orders
             .Include(o => o.Lines)

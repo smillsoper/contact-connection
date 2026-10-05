@@ -23,6 +23,15 @@ public class PaymentTransactionRepository : IPaymentTransactionRepository
             .OrderByDescending(t => t.CreatedAt)
             .FirstOrDefaultAsync(ct);
 
+    public Task<PaymentTransaction?> GetMostRecentApprovedAsync(Guid callRecordId, Guid? interactionId, CancellationToken ct = default)
+        => interactionId is not { } ix || ix == Guid.Empty
+            ? GetMostRecentApprovedAsync(callRecordId, ct)
+            : Ctx.PaymentTransactions
+                .Where(t => t.CallRecordId == callRecordId && t.InteractionId == ix
+                    && t.Status == PaymentTransactionStatus.Approved && t.VoidedAt == null)
+                .OrderByDescending(t => t.CreatedAt)
+                .FirstOrDefaultAsync(ct);
+
     public async Task<IReadOnlyList<PaymentTransaction>> GetByCallRecordAsync(Guid callRecordId, CancellationToken ct = default)
         => await Ctx.PaymentTransactions.AsNoTracking()
             .Where(t => t.CallRecordId == callRecordId)

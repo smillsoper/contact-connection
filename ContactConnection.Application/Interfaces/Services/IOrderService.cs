@@ -19,5 +19,5 @@ public interface IOrderService
     /// Returns (order, created=true) on success; (existingOrder, created=false) if already ordered.
     /// Throws InvalidOperationException if the call record has no cart or an empty cart.
     /// </summary>
-    Task<(Order Order, bool Created)> CreateFromCartAsync(Guid callRecordId, CancellationToken ct = default);
+    Task<(Order Order, bool Created)> CreateFromCartAsync(Guid callRecordId, CancellationToken ct = default, Guid? interactionId = null);
 }
