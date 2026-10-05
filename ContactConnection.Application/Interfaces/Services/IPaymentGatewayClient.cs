@@ -43,6 +43,10 @@ public interface IPaymentGatewayClient : ICampaignCredentialSet
     Task<GatewayVoidResult> VoidAsync(
         Guid campaignId, Guid clientId, string gatewayTransactionId,
         CancellationToken ct = default);
+
+    /// <summary>Whether credentials exist for this campaign in the current credential set (S179 — a training run with no
+    /// sandbox credentials is simulated instead of failing).</summary>
+    Task<bool> IsConfiguredAsync(Guid campaignId, Guid clientId, CancellationToken ct = default);
 }
 
 /// <summary>Resolves the correct IPaymentGatewayClient by ProviderKey. Unlike ITaxProviderFactory,

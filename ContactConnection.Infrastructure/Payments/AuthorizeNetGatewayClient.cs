@@ -256,6 +256,10 @@ public class AuthorizeNetGatewayClient(
         return (apiLoginId, transactionKey, url);
     }
 
+    public async Task<bool> IsConfiguredAsync(Guid campaignId, Guid clientId, CancellationToken ct = default) =>
+        await ResolveScopedAsync("ApiLoginId", campaignId, clientId, ct) is not null
+        && await ResolveScopedAsync("TransactionKey", campaignId, clientId, ct) is not null;
+
     private Task<string?> ResolveScopedAsync(string field, Guid campaignId, Guid clientId, CancellationToken ct)
         => ScopedCredentials.ResolveAsync(credentials, "AuthorizeNet", field, campaignId, clientId, ct);
 }

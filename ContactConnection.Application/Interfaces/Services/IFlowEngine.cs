@@ -179,6 +179,9 @@ public class FlowNodeState
 {
     public required Guid SessionId { get; init; }
 
+    /// <summary>production / training / sandbox (S179) — the agent UI shows a banner for anything but production.</summary>
+    public string RunMode { get; init; } = "production";
+
     /// <summary>The call this session belongs to — lets the agent UI associate each open flow tab
     /// with its own call-scoped state (e.g. the cart) instead of relying on a single global "current
     /// call" value that doesn't actually track which tab is active.</summary>

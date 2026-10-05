@@ -75,6 +75,10 @@ public static class Permission
     public const string BlocklistView   = "blocklist.view";
     public const string BlocklistManage = "blocklist.manage";
 
+    /// <summary>Launch scripts in training mode (S179): sandbox credentials or simulated providers, excluded from
+    /// billing, commissions and reporting.</summary>
+    public const string TrainingMode = "training.mode";
+
     public static readonly IReadOnlyList<string> All = [
         AgentsView, AgentsManage, RolesManage,
         FlowsView, FlowsManage, FlowsPublish,
@@ -83,7 +87,8 @@ public static class Permission
         IntegrationsView, IntegrationsManage,
         SupervisorMonitor, SupervisorOverride,
         ReportsView, ReportsManage,
-        BlocklistView, BlocklistManage
+        BlocklistView, BlocklistManage,
+        TrainingMode
     ];
 
     // Permissions derived from legacy AgentRole strings (for agents without a custom RoleId)

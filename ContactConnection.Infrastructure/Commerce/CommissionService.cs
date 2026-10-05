@@ -89,7 +89,8 @@ public static class CommissionLedger
     /// </summary>
     public static Desired DesiredFor(CallRecord record, RuleBook rules)
     {
-        if (record.CommissionsReversedAt is not null) return new([]);
+        // Training / sandbox runs never earn (S179 launch modes).
+        if (record.CommissionsReversedAt is not null || !record.IsProductionRun) return new([]);
         var lines = new List<EarnedLine>();
 
         if (record.AgentId is { } agentId)

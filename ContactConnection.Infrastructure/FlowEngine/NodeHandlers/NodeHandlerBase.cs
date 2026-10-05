@@ -49,6 +49,7 @@ public abstract class NodeHandlerBase
         bool required = false) => new()
     {
         SessionId    = ctx.SessionId,
+        RunMode      = ctx.CallRecord.GetValueOrDefault("run_mode") is { Length: > 0 } rm ? rm : "production",
         CallRecordId = ctx.CallRecordId,
         NodeId       = ctx.CurrentNodeId,
         NodeType     = StrReq(node, "type"),

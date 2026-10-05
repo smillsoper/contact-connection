@@ -17,6 +17,8 @@ public static class ScopedCredentials
         ITenantCredentialStore credentials, string vendor, string field,
         Guid campaignId, Guid clientId, CancellationToken ct = default)
     {
+        // A sandbox run (CredentialSetScope) reads the campaign's sandbox set and never falls back to production keys.
+        vendor = CredentialSetScope.VendorKey(vendor);
         if (campaignId != Guid.Empty)
         {
             var campaignValue = await credentials.GetAsync($"{vendor}:{campaignId}:{field}", ct);

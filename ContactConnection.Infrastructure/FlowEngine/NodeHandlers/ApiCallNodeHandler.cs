@@ -116,10 +116,16 @@ public class ApiCallNodeHandler(
             else
             {
                 var (request, bodyError) = await BuildRequestAsync(target, node, ctx, scope, ct);
+                // Launch modes (S179): a training / sandbox run never calls a client's API — it gets a simulated success
+                // (the body is still built, so template errors show up). Sandbox API environments come in part 2.
+                var practiceRun = ctx.CallRecord.GetValueOrDefault("run_mode") is { Length: > 0 } rm && rm != "production";
                 result = bodyError is not null
                     // Never send a body the template couldn't produce correctly.
                     ? new ApiDefinitionExecutionResult(false, null, null, new(), null, false, bodyError)
-                    : await executor.ExecuteAsync(request, ct);
+                    : practiceRun
+                        ? new ApiDefinitionExecutionResult(true, 200, "OK (simulated)", new(),
+                            "{\"success\":true,\"simulated\":true}", false, null)
+                        : await executor.ExecuteAsync(request, ct);
 
                 result = ResponseSuccessEvaluator.Apply(result, target.SuccessCriteria);
                 transitionKey = result.TimedOut ? "timeout" : (!result.Success ? "error" : "success");

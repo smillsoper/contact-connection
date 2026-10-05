@@ -857,6 +857,7 @@ public class FlowEngine : IFlowEngine
         ctx.CallRecord["id"] = record.Id.ToString();
         ctx.CallRecord["status"] = record.OverallStatus;
         ctx.CallRecord["call_source"] = record.Source;
+        ctx.CallRecord["run_mode"] = record.RunMode;   // S179 launch modes
         ctx.CallRecord["record_type"] = record.RecordType;
         ctx.CallRecord["phone_number"] = record.Phone ?? string.Empty;
         ctx.CallRecord["dnis"] = record.Dnis ?? string.Empty;

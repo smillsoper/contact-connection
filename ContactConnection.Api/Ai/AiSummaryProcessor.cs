@@ -39,6 +39,10 @@ public sealed class AiSummaryProcessor(
         services.GetRequiredService<TenantContext>().Current = tenant;
 
         await using var db = services.GetRequiredService<ScopedTenantDbContextFactory>().Create();
+        // Training / sandbox runs get no automatic summary (S179); an agent can still press Generate.
+        if (await db.CallRecords.AsNoTracking().Where(r => r.Id == item.CallRecordId).Select(r => r.RunMode).FirstOrDefaultAsync(ct)
+            is { } runMode && runMode != CallRunMode.Production) return;
+
         // One summary per interaction (S178), opted in by the interaction's campaign (a transferred CS interaction asks CS).
         var ixId = item.InteractionId is { } given && given != Guid.Empty ? given : (Guid?)null;
         var campaignId = (ixId is null ? null

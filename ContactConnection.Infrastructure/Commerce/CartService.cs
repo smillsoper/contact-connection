@@ -47,7 +47,7 @@ public class CartService : ICartService
         {
             var cart = CartOf(record, ix);
             if (cart is null) continue;
-            last = await _pricing.CalculateTotalsAsync(cart, await BuildTaxContextAsync(record, ix, ct), ct);
+            last = await PriceAsync(record, cart, await BuildTaxContextAsync(record, ix, ct), ct);
             Store(record, ix, last);
         }
         if (last is null) return CartOperationResult.Success(CartDocument.Empty());
@@ -164,6 +164,14 @@ public class CartService : ICartService
         => await _callRecords.GetByIdWithInteractionsAsync(callRecordId, ct)
             ?? throw new InvalidOperationException($"Call record {callRecordId} not found");
 
+    /// <summary>Prices a cart under the call's credential set (S179 launch modes: a sandbox run taxes with the campaign's
+    /// sandbox Avalara account, or simulated tax when there is none).</summary>
+    private async Task<CartDocument> PriceAsync(CallRecord record, CartDocument cart, TaxContext tax, CancellationToken ct)
+    {
+        using var scope = Credentials.CredentialSetScope.Use(record.CredentialSet);
+        return await _pricing.CalculateTotalsAsync(cart, tax, ct);
+    }
+
     /// <summary>The cart a change applies to: the interaction's (S178).</summary>
     private static CartDocument? CartOf(CallRecord record, CallInteraction? ix) => ix?.Cart;
 
@@ -195,7 +203,7 @@ public class CartService : ICartService
             return CartOperationResult.Conflict(unavailable);
         }
 
-        var calculated = await _pricing.CalculateTotalsAsync(newCart, await BuildTaxContextAsync(record, ix, ct), ct);
+        var calculated = await PriceAsync(record, newCart, await BuildTaxContextAsync(record, ix, ct), ct);
         Store(record, ix, calculated);
         await _callRecords.SaveChangesAsync(ct);
 

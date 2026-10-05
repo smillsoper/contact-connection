@@ -144,8 +144,11 @@ public class AvalaraTaxProvider(
         var accountId  = await ScopedCredentials.ResolveAsync(credentials, "Avalara", "AccountId", context.CampaignId, context.ClientId, ct);
         var licenseKey = await ScopedCredentials.ResolveAsync(credentials, "Avalara", "LicenseKey", context.CampaignId, context.ClientId, ct);
         if (accountId is null || licenseKey is null)
-            return TaxResult.Zero(TaxCalculationStatus.Error,
-                "Avalara credentials are not configured for this campaign (Avalara AccountId / LicenseKey).");
+            return CredentialSetScope.IsSandbox
+                // Training / sandbox run without sandbox credentials (S179): simulated, never the production account.
+                ? TaxResult.Zero(TaxCalculationStatus.Calculated, "Simulated tax (training / sandbox run with no sandbox Avalara credentials).")
+                : TaxResult.Zero(TaxCalculationStatus.Error,
+                    "Avalara credentials are not configured for this campaign (Avalara AccountId / LicenseKey).");
         var environment = await ScopedCredentials.ResolveAsync(credentials, "Avalara", "Environment", context.CampaignId, context.ClientId, ct);
         var url = string.Equals(environment, "production", StringComparison.OrdinalIgnoreCase) ? ProductionUrl : SandboxUrl;
 

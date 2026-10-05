@@ -40,6 +40,7 @@ export const PERMISSION_LABELS: Record<string, string> = {
   'reports.manage':        'Manage Supervisor Dashboards',
   'blocklist.view':        'View Block List',
   'blocklist.manage':      'Manage Block List',
+  'training.mode':         'Launch Scripts in Training Mode',
 }
 
 export const PERMISSION_GROUPS: Record<string, string[]> = {
@@ -52,6 +53,7 @@ export const PERMISSION_GROUPS: Record<string, string[]> = {
   Supervisor:  ['supervisor.monitor', 'supervisor.override'],
   Reporting:   ['reports.view', 'reports.manage'],
   Blocklist:   ['blocklist.view', 'blocklist.manage'],
+  Training:    ['training.mode'],
 }
 
 export const LANDING_PAGE_LABELS: Record<string, string> = {

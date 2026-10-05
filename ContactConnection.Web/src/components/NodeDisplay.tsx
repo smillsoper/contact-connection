@@ -521,6 +521,17 @@ export default function NodeDisplay({ node, onAdvance, onJump, advancing, valida
 
   return (
     <div className="flex flex-col gap-6 p-6 max-w-2xl mx-auto">
+      {node.runMode && node.runMode !== 'production' && (
+        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border ${node.runMode === 'training'
+          ? 'bg-amber-950/60 border-amber-700 text-amber-200' : 'bg-violet-950/60 border-violet-700 text-violet-200'}`}>
+          <span className="uppercase tracking-wide text-xs font-bold">{node.runMode}</span>
+          <span className="font-normal">
+            {node.runMode === 'training'
+              ? 'Practice run — sandbox or simulated payments, tax and order APIs. Nothing is billed or paid out.'
+              : 'Designer test run — not billed, no commissions, excluded from reports.'}
+          </span>
+        </div>
+      )}
       {/* Commit point passed — earlier sections are closed (engine-enforced) */}
       {node.commitLabel && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-950/50 border border-amber-700 text-amber-200 text-sm">

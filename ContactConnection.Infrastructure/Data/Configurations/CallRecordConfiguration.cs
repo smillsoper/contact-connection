@@ -62,6 +62,8 @@ public class CallRecordConfiguration : IEntityTypeConfiguration<CallRecord>
         builder.Property(r => r.CommissionsReversedAt).HasColumnName("commissions_reversed_at");
         builder.Property(r => r.CommissionsReversedReason).HasColumnName("commissions_reversed_reason").HasMaxLength(500);
         builder.Property(r => r.FinalizedAt).HasColumnName("finalized_at");
+        builder.Property(r => r.RunMode).HasColumnName("run_mode").HasMaxLength(20).HasDefaultValue(CallRunMode.Production);
+        builder.Property(r => r.CredentialSet).HasColumnName("credential_set").HasMaxLength(20).HasDefaultValue(CallCredentialSet.Production);
         builder.Property(r => r.DisconnectedAt).HasColumnName("disconnected_at");
         builder.Property(r => r.FinalizedById).HasColumnName("finalized_by_id");
         builder.Property(r => r.FinalizedByName).HasColumnName("finalized_by_name").HasMaxLength(200);

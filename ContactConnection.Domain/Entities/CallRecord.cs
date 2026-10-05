@@ -163,11 +163,24 @@ public class CallRecord
     /// A stub record backing a manually-started script preview (no real call) — gives call-record-
     /// scoped features (cart, custom fields, etc.) something to attach to while testing a flow.
     /// </summary>
-    public static CallRecord CreateManual(Guid tenantId, Guid agentId)
+    /// <summary>Script launch mode (S179, Sprint 1 item 1): production (a real call), training (a trainee practising —
+    /// sandbox credentials or simulated providers) or sandbox (a script designer testing). Non-production calls are kept
+    /// for review but excluded from usage billing, commissions, AI summaries and reporting.</summary>
+    public string RunMode { get; private set; } = CallRunMode.Production;
+    /// <summary>Which provider credentials the call uses: production, or the campaign's sandbox set (simulated where none).</summary>
+    public string CredentialSet { get; private set; } = CallCredentialSet.Production;
+    public bool IsProductionRun => RunMode == CallRunMode.Production;
+
+    public static CallRecord CreateManual(Guid tenantId, Guid agentId,
+        string runMode = CallRunMode.Sandbox, string credentialSet = CallCredentialSet.Sandbox)
     {
         var now = DateTimeOffset.UtcNow;
         return new CallRecord
         {
+            RunMode = CallRunMode.IsValid(runMode) ? runMode : CallRunMode.Sandbox,
+            // Training never touches production credentials; only a designer sandbox run may choose them.
+            CredentialSet = runMode == CallRunMode.Training ? CallCredentialSet.Sandbox
+                : credentialSet == CallCredentialSet.Production ? CallCredentialSet.Production : CallCredentialSet.Sandbox,
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             ClientId = Guid.Empty,
@@ -584,4 +597,20 @@ public static class CallRecordStatus
     public const string Active = "active";
     public const string Complete = "complete";
     public const string Incomplete = "incomplete";
+}
+
+/// <summary>Script launch modes (S179). Production = a real call; training and sandbox are practice/test runs.</summary>
+public static class CallRunMode
+{
+    public const string Production = "production";
+    public const string Training = "training";
+    public const string Sandbox = "sandbox";
+    public static bool IsValid(string? m) => m is Production or Training or Sandbox;
+}
+
+/// <summary>Provider credential set a call uses (S179).</summary>
+public static class CallCredentialSet
+{
+    public const string Production = "production";
+    public const string Sandbox = "sandbox";
 }

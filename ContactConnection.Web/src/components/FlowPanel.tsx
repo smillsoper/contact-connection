@@ -526,6 +526,14 @@ export default function FlowPanel() {
     return () => { connection.stop() }
   }, [token, tenantSubdomain]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Launch modes (S179): a live call starts its script in production on that call; otherwise the agent picks a practice
+  // mode they're allowed — training (training.mode) or a designer sandbox (flows.manage, with a credential choice).
+  const canTrain = useAuthStore((s) => s.hasPermission('training.mode'))
+  const canSandbox = useAuthStore((s) => s.hasPermission('flows.manage'))
+  const [launchMode, setLaunchMode] = useState<'training' | 'sandbox'>(canSandbox ? 'sandbox' : 'training')
+  const [sandboxCreds, setSandboxCreds] = useState<'sandbox' | 'production'>('sandbox')
+  const practiceAllowed = canTrain || canSandbox
+
   async function handleStartSession() {
     if (!selectedFlowId || starting) return
     setStarting(true)
@@ -537,7 +545,9 @@ export default function FlowPanel() {
       if (!recordId) {
         // The stub takes on the flow's home campaign (if any) so tax, order numbers, payment
         // credentials and campaign-scoped fields behave like a real call on that campaign.
-        const stub = await api.post<{ id: string }>('/api/v1/call-records/manual', { flowId: selectedFlowId })
+        // Launch modes (S179): with no live call it's always a practice run — training or a designer sandbox.
+        const stub = await api.post<{ id: string }>('/api/v1/call-records/manual',
+          { flowId: selectedFlowId, mode: launchMode, credentialSet: launchMode === 'sandbox' ? sandboxCreds : 'sandbox' })
         recordId = stub.id
         setCallRecordId(recordId)
       }
@@ -581,9 +591,31 @@ export default function FlowPanel() {
             ))}
           </select>
 
+          {callRecordId ? (
+            <span className="text-xs text-emerald-300" title="Starts on the live call">On this call</span>
+          ) : practiceAllowed ? (
+            <>
+              <select value={launchMode} onChange={(e) => setLaunchMode(e.target.value as 'training' | 'sandbox')}
+                className="bg-gray-800 text-white rounded-lg px-2 py-1.5 text-sm border border-gray-700" title="Practice mode">
+                {canTrain && <option value="training">Training</option>}
+                {canSandbox && <option value="sandbox">Sandbox (designer)</option>}
+              </select>
+              {launchMode === 'sandbox' && (
+                <select value={sandboxCreds} onChange={(e) => setSandboxCreds(e.target.value as 'sandbox' | 'production')}
+                  className="bg-gray-800 text-white rounded-lg px-2 py-1.5 text-sm border border-gray-700"
+                  title="Which provider accounts the test uses">
+                  <option value="sandbox">Sandbox credentials</option>
+                  <option value="production">Production credentials</option>
+                </select>
+              )}
+            </>
+          ) : (
+            <span className="text-xs text-gray-500">Scripts start when you're on a call</span>
+          )}
+
           <button
             onClick={handleStartSession}
-            disabled={!selectedFlowId || starting}
+            disabled={!selectedFlowId || starting || (!callRecordId && !practiceAllowed)}
             className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded-lg px-4 py-1.5 text-sm font-medium transition-colors"
           >
             {starting ? 'Starting…' : 'Start'}

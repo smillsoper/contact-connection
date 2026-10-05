@@ -178,11 +178,26 @@ public static class CallRecordsEndpoints
         var agentIdClaim = user.FindFirst("sub")?.Value;
         if (!Guid.TryParse(agentIdClaim, out var agentId)) return Results.Unauthorized();
 
-        var record = CallRecord.CreateManual(tenantContext.Current.Id, agentId);
-
         CreateManualRequest? req = null;
         if (http.ContentLength is > 0)
             try { req = await http.ReadFromJsonAsync<CreateManualRequest>(ct); } catch { /* empty/invalid body = no flow */ }
+
+        // Launch modes (S179): a manual stub is always a practice run. Training needs training.mode, sandbox needs
+        // flows.manage; with no mode given, the most capable the user is allowed.
+        var permissions = (user.FindFirst("permissions")?.Value ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries);
+        bool Has(string p) => permissions.Contains(p, StringComparer.OrdinalIgnoreCase);
+        var mode = req?.Mode?.Trim().ToLowerInvariant()
+            ?? (Has(Permission.FlowsManage) ? CallRunMode.Sandbox : CallRunMode.Training);
+        if (mode == CallRunMode.Production)
+            return Results.BadRequest(new { error = "Production scripts start on a live call — answer or place a call first." });
+        if (mode == CallRunMode.Training && !Has(Permission.TrainingMode))
+            return Results.Json(new { error = "Training mode isn't enabled for your role." }, statusCode: 403);
+        if (mode == CallRunMode.Sandbox && !Has(Permission.FlowsManage))
+            return Results.Json(new { error = "Sandbox runs are for script designers (flows.manage)." }, statusCode: 403);
+        if (!CallRunMode.IsValid(mode)) return Results.BadRequest(new { error = $"Unknown mode '{mode}'." });
+
+        var record = CallRecord.CreateManual(tenantContext.Current.Id, agentId, mode,
+            req?.CredentialSet?.Trim().ToLowerInvariant() ?? CallCredentialSet.Sandbox);
         if (req?.FlowId is { } flowId
             && await flows.GetByIdAsync(flowId, ct) is { CampaignId: { } campaignId, ClientId: { } clientId } flow
             && flow.TenantId == tenantContext.Current.Id)
@@ -191,7 +206,7 @@ public static class CallRecordsEndpoints
         await callRecords.AddAsync(record, ct);
         await callRecords.SaveChangesAsync(ct);
 
-        return Results.Created($"/api/v1/call-records/{record.Id}", new { id = record.Id });
+        return Results.Created($"/api/v1/call-records/{record.Id}", new { id = record.Id, record.RunMode, record.CredentialSet });
     }
 
     private static async Task<IResult> GetById(
@@ -472,4 +487,7 @@ public record AuthorizePaymentRequest(
     string? Provider, string? CardNumberField, string? ExpField, string? CvvField, string? ZipField,
     string? ZipOverride, decimal? FixedAmount);
 
-public record CreateManualRequest(Guid? FlowId);
+/// <param name="Mode">training (needs training.mode) or sandbox (needs flows.manage). Production scripts start on a live
+/// call's own record, never a manual stub.</param>
+/// <param name="CredentialSet">sandbox runs only: "production" to test against the real provider accounts.</param>
+public record CreateManualRequest(Guid? FlowId, string? Mode = null, string? CredentialSet = null);

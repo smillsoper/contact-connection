@@ -311,7 +311,7 @@ public static class PortalTenantsEndpoints
         tenantContext.Current = tenant;
         await using var db = dbFactory.Create();
         var calls = await db.CallRecords.AsNoTracking()
-            .Where(r => r.CallStartAt >= from && r.CallStartAt < to)
+            .Where(r => r.CallStartAt >= from && r.CallStartAt < to && r.RunMode == CallRunMode.Production)
             .Select(r => new
             {
                 r.Source, r.CallerId, r.Dnis, r.CallStartAt, r.DisconnectedAt, Closed = r.CallEndAt != null,

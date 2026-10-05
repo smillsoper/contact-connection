@@ -32,6 +32,8 @@ public class PaymentService(
         // Interaction-scoped (S178): this interaction's cart, its own authorization, its campaign's gateway
         // credentials, its order number. A legacy record with no interactions behaves as before.
         var ix = record.CommerceInteraction(interactionId);
+        // Launch modes (S179): a training / sandbox run uses the campaign's sandbox credentials, never production.
+        using var credentialScope = Credentials.CredentialSetScope.Use(record.CredentialSet);
         var cart = ix?.Cart;
         var campaignId = ix?.CampaignId ?? record.CampaignId;
         var amount = fixedAmount ?? cart?.CartTotal ?? 0m;
@@ -96,8 +98,12 @@ public class PaymentService(
 
         var client = gatewayClients.Resolve(provider);
         var orderNumber = await orderNumbers.GetOrAssignAsync(record, ix, ct);
-        var result = await client.AuthorizeAsync(
-            campaignId, record.ClientId, amount, cardNumber, expirationMMYY, cvv, zip, orderNumber, ct);
+        // A non-production run with no sandbox credentials is simulated: approved, nothing sent to the gateway.
+        var simulate = !record.IsProductionRun && !await client.IsConfiguredAsync(campaignId, record.ClientId, ct);
+        var result = simulate
+            ? SimulatedAuthorization(cardNumber)
+            : await client.AuthorizeAsync(
+                campaignId, record.ClientId, amount, cardNumber, expirationMMYY, cvv, zip, orderNumber, ct);
 
         var transaction = PaymentTransaction.Create(
             id: Guid.NewGuid(),
@@ -137,6 +143,16 @@ public class PaymentService(
         if (transaction is null)
             return new PaymentVoidResult(false, "No approved, un-voided transaction found for this call.");
 
+        // A simulated authorization (training / sandbox without credentials) is voided without a gateway call.
+        if (transaction.GatewayTransactionId?.StartsWith(SimulatedPrefix, StringComparison.Ordinal) == true)
+        {
+            transaction.MarkVoided();
+            await transactions.SaveChangesAsync(ct);
+            return new PaymentVoidResult(true, "Simulated authorization voided.");
+        }
+        var voidRecord = await callRecords.GetByIdAsync(callRecordId, ct);
+        using var credentialScope = Credentials.CredentialSetScope.Use(voidRecord?.CredentialSet);
+
         var client = gatewayClients.Resolve(transaction.Gateway);
         var result = await client.VoidAsync(transaction.CampaignId, transaction.ClientId, transaction.GatewayTransactionId!, ct);
 
@@ -147,5 +163,20 @@ public class PaymentService(
         }
 
         return new PaymentVoidResult(result.Succeeded, result.ResponseReasonText);
+    }
+
+    /// <summary>Transaction id prefix for simulated authorizations (S179 launch modes).</summary>
+    public const string SimulatedPrefix = "TRN-";
+
+    private static GatewayAuthResult SimulatedAuthorization(string cardNumber)
+    {
+        var digits = new string(cardNumber.Where(char.IsDigit).ToArray());
+        return new GatewayAuthResult(
+            Succeeded: true, Status: PaymentTransactionStatus.Approved,
+            GatewayTransactionId: SimulatedPrefix + Guid.NewGuid().ToString("N")[..10].ToUpperInvariant(),
+            AuthCode: "TRAINING", ResponseCode: "1",
+            ResponseReasonText: "Simulated approval (training / sandbox run with no sandbox credentials) — no gateway call.",
+            AvsResultCode: null, CvvResultCode: null,
+            CardLast4: digits.Length >= 4 ? digits[^4..] : null, CardType: null);
     }
 }
