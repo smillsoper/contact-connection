@@ -70,6 +70,7 @@ public static class AdminApiDefinitionsEndpoints
         var def = TenantApiDefinition.Create(request.ApiCategory, request.Name, request.HttpMethod, request.BaseUrl, request.Description, request.Provider, request.TimeoutSeconds ?? 30);
         if (request.AuthConfig is not null) def.SetAuthConfig(request.AuthConfig);
         if (request.RateLimitPerMinute is > 0) def.SetRateLimit(request.RateLimitPerMinute);
+        if (request.Sandbox is { } sandbox) def.SetSandbox(sandbox.BaseUrl, sandbox.TokenUrl, sandbox.TrainingUsesSandbox);
         await repo.AddAsync(def, ct);
         await repo.SaveChangesAsync(ct);
         await versions.SnapshotAsync(
@@ -131,6 +132,7 @@ public static class AdminApiDefinitionsEndpoints
         if (request.ResponseMapping is not null) def.SetResponseMapping(request.ResponseMapping);
         if (request.AuthConfig is not null) def.SetAuthConfig(request.AuthConfig);
         if (request.RateLimitPerMinute is not null) def.SetRateLimit(request.RateLimitPerMinute > 0 ? request.RateLimitPerMinute : null);
+        if (request.Sandbox is { } sandbox) def.SetSandbox(sandbox.BaseUrl, sandbox.TokenUrl, sandbox.TrainingUsesSandbox);
 
         await repo.SaveChangesAsync(ct);
         await versions.SnapshotAsync(
@@ -184,7 +186,7 @@ public static class AdminApiDefinitionsEndpoints
     private static string BuildSnapshot(TenantApiDefinition d) => JsonSerializer.Serialize(new ApiDefinitionSnapshot(
         d.ApiCategory, d.Provider, d.Name, d.Description, d.HttpMethod, d.BaseUrl, d.TimeoutSeconds,
         d.Headers, d.QueryParams, d.RequestBodyTemplate, d.ResponseMapping, d.AuthConfig, d.IsActive,
-        d.RateLimitPerMinute));
+        d.RateLimitPerMinute, d.SandboxBaseUrl, d.SandboxTokenUrl, d.TrainingUsesSandbox));
 
     private static void ApplySnapshot(TenantApiDefinition d, ApiDefinitionSnapshot s)
     {
@@ -196,6 +198,7 @@ public static class AdminApiDefinitionsEndpoints
         d.SetResponseMapping(s.ResponseMapping);
         d.SetAuthConfig(s.AuthConfig);
         d.SetRateLimit(s.RateLimitPerMinute);
+        d.SetSandbox(s.SandboxBaseUrl, s.SandboxTokenUrl, s.TrainingUsesSandbox);
         if (s.IsActive) d.Activate(); else d.Deactivate();
     }
 
@@ -253,6 +256,9 @@ public static class AdminApiDefinitionsEndpoints
         d.AuthConfig,
         d.IsActive,
         d.RateLimitPerMinute,
+        d.SandboxBaseUrl,
+        d.SandboxTokenUrl,
+        d.TrainingUsesSandbox,
         d.CreatedAt,
         d.UpdatedAt,
     };
@@ -270,7 +276,9 @@ public record CreateApiDefinitionRequest(
     string? AuthConfig,
     /// <summary>Outbound requests/minute allowed against this definition, or null for unlimited
     /// (the default — an opt-in protection, matching IsRetrySafe's default-off pattern).</summary>
-    int? RateLimitPerMinute = null);
+    int? RateLimitPerMinute = null,
+    /// <summary>Tenant definitions only (S179). Null = no sandbox environment.</summary>
+    ApiDefinitionSandboxSettings? Sandbox = null);
 
 public record UpdateApiDefinitionRequest(
     string Name,
@@ -288,4 +296,9 @@ public record UpdateApiDefinitionRequest(
     /// <summary>Same "null = don't touch" convention as Provider above: omit to leave the current
     /// limit alone, pass 0 to explicitly clear back to unlimited, or a positive number to set a
     /// new limit.</summary>
-    int? RateLimitPerMinute = null);
+    int? RateLimitPerMinute = null,
+    /// <summary>Tenant definitions only (S179). Null = leave the sandbox environment unchanged.</summary>
+    ApiDefinitionSandboxSettings? Sandbox = null);
+
+/// <summary>A tenant API definition's sandbox environment — see TenantApiDefinition.SandboxBaseUrl.</summary>
+public record ApiDefinitionSandboxSettings(string? BaseUrl, string? TokenUrl, bool TrainingUsesSandbox = false);

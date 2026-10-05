@@ -41,6 +41,10 @@ export interface ApiDefinitionRecord {
    *  definition's limit is shared across every tenant using it — see
    *  API_HARDENING_CHECKLIST.md Tier 2. */
   rateLimitPerMinute: number | null
+  /** Tenant definitions (S179): the client's sandbox environment — see SandboxEnvironmentSection. */
+  sandboxBaseUrl?: string | null
+  sandboxTokenUrl?: string | null
+  trainingUsesSandbox?: boolean
   createdAt: string
   updatedAt: string | null
 }
@@ -69,6 +73,7 @@ export interface ApiEndpointRecord {
   successCriteria?: string
   /** Tenant endpoints only (S179) — see DetailApi.supportsTrainingResponse. */
   trainingResponse?: string | null
+  sandboxPath?: string | null
   createdAt: string
   updatedAt: string | null
 }
@@ -85,6 +90,9 @@ export interface EndpointTestPayload {
   bodyTemplateType?: string
   liquidModel?: Record<string, unknown>
   successCriteria?: string
+  /** 'sandbox' runs the test against the definition's sandbox environment (tenant definitions, S179). */
+  environment?: 'sandbox'
+  sandboxPath?: string
 }
 
 export interface EndpointTestResult {
@@ -110,6 +118,7 @@ export interface DetailApi {
     /** Omit to leave unchanged, 0 to clear back to unlimited, or a positive number to set a new
      *  limit. */
     rateLimitPerMinute?: number
+    sandbox?: { baseUrl: string | null; tokenUrl: string | null; trainingUsesSandbox: boolean }
   }): Promise<ApiDefinitionRecord>
   activateDefinition(id: string): Promise<ApiDefinitionRecord>
   deactivateDefinition(id: string): Promise<ApiDefinitionRecord>
@@ -132,8 +141,8 @@ export interface DetailApi {
    *  useEffect that tolerates a missing implementation, not because either side omits it. */
   listTtsProviders?(): Promise<string[]>
   listPagePath: string
-  /** Tenant API definitions (S179, launch modes): endpoints carry a Training response a practice run returns
-   *  instead of calling the client's API. Platform (portal) APIs run for real, so they don't. */
+  /** Tenant API definitions (S179, launch modes): a sandbox environment (base URL, credentials, endpoint sandbox paths)
+   *  and a per-endpoint Training response, for practice runs. Platform (portal) APIs run for real, so they have neither. */
   supportsTrainingResponse?: boolean
   // Version history — every write is retained forever; revert applies a past snapshot and
   // records it as a brand-new version (see API_HARDENING_CHECKLIST.md Tier 1).
@@ -159,6 +168,7 @@ interface EndpointFormData {
   bodyTemplateType?: string
   successCriteria?: string
   trainingResponse?: string
+  sandboxPath?: string
 }
 
 interface DefFormState {
@@ -171,6 +181,9 @@ interface DefFormState {
   timeoutSeconds: string
   rateLimitPerMinute: string
   auth: AuthFormState
+  sandboxBaseUrl: string
+  sandboxTokenUrl: string
+  trainingUsesSandbox: boolean
 }
 
 interface KVRow { key: string; value: string; skipIfEmpty?: boolean }
@@ -345,6 +358,8 @@ interface EndpointForm {
   liquidModel: string
   /** JSON a training / sandbox run returns instead of calling the API ('' = generic simulated success). */
   trainingResponse: string
+  /** Path in the definition's sandbox environment ('' = same as path). */
+  sandboxPath: string
 }
 
 interface SuccessRule { path: string; operator: string; value: string }
@@ -400,6 +415,7 @@ const BLANK_ENDPOINT_FORM: EndpointForm = {
   successErrorPath: '',
   liquidModel: '',
   trainingResponse: '',
+  sandboxPath: '',
 }
 
 /** One path per line (blank lines ignored) <-> JSON array of dot-separated paths. */
@@ -1547,6 +1563,13 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
 
   // Endpoint test execution
   const [testRunning, setTestRunning] = useState(false)
+  // Tenant definitions with a sandbox environment (S179): every Test button can target production or the sandbox.
+  const [testEnvironment, setTestEnvironment] = useState<'production' | 'sandbox'>('production')
+  function sendEndpointTest(payload: EndpointTestPayload) {
+    return api.testEndpoint(definitionId, testEnvironment === 'sandbox'
+      ? { ...payload, environment: 'sandbox', sandboxPath: endpointForm.sandboxPath.trim() || undefined }
+      : payload)
+  }
   const [testResult, setTestResult] = useState<EndpointTestResult | null>(null)
 
   async function runEndpointTest() {
@@ -1554,7 +1577,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
     setTestRunning(true)
     setTestResult(null)
     try {
-      const result = await api.testEndpoint(definitionId, {
+      const result = await sendEndpointTest({
         path: endpointForm.path,
         httpMethod: endpointForm.httpMethod || undefined,
         queryParams: kvToJson(endpointForm.params),
@@ -1577,7 +1600,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
     if (!endpointSourceContext) return
     setTestRunning(true)
     try {
-      const result = await api.testEndpoint(definitionId, {
+      const result = await sendEndpointTest({
         path: endpointForm.path,
         httpMethod: endpointForm.httpMethod || undefined,
         queryParams: kvToJson(endpointForm.params),
@@ -1614,7 +1637,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
     setTestRunning(true)
     setTestResult(null)
     try {
-      const result = await api.testEndpoint(definitionId, {
+      const result = await sendEndpointTest({
         path: endpointForm.path,
         httpMethod: endpointForm.httpMethod || undefined,
         queryParams: kvToJson(endpointForm.params),
@@ -1643,7 +1666,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
       const values = endpointForm.testData
       const resolvedParams = endpointForm.params.map((r) => ({ ...r, value: substituteVarTags(r.value, values) }))
       const resolvedHeaders = endpointForm.headers.map((r) => ({ ...r, value: substituteVarTags(r.value, values) }))
-      const result = await api.testEndpoint(definitionId, {
+      const result = await sendEndpointTest({
         path: substituteVarTags(endpointForm.path, values),
         httpMethod: endpointForm.httpMethod || undefined,
         queryParams: kvToJson(resolvedParams),
@@ -1668,7 +1691,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
     if (!endpointSourceContext) return
     setTestRunning(true)
     try {
-      const result = await api.testEndpoint(definitionId, {
+      const result = await sendEndpointTest({
         path: endpointForm.path,
         httpMethod: endpointForm.httpMethod || undefined,
         queryParams: kvToJson(endpointForm.params),
@@ -1747,6 +1770,9 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
       timeoutSeconds: String(def.timeoutSeconds),
       rateLimitPerMinute: def.rateLimitPerMinute ? String(def.rateLimitPerMinute) : '',
       auth: authStateFromConfig(def.authConfig),
+      sandboxBaseUrl: def.sandboxBaseUrl ?? '',
+      sandboxTokenUrl: def.sandboxTokenUrl ?? '',
+      trainingUsesSandbox: def.trainingUsesSandbox ?? false,
     })
     setDefFormError(null)
     setShowDefModal(true)
@@ -1778,6 +1804,13 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
         // definition's current state — an empty field means "clear to unlimited" (0), not "leave
         // whatever's on the server alone".
         rateLimitPerMinute: defForm.rateLimitPerMinute.trim() ? (parseInt(defForm.rateLimitPerMinute) || 0) : 0,
+        ...(api.supportsTrainingResponse ? {
+          sandbox: {
+            baseUrl: defForm.sandboxBaseUrl.trim() || null,
+            tokenUrl: defForm.sandboxTokenUrl.trim() || null,
+            trainingUsesSandbox: defForm.trainingUsesSandbox,
+          },
+        } : {}),
       })
       setDef(updated)
       setShowDefModal(false)
@@ -1829,6 +1862,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
       successErrorPath: successCriteriaFromJson(ep.successCriteria).errorPath,
       liquidModel: '',
       trainingResponse: ep.trainingResponse ?? '',
+      sandboxPath: ep.sandboxPath ?? '',
     })
     setEditingEndpointId(ep.id)
     setEndpointFormError(null)
@@ -1865,7 +1899,9 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
         sensitiveResponseFields: pathsToJson(endpointForm.sensitiveResponseFields),
         bodyTemplateType: endpointForm.bodyTemplateType,
         successCriteria: successCriteriaToJson(endpointForm.successRules, endpointForm.successErrorPath),
-        ...(api.supportsTrainingResponse ? { trainingResponse: endpointForm.trainingResponse.trim() } : {}),
+        ...(api.supportsTrainingResponse
+          ? { trainingResponse: endpointForm.trainingResponse.trim(), sandboxPath: endpointForm.sandboxPath.trim() }
+          : {}),
       }
       if (endpointModal === 'edit' && editingEndpointId) {
         const updated = await api.updateEndpoint(definitionId, editingEndpointId, data)
@@ -1963,6 +1999,15 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                 <>
                   <span className="text-gray-600">·</span>
                   <span className="text-gray-500 text-xs">{def.rateLimitPerMinute}/min limit</span>
+                </>
+              )}
+              {def.sandboxBaseUrl && (
+                <>
+                  <span className="text-gray-600">·</span>
+                  <span className="text-xs px-2 py-0.5 rounded font-medium bg-violet-950/60 text-violet-300 border border-violet-800"
+                    title={`Sandbox: ${def.sandboxBaseUrl}${def.trainingUsesSandbox ? ' — training runs use it too' : ''}`}>
+                    Sandbox{def.trainingUsesSandbox ? ' + training' : ''}
+                  </span>
                 </>
               )}
             </div>
@@ -2231,6 +2276,18 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                   onTestAuth={() => api.testAuth(serializeAuthConfig(defForm.auth))}
                 />
               </div>
+              {api.supportsTrainingResponse && (
+                <SandboxEnvironmentSection
+                  form={defForm}
+                  onChange={(patch) => setDefForm((f) => f ? { ...f, ...patch } : f)}
+                  authConfig={serializeAuthConfig(defForm.auth)}
+                  knownCredentials={knownCreds}
+                  onSetCredential={async (keyName, value) => {
+                    await api.setCredential(keyName, value)
+                    setKnownCreds((prev) => prev.includes(keyName) ? prev : [...prev, keyName])
+                  }}
+                />
+              )}
             </div>
             <div className="px-6 py-4 border-t border-gray-800 shrink-0">
               {defFormError && <p className="text-red-400 text-sm mb-3">{defFormError}</p>}
@@ -2387,6 +2444,21 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                       />
                       <p className="text-gray-600 text-xs mt-1">Relative path appended to the base URL. Start with /</p>
                     </div>
+                    {api.supportsTrainingResponse && def.sandboxBaseUrl && (
+                      <div>
+                        <label className="block text-gray-400 text-xs font-medium mb-1.5">Sandbox path</label>
+                        <input
+                          type="text"
+                          value={endpointForm.sandboxPath}
+                          onChange={(e) => setEndpointForm((f) => ({ ...f, sandboxPath: e.target.value }))}
+                          placeholder={endpointForm.path || 'Same as Path'}
+                          className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 font-mono focus:outline-none focus:border-violet-500"
+                        />
+                        <p className="text-gray-600 text-xs mt-1">
+                          Appended to the sandbox base URL (<span className="font-mono text-gray-400">{def.sandboxBaseUrl}</span>). Blank = same as Path.
+                        </p>
+                      </div>
+                    )}
                     <div>
                       <label className="block text-gray-400 text-xs font-medium mb-1.5">Description</label>
                       <input
@@ -2672,6 +2744,23 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                             )
                           )}
                         </div>
+                      )}
+                    </div>
+                  )}
+
+                  {endpointTab === 'test' && api.supportsTrainingResponse && def.sandboxBaseUrl && (
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="text-gray-400 text-xs">Send to</span>
+                      {(['production', 'sandbox'] as const).map((env) => (
+                        <button key={env} type="button" onClick={() => setTestEnvironment(env)}
+                          className={`px-3 py-1 text-xs rounded-md border ${testEnvironment === env
+                            ? (env === 'sandbox' ? 'bg-violet-950/60 border-violet-700 text-violet-200' : 'bg-gray-800 border-gray-600 text-white')
+                            : 'border-gray-700 text-gray-400 hover:text-gray-200'}`}>
+                          {env === 'production' ? 'Production' : 'Sandbox'}
+                        </button>
+                      ))}
+                      {testEnvironment === 'sandbox' && (
+                        <span className="text-violet-300/80 text-xs">Sandbox base URL, sandbox path and sandbox credentials.</span>
                       )}
                     </div>
                   )}
@@ -3037,6 +3126,104 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
           }}
           onClose={() => setHistoryEndpointId(null)}
         />
+      )}
+    </div>
+  )
+}
+
+// ── Sandbox environment (S179, launch modes) ────────────────────────────────
+
+/** Credential settings an auth config reads (credentialKey, tokenKey, clientIdKey, …) — mirrors SandboxEnvironment.CredentialKeys. */
+function authCredentialKeys(authConfigJson: string): { setting: string; key: string }[] {
+  try {
+    const root = JSON.parse(authConfigJson) as Record<string, unknown>
+    return Object.entries(root)
+      .filter(([name, v]) => name.endsWith('Key') && typeof v === 'string' && v.trim() !== '')
+      .map(([setting, v]) => ({ setting, key: (v as string).trim() }))
+  } catch { return [] }
+}
+
+function SandboxEnvironmentSection({ form, onChange, authConfig, knownCredentials, onSetCredential }: {
+  form: DefFormState
+  onChange: (patch: Partial<DefFormState>) => void
+  authConfig: string
+  knownCredentials: string[]
+  onSetCredential: (keyName: string, value: string) => Promise<void>
+}) {
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [busy, setBusy] = useState<string | null>(null)
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const keys = authCredentialKeys(authConfig)
+  const isOAuth = form.auth.authType === 'oauth2'
+  const inputCls = 'w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-violet-500'
+
+  async function save(key: string) {
+    const sandboxKey = `${key}.sandbox`
+    setBusy(key); setMsg(null)
+    try {
+      await onSetCredential(sandboxKey, drafts[key].trim())
+      setDrafts((d) => ({ ...d, [key]: '' }))
+      setMsg({ ok: true, text: `Saved ${sandboxKey}.` })
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof Error ? e.message : 'Save failed.' })
+    } finally { setBusy(null) }
+  }
+
+  return (
+    <div className="border border-violet-900/60 rounded-lg p-4 space-y-3 bg-violet-950/10">
+      <div>
+        <p className="text-violet-300 text-xs font-medium uppercase tracking-wide">Sandbox environment</p>
+        <p className="text-gray-500 text-xs mt-1 leading-snug">
+          The client's test system. Designer sandbox runs send real requests here; live calls never do. Blank = no sandbox:
+          practice runs get each endpoint's Training response instead. Same authentication settings as above, with separate
+          credential values — a sandbox call never uses the production ones.
+        </p>
+      </div>
+      <div>
+        <label className="block text-gray-400 text-xs font-medium mb-1.5">Sandbox base URL</label>
+        <input value={form.sandboxBaseUrl} onChange={(e) => onChange({ sandboxBaseUrl: e.target.value })}
+          placeholder="https://vendor-staging.example.com" className={`${inputCls} font-mono`} />
+      </div>
+      {isOAuth && (
+        <div>
+          <label className="block text-gray-400 text-xs font-medium mb-1.5">Sandbox token URL</label>
+          <input value={form.sandboxTokenUrl} onChange={(e) => onChange({ sandboxTokenUrl: e.target.value })}
+            placeholder="Blank = the production token URL" className={`${inputCls} font-mono`} />
+        </div>
+      )}
+      <label className="flex items-start gap-2 text-sm text-gray-300">
+        <input type="checkbox" checked={form.trainingUsesSandbox} onChange={(e) => onChange({ trainingUsesSandbox: e.target.checked })}
+          className="accent-violet-500 mt-0.5" />
+        <span>
+          Training runs also call the sandbox
+          <span className="block text-gray-500 text-xs">Off: trainees get the Training response, so the client's sandbox isn't filled with practice orders.</span>
+        </span>
+      </label>
+      {form.sandboxBaseUrl.trim() && (
+        <div className="space-y-2">
+          <p className="text-gray-400 text-xs font-medium">Sandbox credentials</p>
+          {keys.length === 0 && <p className="text-gray-500 text-xs">This authentication type uses no stored credentials.</p>}
+          {keys.map(({ setting, key }) => {
+            const sandboxKey = `${key}.sandbox`
+            const isSet = knownCredentials.includes(sandboxKey)
+            return (
+              <div key={setting} className="grid grid-cols-1 md:grid-cols-[14rem_1fr_auto] gap-2 items-center">
+                <div className="min-w-0">
+                  <p className="text-gray-200 text-xs font-mono truncate" title={sandboxKey}>{sandboxKey}</p>
+                  <p className={`text-xs ${isSet ? 'text-emerald-400' : 'text-amber-400'}`}>{isSet ? 'Set' : 'Not set'}</p>
+                </div>
+                <input type="password" autoComplete="new-password" value={drafts[key] ?? ''}
+                  onChange={(e) => setDrafts((d) => ({ ...d, [key]: e.target.value }))}
+                  placeholder={isSet ? '•••••••• (set — type to replace)' : 'Sandbox value'} className={inputCls} />
+                <button type="button" disabled={busy !== null || !(drafts[key] ?? '').trim()} onClick={() => save(key)}
+                  className="bg-violet-700 hover:bg-violet-600 disabled:opacity-40 text-white rounded-lg px-3 py-2 text-xs font-medium">
+                  {busy === key ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            )
+          })}
+          {msg && <p className={`text-xs ${msg.ok ? 'text-emerald-400' : 'text-red-400'}`}>{msg.text}</p>}
+        </div>
       )}
     </div>
   )

@@ -58,6 +58,9 @@ public class TenantApiEndpoint
     /// </summary>
     public string? TrainingResponse { get; private set; }
 
+    /// <summary>Path in the definition's sandbox environment (S179). Null = the same as <see cref="Path"/>.</summary>
+    public string? SandboxPath { get; private set; }
+
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? UpdatedAt { get; private set; }
 
@@ -133,5 +136,6 @@ public class TenantApiEndpoint
         BodyTemplateType = type; UpdatedAt = DateTimeOffset.UtcNow;
     }
     public void SetSuccessCriteria(string criteriaJson) { SuccessCriteria = string.IsNullOrWhiteSpace(criteriaJson) ? "{}" : criteriaJson; UpdatedAt = DateTimeOffset.UtcNow; }
+    public void SetSandboxPath(string? path) { SandboxPath = string.IsNullOrWhiteSpace(path) ? null : path.Trim(); UpdatedAt = DateTimeOffset.UtcNow; }
     public void SetTrainingResponse(string? json) { TrainingResponse = string.IsNullOrWhiteSpace(json) ? null : json; UpdatedAt = DateTimeOffset.UtcNow; }
 }

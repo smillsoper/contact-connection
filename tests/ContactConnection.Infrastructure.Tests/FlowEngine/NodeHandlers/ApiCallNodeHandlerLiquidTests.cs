@@ -21,6 +21,7 @@ public class ApiCallNodeHandlerLiquidTests
         public readonly Mock<IApiDefinitionExecutor> Executor = new();
         public readonly Mock<IApiResponseCacheStore> Cache = new();
         public readonly Mock<ICardDataRetentionService> CardRetention = new();
+        public readonly Mock<ITenantCredentialStore> Credentials = new();
         public readonly FlowExecutionContext Ctx = new()
         {
             SessionId = Guid.NewGuid(), FlowId = Guid.NewGuid(), FlowVersion = 1, CallRecordId = Guid.NewGuid(),
@@ -50,7 +51,7 @@ public class ApiCallNodeHandlerLiquidTests
             model.Setup(m => m.BuildAsync(It.IsAny<FlowExecutionContext>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(ApiTemplateModelBuilder.Sample());
             return new ApiCallNodeHandler(new VariableResolver(), defs.Object, Mock.Of<IPortalApiDefinitionRepository>(),
-                endpoints.Object, Mock.Of<IPortalApiEndpointRepository>(), Mock.Of<ITenantCredentialStore>(),
+                endpoints.Object, Mock.Of<IPortalApiEndpointRepository>(), Credentials.Object,
                 Mock.Of<IPortalCredentialStore>(), Executor.Object, new FluidLiquidTemplateRenderer(), model.Object, Cache.Object, CardRetention.Object);
         }
 
@@ -225,5 +226,82 @@ public class ApiCallNodeHandlerLiquidTests
 
         h.Executor.Verify(e => e.ExecuteAsync(It.IsAny<ApiDefinitionExecutionRequest>(), It.IsAny<CancellationToken>()), Times.Once);
         Assert.False(h.Ctx.FlowVars.ContainsKey("order.response.orderNumber"));
+    }
+
+    // S179 — the definition's sandbox environment (e.g. Life Seasons' campaign approval runs through their sandbox).
+    private static Harness SandboxHarness(bool trainingUsesSandbox = false, bool sandboxKeySet = true)
+    {
+        var h = new Harness("{}");
+        h.Definition.SetAuthConfig("""{"type":"api_key","placement":"header","paramName":"x-functions-key","credentialKey":"LS:OrderApiKey"}""");
+        h.Definition.SetSandbox("https://vendor-staging.example.com", null, trainingUsesSandbox);
+        h.Endpoint.SetSandboxPath("/api/v1/test/addorder");
+        h.Credentials.Setup(c => c.GetAsync("LS:OrderApiKey", It.IsAny<CancellationToken>())).ReturnsAsync("PROD-KEY");
+        if (sandboxKeySet)
+            h.Credentials.Setup(c => c.GetAsync("LS:OrderApiKey.sandbox", It.IsAny<CancellationToken>())).ReturnsAsync("SANDBOX-KEY");
+        return h;
+    }
+
+    [Fact]
+    public async Task DesignerSandbox_WithASandboxEnvironment_CallsTheSandbox_WithSandboxCredentials()
+    {
+        var h = SandboxHarness();
+        Practice(h, "sandbox", "sandbox");
+
+        var result = await h.Handler().ExecuteAsync(h.Node(), h.Ctx, null, "");
+
+        Assert.Equal("n_ok", result.NextNodeId);
+        Assert.Equal("https://vendor-staging.example.com/api/v1/test/addorder", h.Sent!.Url);
+        Assert.Equal("SANDBOX-KEY", await h.Sent.GetCredential("LS:OrderApiKey", default));
+        Assert.NotEqual(h.Definition.Id, h.Sent.DefinitionId);   // its own circuit breaker / rate limit
+        Assert.Equal(ApiCallNodeHandler.SandboxHistoryNote, h.Ctx.ExecutionHistory[^1].InputValue);
+    }
+
+    [Fact]
+    public async Task Training_UsesTheTrainingResponse_UnlessTheDefinitionAllowsTheSandbox()
+    {
+        var off = SandboxHarness(trainingUsesSandbox: false);
+        Practice(off, "training", "sandbox");
+        await off.Handler().ExecuteAsync(off.Node(), off.Ctx, null, "");
+        off.Executor.Verify(e => e.ExecuteAsync(It.IsAny<ApiDefinitionExecutionRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        var on = SandboxHarness(trainingUsesSandbox: true);
+        Practice(on, "training", "sandbox");
+        await on.Handler().ExecuteAsync(on.Node(), on.Ctx, null, "");
+        Assert.StartsWith("https://vendor-staging.example.com", on.Sent!.Url);
+    }
+
+    [Fact]
+    public async Task MissingSandboxCredential_Fails_NeverFallsBackToProduction()
+    {
+        var h = SandboxHarness(sandboxKeySet: false);
+        Practice(h, "sandbox", "sandbox");
+
+        var result = await h.Handler().ExecuteAsync(h.Node(), h.Ctx, null, "");
+
+        Assert.Equal("n_err", result.NextNodeId);
+        Assert.Contains("LS:OrderApiKey.sandbox", h.Ctx.FlowVars["order.error"]);
+        h.Executor.Verify(e => e.ExecuteAsync(It.IsAny<ApiDefinitionExecutionRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task LiveCall_IgnoresTheSandboxEnvironment()
+    {
+        var h = SandboxHarness(trainingUsesSandbox: true);
+        Practice(h, "production", "production");
+
+        await h.Handler().ExecuteAsync(h.Node(), h.Ctx, null, "");
+
+        Assert.Equal("https://vendor.example.com/api/v1/addorder", h.Sent!.Url);
+        Assert.Equal("PROD-KEY", await h.Sent.GetCredential("LS:OrderApiKey", default));
+        Assert.Equal(h.Definition.Id, h.Sent.DefinitionId);
+    }
+
+    [Fact]
+    public void SandboxAuthConfig_SwapsOnlyTheOAuthTokenUrl()
+    {
+        const string oauth = """{"type":"oauth2","tokenUrl":"https://auth.example.com/token","clientIdKey":"V:Id","clientSecretKey":"V:Secret"}""";
+        Assert.Contains("https://sandbox-auth.example.com/token", SandboxEnvironment.AuthConfig(oauth, "https://sandbox-auth.example.com/token"));
+        Assert.Equal(oauth, SandboxEnvironment.AuthConfig(oauth, null));
+        Assert.Equal([("clientIdKey", "V:Id"), ("clientSecretKey", "V:Secret")], SandboxEnvironment.CredentialKeys(oauth));
     }
 }

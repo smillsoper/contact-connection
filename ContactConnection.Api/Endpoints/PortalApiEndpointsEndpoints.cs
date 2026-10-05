@@ -341,7 +341,10 @@ public record CreateApiEndpointRequest(
     string? SuccessCriteria = null,
     /// <summary>Tenant endpoints only (S179): JSON a training / sandbox run gets instead of the real call. Null = leave
     /// unchanged; "" = clear (generic simulated success).</summary>
-    string? TrainingResponse = null);
+    string? TrainingResponse = null,
+    /// <summary>Tenant endpoints only (S179): path in the definition's sandbox environment. Null = leave unchanged;
+    /// "" = clear (same as the production path).</summary>
+    string? SandboxPath = null);
 
 public record UpdateApiEndpointRequest(
     string Name,
@@ -362,4 +365,7 @@ public record UpdateApiEndpointRequest(
     string? SuccessCriteria = null,
     /// <summary>Tenant endpoints only (S179): JSON a training / sandbox run gets instead of the real call. Null = leave
     /// unchanged; "" = clear (generic simulated success).</summary>
-    string? TrainingResponse = null);
+    string? TrainingResponse = null,
+    /// <summary>Tenant endpoints only (S179): path in the definition's sandbox environment. Null = leave unchanged;
+    /// "" = clear (same as the production path).</summary>
+    string? SandboxPath = null);

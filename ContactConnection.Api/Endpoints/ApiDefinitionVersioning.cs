@@ -9,7 +9,10 @@ public record ApiDefinitionSnapshot(
     string ApiCategory, string? Provider, string Name, string? Description, string HttpMethod,
     string BaseUrl, int TimeoutSeconds, string Headers, string QueryParams,
     string? RequestBodyTemplate, string ResponseMapping, string AuthConfig, bool IsActive,
-    int? RateLimitPerMinute = null);
+    int? RateLimitPerMinute = null,
+    string? SandboxBaseUrl = null,
+    string? SandboxTokenUrl = null,
+    bool TrainingUsesSandbox = false);
 
 public record ApiEndpointSnapshot(
     string ApiSubType, string Name, string? Description, string Path, string? HttpMethod,
@@ -18,4 +21,5 @@ public record ApiEndpointSnapshot(
     string SensitiveResponseFields = "[]",
     string BodyTemplateType = "simple",
     string SuccessCriteria = "{}",
-    string? TrainingResponse = null);
+    string? TrainingResponse = null,
+    string? SandboxPath = null);

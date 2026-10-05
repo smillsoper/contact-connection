@@ -51,7 +51,8 @@ export interface UpdateApiDefinitionData {
   authConfig?: string
   /** Omit to leave unchanged, 0 to clear back to unlimited, or a positive number to set a new
    * limit — same convention the backend uses. */
-  rateLimitPerMinute?: number
+  rateLimitPerMinute?: number  /** S179: the client's sandbox environment. Omit to leave unchanged. */
+  sandbox?: { baseUrl: string | null; tokenUrl: string | null; trainingUsesSandbox: boolean }
 }
 
 export function listAdminApiDefinitions(): Promise<ApiDefinitionRecord[]> {
@@ -118,6 +119,7 @@ export interface ApiEndpointRecord {
   successCriteria?: string
   /** Tenant endpoints (S179): JSON a training / sandbox run gets instead of the real call; '' clears. */
   trainingResponse?: string | null
+  sandboxPath?: string | null
   createdAt: string
   updatedAt: string | null
 }
@@ -139,6 +141,7 @@ export interface CreateApiEndpointData {
   successCriteria?: string
   /** Tenant endpoints (S179): JSON a training / sandbox run gets instead of the real call; '' clears. */
   trainingResponse?: string | null
+  sandboxPath?: string | null
 }
 
 export interface UpdateApiEndpointData {
@@ -157,6 +160,7 @@ export interface UpdateApiEndpointData {
   successCriteria?: string
   /** Tenant endpoints (S179): JSON a training / sandbox run gets instead of the real call; '' clears. */
   trainingResponse?: string | null
+  sandboxPath?: string | null
 }
 
 // ── Liquid request-body authoring ────────────────────────────────────────────
@@ -389,6 +393,7 @@ export interface EndpointTestPayload {
   successCriteria?: string
   /** Tenant endpoints (S179): JSON a training / sandbox run gets instead of the real call; '' clears. */
   trainingResponse?: string | null
+  sandboxPath?: string | null
 }
 
 export interface EndpointTestResult {

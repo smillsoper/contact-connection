@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ContactConnection.Infrastructure.ApiExecution;
 using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
@@ -117,6 +118,7 @@ public static class AdminApiEndpointsEndpoints
             if (TrainingResponseError(request.TrainingResponse) is { } trainingError) return Results.BadRequest(new { error = trainingError });
             endpoint.SetTrainingResponse(request.TrainingResponse);
         }
+        if (request.SandboxPath is not null) endpoint.SetSandboxPath(request.SandboxPath);
 
         await repo.AddAsync(endpoint, ct);
         await repo.SaveChangesAsync(ct);
@@ -190,6 +192,7 @@ public static class AdminApiEndpointsEndpoints
             if (TrainingResponseError(request.TrainingResponse) is { } trainingError) return Results.BadRequest(new { error = trainingError });
             endpoint.SetTrainingResponse(request.TrainingResponse);
         }
+        if (request.SandboxPath is not null) endpoint.SetSandboxPath(request.SandboxPath);
 
         await repo.SaveChangesAsync(ct);
         await versions.SnapshotAsync(
@@ -246,7 +249,7 @@ public static class AdminApiEndpointsEndpoints
     private static string BuildSnapshot(TenantApiEndpoint e) => JsonSerializer.Serialize(new ApiEndpointSnapshot(
         e.ApiSubType, e.Name, e.Description, e.Path, e.HttpMethod, e.RequestBodyTemplate,
         e.QueryParams, e.Headers, e.ResponseMapping, e.SortOrder, e.IsPreferred, e.IsActive, e.IsRetrySafe,
-        e.SensitiveResponseFields, e.BodyTemplateType, e.SuccessCriteria, e.TrainingResponse));
+        e.SensitiveResponseFields, e.BodyTemplateType, e.SuccessCriteria, e.TrainingResponse, e.SandboxPath));
 
     private static string? TrainingResponseError(string json)
     {
@@ -270,6 +273,7 @@ public static class AdminApiEndpointsEndpoints
         e.SetBodyTemplateType(s.BodyTemplateType);
         e.SetSuccessCriteria(s.SuccessCriteria);
         e.SetTrainingResponse(s.TrainingResponse);
+        e.SetSandboxPath(s.SandboxPath);
         if (s.IsActive) e.Activate(); else e.Deactivate();
         if (s.IsPreferred) e.SetPreferred(); else e.ClearPreferred();
     }
@@ -305,6 +309,25 @@ public static class AdminApiEndpointsEndpoints
         if (!tenantContext.HasTenant) return Results.Unauthorized();
         var def = await defRepo.GetByIdAsync(definitionId, ct);
         if (def is null) return Results.NotFound();
+
+        if (string.Equals(request.Environment, "sandbox", StringComparison.OrdinalIgnoreCase))
+        {
+            // S179: the definition's sandbox environment — sandbox base URL, path and credentials, never production's.
+            if (string.IsNullOrWhiteSpace(def.SandboxBaseUrl))
+                return Results.BadRequest(new { error = "This API definition has no sandbox base URL." });
+            var sandboxAuth = SandboxEnvironment.AuthConfig(def.AuthConfig, def.SandboxTokenUrl);
+            if (await SandboxEnvironment.FirstMissingCredentialAsync(sandboxAuth, credStore.GetAsync, ct) is { } missing)
+                return Results.BadRequest(new { error = SandboxEnvironment.MissingCredentialError(missing) });
+            return await ApiEndpointTestHelper.RunTest(
+                def.SandboxBaseUrl,
+                sandboxAuth,
+                request with { Path = string.IsNullOrWhiteSpace(request.SandboxPath) ? request.Path : request.SandboxPath },
+                SandboxEnvironment.Credentials(credStore.GetAsync),
+                httpFactory,
+                ct,
+                mtlsProvider,
+                liquid);
+        }
 
         return await ApiEndpointTestHelper.RunTest(
             def.BaseUrl,
@@ -353,6 +376,7 @@ public static class AdminApiEndpointsEndpoints
         e.BodyTemplateType,
         e.SuccessCriteria,
         e.TrainingResponse,
+        e.SandboxPath,
         e.CreatedAt,
         e.UpdatedAt,
     };

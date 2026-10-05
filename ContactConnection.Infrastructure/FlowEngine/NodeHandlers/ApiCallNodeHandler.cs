@@ -65,7 +65,36 @@ public class ApiCallNodeHandler(
         Guid DefinitionId, string HttpMethod, string BaseUrl, string Path, string Headers, string QueryParams,
         string? RequestBodyTemplate, string AuthConfig, int TimeoutSeconds, bool IsActive, bool IsRetrySafe,
         int? RateLimitPerMinute, string SensitiveResponseFields, string BodyTemplateType, string SuccessCriteria,
-        string? EndpointName = null, bool IsClientApi = false, string? TrainingResponse = null);
+        string? EndpointName = null, bool IsClientApi = false, string? TrainingResponse = null,
+        string? SandboxBaseUrl = null, string? SandboxPath = null, string? SandboxTokenUrl = null, bool TrainingUsesSandbox = false,
+        bool Sandbox = false)
+    {
+        /// <summary>The same call, pointed at the definition's sandbox environment (S179).</summary>
+        public CallTarget ForSandbox() => this with
+        {
+            BaseUrl = SandboxBaseUrl!,
+            Path = string.IsNullOrWhiteSpace(SandboxPath) ? Path : SandboxPath,
+            AuthConfig = SandboxEnvironment.AuthConfig(AuthConfig, SandboxTokenUrl),
+            DefinitionId = SandboxEnvironment.DefinitionId(DefinitionId),
+            Sandbox = true,
+        };
+    }
+
+    private enum RunEnvironment { Production, Sandbox, Simulated }
+
+    /// <summary>
+    /// Launch modes (S179). Live calls and platform APIs (address lookups, speech) always run for real, and so does a
+    /// designer sandbox run that chose production credentials. Otherwise a practice run reaches the client's API only
+    /// through its sandbox environment — designer sandbox runs whenever the definition has one, training runs only when
+    /// the definition allows it — and is simulated (Training response) everywhere else.
+    /// </summary>
+    private static RunEnvironment EnvironmentFor(CallTarget target, FlowExecutionContext ctx)
+    {
+        if (!target.IsClientApi || !SimulatesClientApis(ctx)) return RunEnvironment.Production;
+        if (string.IsNullOrWhiteSpace(target.SandboxBaseUrl)) return RunEnvironment.Simulated;
+        var designerSandbox = ctx.CallRecord.GetValueOrDefault("run_mode") == "sandbox";
+        return designerSandbox || target.TrainingUsesSandbox ? RunEnvironment.Sandbox : RunEnvironment.Simulated;
+    }
 
     public async Task<NodeResult> ExecuteAsync(
         JsonObject node, FlowExecutionContext ctx,
@@ -78,6 +107,7 @@ public class ApiCallNodeHandler(
         ApiDefinitionExecutionResult result;
         string transitionKey;
         var simulated = false;
+        var sandboxed = false;
         var targetSensitiveFields = "[]";
 
         if (string.IsNullOrEmpty(endpointIdStr) || !Guid.TryParse(endpointIdStr, out var endpointId))
@@ -116,18 +146,26 @@ public class ApiCallNodeHandler(
             }
             else
             {
+                // Launch modes (S179): production, the client's sandbox environment, or simulated — see EnvironmentFor.
+                // A simulated call still builds its body, so template errors show up in practice too.
+                var environment = EnvironmentFor(target, ctx);
+                if (environment == RunEnvironment.Sandbox) target = target.ForSandbox();
                 var (request, bodyError) = await BuildRequestAsync(target, node, ctx, scope, ct);
-                // Launch modes (S179): a practice run never calls a client's API on the sandbox credential set — it gets the
-                // endpoint's Training response (or a generic success). The body is still built, so template errors show up.
-                // Platform APIs (address lookups, speech) run for real; a designer sandbox run that chose production
-                // credentials calls the real API.
-                simulated = bodyError is null && target.IsClientApi && SimulatesClientApis(ctx);
+                simulated = bodyError is null && environment == RunEnvironment.Simulated;
+                sandboxed = target.Sandbox;
+                var missingSandboxCredential = bodyError is null && target.Sandbox
+                    ? await SandboxEnvironment.FirstMissingCredentialAsync(target.AuthConfig, tenantCredentials.GetAsync, ct)
+                    : null;
                 result = bodyError is not null
                     // Never send a body the template couldn't produce correctly.
                     ? new ApiDefinitionExecutionResult(false, null, null, new(), null, false, bodyError)
-                    : simulated
-                        ? SimulatedResult(target.TrainingResponse)
-                        : await executor.ExecuteAsync(request, ct);
+                    : missingSandboxCredential is not null
+                        // Never let a sandbox call go out on production credentials (or none).
+                        ? new ApiDefinitionExecutionResult(false, null, null, new(), null, false,
+                            SandboxEnvironment.MissingCredentialError(missingSandboxCredential))
+                        : simulated
+                            ? SimulatedResult(target.TrainingResponse)
+                            : await executor.ExecuteAsync(request, ct);
 
                 result = ResponseSuccessEvaluator.Apply(result, target.SuccessCriteria);
                 transitionKey = result.TimedOut ? "timeout" : (!result.Success ? "error" : "success");
@@ -167,7 +205,7 @@ public class ApiCallNodeHandler(
         }
 
         var next = Transition(node, transitionKey) ?? Transition(node, "default");
-        AppendHistory(ctx, node, input: simulated ? SimulatedHistoryNote : null, transition: next);
+        AppendHistory(ctx, node, input: simulated ? SimulatedHistoryNote : sandboxed ? SandboxHistoryNote : null, transition: next);
 
         var state = BuildState(ctx, node, resolvedContent: string.Empty);
         return new NodeResult(state, next);
@@ -176,6 +214,7 @@ public class ApiCallNodeHandler(
     private static string OnceKey(string scope, Guid endpointId) => $"once:{scope}:{endpointId}";
 
     internal const string SimulatedHistoryNote = "Simulated (practice run): the client's API was not called";
+    internal const string SandboxHistoryNote = "Sent to the client's sandbox environment (practice run)";
     internal const string GenericSimulatedBody = "{\"success\":true,\"simulated\":true}";
 
     /// <summary>A practice run on the sandbox credential set (training always is) simulates the client's APIs.</summary>
@@ -216,7 +255,9 @@ public class ApiCallNodeHandler(
 
         Func<string, CancellationToken, Task<string?>> getCredential = scope == "portal"
             ? portalCredentials.GetAsync
-            : tenantCredentials.GetAsync;
+            : target.Sandbox
+                ? SandboxEnvironment.Credentials(tenantCredentials.GetAsync)   // {key}.sandbox — never the production value
+                : tenantCredentials.GetAsync;
         var timeoutOverride = node["timeoutSeconds"] is JsonValue tv && tv.TryGetValue<int>(out var overrideSeconds) && overrideSeconds > 0
             ? overrideSeconds
             : (int?)null;
@@ -244,6 +285,7 @@ public class ApiCallNodeHandler(
             return ApiRequestPreviewer.Failed("This API Call node has no API endpoint selected.");
         var target = scope == "portal" ? await LoadPortalAsync(endpointId, ct) : await LoadTenantAsync(endpointId, ct);
         if (target is null) return ApiRequestPreviewer.Failed("API endpoint not found.");
+        if (EnvironmentFor(target, ctx) == RunEnvironment.Sandbox) target = target.ForSandbox();
 
         var (request, bodyError) = await BuildRequestAsync(target, node, ctx, scope, ct);
         return ApiRequestPreviewer.From(target.EndpointName, request, target.BodyTemplateType, bodyError);
@@ -270,7 +312,8 @@ public class ApiCallNodeHandler(
             def.Id, endpoint.HttpMethod ?? def.HttpMethod, def.BaseUrl, endpoint.Path, endpoint.Headers, endpoint.QueryParams,
             endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive, endpoint.IsRetrySafe,
             def.RateLimitPerMinute, endpoint.SensitiveResponseFields, endpoint.BodyTemplateType, endpoint.SuccessCriteria,
-            $"{def.Name} → {endpoint.Name}", IsClientApi: true, endpoint.TrainingResponse);
+            $"{def.Name} → {endpoint.Name}", IsClientApi: true, endpoint.TrainingResponse,
+            def.SandboxBaseUrl, endpoint.SandboxPath, def.SandboxTokenUrl, def.TrainingUsesSandbox);
     }
 
     private async Task<CallTarget?> LoadPortalAsync(Guid endpointId, CancellationToken ct)

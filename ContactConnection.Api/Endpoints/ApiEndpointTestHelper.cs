@@ -31,7 +31,11 @@ public record RunEndpointTestRequest(
     JsonObject? LiquidModel = null,
     /// <summary>The endpoint form's current SuccessCriteria (saved or not) — applied to a 2xx
     /// response exactly as a live call would.</summary>
-    string? SuccessCriteria = null);
+    string? SuccessCriteria = null,
+    /// <summary>Tenant endpoints (S179): "sandbox" runs the test against the definition's sandbox environment.</summary>
+    string? Environment = null,
+    /// <summary>The form's current sandbox path (saved or not) — used when Environment is "sandbox". Blank = Path.</summary>
+    string? SandboxPath = null);
 
 public record RunEndpointTestResponse(
     bool Success,

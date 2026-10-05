@@ -30,6 +30,7 @@ public class TenantApiEndpointConfiguration : IEntityTypeConfiguration<TenantApi
         builder.Property(e => e.BodyTemplateType).HasColumnName("body_template_type").HasMaxLength(20).IsRequired().HasDefaultValue("simple");
         builder.Property(e => e.SuccessCriteria).HasColumnName("success_criteria").HasColumnType("jsonb").IsRequired().HasDefaultValue("{}");
         builder.Property(e => e.TrainingResponse).HasColumnName("training_response");
+        builder.Property(e => e.SandboxPath).HasColumnName("sandbox_path").HasMaxLength(500);
         builder.Property(e => e.CreatedAt).HasColumnName("created_at").IsRequired();
         builder.Property(e => e.UpdatedAt).HasColumnName("updated_at");
 

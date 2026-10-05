@@ -22,6 +22,17 @@ public class TenantApiDefinition
     /// IsRetrySafe's default-off pattern — an existing definition's behavior never changes until
     /// someone sets this). See API_HARDENING_CHECKLIST.md Tier 2.</summary>
     public int? RateLimitPerMinute { get; private set; }
+
+    /// <summary>
+    /// Sandbox environment (S179, launch modes) — the client's test system. Blank = none: practice runs get each endpoint's
+    /// Training response. Same auth settings as production; credential values live under <c>{key}.sandbox</c>.
+    /// </summary>
+    public string? SandboxBaseUrl { get; private set; }
+    /// <summary>OAuth2 only: the sandbox token URL, when the vendor issues sandbox tokens elsewhere. Blank = the production one.</summary>
+    public string? SandboxTokenUrl { get; private set; }
+    /// <summary>Training runs call the sandbox too (designer sandbox runs always do). Off = training gets the Training response,
+    /// so trainees don't fill the client's sandbox with practice orders.</summary>
+    public bool TrainingUsesSandbox { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? UpdatedAt { get; private set; }
 
@@ -83,6 +94,14 @@ public class TenantApiDefinition
     {
         if (perMinute is <= 0) throw new ArgumentException("Rate limit must be null (unlimited) or a positive number of requests per minute.", nameof(perMinute));
         RateLimitPerMinute = perMinute;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void SetSandbox(string? baseUrl, string? tokenUrl, bool trainingUsesSandbox)
+    {
+        SandboxBaseUrl = string.IsNullOrWhiteSpace(baseUrl) ? null : baseUrl.Trim();
+        SandboxTokenUrl = string.IsNullOrWhiteSpace(tokenUrl) ? null : tokenUrl.Trim();
+        TrainingUsesSandbox = trainingUsesSandbox;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
