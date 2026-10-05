@@ -251,7 +251,7 @@ export default function TelephonyNodePropertiesPanel({
             value={(data.condition as string) ?? ''}
             onChange={(e) => set('condition', e.target.value)}
           />
-          <p className="text-xs text-gray-500 mt-1">Operators: ==  !=  &gt;  &lt;  &gt;=  &lt;=  contains</p>
+          <p className="text-xs text-gray-500 mt-1">Operators: ==  !=  &gt;  &lt;  &gt;=  &lt;=  contains · join with &amp;&amp; (and) or || (or) — &amp;&amp; is checked first</p>
         </div>
       )}
 

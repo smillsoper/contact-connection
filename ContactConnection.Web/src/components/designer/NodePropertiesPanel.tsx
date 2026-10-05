@@ -931,7 +931,7 @@ export default function NodePropertiesPanel({
         return (
           <>
             {field('condition', 'Condition', input('condition', '{{input.node_id}} == value'))}
-            <p className="text-[10px] text-gray-500">Operators: == != &gt; &lt; &gt;= &lt;= contains</p>
+            <p className="text-[10px] text-gray-500">Operators: == != &gt; &lt; &gt;= &lt;= contains · join with &amp;&amp; (and) or || (or) — &amp;&amp; is checked first</p>
             <div className="flex justify-between text-xs mt-1">
               <span className="text-green-400 font-medium">→ true transition</span>
               <span className="text-red-400 font-medium">→ false transition</span>

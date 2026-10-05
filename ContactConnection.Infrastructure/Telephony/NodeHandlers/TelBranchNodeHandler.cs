@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using ContactConnection.Infrastructure.FlowEngine;
 using ContactConnection.Application.Interfaces.Services;
 
 namespace ContactConnection.Infrastructure.Telephony.NodeHandlers;
@@ -7,7 +8,7 @@ namespace ContactConnection.Infrastructure.Telephony.NodeHandlers;
 /// Evaluates a simple condition against flow variables.
 /// Condition format: "{{flow.varName}} operator value" (or any tag TelSetVariableNodeHandler.Resolve
 /// supports: bare {{varName}}, {{caller.ani}}, {{call.id}}, {{call.did}}, {{now.*}}, {{shared.*}}).
-/// Operators: ==, !=, >, <, >=, <=, contains
+/// Operators: ==, !=, >, <, >=, <=, contains — clauses joined with && / || (see CompoundCondition).
 /// </summary>
 public class TelBranchNodeHandler : ITelephonyNodeHandler
 {
@@ -28,7 +29,11 @@ public class TelBranchNodeHandler : ITelephonyNodeHandler
     private static bool EvaluateCondition(string condition, TelephonyFlowContext ctx)
     {
         if (string.IsNullOrWhiteSpace(condition)) return false;
+        return CompoundCondition.Evaluate(condition, clause => EvaluateClause(clause, ctx));
+    }
 
+    private static bool EvaluateClause(string condition, TelephonyFlowContext ctx)
+    {
         // Resolve {{...}} tags using the same resolver every other telephony node uses —
         // handles {{flow.varname}} (and bare {{varname}}), {{caller.ani}}, {{call.did}},
         // {{now.*}}. Previously this did its own raw ctx.Vars lookup keyed on the full tag

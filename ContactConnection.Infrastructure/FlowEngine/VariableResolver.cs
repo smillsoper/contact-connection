@@ -58,7 +58,13 @@ public partial class VariableResolver : IVariableResolver
     {
         if (string.IsNullOrWhiteSpace(condition)) return true;
 
-        // Resolve any tags in the condition first
+        // && / || are split on the typed condition before any tag resolves (S179) — see CompoundCondition.
+        return CompoundCondition.Evaluate(condition, clause => EvaluateClause(clause, context));
+    }
+
+    private bool EvaluateClause(string condition, VariableContext context)
+    {
+        // Resolve any tags in the clause first
         var resolved = Resolve(condition, context);
 
         // Try each operator in order (longest first to avoid prefix conflicts)
