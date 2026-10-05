@@ -40,7 +40,7 @@ export default function AgentShell() {
   const handleLogout = useCallback(() => {
     // Fire-and-forget — must fire before clearAuth() wipes the token used for this request.
     // Feeds agent_state_history so future reporting can show logout timestamps/durations.
-    api.put('/api/v1/agent-state', { code: 'logged_out', customCodeId: null, customLabel: null }).catch(() => {})
+    api.put('/api/v1/agent-state', { code: 'logged_out', customCodeId: null, customLabel: null }).catch(() => { })
     clearAuth()
     clearSip()
     navigate('/login', { replace: true })
@@ -118,12 +118,6 @@ export default function AgentShell() {
         <img src="/cc-navbar-dark.svg" alt="Contact Connection" className="shrink-0 block" />
         <div className="flex items-center justify-end flex-1 gap-4 px-4">
           <MyCommissions />
-          <button
-            onClick={() => navigate('/flows')}
-            className="text-xs text-gray-400 hover:text-indigo-300 transition-colors"
-          >
-            Flows
-          </button>
           <button
             onClick={handleLogout}
             className="text-xs text-gray-400 hover:text-white transition-colors"
