@@ -55,14 +55,17 @@ const inputCls = 'w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-1
  *   reviewer must choose explicitly; Confirm & save or Discard. Nothing the AI writes reaches the call until
  *   a person confirms it. The confirmed summary then shows with who confirmed it and whether it was edited.
  */
-export default function AiSummaryPanel({ callId, canManage, onChanged, agentMode = false, title }: {
+export default function AiSummaryPanel({ callId, interactionId, canManage, onChanged, agentMode = false, title }: {
   callId: string
+  /** Summarize one interaction (S178 — a transferred call's CS work has its own summary). Omit for the whole call. */
+  interactionId?: string | null
   canManage: boolean
   onChanged?: () => void
   /** Agent wrap-up: compact — no context preview or spend line, and the parent removes the card once reviewed. */
   agentMode?: boolean
   title?: string
 }) {
+  const ixq = interactionId ? `?interactionId=${interactionId}` : ''
   const [ctx, setCtx] = useState<AiContext | null>(null)
   const [open, setOpen] = useState(false)
   const [suggestion, setSuggestion] = useState<AiSuggestion | null>(null)
@@ -91,7 +94,7 @@ export default function AiSummaryPanel({ callId, canManage, onChanged, agentMode
   }
 
   const loadConfirmed = () =>
-    api.get<{ confirmed: Confirmed | null; pending: AiSuggestion | null; generated: number; totalCostUsd: number }>(`/api/v1/call-review/calls/${callId}/ai/summaries`)
+    api.get<{ confirmed: Confirmed | null; pending: AiSuggestion | null; generated: number; totalCostUsd: number }>(`/api/v1/call-review/calls/${callId}/ai/summaries${ixq}`)
       .then((r) => {
         setConfirmed(r.confirmed)
         setStats({ generated: r.generated, totalCostUsd: r.totalCostUsd })
@@ -103,14 +106,14 @@ export default function AiSummaryPanel({ callId, canManage, onChanged, agentMode
 
   async function loadContext() {
     setError(null)
-    try { setCtx(await api.get<AiContext>(`/api/v1/call-review/calls/${callId}/ai/context`)); setOpen(true) }
+    try { setCtx(await api.get<AiContext>(`/api/v1/call-review/calls/${callId}/ai/context${ixq}`)); setOpen(true) }
     catch (e) { setError(e instanceof Error ? e.message : 'Failed to load.') }
   }
 
   async function generate() {
     setBusy(true); setError(null)
     try {
-      const r = await api.post<AiSuggestion>(`/api/v1/call-review/calls/${callId}/ai/summary`)
+      const r = await api.post<AiSuggestion>(`/api/v1/call-review/calls/${callId}/ai/summary${ixq}`)
       startReview(r)
       loadConfirmed()
     }

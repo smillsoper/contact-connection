@@ -39,19 +39,23 @@ public sealed class AiSummaryProcessor(
         services.GetRequiredService<TenantContext>().Current = tenant;
 
         await using var db = services.GetRequiredService<ScopedTenantDbContextFactory>().Create();
-        var campaignId = await db.CallRecords.AsNoTracking().Where(r => r.Id == item.CallRecordId).Select(r => r.CampaignId).FirstOrDefaultAsync(ct);
+        // One summary per interaction (S178), opted in by the interaction's campaign (a transferred CS interaction asks CS).
+        var ixId = item.InteractionId is { } given && given != Guid.Empty ? given : (Guid?)null;
+        var campaignId = (ixId is null ? null
+                : await db.CallInteractions.AsNoTracking().Where(i => i.Id == ixId).Select(i => i.CampaignId).FirstOrDefaultAsync(ct))
+            ?? await db.CallRecords.AsNoTracking().Where(r => r.Id == item.CallRecordId).Select(r => r.CampaignId).FirstOrDefaultAsync(ct);
         var enabled = await db.Campaigns.AsNoTracking().Where(c => c.Id == campaignId).Select(c => c.AiSummaryEnabled).FirstOrDefaultAsync(ct);
         if (!enabled) return;
-        if (await db.CallSummaries.AnyAsync(s => s.CallRecordId == item.CallRecordId
+        if (await db.CallSummaries.AnyAsync(s => s.CallRecordId == item.CallRecordId && s.InteractionId == ixId
                 && (s.Status == CallSummaryStatus.Suggested || s.Status == CallSummaryStatus.Confirmed), ct)) return;
 
-        var result = await services.GetRequiredService<CallSummarizer>().SummarizeAsync(db, item.CallRecordId, ct);
+        var result = await services.GetRequiredService<CallSummarizer>().SummarizeAsync(db, item.CallRecordId, ct, ixId);
         if (result is null) return;
         var s = result.Summary;
         var u = result.Usage;
         db.CallSummaries.Add(CallSummary.Suggest(tenant.Id, item.CallRecordId, s.Text, s.ReasonForCall, s.Outcome,
             s.SuggestedDisposition, s.DispositionValid, s.Confidence, s.FollowUp, s.IsTestCall, result.PossibleTestCall,
-            u.Model, u.InputTokens, u.OutputTokens, u.EstimatedCostUsd, u.ElapsedMs, "Automatic (script finished)"));
+            u.Model, u.InputTokens, u.OutputTokens, u.EstimatedCostUsd, u.ElapsedMs, "Automatic (script finished)", ixId));
         await db.SaveChangesAsync(ct);
 
         if (item.AgentId is { } agentId)

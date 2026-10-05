@@ -13,6 +13,7 @@ public class CallSummaryConfiguration : IEntityTypeConfiguration<CallSummary>
         b.Property(x => x.Id).HasColumnName("id");
         b.Property(x => x.TenantId).HasColumnName("tenant_id");
         b.Property(x => x.CallRecordId).HasColumnName("call_record_id");
+        b.Property(x => x.InteractionId).HasColumnName("interaction_id");
         b.Property(x => x.Status).HasColumnName("status").HasMaxLength(20).IsRequired();
         b.Property(x => x.AiSummary).HasColumnName("ai_summary").IsRequired();
         b.Property(x => x.AiReasonForCall).HasColumnName("ai_reason_for_call").HasMaxLength(500);

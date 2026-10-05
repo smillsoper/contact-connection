@@ -66,29 +66,42 @@ public static partial class CallSummaryContextBuilder
 
     private record Step(string NodeType, string Label, string? InputValue);
 
-    public static async Task<Result?> BuildAsync(TenantDbContext db, Guid callRecordId, CancellationToken ct)
+    /// <param name="interactionId">Summarize one interaction (S178): only its script sessions and payments, its cart /
+    /// order / fields, its campaign. Null = the whole call (legacy calls without interactions).</param>
+    public static async Task<Result?> BuildAsync(TenantDbContext db, Guid callRecordId, CancellationToken ct, Guid? interactionId = null)
     {
-        var record = await db.CallRecords.AsNoTracking().FirstOrDefaultAsync(r => r.Id == callRecordId, ct);
+        var record = await db.CallRecords.AsNoTracking().Include(r => r.Interactions).FirstOrDefaultAsync(r => r.Id == callRecordId, ct);
         if (record is null) return null;
+        var ix = interactionId is { } want && want != Guid.Empty ? record.Interactions.FirstOrDefault(i => i.Id == want) : null;
 
-        var campaign = await db.Campaigns.AsNoTracking().Where(c => c.Id == record.CampaignId).Select(c => c.Name).FirstOrDefaultAsync(ct);
+        var campaignId = ix?.CampaignId ?? record.CampaignId;
+        var campaign = await db.Campaigns.AsNoTracking().Where(c => c.Id == campaignId).Select(c => c.Name).FirstOrDefaultAsync(ct);
         var client = await db.Clients.AsNoTracking().Where(c => c.Id == record.ClientId).Select(c => c.Name).FirstOrDefaultAsync(ct);
         var histories = await db.FlowSessions.AsNoTracking()
-            .Where(s => s.CallRecordId == callRecordId).OrderBy(s => s.StartedAt)
+            .Where(s => s.CallRecordId == callRecordId && (ix == null || s.InteractionId == ix.Id)).OrderBy(s => s.StartedAt)
             .Select(s => s.ExecutionHistory).ToListAsync(ct);
         // Payment results are facts we have — give them to the model rather than let it guess what
         // "Authorize Payment (step reached)" led to.
         var payments = await db.PaymentTransactions.AsNoTracking()
-            .Where(p => p.CallRecordId == callRecordId).OrderBy(p => p.CreatedAt)
+            .Where(p => p.CallRecordId == callRecordId && (ix == null || p.InteractionId == ix.Id)).OrderBy(p => p.CreatedAt)
             .Select(p => new Payment(p.TransactionType, p.Status, p.Amount, p.VoidedAt != null)).ToListAsync(ct);
 
-        return Build(record, client, campaign, histories, payments);
+        return Build(record, client, campaign, histories, payments, ix);
     }
 
     /// <summary>Pure formatting — everything the model will see is decided here.</summary>
     internal static Result Build(
-        CallRecord record, string? client, string? campaign, IEnumerable<string> executionHistories, IEnumerable<Payment>? payments = null)
+        CallRecord record, string? client, string? campaign, IEnumerable<string> executionHistories, IEnumerable<Payment>? payments = null,
+        CallInteraction? interaction = null)
     {
+        // One interaction's commerce (S178), else the record's (legacy). A transferred interaction (a different campaign
+        // than the call's) has its own fields; others share the record's.
+        var transferred = interaction?.CampaignId is { } ixc && ixc != record.CampaignId;
+        var orderSubmittedAt = interaction is not null ? interaction.OrderSubmittedAt : record.OrderSubmittedAt;
+        var paymentStatus = interaction is not null ? interaction.PaymentStatus : record.PaymentStatus;
+        var routedTier = interaction is not null ? interaction.RoutedTierLabel : record.RoutedTierLabel;
+        var cartDoc = interaction is not null ? interaction.Cart : record.Cart;
+        var fieldsJson = transferred ? interaction!.CustomFields : record.CustomFields;
         var r = new AiRedactor();
         var withheld = new List<string>();
         var placeholders = new List<(string Label, string Value)>();
@@ -120,18 +133,19 @@ public static partial class CallSummaryContextBuilder
         sb.AppendLine($"Direction: {record.Source}");
         if (record.HandleTimeSeconds is { } secs) sb.AppendLine($"Handle time: {secs / 60}m {secs % 60}s");
         sb.AppendLine($"Call status: {record.OverallStatus}");
-        sb.AppendLine($"Order placed: {(record.OrderSubmittedAt is null ? "no" : "yes")}");
-        if (!string.IsNullOrWhiteSpace(record.PaymentStatus)) sb.AppendLine($"Payment status: {record.PaymentStatus}");
+        if (transferred) sb.AppendLine("Transferred in: this agent took the caller over mid-call from another campaign's agent.");
+        sb.AppendLine($"Order placed: {(orderSubmittedAt is null ? "no" : "yes")}");
+        if (!string.IsNullOrWhiteSpace(paymentStatus)) sb.AppendLine($"Payment status: {paymentStatus}");
         var paid = (payments ?? []).ToList();
         if (paid.Count > 0)
             sb.AppendLine("Payments: " + string.Join("; ", paid.Select(p =>
                 $"{(p.Type == PaymentTransactionType.AuthOnly ? "authorization" : p.Type.Replace('_', ' '))} {p.Status} {Money(p.Amount)}{(p.Voided ? " (voided)" : "")}")));
-        if (record.RoutedTierLabel is { } tier) sb.AppendLine($"Routed through tier: {tier}");
+        if (routedTier is { } tier) sb.AppendLine($"Routed through tier: {tier}");
         if (withheld.Count > 0) sb.AppendLine($"Captured: {string.Join(", ", withheld.Distinct())}");
         if (placeholders.Count > 0)
             sb.AppendLine($"Possible test call: placeholder answers ({string.Join(", ", placeholders.Select(p => $"\"{p.Value}\"").Distinct())}) at {string.Join(", ", placeholders.Select(p => p.Label).Distinct())}");
 
-        if (record.Cart is { Items.Count: > 0 } cart)
+        if (cartDoc is { Items.Count: > 0 } cart)
         {
             sb.AppendLine();
             sb.AppendLine("CART");
@@ -140,7 +154,7 @@ public static partial class CallSummaryContextBuilder
             sb.AppendLine($"Subtotal {Money(cart.CartSubtotal)}, shipping {Money(cart.Shipping)}, tax {Money(cart.SalesTax)}, total {Money(cart.CartTotal)}");
         }
 
-        var fields = CommissionLedger.CustomFieldValues(record.CustomFields).Where(kv => !string.IsNullOrWhiteSpace(kv.Value)).ToList();
+        var fields = CommissionLedger.CustomFieldValues(fieldsJson).Where(kv => !string.IsNullOrWhiteSpace(kv.Value)).ToList();
         if (fields.Count > 0)
         {
             sb.AppendLine();

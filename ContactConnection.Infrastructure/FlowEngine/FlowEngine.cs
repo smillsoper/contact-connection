@@ -1010,7 +1010,7 @@ public class FlowEngine : IFlowEngine
 
         // AI wrap-up summary (S171): the context is complete now — every answer and the disposition. Queued, so
         // the agent's last click returns immediately; the processor checks the campaign's opt-in.
-        _aiSummaries?.Enqueue(new(ctx.TenantId, ctx.CallRecordId, ctx.AgentId));
+        _aiSummaries?.Enqueue(new(ctx.TenantId, ctx.CallRecordId, ctx.AgentId, ctx.InteractionId));
     }
 
     private async Task<Guid> EnsureInteractionAsync(StartFlowRequest request, Guid? flowCampaignId, CancellationToken ct)

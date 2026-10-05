@@ -20,9 +20,11 @@ public static partial class DispositionCatalog
 {
     public const string FieldName = "disposition";
 
-    public static async Task<List<string>> ForCallAsync(TenantDbContext db, Guid callRecordId, CancellationToken ct)
+    /// <param name="interactionId">Only that interaction's scripts (S178 — CS has its own dispositions). Null = the call's.</param>
+    public static async Task<List<string>> ForCallAsync(TenantDbContext db, Guid callRecordId, CancellationToken ct, Guid? interactionId = null)
     {
-        var flowIds = await db.FlowSessions.AsNoTracking().Where(s => s.CallRecordId == callRecordId)
+        var ix = interactionId is { } want && want != Guid.Empty ? want : (Guid?)null;
+        var flowIds = await db.FlowSessions.AsNoTracking().Where(s => s.CallRecordId == callRecordId && (ix == null || s.InteractionId == ix))
             .Select(s => s.FlowId).Distinct().ToListAsync(ct);
         var definitions = await db.Flows.AsNoTracking().Where(f => flowIds.Contains(f.Id)).Select(f => f.Definition).ToListAsync(ct);
         return FromDefinitions(definitions);

@@ -3,6 +3,8 @@ import { api } from '../api/client'
 import AiSummaryPanel from './admin/AiSummaryPanel'
 
 interface PendingCall {
+  /** The interaction the summary is for (S178); null on older rows. */
+  interactionId: string | null
   callRecordId: string
   createdAt: string
   callStartedAt: string | null
@@ -50,8 +52,9 @@ export default function WrapUpSummaries() {
     <div className="border-b border-gray-800 bg-gray-950 px-4 py-3 space-y-3 max-h-[60vh] overflow-y-auto">
       {pending.map((p) => (
         <AiSummaryPanel
-          key={p.callRecordId}
+          key={p.interactionId ?? p.callRecordId}
           callId={p.callRecordId}
+          interactionId={p.interactionId}
           canManage
           agentMode
           title={`Wrap-up — ${callLabel(p)}`}

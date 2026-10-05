@@ -10,7 +10,7 @@ namespace ContactConnection.Infrastructure.Ai;
 /// </summary>
 public sealed class AiSummaryQueue
 {
-    public record Item(Guid TenantId, Guid CallRecordId, Guid? AgentId);
+    public record Item(Guid TenantId, Guid CallRecordId, Guid? AgentId, Guid? InteractionId = null);
 
     private readonly Channel<Item> _channel = Channel.CreateBounded<Item>(
         new BoundedChannelOptions(1000) { FullMode = BoundedChannelFullMode.DropOldest });

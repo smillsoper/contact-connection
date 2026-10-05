@@ -44,17 +44,29 @@ public static class AiEndpoints
     {
         if (Has(http, permission)) return true;
         if (ActorResolver.Resolve(http.User) is not { } actor) return false;
-        return await db.CallRecords.AsNoTracking().AnyAsync(r => r.Id == callId && r.AgentId == actor.Id, ct);
+        // The call's agent, or the agent of one of its interactions (S178: a CS agent's own wrap-up on a transferred call).
+        return await db.CallRecords.AsNoTracking().AnyAsync(r => r.Id == callId
+            && (r.AgentId == actor.Id || r.Interactions.Any(i => i.AgentId == actor.Id)), ct);
+    }
+
+    /// <summary>The disposition currently recorded for an interaction: a transferred one's own field, else the record's.</summary>
+    private static async Task<string?> RecordedDispositionAsync(TenantDbContext db, Guid callId, Guid? interactionId, CancellationToken ct)
+    {
+        var record = await db.CallRecords.AsNoTracking().Include(r => r.Interactions).FirstOrDefaultAsync(r => r.Id == callId, ct);
+        if (record is null) return null;
+        var ix = interactionId is { } want ? record.Interactions.FirstOrDefault(i => i.Id == want) : null;
+        var transferred = ix?.CampaignId is { } c && c != record.CampaignId;
+        return RecordedDisposition(transferred ? ix!.CustomFields : record.CustomFields);
     }
 
     private static async Task<IResult> PreviewContext(
-        Guid id, HttpContext http, TenantContext tenant, ScopedTenantDbContextFactory dbFactory, CancellationToken ct)
+        Guid id, Guid? interactionId, HttpContext http, TenantContext tenant, ScopedTenantDbContextFactory dbFactory, CancellationToken ct)
     {
         if (!tenant.HasTenant) return Results.Unauthorized();
         if (!Has(http, Permission.CallsView)) return Results.Forbid();
 
         await using var db = dbFactory.Create();
-        var context = await CallSummaryContextBuilder.BuildAsync(db, id, ct);
+        var context = await CallSummaryContextBuilder.BuildAsync(db, id, ct, interactionId);
         if (context is null) return Results.NotFound();
         return Results.Ok(new
         {
@@ -70,7 +82,7 @@ public static class AiEndpoints
     // Generate: ask the model, save the answer as a suggestion (provenance + cost), return it for review.
     // A failed AI call is a 503 with a plain message, never a broken page.
     private static async Task<IResult> GenerateSummary(
-        Guid id, HttpContext http, TenantContext tenant, ScopedTenantDbContextFactory dbFactory,
+        Guid id, Guid? interactionId, HttpContext http, TenantContext tenant, ScopedTenantDbContextFactory dbFactory,
         CallSummarizer summarizer, AnthropicClient client, CancellationToken ct)
     {
         if (!tenant.HasTenant) return Results.Unauthorized();
@@ -80,19 +92,20 @@ public static class AiEndpoints
         if (!await CanAccessAsync(http, db, id, Permission.CallsView, ct)) return Results.Forbid();
         try
         {
-            var result = await summarizer.SummarizeAsync(db, id, ct);
+            var result = await summarizer.SummarizeAsync(db, id, ct, interactionId);
             if (result is null) return Results.NotFound();
 
             var s = result.Summary;
             var u = result.Usage;
             var row = CallSummary.Suggest(tenant.Current!.Id, id, s.Text, s.ReasonForCall, s.Outcome, s.SuggestedDisposition,
                 s.DispositionValid, s.Confidence, s.FollowUp, s.IsTestCall, result.PossibleTestCall,
-                u.Model, u.InputTokens, u.OutputTokens, u.EstimatedCostUsd, u.ElapsedMs, ActorResolver.Resolve(http.User)?.Name);
+                u.Model, u.InputTokens, u.OutputTokens, u.EstimatedCostUsd, u.ElapsedMs, ActorResolver.Resolve(http.User)?.Name,
+                interactionId);
             db.CallSummaries.Add(row);
             await db.SaveChangesAsync(ct);
 
             return Results.Ok(new { summaryId = row.Id, result.Summary, result.Usage, result.AllowedDispositions, result.PossibleTestCall,
-                recordedDisposition = RecordedDisposition(await db.CallRecords.AsNoTracking().Where(r => r.Id == id).Select(r => r.CustomFields).FirstOrDefaultAsync(ct)) });
+                recordedDisposition = await RecordedDispositionAsync(db, id, interactionId, ct) });
         }
         catch (AnthropicClient.AiUnavailableException ex)
         {
@@ -102,19 +115,22 @@ public static class AiEndpoints
 
     /// <summary>The call's confirmed summary (if any), plus counts for the acceptance / edit picture.</summary>
     private static async Task<IResult> Summaries(
-        Guid id, HttpContext http, TenantContext tenant, ScopedTenantDbContextFactory dbFactory, CancellationToken ct)
+        Guid id, Guid? interactionId, HttpContext http, TenantContext tenant, ScopedTenantDbContextFactory dbFactory, CancellationToken ct)
     {
         if (!tenant.HasTenant) return Results.Unauthorized();
         await using var db = dbFactory.Create();
         if (!await CanAccessAsync(http, db, id, Permission.CallsView, ct)) return Results.Forbid();
-        var all = await db.CallSummaries.AsNoTracking().Where(s => s.CallRecordId == id).OrderByDescending(s => s.CreatedAt).ToListAsync(ct);
+        // One interaction's summaries when asked (S178 per-interaction view); otherwise the whole call's.
+        var all = await db.CallSummaries.AsNoTracking()
+            .Where(s => s.CallRecordId == id && (interactionId == null || s.InteractionId == interactionId))
+            .OrderByDescending(s => s.CreatedAt).ToListAsync(ct);
         var confirmed = all.FirstOrDefault(s => s.Status == CallSummaryStatus.Confirmed);
         // The newest unreviewed suggestion (e.g. the automatic wrap-up one), in the same shape Generate returns.
         var pending = all.FirstOrDefault(s => s.Status == CallSummaryStatus.Suggested);
         object? pendingJson = null;
         if (pending is not null)
         {
-            var allowed = await DispositionCatalog.ForCallAsync(db, id, ct);
+            var allowed = await DispositionCatalog.ForCallAsync(db, id, ct, pending.InteractionId);
             pendingJson = new
             {
                 summaryId = pending.Id,
@@ -128,7 +144,7 @@ public static class AiEndpoints
                     estimatedCostUsd = pending.CostUsd, elapsedMs = pending.ElapsedMs, attempts = 1 },
                 allowedDispositions = allowed,
                 possibleTestCall = pending.PossibleTestCall,
-                recordedDisposition = RecordedDisposition(await db.CallRecords.AsNoTracking().Where(r => r.Id == id).Select(r => r.CustomFields).FirstOrDefaultAsync(ct)),
+                recordedDisposition = await RecordedDispositionAsync(db, id, pending.InteractionId, ct),
             };
         }
         return Results.Ok(new
@@ -161,13 +177,14 @@ public static class AiEndpoints
 
         // The confirmed disposition must be one the script can record — the same rule the AI was held to.
         var disposition = string.IsNullOrWhiteSpace(req.Disposition) ? null : req.Disposition.Trim();
-        var allowed = await DispositionCatalog.ForCallAsync(db, id, ct);
+        var allowed = await DispositionCatalog.ForCallAsync(db, id, ct, row.InteractionId);
         if (disposition is not null && allowed.Count > 0 && !allowed.Contains(disposition, StringComparer.OrdinalIgnoreCase))
             return Results.BadRequest(new { error = $"'{disposition}' isn't one of this script's dispositions." });
 
         try
         {
-            foreach (var previous in await db.CallSummaries.Where(s => s.CallRecordId == id && s.Status == CallSummaryStatus.Confirmed).ToListAsync(ct))
+            foreach (var previous in await db.CallSummaries.Where(s => s.CallRecordId == id && s.InteractionId == row.InteractionId
+                         && s.Status == CallSummaryStatus.Confirmed).ToListAsync(ct))
                 previous.Supersede();
             row.Confirm(req.Summary ?? "", req.ReasonForCall ?? "", req.Outcome!, disposition, req.FollowUp, actor.Id, actor.Name);
         }
@@ -183,13 +200,14 @@ public static class AiEndpoints
             actor.Id, actor.Name), ct);
 
         // A changed disposition goes through the same path as a manual edit — no AI shortcut around the rules.
-        var recorded = RecordedDisposition(await db.CallRecords.AsNoTracking().Where(r => r.Id == id).Select(r => r.CustomFields).FirstOrDefaultAsync(ct));
+        var recorded = await RecordedDispositionAsync(db, id, row.InteractionId, ct);
         if (disposition is not null && !string.Equals(disposition, recorded, StringComparison.Ordinal))
         {
             var field = (await customFields.GetFieldsForCallAsync(id, ct)).FirstOrDefault(f => f.Definition.FieldName == DispositionCatalog.FieldName);
             if (field is not null)
             {
-                await customFields.SetValueAsync(id, field.Definition.Id, disposition, ct);
+                // Same routing as a script write: a transferred interaction's disposition lands on that interaction.
+                await customFields.SetValueFromScriptAsync(id, row.InteractionId ?? Guid.Empty, field.Definition.Id, disposition, ct);
                 await audit.AddAsync(CallRecordAuditEntry.Create(id, CallAuditAction.CustomFieldEdited,
                     $"Custom field “{field.Definition.DisplayLabel}”: {recorded ?? "(blank)"} → {disposition} (confirmed from AI summary)",
                     JsonSerializer.Serialize(new { definitionId = field.Definition.Id, field.Definition.FieldName, before = recorded, after = disposition, aiSummaryId = row.Id }, AuditJson),
@@ -223,12 +241,19 @@ public static class AiEndpoints
         if (ActorResolver.Resolve(http.User) is not { } actor) return Results.Unauthorized();
         await using var db = dbFactory.Create();
         var since = DateTimeOffset.UtcNow.AddHours(-12);
+        // Per interaction (S178): the agent who worked the interaction reviews its summary — on a transferred call the CS
+        // agent gets theirs. Legacy rows (no interaction) go to the call's agent.
         var pending = await db.CallSummaries.AsNoTracking()
             .Where(s => s.Status == CallSummaryStatus.Suggested && s.CreatedAt >= since
-                && db.CallRecords.Any(r => r.Id == s.CallRecordId && r.AgentId == actor.Id))
-            .GroupBy(s => s.CallRecordId)
-            .Select(g => new { CallRecordId = g.Key, CreatedAt = g.Max(s => s.CreatedAt) })
+                && (s.InteractionId != null
+                    ? db.CallInteractions.Any(i => i.Id == s.InteractionId && i.AgentId == actor.Id)
+                    : db.CallRecords.Any(r => r.Id == s.CallRecordId && r.AgentId == actor.Id)))
+            .GroupBy(s => new { s.CallRecordId, s.InteractionId })
+            .Select(g => new { g.Key.CallRecordId, g.Key.InteractionId, CreatedAt = g.Max(s => s.CreatedAt) })
             .ToListAsync(ct);
+        var ixIds = pending.Select(p => p.InteractionId).OfType<Guid>().ToList();
+        var ixInfo = await db.CallInteractions.AsNoTracking().Where(i => ixIds.Contains(i.Id))
+            .Select(i => new { i.Id, i.CampaignId, i.OrderNumber }).ToDictionaryAsync(i => i.Id, ct);
 
         // Details so the agent can tell several waiting calls apart. Shown to the agent who handled the call —
         // never added to what's sent to the AI.
@@ -236,21 +261,24 @@ public static class AiEndpoints
         var calls = await db.CallRecords.AsNoTracking().Where(r => ids.Contains(r.Id))
             .Select(r => new { r.Id, r.CreatedAt, r.CampaignId, r.FirstName, r.LastName, r.CallerId, r.OrderNumber, r.HandleTimeSeconds })
             .ToDictionaryAsync(r => r.Id, ct);
-        var campaignIds = calls.Values.Select(c => c.CampaignId).Distinct().ToList();
+        var campaignIds = calls.Values.Select(c => c.CampaignId)
+            .Concat(ixInfo.Values.Select(i => i.CampaignId).OfType<Guid>()).Distinct().ToList();
         var campaigns = await db.Campaigns.AsNoTracking().Where(c => campaignIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Name, ct);
 
         return Results.Ok(pending.OrderByDescending(p => p.CreatedAt).Select(p =>
         {
             var c = calls.GetValueOrDefault(p.CallRecordId);
+            var ix = p.InteractionId is { } iid ? ixInfo.GetValueOrDefault(iid) : null;
             return new
             {
                 callRecordId = p.CallRecordId,
+                interactionId = p.InteractionId,
                 createdAt = p.CreatedAt,
                 callStartedAt = c?.CreatedAt,
-                campaign = c is null ? null : campaigns.GetValueOrDefault(c.CampaignId),
+                campaign = ix?.CampaignId is { } ic ? campaigns.GetValueOrDefault(ic) : c is null ? null : campaigns.GetValueOrDefault(c.CampaignId),
                 callerName = c is null ? null : $"{c.FirstName} {c.LastName}".Trim() is { Length: > 0 } n ? n : null,
                 callerNumber = c?.CallerId,
-                orderNumber = c?.OrderNumber,
+                orderNumber = ix is not null ? ix.OrderNumber : c?.OrderNumber,
                 handleTimeSeconds = c?.HandleTimeSeconds,
             };
         }));

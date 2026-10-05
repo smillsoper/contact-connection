@@ -89,11 +89,11 @@ public class CallSummarizer(AnthropicClient client, IConfiguration config)
         };
     }
 
-    public async Task<Result?> SummarizeAsync(TenantDbContext db, Guid callRecordId, CancellationToken ct)
+    public async Task<Result?> SummarizeAsync(TenantDbContext db, Guid callRecordId, CancellationToken ct, Guid? interactionId = null)
     {
-        var context = await CallSummaryContextBuilder.BuildAsync(db, callRecordId, ct);
+        var context = await CallSummaryContextBuilder.BuildAsync(db, callRecordId, ct, interactionId);
         if (context is null) return null;
-        var dispositions = await DispositionCatalog.ForCallAsync(db, callRecordId, ct);
+        var dispositions = await DispositionCatalog.ForCallAsync(db, callRecordId, ct, interactionId);
 
         var model = config["Anthropic:SummaryModel"] ?? DefaultModel;
         var reply = await client.CallToolAsync(model, SystemPrompt, context.Text, Tool(dispositions), maxTokens: 500, ct);

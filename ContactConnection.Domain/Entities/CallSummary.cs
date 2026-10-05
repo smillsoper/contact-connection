@@ -16,6 +16,9 @@ public class CallSummary
     public Guid Id { get; private set; }
     public Guid TenantId { get; private set; }
     public Guid CallRecordId { get; private set; }
+    /// <summary>The interaction this summarizes (S178 — one summary per interaction; a transferred call's CS work is
+    /// summarized on its own). Null on rows from before interaction-scoped summaries that the backfill couldn't place.</summary>
+    public Guid? InteractionId { get; private set; }
     public string Status { get; private set; } = CallSummaryStatus.Suggested;
 
     // ── What the AI suggested ──
@@ -55,9 +58,11 @@ public class CallSummary
         Guid tenantId, Guid callRecordId,
         string summary, string reasonForCall, string outcome, string? disposition, bool dispositionValid,
         double confidence, string? followUp, bool aiIsTestCall, bool possibleTestCall,
-        string model, int inputTokens, int outputTokens, decimal costUsd, long elapsedMs, string? createdByName) => new()
+        string model, int inputTokens, int outputTokens, decimal costUsd, long elapsedMs, string? createdByName,
+        Guid? interactionId = null) => new()
     {
-        Id = Guid.NewGuid(), TenantId = tenantId, CallRecordId = callRecordId, Status = CallSummaryStatus.Suggested,
+        Id = Guid.NewGuid(), TenantId = tenantId, CallRecordId = callRecordId, InteractionId = interactionId,
+        Status = CallSummaryStatus.Suggested,
         AiSummary = summary, AiReasonForCall = reasonForCall, AiOutcome = outcome,
         AiDisposition = dispositionValid ? disposition : null, AiDispositionValid = dispositionValid,
         AiConfidence = confidence, AiFollowUp = followUp, AiIsTestCall = aiIsTestCall, PossibleTestCall = possibleTestCall,

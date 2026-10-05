@@ -118,4 +118,35 @@ public class CallSummaryContextTests
              new CallSummaryContextBuilder.Payment("auth_only", "declined", 10m, false)]).Text;
         Assert.Contains("Payments: authorization approved $144.85; authorization declined $10.00", text);
     }
+
+    // S178: a transferred CS interaction is summarized on its own — its cart and fields, never the sales ones.
+    [Fact]
+    public void TransferredInteraction_SeesOnlyItsOwnCartAndFields()
+    {
+        var record = Call();
+        record.UpdateCustomFieldsSnapshot("{\"disposition\":\"Transferred to Customer Service\"}");
+        var sales = record.AddInteraction(InteractionType.CustomerService);
+        sales.AssignTo(Guid.NewGuid(), record.CampaignId);
+        sales.SetCart(ContactConnection.Domain.ValueObjects.Commerce.CartDocument.Empty() with
+        {
+            Items = [new(Guid.NewGuid(), Guid.NewGuid(), "NQ-3", "NeuroQ 3 bottles", 1, 144.85m, 144.85m, 0, 0, 0, false, false, false, false, 0,
+                false, 0, null, null, null, null, [], [], [], 0, 0, 0, 0)],
+        });
+        var cs = record.AddInteraction(InteractionType.CustomerService);
+        cs.AssignTo(Guid.NewGuid(), Guid.NewGuid());
+        cs.SetCart(ContactConnection.Domain.ValueObjects.Commerce.CartDocument.Empty() with
+        {
+            Items = [new(Guid.NewGuid(), Guid.NewGuid(), "DHA", "Memory DHA", 1, 49.90m, 49.90m, 0, 0, 0, false, false, false, false, 0,
+                false, 0, null, null, null, null, [], [], [], 0, 0, 0, 0)],
+        });
+        cs.SetCustomField("disposition", "Customer Service");
+
+        var text = CallSummaryContextBuilder.Build(record, null, "NeuroQ CS", [], interaction: cs).Text;
+
+        Assert.Contains("Transferred in", text);
+        Assert.Contains("Memory DHA", text);
+        Assert.Contains("disposition: Customer Service", text);
+        Assert.DoesNotContain("NeuroQ 3 bottles", text);
+        Assert.DoesNotContain("Transferred to Customer Service", text);
+    }
 }
