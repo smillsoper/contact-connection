@@ -27,6 +27,8 @@ public class CallInteractionConfiguration : IEntityTypeConfiguration<CallInterac
         builder.Property(i => i.Id).HasColumnName("id");
         builder.Property(i => i.CallRecordId).HasColumnName("call_record_id");
         builder.Property(i => i.InteractionNumber).HasColumnName("interaction_number");
+        builder.Property(i => i.AgentId).HasColumnName("agent_id");
+        builder.Property(i => i.CampaignId).HasColumnName("campaign_id");
 
         builder.Property(i => i.Type)
             .HasColumnName("type").IsRequired().HasMaxLength(50);

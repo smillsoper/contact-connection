@@ -40,6 +40,18 @@ public class CallInteraction
         };
     }
 
+    /// <summary>Who handled this interaction, and for which campaign (S178). On a call transferred mid-call
+    /// (sales → CS) each agent's work is its own interaction, while the call record keeps the original
+    /// campaign, agent and routing tier for attribution and commissions.</summary>
+    public Guid? AgentId { get; private set; }
+    public Guid? CampaignId { get; private set; }
+
+    public void AssignTo(Guid agentId, Guid campaignId)
+    {
+        AgentId = agentId;
+        CampaignId = campaignId == Guid.Empty ? null : campaignId;
+    }
+
     public void SetFlow(Guid flowId, int flowVersion)
     {
         FlowId = flowId;

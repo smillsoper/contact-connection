@@ -26,7 +26,8 @@ public class TransferNodeHandlerTests
         new(new DbContextOptionsBuilder<TenantDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
 
-    private TransferNodeHandler NewHandler(Dictionary<string, string?>? config = null, TenantDbContext? db = null)
+    private TransferNodeHandler NewHandler(Dictionary<string, string?>? config = null, TenantDbContext? db = null,
+        IEslCommanderFactory? eslFactory = null)
     {
         var cfg = new ConfigurationBuilder()
             .AddInMemoryCollection(config ?? new Dictionary<string, string?>())
@@ -34,6 +35,7 @@ public class TransferNodeHandlerTests
 
         var services = new ServiceCollection();
         services.AddSingleton(_engine.Object);
+        if (eslFactory is not null) services.AddSingleton(eslFactory);
         var sp = services.BuildServiceProvider();
 
         var factory = new Mock<ITenantDbContextFactory>();
@@ -358,5 +360,111 @@ public class TransferNodeHandlerTests
         esl.Verify(e => e.TransferAsync(Uuid, "tts_play", "XML", "default", It.IsAny<CancellationToken>()), Times.Never);
         Assert.True(ctx.VarsToRemove.Contains("_announce_done"));
         Assert.True(ctx.VarsToRemove.Contains("_announce_replay_node"));
+    }
+
+    // ── Mid-call transfer (S178): sales agent's script fires a CS-queue transfer ──────────────────
+
+    private const string AgentLeg = "agent-leg-uuid";
+    private static readonly Guid SalesAgent = Guid.Parse("bbbbbbbb-0000-0000-0000-0000000000ee");
+
+    private async Task<(TelephonyNodeResult Result, TelephonyFlowContext Ctx, CallRecord Seeded, Campaign Target,
+        DbContextOptions<TenantDbContext> Options, TelephonyCallSession Live)> RunMidCallTransferAsync(
+        Mock<IEslCommander>? ctxEsl, IEslCommanderFactory? factory = null)
+    {
+        var dbName = Guid.NewGuid().ToString();
+        DbContextOptions<TenantDbContext> Options() =>
+            new DbContextOptionsBuilder<TenantDbContext>().UseInMemoryDatabase(dbName).Options;
+
+        var salesCampaignId = Guid.NewGuid();
+        var csFlow = Guid.NewGuid();
+        var target = Campaign.Create(TenantId, Guid.NewGuid(), "NeuroQ CS", "neuroq-cs");
+        target.AssignFlow(csFlow);
+        var record = CallRecord.Create(TenantId, Guid.NewGuid(), salesCampaignId);
+        await using (var seedDb = new TenantDbContext(Options()))
+        {
+            seedDb.Campaigns.Add(target);
+            seedDb.CallRecords.Add(record);
+            await seedDb.SaveChangesAsync();
+        }
+
+        var live = new TelephonyCallSession { ChannelUuid = Uuid, CallRecordId = record.Id, CampaignId = salesCampaignId };
+        _sessionStore.Setup(s => s.GetAsync(Uuid, It.IsAny<CancellationToken>())).ReturnsAsync(live);
+
+        var ctx = new TelephonyFlowContext
+        {
+            ChannelUuid = Uuid, CallerNumber = "+15551110000", DestinationNumber = "+15552220000",
+            TenantId = TenantId, CampaignId = salesCampaignId, CallRecordId = record.Id,
+            TenantSubdomain = "test-tenant", TenantSchemaName = "tenant_test_tenant", TenantTimezone = "America/Chicago",
+            Esl = ctxEsl?.Object,
+        };
+        ctx.Vars["_assigned_agent_id"] = SalesAgent.ToString();
+        ctx.Vars["_bridged_peer_uuid"] = AgentLeg;
+
+        var result = await NewHandler(db: new TenantDbContext(Options()), eslFactory: factory).ExecuteAsync(
+            Node("campaign_queue", new JsonObject { ["targetCampaignId"] = target.Id.ToString() }), ctx);
+        return (result, ctx, record, target, Options(), live);
+    }
+
+    [Fact]
+    public async Task MidCall_PutsCallerOnHold_DropsAgentLeg_GuardsSavedBeforeTheBridgeIsTouched()
+    {
+        var esl = NewEsl();
+        esl.Setup(e => e.HangupChannelAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        var guardsSavedFirst = false;
+        _sessionStore.Setup(s => s.SaveAsync(It.IsAny<TelephonyCallSession>(), It.IsAny<CancellationToken>()))
+                     .Callback<TelephonyCallSession, CancellationToken>((s, _) =>
+                         guardsSavedFirst = s.Vars.GetValueOrDefault("_requeue_in_progress") == "true")
+                     .Returns(Task.CompletedTask);
+        esl.Setup(e => e.TransferAsync(Uuid, "park_with_moh", "XML", "default", It.IsAny<CancellationToken>()))
+           .Callback(() => Assert.True(guardsSavedFirst, "guards must be saved before the caller is moved"))
+           .Returns(Task.CompletedTask);
+
+        var (result, ctx, _, _, _, live) = await RunMidCallTransferAsync(esl);
+
+        Assert.Equal("transferred", result.TransitionTaken);
+        esl.Verify(e => e.SetChannelVarAsync(AgentLeg, "park_after_bridge", "false", It.IsAny<CancellationToken>()), Times.Once);
+        esl.Verify(e => e.TransferAsync(Uuid, "park_with_moh", "XML", "default", It.IsAny<CancellationToken>()), Times.Once);
+        esl.Verify(e => e.HangupChannelAsync(AgentLeg, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal(AgentLeg, live.Vars["_requeue_old_leg"]);
+        Assert.Equal(SalesAgent.ToString(), live.Vars["_requeued_from_agent_id"]);
+        Assert.Equal("true", live.Vars["_keep_record_agent"]);
+        // The sales agent is off the call; the next agent's delivery sets these again.
+        Assert.Contains("_assigned_agent_id", ctx.VarsToRemove);
+        Assert.Equal("true", ctx.Vars["_queued"]);
+    }
+
+    [Fact]
+    public async Task MidCall_KeepsTheCallRecordOnItsOriginalCampaign_AndPopsTheTargetCampaignsScript()
+    {
+        var esl = NewEsl();
+        esl.Setup(e => e.HangupChannelAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
+        var (_, ctx, seeded, target, options, _) = await RunMidCallTransferAsync(esl);
+
+        await using var verifyDb = new TenantDbContext(options);
+        var after = await verifyDb.CallRecords.FindAsync(seeded.Id);
+        Assert.Equal(seeded.CampaignId, after!.CampaignId);                       // sales attribution stays
+        Assert.Equal(target.Id.ToString(), ctx.Vars["_switch_campaign_id"]);       // routing moves to CS
+        Assert.Equal(target.FlowId.ToString(), ctx.Vars["_screenpop_flow_override"]);
+    }
+
+    [Fact]
+    public async Task MidCall_FromAnEventBranchWithNoEsl_OpensItsOwnConnection()
+    {
+        var owned = new Mock<IOwnedEslCommander>();
+        owned.Setup(e => e.SetChannelVarAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+             .Returns(Task.CompletedTask);
+        owned.Setup(e => e.TransferAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+             .Returns(Task.CompletedTask);
+        owned.Setup(e => e.HangupChannelAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        owned.Setup(e => e.DisposeAsync()).Returns(ValueTask.CompletedTask);
+        var factory = new Mock<IEslCommanderFactory>();
+        factory.Setup(f => f.CreateAsync(It.IsAny<CancellationToken>())).ReturnsAsync(owned.Object);
+
+        var (result, _, _, _, _, _) = await RunMidCallTransferAsync(ctxEsl: null, factory.Object);
+
+        Assert.Equal("transferred", result.TransitionTaken);
+        owned.Verify(e => e.TransferAsync(Uuid, "park_with_moh", "XML", "default", It.IsAny<CancellationToken>()), Times.Once);
+        owned.Verify(e => e.DisposeAsync(), Times.Once);
     }
 }

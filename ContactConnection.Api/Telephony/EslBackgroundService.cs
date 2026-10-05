@@ -1558,6 +1558,35 @@ public sealed class EslBackgroundService : BackgroundService
             return;
         }
 
+        // Mid-call transfer to another campaign's queue (S178): the first agent's leg was dropped on purpose while
+        // the caller waits on hold for the next agent. Not the end of the call — that agent goes to ACW.
+        if (session is not null
+            && !string.IsNullOrEmpty(channelUuid)
+            && session.Vars.GetValueOrDefault("_requeue_old_leg") == channelUuid)
+        {
+            _logger.LogInformation(
+                "CHANNEL_HANGUP {Uuid} cause={Cause}: agent leg dropped by a mid-call transfer — caller {Caller} stays on hold",
+                channelUuid, cause, session.ChannelUuid);
+            session.Vars.Remove("_requeue_old_leg");
+            var fromAgent = session.Vars.GetValueOrDefault("_requeued_from_agent_id");
+            await _sessionStore.SaveAsync(session, ct);
+
+            if (Guid.TryParse(fromAgent, out var fromAgentId))
+            {
+                // ACW per the call record's campaign: the one the first agent was working.
+                using var acwScope = _scopeFactory.CreateScope();
+                await using var acwDb = acwScope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>()
+                    .Create(session.TenantSchemaName);
+                var acwCampaignId = await acwDb.CallRecords.Where(r => r.Id == session.CallRecordId)
+                    .Select(r => r.CampaignId).FirstOrDefaultAsync(ct);
+                var acwSeconds = await acwDb.Campaigns.Where(c => c.Id == acwCampaignId)
+                    .Select(c => (int?)c.AfterCallWorkSeconds).FirstOrDefaultAsync(ct) ?? 0;
+                await AfterCallWork.StartAsync(_stateStore, _hub, session.TenantId, fromAgentId,
+                    session.TenantSchemaName, acwSeconds, ct);
+            }
+            return;
+        }
+
         // Supervisor Take Over (S167): the agent's old leg was dropped on purpose after the caller was
         // re-bridged to the supervisor — not the end of the call.
         if (session is not null
@@ -1878,6 +1907,15 @@ public sealed class EslBackgroundService : BackgroundService
                 .EnsureBeepOnPeerAsync(uuid, other, esl, ct);
         }
 
+        // Mid-call transfer (S178): the caller is now with the next agent — later unbridges are real.
+        if (bridgeSession.Vars.GetValueOrDefault("_requeue_in_progress") == "true"
+            && bridgeSession.Vars.GetValueOrDefault("_requeue_old_leg") != other)
+        {
+            foreach (var k in new[] { "_requeue_in_progress", "_requeue_old_leg", "_requeued_from_agent_id" })
+                bridgeSession.Vars.Remove(k);
+            await _sessionStore.SaveAsync(bridgeSession, ct);
+        }
+
         // Supervisor Take Over: the caller is now on the supervisor's leg — later unbridges are real.
         if (bridgeSession.Vars.GetValueOrDefault("_takeover_in_progress") == "true"
             && bridgeSession.Vars.GetValueOrDefault("_takeover_new_leg") == other)
@@ -2056,6 +2094,16 @@ public sealed class EslBackgroundService : BackgroundService
         {
             _logger.LogInformation(
                 "CHANNEL_UNBRIDGE {Uuid}: bridge torn down for a controlled secure-collect hold — leaving caller {SessionKeyUuid} parked",
+                uuid, session.ChannelUuid);
+            return;
+        }
+
+        // Mid-call transfer to another campaign's queue (S178): tf_transfer moved the caller to hold music and
+        // dropped the agent's leg on purpose. Cleared on the next agent's bridge (HandleChannelBridgeAsync).
+        if (session.Vars.GetValueOrDefault("_requeue_in_progress") == "true")
+        {
+            _logger.LogInformation(
+                "CHANNEL_UNBRIDGE {Uuid}: mid-call transfer to another queue — leaving caller {SessionKeyUuid} on hold",
                 uuid, session.ChannelUuid);
             return;
         }
