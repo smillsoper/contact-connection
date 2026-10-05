@@ -1567,7 +1567,12 @@ public sealed class EslBackgroundService : BackgroundService
             _logger.LogInformation(
                 "CHANNEL_HANGUP {Uuid} cause={Cause}: agent leg dropped by a mid-call transfer — caller {Caller} stays on hold",
                 channelUuid, cause, session.ChannelUuid);
-            session.Vars.Remove("_requeue_old_leg");
+
+            // The marker stays until the next agent's bridge: FreeSWITCH reports this leg's hangup more than once
+            // (S178 live test: the second event, after the marker had been cleared here, ran the normal completion
+            // path, completing the record and hanging up the caller). ACW starts only once.
+            if (session.Vars.GetValueOrDefault("_requeue_acw_started") == "true") return;
+            session.Vars["_requeue_acw_started"] = "true";
             var fromAgent = session.Vars.GetValueOrDefault("_requeued_from_agent_id");
             await _sessionStore.SaveAsync(session, ct);
 
@@ -1911,7 +1916,7 @@ public sealed class EslBackgroundService : BackgroundService
         if (bridgeSession.Vars.GetValueOrDefault("_requeue_in_progress") == "true"
             && bridgeSession.Vars.GetValueOrDefault("_requeue_old_leg") != other)
         {
-            foreach (var k in new[] { "_requeue_in_progress", "_requeue_old_leg", "_requeued_from_agent_id" })
+            foreach (var k in new[] { "_requeue_in_progress", "_requeue_old_leg", "_requeued_from_agent_id", "_requeue_acw_started" })
                 bridgeSession.Vars.Remove(k);
             await _sessionStore.SaveAsync(bridgeSession, ct);
         }
