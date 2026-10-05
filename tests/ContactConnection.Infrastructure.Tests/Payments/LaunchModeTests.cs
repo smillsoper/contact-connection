@@ -17,9 +17,9 @@ public class LaunchModeTests
     private const string CardJson = """{"pan":"4111111111111111","expiry":"1227","cvv":"123"}""";
 
     private static (PaymentService Service, Mock<IPaymentGatewayClient> Gateway, CallRecord Record, List<bool> SandboxSeen) Build(
-        CallRecord record, bool gatewayConfigured)
+        CallRecord record, bool gatewayConfigured, bool cardCaptured = true)
     {
-        record.StoreSensitiveData("ciphertext");
+        if (cardCaptured) record.StoreSensitiveData("ciphertext");
         var callRecords = new Mock<ICallRecordRepository>();
         callRecords.Setup(r => r.GetByIdWithInteractionsAsync(record.Id, It.IsAny<CancellationToken>())).ReturnsAsync(record);
         var protector = new Mock<ISensitiveDataProtector>();
@@ -103,5 +103,26 @@ public class LaunchModeTests
         var r = CallRecord.CreateManual(Guid.NewGuid(), Guid.NewGuid(), CallRunMode.Training, CallCredentialSet.Production);
         Assert.Equal((CallRunMode.Training, CallCredentialSet.Sandbox), (r.RunMode, r.CredentialSet));
         Assert.False(r.IsProductionRun);
+    }
+
+    [Fact]
+    public async Task Training_WithNoCapturedCard_UsesTheTestCard()
+    {
+        var (service, _, record, _) = Build(CallRecord.CreateManual(Guid.NewGuid(), Guid.NewGuid(), CallRunMode.Training),
+            gatewayConfigured: false, cardCaptured: false);
+
+        var result = await Auth(service, record);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("1111", result.CardLast4);
+    }
+
+    [Fact]
+    public async Task Production_WithNoCapturedCard_StillFails()
+    {
+        var (service, _, record, _) = Build(CallRecord.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()),
+            gatewayConfigured: true, cardCaptured: false);
+
+        Assert.False((await Auth(service, record)).Succeeded);
     }
 }

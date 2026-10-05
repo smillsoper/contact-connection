@@ -67,6 +67,13 @@ public class PaymentService(
             action = PaymentAuthAction.Reauthorized;
         }
 
+        // A practice run (training / sandbox, S179) has no live caller keying a card — use the standard test card, so a
+        // trainee can work the payment step: the sandbox gateway authorizes it, or it's simulated without credentials.
+        if (string.IsNullOrEmpty(record.SensitiveData) && !record.IsProductionRun)
+            return await AuthorizeWithFieldsAsync(record, ix, campaignId, provider, amount, action,
+                new Dictionary<string, string> { [cardNumberField] = TestCardNumber, [expField] = "1230", [cvvField] = "123" },
+                cardNumberField, expField, cvvField, zipField, zipOverride, ct);
+
         if (string.IsNullOrEmpty(record.SensitiveData))
             return new PaymentAuthResult(false, PaymentTransactionStatus.Error, null, null, null,
                 action == PaymentAuthAction.Reauthorized
@@ -86,6 +93,16 @@ public class PaymentService(
                 $"Could not read captured card data: {ex.Message}", Action: action);
         }
 
+        return await AuthorizeWithFieldsAsync(record, ix, campaignId, provider, amount, action, fields!,
+            cardNumberField, expField, cvvField, zipField, zipOverride, ct);
+    }
+
+    /// <summary>The authorization itself, from card fields (captured, or the practice-run test card).</summary>
+    private async Task<PaymentAuthResult> AuthorizeWithFieldsAsync(
+        CallRecord record, CallInteraction? ix, Guid campaignId, string provider, decimal amount,
+        string action, Dictionary<string, string> fields,
+        string cardNumberField, string expField, string cvvField, string? zipField, string? zipOverride, CancellationToken ct)
+    {
         if (fields is null
             || !fields.TryGetValue(cardNumberField, out var cardNumber)
             || !fields.TryGetValue(expField, out var expirationMMYY)
@@ -108,7 +125,7 @@ public class PaymentService(
         var transaction = PaymentTransaction.Create(
             id: Guid.NewGuid(),
             tenantId: record.TenantId,
-            callRecordId: callRecordId,
+            callRecordId: record.Id,
             clientId: record.ClientId,
             campaignId: campaignId,
             gateway: provider,
@@ -164,6 +181,9 @@ public class PaymentService(
 
         return new PaymentVoidResult(result.Succeeded, result.ResponseReasonText);
     }
+
+    /// <summary>Visa test number (accepted by gateway sandboxes, declined by real processors) for practice runs (S179).</summary>
+    public const string TestCardNumber = "4111111111111111";
 
     /// <summary>Transaction id prefix for simulated authorizations (S179 launch modes).</summary>
     public const string SimulatedPrefix = "TRN-";
