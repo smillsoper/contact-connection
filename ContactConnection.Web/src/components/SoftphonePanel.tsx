@@ -844,11 +844,14 @@ export default function SoftphonePanel() {
     }
   }
 
-  // DTMF on the live leg — the consult leg during a warm transfer, else the main call (RFC 2833 in the media).
+  // DTMF on the live leg — the consult leg during a warm transfer, else the main call. Sent as SIP INFO, not RFC 2833:
+  // the softphone leg is Opus (48 kHz RTP clock) and the carrier leg 8 kHz, and FreeSWITCH relaying in-media events across
+  // that clock change left the far end repeating a digit (S179 live test: one # press kept sounding on the cell).
+  // With INFO, FreeSWITCH generates a fresh, correctly-timed tone on the customer's leg.
   const sendDtmf = (digit: string) => {
     const target = transferSessionRef.current ?? sessionRef.current
     if (!target) return
-    try { target.sendDTMF(digit, { transportType: 'RFC2833', duration: 120, interToneGap: 70 }) } catch { return }
+    try { target.sendDTMF(digit, { transportType: 'INFO', duration: 160 }) } catch { return }
     setDtmfSent((d) => (d + digit).slice(-20))
   }
 
