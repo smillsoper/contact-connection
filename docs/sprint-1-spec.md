@@ -91,6 +91,12 @@ Go-live need: Life Seasons makes about 800 outbound calls a month (callbacks), a
        campaigns (**auto-selected when only one**) → then the **number field + keypad**.
      - **Direct dial (role-gated):** a new role permission **"Can direct dial"** adds a Direct dial entry that dials
        without a client or campaign, using the **tenant's default outbound caller ID** (new tenant setting).
+- **Caller ID preview:** before the agent places an external call (campaign or direct dial), the softphone shows the
+  caller ID the call will use, e.g. "Calling as (541) 641-3898 · NeuroQ CS". It confirms visually that the right
+  campaign is selected. Internal calls don't show it. The preview comes from the same server-side rule that sets the real
+  caller ID, so the two can never disagree.
+- Direct-dial users get the same **Place call** button (possibly labeled differently) with Internal / External; Direct
+  dial is an extra choice under External, not a separate always-visible number field.
 - **Keypad** (DTMF) on any connected call: outbound, inbound, warm/consult transfers. Sends RFC 2833 DTMF on the active
   leg (navigating the far end's IVR, entering extensions).
 
