@@ -284,6 +284,8 @@ public static class CallReviewEndpoints
                     interactionNumber = n + 1, i.Type, i.Disposition, i.Status, i.StartedAt, i.CompletedAt,
                     i.AgentId, agentName = i.AgentId is { } ia ? ixNames.Agents.GetValueOrDefault(ia) : null,
                     i.CampaignId, campaignName = i.CampaignId is { } ic ? ixNames.Campaigns.GetValueOrDefault(ic) : null,
+                    // A transferred interaction's own script-written fields (S178); null otherwise.
+                    customFields = string.IsNullOrEmpty(i.CustomFields) ? null : ParseJson(i.CustomFields),
                 }),
             sessions = sessionViews,
             audit = (await audit.GetByCallRecordAsync(id, ct)).Select(e => new

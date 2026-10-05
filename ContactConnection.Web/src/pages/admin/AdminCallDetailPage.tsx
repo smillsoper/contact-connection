@@ -1105,6 +1105,13 @@ function OtherPanel({ call }: { call: CallDetail }) {
                 <div className="text-gray-500 text-xs">
                   {[d.campaignName, d.agentName, fmtDate(d.startedAt), d.status].filter(Boolean).join(' · ')}
                 </div>
+                {d.customFields && Object.keys(d.customFields).length > 0 && (
+                  <div className="text-xs text-gray-400 mt-0.5">
+                    {Object.entries(d.customFields).map(([k, v]) => (
+                      <span key={k} className="mr-3"><span className="text-gray-500 font-mono">{k}</span> {String(v ?? '')}</span>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           ))}

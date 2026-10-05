@@ -41,7 +41,8 @@ public class SetCustomFieldNodeHandler(IVariableResolver resolver, ICustomFieldS
             var resolvedValue = Resolver.Resolve(rawValue, varCtx);
             try
             {
-                await customFields.SetValueAsync(ctx.CallRecordId, definitionId, resolvedValue, ct);
+                // Per interaction on a transferred call (S178) — see ICustomFieldService.SetValueFromScriptAsync.
+                await customFields.SetValueFromScriptAsync(ctx.CallRecordId, ctx.InteractionId, definitionId, resolvedValue, ct);
                 transitionKey = "success";
             }
             catch (Exception ex) when (ex is FormatException or ArgumentException)

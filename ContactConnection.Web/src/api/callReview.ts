@@ -198,6 +198,8 @@ export interface CallDetail {
   dispositions: {
     interactionNumber: number; type: string; disposition: string | null; status: string; startedAt: string; completedAt: string | null
     agentId: string | null; agentName: string | null; campaignId: string | null; campaignName: string | null
+    /** Fields this interaction's script wrote for itself (a transferred interaction); the record keeps the first campaign's. */
+    customFields: Record<string, unknown> | null
   }[]
   sessions: CallSessionView[]
   audit: CallAuditEntry[]

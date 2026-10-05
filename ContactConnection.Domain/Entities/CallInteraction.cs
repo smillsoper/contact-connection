@@ -46,6 +46,17 @@ public class CallInteraction
     public Guid? AgentId { get; private set; }
     public Guid? CampaignId { get; private set; }
 
+    /// <summary>Merge one field into this interaction's own custom fields (a transferred interaction's script
+    /// writes, S178). Values are the typed values, serialized as JSON.</summary>
+    public void SetCustomField(string fieldName, object? value)
+    {
+        var map = string.IsNullOrEmpty(CustomFields)
+            ? new Dictionary<string, object?>()
+            : System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object?>>(CustomFields) ?? [];
+        map[fieldName] = value;
+        CustomFields = System.Text.Json.JsonSerializer.Serialize(map);
+    }
+
     public void AssignTo(Guid agentId, Guid campaignId)
     {
         AgentId = agentId;

@@ -40,7 +40,7 @@ public class SetCustomFieldNodeHandlerTests
             Node(definitionId.ToString(), "{{flow.entered_phone}}"), ctx, agentInput: null, agentTransition: "");
 
         Assert.Equal("n_success", result.NextNodeId);
-        customFields.Verify(s => s.SetValueAsync(ctx.CallRecordId, definitionId, "5416704541", It.IsAny<CancellationToken>()), Times.Once);
+        customFields.Verify(s => s.SetValueFromScriptAsync(ctx.CallRecordId, It.IsAny<Guid>(), definitionId, "5416704541", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -49,7 +49,7 @@ public class SetCustomFieldNodeHandlerTests
         var ctx = Ctx();
         var definitionId = Guid.NewGuid();
         var customFields = new Mock<ICustomFieldService>();
-        customFields.Setup(s => s.SetValueAsync(ctx.CallRecordId, definitionId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        customFields.Setup(s => s.SetValueFromScriptAsync(ctx.CallRecordId, It.IsAny<Guid>(), definitionId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new FormatException("not a number"));
         var handler = new SetCustomFieldNodeHandler(new VariableResolver(), customFields.Object);
 
@@ -64,7 +64,7 @@ public class SetCustomFieldNodeHandlerTests
         var ctx = Ctx();
         var definitionId = Guid.NewGuid();
         var customFields = new Mock<ICustomFieldService>();
-        customFields.Setup(s => s.SetValueAsync(ctx.CallRecordId, definitionId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        customFields.Setup(s => s.SetValueFromScriptAsync(ctx.CallRecordId, It.IsAny<Guid>(), definitionId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ArgumentException("unsupported type"));
         var handler = new SetCustomFieldNodeHandler(new VariableResolver(), customFields.Object);
 
@@ -79,7 +79,7 @@ public class SetCustomFieldNodeHandlerTests
         var ctx = Ctx();
         var definitionId = Guid.NewGuid();
         var customFields = new Mock<ICustomFieldService>();
-        customFields.Setup(s => s.SetValueAsync(ctx.CallRecordId, definitionId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        customFields.Setup(s => s.SetValueFromScriptAsync(ctx.CallRecordId, It.IsAny<Guid>(), definitionId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("definition not found"));
         var handler = new SetCustomFieldNodeHandler(new VariableResolver(), customFields.Object);
 
@@ -98,7 +98,7 @@ public class SetCustomFieldNodeHandlerTests
         var result = await handler.ExecuteAsync(Node(null, "x"), ctx, agentInput: null, agentTransition: "");
 
         Assert.Equal("n_error", result.NextNodeId);
-        customFields.Verify(s => s.SetValueAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        customFields.Verify(s => s.SetValueFromScriptAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

@@ -11,15 +11,46 @@ public class CustomFieldService : ICustomFieldService
     private readonly ICustomFieldDefinitionRepository _definitions;
     private readonly ICustomFieldValueRepository _values;
     private readonly ICallRecordRepository _callRecords;
+    private readonly ICampaignRepository _campaigns;
 
     public CustomFieldService(
         ICustomFieldDefinitionRepository definitions,
         ICustomFieldValueRepository values,
-        ICallRecordRepository callRecords)
+        ICallRecordRepository callRecords,
+        ICampaignRepository campaigns)
     {
         _definitions = definitions;
         _values = values;
         _callRecords = callRecords;
+        _campaigns = campaigns;
+    }
+
+    public async Task SetValueFromScriptAsync(
+        Guid callRecordId, Guid interactionId, Guid definitionId, string rawValue, CancellationToken ct = default)
+    {
+        var record = interactionId == Guid.Empty ? null : await _callRecords.GetByIdWithInteractionsAsync(callRecordId, ct);
+        var interaction = record?.Interactions.FirstOrDefault(i => i.Id == interactionId);
+        if (record is null || interaction?.CampaignId is not { } ixCampaignId || ixCampaignId == record.CampaignId)
+        {
+            await SetValueAsync(callRecordId, definitionId, rawValue, ct);
+            return;
+        }
+
+        var def = await _definitions.GetByIdAsync(definitionId, ct)
+            ?? throw new InvalidOperationException($"Custom field definition {definitionId} not found");
+        var ixCampaign = await _campaigns.GetByIdAsync(ixCampaignId, ct);
+        var inScope = def.IsActive && def.TenantId == record.TenantId
+            && (def.ClientId == null || def.ClientId == ixCampaign?.ClientId)
+            && (def.CampaignId == null || def.CampaignId == ixCampaignId);
+        if (!inScope)
+            throw new InvalidOperationException(
+                $"Custom field definition {definitionId} is not in scope for interaction {interactionId}");
+
+        // Parse exactly as a record-level write would (bad values throw the same exceptions → invalid_value path).
+        var probe = CustomFieldValue.Create(callRecordId, definitionId);
+        ApplyTypedValue(probe, def.DataTypeName, rawValue);
+        interaction.SetCustomField(def.FieldName, probe.GetTypedValue());
+        await _callRecords.SaveChangesAsync(ct);
     }
 
     public async Task<List<ResolvedCustomField>> GetFieldsForCallAsync(Guid callRecordId, CancellationToken ct = default)
