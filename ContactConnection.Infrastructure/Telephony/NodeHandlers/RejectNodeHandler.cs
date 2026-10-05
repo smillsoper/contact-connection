@@ -1,9 +1,10 @@
 using System.Text.Json.Nodes;
 using ContactConnection.Application.Interfaces.Services;
+using Microsoft.Extensions.Logging;
 
 namespace ContactConnection.Infrastructure.Telephony.NodeHandlers;
 
-public class RejectNodeHandler : ITelephonyNodeHandler
+public class RejectNodeHandler(ILogger<RejectNodeHandler>? logger = null) : ITelephonyNodeHandler
 {
     public string NodeType => "tf_reject";
 
@@ -23,7 +24,11 @@ public class RejectNodeHandler : ITelephonyNodeHandler
             _             => 17  // busy (default)
         };
 
-        await ctx.Esl.KillChannelAsync(ctx.ChannelUuid, causeCode, ct);
+        // No ESL on this context (e.g. a trigger_telephony_event branch) — nothing to act on the channel with (S179).
+        if (ctx.Esl is null)
+            logger?.LogWarning("RejectNodeHandler [{Uuid}]: no ESL connection — can't reject; ending the flow", ctx.ChannelUuid);
+        else
+            await ctx.Esl.KillChannelAsync(ctx.ChannelUuid, causeCode, ct);
         return new TelephonyNodeResult(null, "rejected");
     }
 }

@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using ContactConnection.Application.Interfaces.Services;
+using Microsoft.Extensions.Logging;
 using ContactConnection.Domain.Entities;
 using ContactConnection.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -33,6 +34,9 @@ public class RouteToQueueNodeHandler : ITelephonyNodeHandler
         if (!string.IsNullOrWhiteSpace(directExtension))
         {
             // Direct bridge to a specific agent extension
+            // No ESL on this context (e.g. a trigger_telephony_event branch) — nothing to act on the channel with (S179).
+            if (ctx.Esl is null)
+                return new TelephonyNodeResult(node["transitions"]?["default"]?.GetValue<string>(), "default");
             await ctx.Esl.BridgeToAgentAsync(ctx.ChannelUuid, directExtension, ctx.TenantSubdomain, ctx.CallerNumber, ct);
             return new TelephonyNodeResult(null, "bridged");
         }

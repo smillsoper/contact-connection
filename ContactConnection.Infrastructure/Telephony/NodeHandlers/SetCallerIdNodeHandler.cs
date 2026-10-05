@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using ContactConnection.Application.Interfaces.Services;
+using Microsoft.Extensions.Logging;
 
 namespace ContactConnection.Infrastructure.Telephony.NodeHandlers;
 
@@ -7,7 +8,7 @@ namespace ContactConnection.Infrastructure.Telephony.NodeHandlers;
 /// Sets the outbound effective caller ID on the FreeSWITCH channel.
 /// Node data: { "callerIdValue": "+15035551234" | "{{caller.ani}}" | "{{flow.var}}" }
 /// </summary>
-public class SetCallerIdNodeHandler : ITelephonyNodeHandler
+public class SetCallerIdNodeHandler(ILogger<SetCallerIdNodeHandler>? logger = null) : ITelephonyNodeHandler
 {
     public string NodeType => "tf_set_caller_id";
 
@@ -20,7 +21,13 @@ public class SetCallerIdNodeHandler : ITelephonyNodeHandler
         {
             var resolved = TelSetVariableNodeHandler.Resolve(rawValue, ctx);
             if (!string.IsNullOrWhiteSpace(resolved))
-                await ctx.Esl.SetChannelVarAsync(ctx.ChannelUuid, "effective_caller_id_number", resolved, ct);
+            {
+                // No ESL on this context (e.g. a trigger_telephony_event branch) — nothing to act on the channel with (S179).
+                if (ctx.Esl is null)
+                    logger?.LogWarning("SetCallerIdNodeHandler [{Uuid}]: no ESL connection — caller ID not set", ctx.ChannelUuid);
+                else
+                    await ctx.Esl.SetChannelVarAsync(ctx.ChannelUuid, "effective_caller_id_number", resolved, ct);
+            }
         }
 
         var nextNodeId = node["transitions"]?["default"]?.GetValue<string>();

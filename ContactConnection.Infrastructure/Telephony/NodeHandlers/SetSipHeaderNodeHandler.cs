@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using ContactConnection.Application.Interfaces.Services;
+using Microsoft.Extensions.Logging;
 
 namespace ContactConnection.Infrastructure.Telephony.NodeHandlers;
 
@@ -8,7 +9,7 @@ namespace ContactConnection.Infrastructure.Telephony.NodeHandlers;
 /// in subsequent outgoing SIP messages (e.g. when bridging to an agent).
 /// Node data: { "headerName": "X-Contact-ID", "value": "{{custom_ani}}" }
 /// </summary>
-public class SetSipHeaderNodeHandler : ITelephonyNodeHandler
+public class SetSipHeaderNodeHandler(ILogger<SetSipHeaderNodeHandler>? logger = null) : ITelephonyNodeHandler
 {
     public string NodeType => "tf_set_sip_header";
 
@@ -21,7 +22,11 @@ public class SetSipHeaderNodeHandler : ITelephonyNodeHandler
         if (!string.IsNullOrWhiteSpace(headerName))
         {
             var resolved = TelSetVariableNodeHandler.Resolve(rawValue, ctx);
-            await ctx.Esl.SetChannelVarAsync(ctx.ChannelUuid, $"sip_h_{headerName}", resolved, ct);
+            // No ESL on this context (e.g. a trigger_telephony_event branch) — nothing to act on the channel with (S179).
+            if (ctx.Esl is null)
+                logger?.LogWarning("SetSipHeaderNodeHandler [{Uuid}]: no ESL connection — header {Header} not set", ctx.ChannelUuid, headerName);
+            else
+                await ctx.Esl.SetChannelVarAsync(ctx.ChannelUuid, $"sip_h_{headerName}", resolved, ct);
         }
 
         var nextNodeId = node["transitions"]?["default"]?.GetValue<string>();

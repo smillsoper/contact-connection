@@ -1,15 +1,23 @@
 using System.Text.Json.Nodes;
 using ContactConnection.Application.Interfaces.Services;
+using Microsoft.Extensions.Logging;
 
 namespace ContactConnection.Infrastructure.Telephony.NodeHandlers;
 
-public class AnswerNodeHandler : ITelephonyNodeHandler
+public class AnswerNodeHandler(ILogger<AnswerNodeHandler>? logger = null) : ITelephonyNodeHandler
 {
     public string NodeType => "tf_answer";
 
     public async Task<TelephonyNodeResult> ExecuteAsync(
         JsonObject node, TelephonyFlowContext ctx, CancellationToken ct = default)
     {
+        // No ESL on this context (e.g. a trigger_telephony_event branch) — nothing to act on the channel with (S179).
+        if (ctx.Esl is null)
+        {
+            logger?.LogWarning("AnswerNodeHandler [{Uuid}]: no ESL connection — not answered, continuing", ctx.ChannelUuid);
+            return new TelephonyNodeResult(node["transitions"]?["default"]?.GetValue<string>());
+        }
+
         await ctx.Esl.AnswerChannelAsync(ctx.ChannelUuid, ct);
         ctx.Vars["_answered"] = "true";
 
