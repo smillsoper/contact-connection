@@ -85,6 +85,9 @@ public static class Permission
     /// <summary>Listed in other users' softphone Internal dial list (with presence) — a role switch, not an action.</summary>
     public const string InternalDialList = "softphone.internal_list";
 
+    /// <summary>The tenant's Billing page (S179): payment method, autopay, paying our invoices.</summary>
+    public const string BillingManage = "billing.manage";
+
     public static readonly IReadOnlyList<string> All = [
         AgentsView, AgentsManage, RolesManage,
         FlowsView, FlowsManage, FlowsPublish,
@@ -95,7 +98,8 @@ public static class Permission
         ReportsView, ReportsManage,
         BlocklistView, BlocklistManage,
         TrainingMode,
-        DirectDial, InternalDialList
+        DirectDial, InternalDialList,
+        BillingManage
     ];
 
     // Permissions derived from legacy AgentRole strings (for agents without a custom RoleId)

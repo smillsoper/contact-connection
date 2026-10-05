@@ -112,6 +112,9 @@ export default function InvoiceDetailPage() {
           {inv.billToEmail && <p className="text-gray-500 text-xs mt-1">Sent to {inv.billToEmail}</p>}
           {inv.voidReason && <p className="text-red-300 text-xs mt-1">Voided: {inv.voidReason}</p>}
           {inv.paymentReference && <p className="text-emerald-300 text-xs mt-1">Payment: {inv.paymentReference}</p>}
+          {inv.paymentState === 'processing' && <p className="text-sky-300 text-xs mt-1">Stripe payment processing (ACH clears in about 4 business days).</p>}
+          {inv.paymentState === 'failed' && <p className="text-red-300 text-xs mt-1">Stripe payment failed{inv.paymentError ? `: ${inv.paymentError}` : ''}</p>}
+          {inv.paymentState === 'disputed' && <p className="text-amber-300 text-xs mt-1">{inv.paymentError ?? 'Payment disputed'}</p>}
         </div>
 
         {error && <div className="rounded-lg border border-red-800 bg-red-950/50 px-4 py-2 text-sm text-red-300">{error}</div>}

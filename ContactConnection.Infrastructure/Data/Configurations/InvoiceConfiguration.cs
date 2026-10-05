@@ -30,6 +30,11 @@ public class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
         builder.Property(i => i.VoidedAt).HasColumnName("voided_at");
         builder.Property(i => i.VoidReason).HasColumnName("void_reason").HasMaxLength(500);
         builder.Property(i => i.StripeInvoiceId).HasColumnName("stripe_invoice_id").HasMaxLength(100);
+        builder.Property(i => i.StripePaymentIntentId).HasColumnName("stripe_payment_intent_id").HasMaxLength(100);
+        builder.Property(i => i.PaymentState).HasColumnName("payment_state").HasMaxLength(20);
+        builder.Property(i => i.PaymentError).HasColumnName("payment_error").HasMaxLength(500);
+        builder.Property(i => i.PaymentAttempts).HasColumnName("payment_attempts").HasDefaultValue(0);
+        builder.HasIndex(i => i.StripePaymentIntentId).HasDatabaseName("ix_invoices_stripe_payment_intent");
         builder.Property(i => i.CreatedBy).HasColumnName("created_by").HasMaxLength(200);
         builder.Property(i => i.CreatedAt).HasColumnName("created_at");
         builder.Property(i => i.UpdatedAt).HasColumnName("updated_at");

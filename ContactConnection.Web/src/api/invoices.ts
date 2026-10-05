@@ -44,6 +44,9 @@ export interface InvoiceDetail extends Omit<InvoiceSummary, 'tenantName'> {
   paymentReference: string | null
   voidedAt: string | null
   voidReason: string | null
+  paymentState: 'processing' | 'failed' | 'disputed' | null
+  paymentError: string | null
+  paymentAttempts: number
   createdBy: string | null
   updatedAt: string
   lines: InvoiceLine[]

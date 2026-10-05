@@ -47,6 +47,12 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    heading: 'Account',
+    cards: [
+      { title: 'Billing', desc: 'Your ContactConnection invoices, payment method and autopay.', path: '/admin/billing', live: true, requiredPermission: 'billing.manage' },
+    ],
+  },
+  {
     heading: 'Calls',
     cards: [
       { title: 'Call Records', desc: 'Find a past call, review what was captured, correct its data and resubmit a failed order.', path: '/admin/calls', live: true, requiredPermission: 'calls.view|calls.manage' },

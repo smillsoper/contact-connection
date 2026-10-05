@@ -31,11 +31,14 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
 
   if (res.status === 204) return undefined as T
+  // A non-JSON body (e.g. an invoice document's HTML) comes back as text.
+  if (!(res.headers.get('content-type') ?? '').includes('json')) return (await res.text()) as T
   return res.json() as Promise<T>
 }
 
 export const api = {
   get: <T>(path: string) => apiFetch<T>(path),
+  getText: (path: string) => apiFetch<string>(path),
   post: <T>(path: string, body?: unknown) =>
     apiFetch<T>(path, { method: 'POST', body: JSON.stringify(body) }),
   put: <T>(path: string, body?: unknown) =>

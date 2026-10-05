@@ -61,6 +61,31 @@ public class Tenant
     public void SetCustomDomain(string? customDomain) => CustomDomain = customDomain;
     public void SetBillingContact(string? billingContact) => BillingContact = billingContact;
 
+    // ── Paying us (S179, Sprint 1 item 4) — Stripe ids and a display label only; card / bank numbers stay at Stripe. ──
+    public string? StripeCustomerId { get; private set; }
+    public string? PaymentMethodId { get; private set; }
+    /// <summary>card | us_bank_account</summary>
+    public string? PaymentMethodType { get; private set; }
+    /// <summary>"Visa •••• 4242", "STRIPE TEST BANK •••• 6789" — for display.</summary>
+    public string? PaymentMethodLabel { get; private set; }
+    /// <summary>Charge the saved method automatically when an invoice is issued.</summary>
+    public bool AutopayEnabled { get; private set; }
+
+    public void SetStripeCustomer(string customerId) => StripeCustomerId = customerId;
+
+    public void SetPaymentMethod(string paymentMethodId, string type, string label)
+    {
+        PaymentMethodId = paymentMethodId;
+        PaymentMethodType = type;
+        PaymentMethodLabel = label;
+    }
+
+    public void SetAutopay(bool enabled)
+    {
+        if (enabled && PaymentMethodId is null) throw new InvalidOperationException("Add a payment method before turning on autopay.");
+        AutopayEnabled = enabled;
+    }
+
     public void SetBillingRates(decimal ratePerMinute, decimal tollFreeSurcharge, decimal monthlyMinimum)
     {
         if (ratePerMinute < 0 || tollFreeSurcharge < 0 || monthlyMinimum < 0)

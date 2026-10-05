@@ -210,7 +210,7 @@ public class InvoiceService(
     }
 
     /// <summary>The tenant's billing email(s): Settings.BillingEmail, plus the billing contact when it's an address.</summary>
-    private static List<string> BillingEmails(Tenant tenant)
+    public static List<string> BillingEmails(Tenant tenant)
     {
         var list = new List<string>();
         foreach (var candidate in new[] { tenant.Settings.BillingEmail, tenant.BillingContact })

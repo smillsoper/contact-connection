@@ -131,4 +131,49 @@ public class InvoiceTests
         invoice.AddLine(InvoiceLineKind.Credit, "Goodwill", 1, 10m, "r", null);
         Assert.Throws<InvalidOperationException>(() => invoice.Issue("INV-2026-0002", null, null, DateTimeOffset.UtcNow, 15));
     }
+
+    // S179, Sprint 1 item 4 — Stripe payment states. Paid only when Stripe confirms; ACH sits in "processing".
+    private static Invoice Issued()
+    {
+        var invoice = Invoice.CreateDraft(Guid.NewGuid(), null, null, null);
+        invoice.AddLine(InvoiceLineKind.SetupFee, "Implementation", 1, 5000m, null, null);
+        invoice.Issue("INV-2026-0009", null, null, DateTimeOffset.UtcNow, 15);
+        return invoice;
+    }
+
+    [Fact]
+    public void AchPayment_Processing_ThenSucceeded_IsPaid()
+    {
+        var invoice = Issued();
+        Assert.Equal(1, invoice.BeginPayment());
+        invoice.PaymentProcessing("pi_1");
+        Assert.Equal((InvoiceStatus.Issued, InvoicePaymentState.Processing), (invoice.Status, invoice.PaymentState));
+        Assert.Throws<InvalidOperationException>(() => invoice.BeginPayment());   // no second charge while one is in flight
+
+        invoice.PaymentSucceeded("pi_1", DateTimeOffset.UtcNow);
+        Assert.Equal(InvoiceStatus.Paid, invoice.Status);
+        Assert.Null(invoice.PaymentState);
+        Assert.Equal("pi_1", invoice.PaymentReference);
+        invoice.PaymentSucceeded("pi_1", DateTimeOffset.UtcNow);   // a repeated webhook is harmless
+    }
+
+    [Fact]
+    public void FailedPayment_KeepsItDue_AndAllowsAnotherAttempt()
+    {
+        var invoice = Issued();
+        invoice.BeginPayment();
+        invoice.PaymentFailed("pi_1", "Insufficient funds");
+        Assert.Equal((InvoiceStatus.Issued, InvoicePaymentState.Failed), (invoice.Status, invoice.PaymentState));
+        Assert.Equal(2, invoice.BeginPayment());   // the next attempt gets a fresh idempotency key
+        Assert.Null(invoice.PaymentError);
+    }
+
+    [Fact]
+    public void LateFailure_AfterPaid_DoesntUnpay()
+    {
+        var invoice = Issued();
+        invoice.PaymentSucceeded("pi_1", DateTimeOffset.UtcNow);
+        invoice.PaymentFailed("pi_1", "late");
+        Assert.Equal(InvoiceStatus.Paid, invoice.Status);
+    }
 }

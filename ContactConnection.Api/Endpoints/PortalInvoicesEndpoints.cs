@@ -72,12 +72,17 @@ public static class PortalInvoicesEndpoints
         Run(() => svc.AddLineAsync(id, body.Kind ?? "", body.Description ?? "", body.Quantity ?? 1, body.UnitPrice ?? 0, body.Reason,
             Actor(http), ct));
 
-    private static async Task<IResult> Issue(Guid id, IInvoiceService svc, CancellationToken ct)
+    private static async Task<IResult> Issue(Guid id, IInvoiceService svc, IStripeBillingService stripe, ILoggerFactory logs, CancellationToken ct)
     {
         try
         {
             var r = await svc.IssueAsync(id, ct);
-            return Results.Ok(new { invoice = Detail(r.Invoice), emailedTo = r.EmailedTo, emailError = r.EmailError });
+            // Autopay (S179): charge the tenant's saved method now. A failure here never undoes the issue.
+            InvoicePaymentResult? autopay = null;
+            try { autopay = await stripe.AutopayAsync(id, ct); }
+            catch (Exception ex) { logs.CreateLogger("Invoices").LogWarning(ex, "Autopay for invoice {Id} failed", id); }
+            var invoice = autopay is null ? r.Invoice : await svc.GetAsync(id, ct) ?? r.Invoice;
+            return Results.Ok(new { invoice = Detail(invoice), emailedTo = r.EmailedTo, emailError = r.EmailError, autopay });
         }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException) { return Results.BadRequest(new { error = ex.Message }); }
         catch (KeyNotFoundException) { return Results.NotFound(); }
@@ -103,13 +108,14 @@ public static class PortalInvoicesEndpoints
     private static object Summary(Invoice i, string? tenantName) => new
     {
         i.Id, i.TenantId, tenantName, i.Kind, i.Number, i.CreditsInvoiceId, i.PeriodStart, i.PeriodEnd, i.Status, i.Total,
-        i.IssuedAt, i.DueOn, i.PaidAt, i.CreatedAt,
+        i.IssuedAt, i.DueOn, i.PaidAt, i.CreatedAt, i.PaymentState,
     };
 
     private static object Detail(Invoice i) => new
     {
         i.Id, i.TenantId, i.Kind, i.Number, i.CreditsInvoiceId, i.PeriodStart, i.PeriodEnd, i.Status, i.Total, i.Notes,
         i.BillToName, i.BillToEmail, i.IssuedAt, i.DueOn, i.PaidAt, i.PaymentReference, i.VoidedAt, i.VoidReason,
+        i.PaymentState, i.PaymentError, i.PaymentAttempts, i.StripePaymentIntentId,
         i.CreatedBy, i.CreatedAt, i.UpdatedAt,
         lines = i.Lines.OrderBy(l => l.SortOrder).Select(l => new
         {

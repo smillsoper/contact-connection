@@ -64,6 +64,11 @@ public class TenantConfiguration : IEntityTypeConfiguration<Tenant>
         builder.Property(t => t.BillingRatePerMinute).HasColumnName("billing_rate_per_minute").HasPrecision(10, 4);
         builder.Property(t => t.BillingTollFreeSurcharge).HasColumnName("billing_toll_free_surcharge").HasPrecision(10, 4);
         builder.Property(t => t.BillingMonthlyMinimum).HasColumnName("billing_monthly_minimum").HasPrecision(12, 2);
+        builder.Property(t => t.StripeCustomerId).HasColumnName("stripe_customer_id").HasMaxLength(100);
+        builder.Property(t => t.PaymentMethodId).HasColumnName("payment_method_id").HasMaxLength(100);
+        builder.Property(t => t.PaymentMethodType).HasColumnName("payment_method_type").HasMaxLength(30);
+        builder.Property(t => t.PaymentMethodLabel).HasColumnName("payment_method_label").HasMaxLength(100);
+        builder.Property(t => t.AutopayEnabled).HasColumnName("autopay_enabled").HasDefaultValue(false);
 
         builder.Property(t => t.BillingContact)
             .HasColumnName("billing_contact")

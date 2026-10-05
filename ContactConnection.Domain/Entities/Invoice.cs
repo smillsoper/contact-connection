@@ -33,6 +33,13 @@ public class Invoice
     public string? VoidReason { get; private set; }
     /// <summary>Stripe (Sprint 1 item 4) — null until then.</summary>
     public string? StripeInvoiceId { get; private set; }
+    /// <summary>The latest Stripe charge for this invoice (S179, Sprint 1 item 4).</summary>
+    public string? StripePaymentIntentId { get; private set; }
+    /// <summary>Where a Stripe payment stands while the invoice is still Issued: processing (ACH takes ~4 business days),
+    /// failed, disputed. Null = no payment in flight. Paid is <see cref="Status"/>, set only when Stripe confirms.</summary>
+    public string? PaymentState { get; private set; }
+    public string? PaymentError { get; private set; }
+    public int PaymentAttempts { get; private set; }
     public string? CreatedBy { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -131,6 +138,48 @@ public class Invoice
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    /// <summary>A Stripe charge was started; the next attempt number feeds its idempotency key.</summary>
+    public int BeginPayment()
+    {
+        if (Kind != InvoiceKind.Invoice || Status != InvoiceStatus.Issued) throw new InvalidOperationException("Only an issued, unpaid invoice can be paid.");
+        if (PaymentState == InvoicePaymentState.Processing) throw new InvalidOperationException("A payment for this invoice is already processing.");
+        PaymentAttempts++;
+        PaymentError = null;
+        UpdatedAt = DateTimeOffset.UtcNow;
+        return PaymentAttempts;
+    }
+
+    public void PaymentProcessing(string paymentIntentId)
+    {
+        StripePaymentIntentId = paymentIntentId;
+        if (Status == InvoiceStatus.Issued) PaymentState = InvoicePaymentState.Processing;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void PaymentSucceeded(string paymentIntentId, DateTimeOffset at)
+    {
+        StripePaymentIntentId = paymentIntentId;
+        PaymentState = null;
+        PaymentError = null;
+        if (Status == InvoiceStatus.Issued) MarkPaid(at, paymentIntentId);   // idempotent: a repeated webhook is a no-op
+    }
+
+    public void PaymentFailed(string? paymentIntentId, string error)
+    {
+        if (paymentIntentId is not null) StripePaymentIntentId = paymentIntentId;
+        if (Status != InvoiceStatus.Issued) return;
+        PaymentState = InvoicePaymentState.Failed;
+        PaymentError = error.Length > 500 ? error[..500] : error;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void PaymentDisputed(string reason)
+    {
+        PaymentState = InvoicePaymentState.Disputed;
+        PaymentError = $"Disputed: {reason}";
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
     /// <summary>Cancels an issued, unpaid invoice (sent in error). The number stays used; nothing is reissued under it.</summary>
     public void Void(string reason, DateTimeOffset now)
     {
@@ -196,6 +245,13 @@ public static class InvoiceKind
 {
     public const string Invoice = "invoice";
     public const string CreditNote = "credit_note";
+}
+
+public static class InvoicePaymentState
+{
+    public const string Processing = "processing";
+    public const string Failed = "failed";
+    public const string Disputed = "disputed";
 }
 
 public static class InvoiceStatus

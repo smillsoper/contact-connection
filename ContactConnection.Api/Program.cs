@@ -259,6 +259,7 @@ app.MapAdminWebhooksEndpoints();
 app.MapPortalAuthEndpoints();
 app.MapPortalTenantsEndpoints();
 app.MapPortalInvoicesEndpoints();
+app.MapBillingEndpoints();
 app.MapPortalApiDefinitionsEndpoints();
 app.MapPortalApiEndpointsEndpoints();
 app.MapApiTemplateEndpoints();
