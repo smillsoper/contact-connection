@@ -13,12 +13,6 @@ public interface IOrderNumberSequenceRepository
     /// UPDATE ... RETURNING — safe under concurrent calls). Returns the formatted order number, or
     /// null if the client has no sequence.</summary>
     Task<string?> AllocateAsync(Guid clientId, CancellationToken ct = default);
-
-    /// <summary>Stamps <paramref name="orderNumber"/> onto the call record only if it doesn't
-    /// already have one. Returns the call's order number afterward — the given one if this call
-    /// won, or the one a concurrent first-use already wrote (the given number is then simply
-    /// unused, leaving a gap in the sequence, which is harmless).</summary>
-    Task<string?> AssignToCallRecordAsync(Guid callRecordId, string orderNumber, CancellationToken ct = default);
     /// <summary>Same conditional write for an interaction's order number (S178, interaction-scoped commerce).</summary>
     Task<string?> AssignToInteractionAsync(Guid interactionId, string orderNumber, CancellationToken ct = default);
 }
