@@ -166,4 +166,64 @@ public class ApiCallNodeHandlerLiquidTests
 
         h.Executor.Verify(e => e.ExecuteAsync(It.IsAny<ApiDefinitionExecutionRequest>(), It.IsAny<CancellationToken>()), Times.Once);
     }
+
+    // S179 launch modes — a practice run never calls the client's API on the sandbox credential set.
+    private static void Practice(Harness h, string mode, string credentialSet)
+    {
+        h.Ctx.CallRecord["run_mode"] = mode;
+        h.Ctx.CallRecord["credential_set"] = credentialSet;
+    }
+
+    [Fact]
+    public async Task TrainingRun_ReturnsTheTrainingResponse_WithoutCallingTheApi()
+    {
+        var h = new Harness("{}", """{"rules":[{"path":"success","value":"true"}]}""");
+        h.Endpoint.SetTrainingResponse("""{"success":true,"orderNumber":"TRN-1001"}""");
+        Practice(h, "training", "sandbox");
+
+        var result = await h.Handler().ExecuteAsync(h.Node(), h.Ctx, null, "");
+
+        Assert.Equal("n_ok", result.NextNodeId);
+        Assert.Equal("TRN-1001", h.Ctx.FlowVars["order.response.orderNumber"]);
+        Assert.Equal(ApiCallNodeHandler.SimulatedHistoryNote, h.Ctx.ExecutionHistory[^1].InputValue);
+        h.Executor.Verify(e => e.ExecuteAsync(It.IsAny<ApiDefinitionExecutionRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task TrainingRun_WithoutATrainingResponse_GetsTheGenericSuccess()
+    {
+        var h = new Harness("{}");
+        Practice(h, "training", "sandbox");
+
+        await h.Handler().ExecuteAsync(h.Node(), h.Ctx, null, "");
+
+        Assert.Equal("true", h.Ctx.FlowVars["order.response.simulated"]);
+        h.Executor.Verify(e => e.ExecuteAsync(It.IsAny<ApiDefinitionExecutionRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DesignerSandbox_OnProductionCredentials_CallsTheRealApi()
+    {
+        var h = new Harness("{}");
+        h.Endpoint.SetTrainingResponse("""{"success":true}""");
+        Practice(h, "sandbox", "production");
+
+        await h.Handler().ExecuteAsync(h.Node(), h.Ctx, null, "");
+
+        h.Executor.Verify(e => e.ExecuteAsync(It.IsAny<ApiDefinitionExecutionRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Null(h.Ctx.ExecutionHistory[^1].InputValue);
+    }
+
+    [Fact]
+    public async Task ProductionCall_NeverUsesTheTrainingResponse()
+    {
+        var h = new Harness("{}");
+        h.Endpoint.SetTrainingResponse("""{"success":true,"orderNumber":"TRN-1001"}""");
+        Practice(h, "production", "production");
+
+        await h.Handler().ExecuteAsync(h.Node(), h.Ctx, null, "");
+
+        h.Executor.Verify(e => e.ExecuteAsync(It.IsAny<ApiDefinitionExecutionRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+        Assert.False(h.Ctx.FlowVars.ContainsKey("order.response.orderNumber"));
+    }
 }

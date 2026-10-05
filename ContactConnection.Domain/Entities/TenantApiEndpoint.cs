@@ -51,6 +51,13 @@ public class TenantApiEndpoint
     /// </summary>
     public string SuccessCriteria { get; private set; } = "{}";
 
+    /// <summary>
+    /// Launch modes (S179): the JSON body a training / sandbox run gets instead of calling the client's API. It goes
+    /// through SuccessCriteria and the node's output variable like a real response, so an order number etc. flows on.
+    /// Null = the generic {"success":true,"simulated":true}.
+    /// </summary>
+    public string? TrainingResponse { get; private set; }
+
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? UpdatedAt { get; private set; }
 
@@ -126,4 +133,5 @@ public class TenantApiEndpoint
         BodyTemplateType = type; UpdatedAt = DateTimeOffset.UtcNow;
     }
     public void SetSuccessCriteria(string criteriaJson) { SuccessCriteria = string.IsNullOrWhiteSpace(criteriaJson) ? "{}" : criteriaJson; UpdatedAt = DateTimeOffset.UtcNow; }
+    public void SetTrainingResponse(string? json) { TrainingResponse = string.IsNullOrWhiteSpace(json) ? null : json; UpdatedAt = DateTimeOffset.UtcNow; }
 }

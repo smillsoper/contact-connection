@@ -31,6 +31,7 @@ const adminApi: DetailApi = {
   listEndpoints: listAdminApiEndpoints,
   createEndpoint: createAdminApiEndpoint,
   updateEndpoint: updateAdminApiEndpoint,
+  supportsTrainingResponse: true,
   setPreferred: setPreferredAdminApiEndpoint,
   deleteEndpoint: deleteAdminApiEndpoint,
   listCredentials: () => listAdminCredentials().then((list) => list.map((c) => c.keyName)),

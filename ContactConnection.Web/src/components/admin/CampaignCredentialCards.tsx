@@ -7,17 +7,24 @@ import { deleteAdminCredential, setAdminCredential } from '../../api/adminCreden
 // currently comes from (this campaign / the client / the tenant default / not set), secrets are write-only,
 // and saving writes the right key ({Vendor}:{campaignId|clientId}:{Field} or {Vendor}:{Field}) through the
 // audited Credentials API. "Test credentials" checks them with the vendor without charging or recording anything.
+// Each card has a Production and a Sandbox tab (S179, script launch modes): training and designer-sandbox runs use the
+// sandbox set ({Vendor}.sandbox:...), which always talks to the vendor's sandbox endpoint and so has no Environment field.
 
 export type CredentialSection = 'payment-gateways' | 'tax-providers'
+type CredentialSetName = 'production' | 'sandbox'
 
 /** Loads and renders one card per vendor in the section; `only` limits it to one provider key. */
 export default function CampaignCredentialCards({ campaignId, section, only }: { campaignId: string; section: CredentialSection; only?: string }) {
   const [sets, setSets] = useState<CredentialSet[] | null>(null)
+  const [sandboxSets, setSandboxSets] = useState<CredentialSet[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(() => {
-    api.get<CredentialSet[]>(`/api/v1/campaigns/${campaignId}/${section}`)
-      .then(setSets)
+    Promise.all([
+      api.get<CredentialSet[]>(`/api/v1/campaigns/${campaignId}/${section}`),
+      api.get<CredentialSet[]>(`/api/v1/campaigns/${campaignId}/${section}?set=sandbox`),
+    ])
+      .then(([prod, sandbox]) => { setSets(prod); setSandboxSets(sandbox) })
       .catch((e: Error) => setError(e.message))
   }, [campaignId, section])
   useEffect(load, [load])
@@ -28,7 +35,10 @@ export default function CampaignCredentialCards({ campaignId, section, only }: {
       {error && <p className="text-red-400 text-sm">{error}</p>}
       {!sets && !error && <p className="text-gray-500 text-sm">Loading…</p>}
       <div className="space-y-6">
-        {shown?.map((s) => <CredentialCard key={s.providerKey} campaignId={campaignId} section={section} gateway={s} onChanged={load} />)}
+        {shown?.map((s) => (
+          <CredentialSetTabs key={s.providerKey} campaignId={campaignId} section={section} gateway={s}
+            sandbox={sandboxSets?.find((x) => x.providerKey === s.providerKey) ?? null} onChanged={load} />
+        ))}
       </div>
     </>
   )
@@ -64,9 +74,43 @@ const SOURCE_LABEL: Record<Scope, string> = {
   tenant: 'Tenant default',
 }
 
+const isConfigured = (g: CredentialSet) => g.fields.filter((f) => f.secret).every((f) => f.source)
+
+/** One vendor: Production / Sandbox tabs over the same card. */
+function CredentialSetTabs({ campaignId, section, gateway, sandbox, onChanged }: {
+  campaignId: string; section: CredentialSection; gateway: CredentialSet; sandbox: CredentialSet | null; onChanged: () => void
+}) {
+  const [tab, setTab] = useState<CredentialSetName>('production')
+  const shown = tab === 'sandbox' && sandbox ? sandbox : gateway
+  const tabCls = (t: CredentialSetName) => `px-3 py-1 text-xs rounded-md border ${tab === t
+    ? (t === 'sandbox' ? 'bg-violet-950/60 border-violet-700 text-violet-200' : 'bg-gray-800 border-gray-600 text-white')
+    : 'border-transparent text-gray-400 hover:text-gray-200'}`
+  return (
+    <div className="border border-gray-800 rounded-lg p-4">
+      <div className="flex gap-1 mb-3">
+        <button className={tabCls('production')} onClick={() => setTab('production')}>
+          Production {isConfigured(gateway) ? '✓' : ''}
+        </button>
+        {sandbox && (
+          <button className={tabCls('sandbox')} onClick={() => setTab('sandbox')}>
+            Sandbox {isConfigured(sandbox) ? '✓' : ''}
+          </button>
+        )}
+      </div>
+      {tab === 'sandbox' && (
+        <p className="text-xs text-violet-300/90 mb-3 leading-snug">
+          Used by <b>training</b> and <b>designer sandbox</b> runs — never by live calls. Always sent to {gateway.displayName}'s
+          sandbox environment. With nothing set here, training runs simulate this provider (approved / no tax) instead.
+        </p>
+      )}
+      <CredentialCard key={tab} campaignId={campaignId} section={section} gateway={shown} set={tab} onChanged={onChanged} />
+    </div>
+  )
+}
+
 const inputCls = 'w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500'
 
-function CredentialCard({ campaignId, section, gateway, onChanged }: { campaignId: string; section: CredentialSection; gateway: CredentialSet; onChanged: () => void }) {
+function CredentialCard({ campaignId, section, gateway, set, onChanged }: { campaignId: string; section: CredentialSection; gateway: CredentialSet; set: CredentialSetName; onChanged: () => void }) {
   const [scope, setScope] = useState<Scope>('campaign')
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
@@ -101,16 +145,16 @@ function CredentialCard({ campaignId, section, gateway, onChanged }: { campaignI
   async function runTest() {
     setBusy(true); setTest(null); setMsg(null)
     try {
-      setTest(await api.post<TestResult>(`/api/v1/campaigns/${campaignId}/${section}/${gateway.providerKey}/test`))
+      setTest(await api.post<TestResult>(`/api/v1/campaigns/${campaignId}/${section}/${gateway.providerKey}/test${set === 'sandbox' ? '?set=sandbox' : ''}`))
     } catch (e) {
       setTest({ succeeded: false, message: e instanceof Error ? e.message : 'Test failed.', environment: null })
     } finally { setBusy(false) }
   }
 
-  const configured = gateway.fields.filter((f) => f.secret).every((f) => f.source)
+  const configured = isConfigured(gateway)
 
   return (
-    <div className="border border-gray-800 rounded-lg p-4">
+    <div>
       <div className="flex flex-wrap items-center gap-3 mb-2">
         <h3 className="text-white text-sm font-semibold">{gateway.displayName}</h3>
         <span className={`text-xs rounded px-1.5 py-0.5 border ${configured ? 'text-emerald-300 border-emerald-800 bg-emerald-950/40' : 'text-gray-400 border-gray-700'}`}>

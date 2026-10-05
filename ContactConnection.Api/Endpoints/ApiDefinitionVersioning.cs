@@ -17,4 +17,5 @@ public record ApiEndpointSnapshot(
     int SortOrder, bool IsPreferred, bool IsActive, bool IsRetrySafe,
     string SensitiveResponseFields = "[]",
     string BodyTemplateType = "simple",
-    string SuccessCriteria = "{}");
+    string SuccessCriteria = "{}",
+    string? TrainingResponse = null);

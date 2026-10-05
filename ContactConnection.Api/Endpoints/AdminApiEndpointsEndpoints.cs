@@ -112,6 +112,11 @@ public static class AdminApiEndpointsEndpoints
             return Results.BadRequest(new { error = bodyError });
         if (request.BodyTemplateType is not null) endpoint.SetBodyTemplateType(request.BodyTemplateType);
         if (request.SuccessCriteria is not null) endpoint.SetSuccessCriteria(request.SuccessCriteria);
+        if (request.TrainingResponse is not null)
+        {
+            if (TrainingResponseError(request.TrainingResponse) is { } trainingError) return Results.BadRequest(new { error = trainingError });
+            endpoint.SetTrainingResponse(request.TrainingResponse);
+        }
 
         await repo.AddAsync(endpoint, ct);
         await repo.SaveChangesAsync(ct);
@@ -180,6 +185,11 @@ public static class AdminApiEndpointsEndpoints
             return Results.BadRequest(new { error = bodyError });
         if (request.BodyTemplateType is not null) endpoint.SetBodyTemplateType(request.BodyTemplateType);
         if (request.SuccessCriteria is not null) endpoint.SetSuccessCriteria(request.SuccessCriteria);
+        if (request.TrainingResponse is not null)
+        {
+            if (TrainingResponseError(request.TrainingResponse) is { } trainingError) return Results.BadRequest(new { error = trainingError });
+            endpoint.SetTrainingResponse(request.TrainingResponse);
+        }
 
         await repo.SaveChangesAsync(ct);
         await versions.SnapshotAsync(
@@ -236,7 +246,14 @@ public static class AdminApiEndpointsEndpoints
     private static string BuildSnapshot(TenantApiEndpoint e) => JsonSerializer.Serialize(new ApiEndpointSnapshot(
         e.ApiSubType, e.Name, e.Description, e.Path, e.HttpMethod, e.RequestBodyTemplate,
         e.QueryParams, e.Headers, e.ResponseMapping, e.SortOrder, e.IsPreferred, e.IsActive, e.IsRetrySafe,
-        e.SensitiveResponseFields, e.BodyTemplateType, e.SuccessCriteria));
+        e.SensitiveResponseFields, e.BodyTemplateType, e.SuccessCriteria, e.TrainingResponse));
+
+    private static string? TrainingResponseError(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try { using var _ = JsonDocument.Parse(json); return null; }
+        catch (JsonException ex) { return $"Training response must be valid JSON: {ex.Message}"; }
+    }
 
     // ApiSubType is deliberately not reverted — UpdateSubType needs the parent definition's
     // ApiCategory, which this revert path doesn't load, and sub-type changes post-creation are
@@ -252,6 +269,7 @@ public static class AdminApiEndpointsEndpoints
         e.SetSensitiveResponseFields(s.SensitiveResponseFields);
         e.SetBodyTemplateType(s.BodyTemplateType);
         e.SetSuccessCriteria(s.SuccessCriteria);
+        e.SetTrainingResponse(s.TrainingResponse);
         if (s.IsActive) e.Activate(); else e.Deactivate();
         if (s.IsPreferred) e.SetPreferred(); else e.ClearPreferred();
     }
@@ -334,6 +352,7 @@ public static class AdminApiEndpointsEndpoints
         e.SensitiveResponseFields,
         e.BodyTemplateType,
         e.SuccessCriteria,
+        e.TrainingResponse,
         e.CreatedAt,
         e.UpdatedAt,
     };

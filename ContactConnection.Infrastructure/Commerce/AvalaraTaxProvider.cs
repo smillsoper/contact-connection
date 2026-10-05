@@ -80,7 +80,8 @@ public class AvalaraTaxProvider(
     {
         var accountId   = await ScopedCredentials.ResolveAsync(credentials, "Avalara", "AccountId", campaignId, clientId, ct);
         var licenseKey  = await ScopedCredentials.ResolveAsync(credentials, "Avalara", "LicenseKey", campaignId, clientId, ct);
-        var production  = string.Equals(
+        // The sandbox credential set only ever reaches Avalara's sandbox, whatever its Environment value says (S179).
+        var production  = !CredentialSetScope.IsSandbox && string.Equals(
             await ScopedCredentials.ResolveAsync(credentials, "Avalara", "Environment", campaignId, clientId, ct),
             "production", StringComparison.OrdinalIgnoreCase);
         var environment = production ? "production" : "sandbox";
@@ -150,7 +151,8 @@ public class AvalaraTaxProvider(
                 : TaxResult.Zero(TaxCalculationStatus.Error,
                     "Avalara credentials are not configured for this campaign (Avalara AccountId / LicenseKey).");
         var environment = await ScopedCredentials.ResolveAsync(credentials, "Avalara", "Environment", context.CampaignId, context.ClientId, ct);
-        var url = string.Equals(environment, "production", StringComparison.OrdinalIgnoreCase) ? ProductionUrl : SandboxUrl;
+        var url = !CredentialSetScope.IsSandbox && string.Equals(environment, "production", StringComparison.OrdinalIgnoreCase)
+            ? ProductionUrl : SandboxUrl;
 
         var body = BuildRequest(request, settings, shipTo, DateOnly.FromDateTime(DateTime.UtcNow));
 

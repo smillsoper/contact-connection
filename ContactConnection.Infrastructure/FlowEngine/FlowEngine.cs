@@ -861,6 +861,7 @@ public class FlowEngine : IFlowEngine
         // call flow sets): branch on {{call_record.practice_run}} == true, or {{call_record.run_mode}} == training.
         ctx.CallRecord["run_mode"] = record.RunMode;
         ctx.CallRecord["practice_run"] = record.IsProductionRun ? "false" : "true";
+        ctx.CallRecord["credential_set"] = record.CredentialSet;
         ctx.CallRecord["record_type"] = record.RecordType;
         ctx.CallRecord["phone_number"] = record.Phone ?? string.Empty;
         ctx.CallRecord["dnis"] = record.Dnis ?? string.Empty;

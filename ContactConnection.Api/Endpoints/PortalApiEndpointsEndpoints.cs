@@ -338,7 +338,10 @@ public record CreateApiEndpointRequest(
     /// <summary>"simple" | "liquid" — see BodyTemplateType. Null = leave unchanged.</summary>
     string? BodyTemplateType = null,
     /// <summary>Body success rules JSON — see ResponseSuccessEvaluator. Null = leave unchanged.</summary>
-    string? SuccessCriteria = null);
+    string? SuccessCriteria = null,
+    /// <summary>Tenant endpoints only (S179): JSON a training / sandbox run gets instead of the real call. Null = leave
+    /// unchanged; "" = clear (generic simulated success).</summary>
+    string? TrainingResponse = null);
 
 public record UpdateApiEndpointRequest(
     string Name,
@@ -356,4 +359,7 @@ public record UpdateApiEndpointRequest(
     /// <summary>"simple" | "liquid" — see BodyTemplateType. Null = leave unchanged.</summary>
     string? BodyTemplateType = null,
     /// <summary>Body success rules JSON — see ResponseSuccessEvaluator. Null = leave unchanged.</summary>
-    string? SuccessCriteria = null);
+    string? SuccessCriteria = null,
+    /// <summary>Tenant endpoints only (S179): JSON a training / sandbox run gets instead of the real call. Null = leave
+    /// unchanged; "" = clear (generic simulated success).</summary>
+    string? TrainingResponse = null);

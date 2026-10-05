@@ -116,6 +116,8 @@ export interface ApiEndpointRecord {
   bodyTemplateType?: string
   /** Response-body success rules JSON — see ResponseSuccessEvaluator. */
   successCriteria?: string
+  /** Tenant endpoints (S179): JSON a training / sandbox run gets instead of the real call; '' clears. */
+  trainingResponse?: string | null
   createdAt: string
   updatedAt: string | null
 }
@@ -135,6 +137,8 @@ export interface CreateApiEndpointData {
   sensitiveResponseFields?: string
   bodyTemplateType?: string
   successCriteria?: string
+  /** Tenant endpoints (S179): JSON a training / sandbox run gets instead of the real call; '' clears. */
+  trainingResponse?: string | null
 }
 
 export interface UpdateApiEndpointData {
@@ -151,6 +155,8 @@ export interface UpdateApiEndpointData {
   sensitiveResponseFields?: string
   bodyTemplateType?: string
   successCriteria?: string
+  /** Tenant endpoints (S179): JSON a training / sandbox run gets instead of the real call; '' clears. */
+  trainingResponse?: string | null
 }
 
 // ── Liquid request-body authoring ────────────────────────────────────────────
@@ -381,6 +387,8 @@ export interface EndpointTestPayload {
   bodyTemplateType?: string
   liquidModel?: Record<string, unknown>
   successCriteria?: string
+  /** Tenant endpoints (S179): JSON a training / sandbox run gets instead of the real call; '' clears. */
+  trainingResponse?: string | null
 }
 
 export interface EndpointTestResult {

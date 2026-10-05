@@ -67,6 +67,8 @@ export interface ApiEndpointRecord {
   sensitiveResponseFields: string
   bodyTemplateType?: string
   successCriteria?: string
+  /** Tenant endpoints only (S179) — see DetailApi.supportsTrainingResponse. */
+  trainingResponse?: string | null
   createdAt: string
   updatedAt: string | null
 }
@@ -130,6 +132,9 @@ export interface DetailApi {
    *  useEffect that tolerates a missing implementation, not because either side omits it. */
   listTtsProviders?(): Promise<string[]>
   listPagePath: string
+  /** Tenant API definitions (S179, launch modes): endpoints carry a Training response a practice run returns
+   *  instead of calling the client's API. Platform (portal) APIs run for real, so they don't. */
+  supportsTrainingResponse?: boolean
   // Version history — every write is retained forever; revert applies a past snapshot and
   // records it as a brand-new version (see API_HARDENING_CHECKLIST.md Tier 1).
   listDefinitionVersions(id: string): Promise<EntityVersionSummary[]>
@@ -153,6 +158,7 @@ interface EndpointFormData {
   sensitiveResponseFields?: string
   bodyTemplateType?: string
   successCriteria?: string
+  trainingResponse?: string
 }
 
 interface DefFormState {
@@ -337,6 +343,8 @@ interface EndpointForm {
   successErrorPath: string
   /** JSON text of the Liquid sample model (editable; loaded from the server on first use). */
   liquidModel: string
+  /** JSON a training / sandbox run returns instead of calling the API ('' = generic simulated success). */
+  trainingResponse: string
 }
 
 interface SuccessRule { path: string; operator: string; value: string }
@@ -391,6 +399,7 @@ const BLANK_ENDPOINT_FORM: EndpointForm = {
   successRules: [],
   successErrorPath: '',
   liquidModel: '',
+  trainingResponse: '',
 }
 
 /** One path per line (blank lines ignored) <-> JSON array of dot-separated paths. */
@@ -1819,6 +1828,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
       successRules: successCriteriaFromJson(ep.successCriteria).rules,
       successErrorPath: successCriteriaFromJson(ep.successCriteria).errorPath,
       liquidModel: '',
+      trainingResponse: ep.trainingResponse ?? '',
     })
     setEditingEndpointId(ep.id)
     setEndpointFormError(null)
@@ -1831,6 +1841,12 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
     if ((subTypeRequired && !endpointForm.apiSubType.trim()) || !endpointForm.name.trim() || !endpointForm.path.trim()) {
       setEndpointFormError(subTypeRequired ? 'Sub-type, name, and path are required.' : 'Name and path are required.')
       return
+    }
+    if (api.supportsTrainingResponse && endpointForm.trainingResponse.trim()) {
+      try { JSON.parse(endpointForm.trainingResponse) } catch {
+        setEndpointFormError('Training response must be valid JSON (or blank).')
+        return
+      }
     }
     setEndpointSaving(true)
     setEndpointFormError(null)
@@ -1849,6 +1865,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
         sensitiveResponseFields: pathsToJson(endpointForm.sensitiveResponseFields),
         bodyTemplateType: endpointForm.bodyTemplateType,
         successCriteria: successCriteriaToJson(endpointForm.successRules, endpointForm.successErrorPath),
+        ...(api.supportsTrainingResponse ? { trainingResponse: endpointForm.trainingResponse.trim() } : {}),
       }
       if (endpointModal === 'edit' && editingEndpointId) {
         const updated = await api.updateEndpoint(definitionId, editingEndpointId, data)
@@ -2489,6 +2506,25 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                         </div>
                       )}
                     </div>
+                    {api.supportsTrainingResponse && (
+                      <div>
+                        <label className="block text-gray-400 text-xs font-medium mb-1.5">Training Response</label>
+                        <p className="text-gray-600 text-xs mb-2">
+                          What a <span className="text-amber-300">training</span> or <span className="text-violet-300">sandbox</span> run gets
+                          instead of calling this API — the client's system is never contacted. It goes through the success rules
+                          and the node's output variable like a real response, so return the fields later steps use (an order
+                          number, a status). Blank = <span className="font-mono text-gray-400">{'{"success": true, "simulated": true}'}</span>.
+                        </p>
+                        <textarea
+                          value={endpointForm.trainingResponse}
+                          onChange={(e) => setEndpointForm((f) => ({ ...f, trainingResponse: e.target.value }))}
+                          rows={6}
+                          spellCheck={false}
+                          placeholder={'{\n  "success": true,\n  "orderNumber": "TRN-1001"\n}'}
+                          className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white text-xs font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
 

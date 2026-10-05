@@ -252,7 +252,9 @@ public class AuthorizeNetGatewayClient(
         var apiLoginId = await ResolveScopedAsync("ApiLoginId", campaignId, clientId, ct);
         var transactionKey = await ResolveScopedAsync("TransactionKey", campaignId, clientId, ct);
         var environment = await ResolveScopedAsync("Environment", campaignId, clientId, ct) ?? "sandbox";
-        var url = environment.Equals("production", StringComparison.OrdinalIgnoreCase) ? ProductionUrl : SandboxUrl;
+        // The sandbox credential set only ever reaches the sandbox endpoint, whatever its Environment value says (S179).
+        var url = !CredentialSetScope.IsSandbox && environment.Equals("production", StringComparison.OrdinalIgnoreCase)
+            ? ProductionUrl : SandboxUrl;
         return (apiLoginId, transactionKey, url);
     }
 

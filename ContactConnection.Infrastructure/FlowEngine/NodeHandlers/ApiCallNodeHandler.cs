@@ -65,7 +65,7 @@ public class ApiCallNodeHandler(
         Guid DefinitionId, string HttpMethod, string BaseUrl, string Path, string Headers, string QueryParams,
         string? RequestBodyTemplate, string AuthConfig, int TimeoutSeconds, bool IsActive, bool IsRetrySafe,
         int? RateLimitPerMinute, string SensitiveResponseFields, string BodyTemplateType, string SuccessCriteria,
-        string? EndpointName = null);
+        string? EndpointName = null, bool IsClientApi = false, string? TrainingResponse = null);
 
     public async Task<NodeResult> ExecuteAsync(
         JsonObject node, FlowExecutionContext ctx,
@@ -77,6 +77,7 @@ public class ApiCallNodeHandler(
 
         ApiDefinitionExecutionResult result;
         string transitionKey;
+        var simulated = false;
         var targetSensitiveFields = "[]";
 
         if (string.IsNullOrEmpty(endpointIdStr) || !Guid.TryParse(endpointIdStr, out var endpointId))
@@ -116,15 +117,16 @@ public class ApiCallNodeHandler(
             else
             {
                 var (request, bodyError) = await BuildRequestAsync(target, node, ctx, scope, ct);
-                // Launch modes (S179): a training / sandbox run never calls a client's API — it gets a simulated success
-                // (the body is still built, so template errors show up). Sandbox API environments come in part 2.
-                var practiceRun = ctx.CallRecord.GetValueOrDefault("run_mode") is { Length: > 0 } rm && rm != "production";
+                // Launch modes (S179): a practice run never calls a client's API on the sandbox credential set — it gets the
+                // endpoint's Training response (or a generic success). The body is still built, so template errors show up.
+                // Platform APIs (address lookups, speech) run for real; a designer sandbox run that chose production
+                // credentials calls the real API.
+                simulated = bodyError is null && target.IsClientApi && SimulatesClientApis(ctx);
                 result = bodyError is not null
                     // Never send a body the template couldn't produce correctly.
                     ? new ApiDefinitionExecutionResult(false, null, null, new(), null, false, bodyError)
-                    : practiceRun
-                        ? new ApiDefinitionExecutionResult(true, 200, "OK (simulated)", new(),
-                            "{\"success\":true,\"simulated\":true}", false, null)
+                    : simulated
+                        ? SimulatedResult(target.TrainingResponse)
                         : await executor.ExecuteAsync(request, ct);
 
                 result = ResponseSuccessEvaluator.Apply(result, target.SuccessCriteria);
@@ -165,13 +167,25 @@ public class ApiCallNodeHandler(
         }
 
         var next = Transition(node, transitionKey) ?? Transition(node, "default");
-        AppendHistory(ctx, node, input: null, transition: next);
+        AppendHistory(ctx, node, input: simulated ? SimulatedHistoryNote : null, transition: next);
 
         var state = BuildState(ctx, node, resolvedContent: string.Empty);
         return new NodeResult(state, next);
     }
 
     private static string OnceKey(string scope, Guid endpointId) => $"once:{scope}:{endpointId}";
+
+    internal const string SimulatedHistoryNote = "Simulated (practice run): the client's API was not called";
+    internal const string GenericSimulatedBody = "{\"success\":true,\"simulated\":true}";
+
+    /// <summary>A practice run on the sandbox credential set (training always is) simulates the client's APIs.</summary>
+    internal static bool SimulatesClientApis(FlowExecutionContext ctx) =>
+        ctx.CallRecord.GetValueOrDefault("run_mode") is { Length: > 0 } rm && rm != "production"
+        && ctx.CallRecord.GetValueOrDefault("credential_set") != "production";
+
+    private static ApiDefinitionExecutionResult SimulatedResult(string? trainingResponse) =>
+        new(true, 200, trainingResponse is null ? "OK (simulated)" : "OK (simulated: training response)", new(),
+            trainingResponse ?? GenericSimulatedBody, false, null);
 
     /// <summary>Resolves everything the request needs — URL, headers, query, body (simple tags or Liquid)
     /// — exactly as sent. Shared by ExecuteAsync and PreviewAsync so a preview can never differ from the
@@ -256,7 +270,7 @@ public class ApiCallNodeHandler(
             def.Id, endpoint.HttpMethod ?? def.HttpMethod, def.BaseUrl, endpoint.Path, endpoint.Headers, endpoint.QueryParams,
             endpoint.RequestBodyTemplate, def.AuthConfig, def.TimeoutSeconds, def.IsActive && endpoint.IsActive, endpoint.IsRetrySafe,
             def.RateLimitPerMinute, endpoint.SensitiveResponseFields, endpoint.BodyTemplateType, endpoint.SuccessCriteria,
-            $"{def.Name} → {endpoint.Name}");
+            $"{def.Name} → {endpoint.Name}", IsClientApi: true, endpoint.TrainingResponse);
     }
 
     private async Task<CallTarget?> LoadPortalAsync(Guid endpointId, CancellationToken ct)
