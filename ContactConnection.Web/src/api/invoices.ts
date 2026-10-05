@@ -47,6 +47,20 @@ export interface InvoiceDetail extends Omit<InvoiceSummary, 'tenantName'> {
   createdBy: string | null
   updatedAt: string
   lines: InvoiceLine[]
+  /** Only on GET: the credit notes against this invoice, issued credits, and what's owed after them. */
+  creditNotes?: { id: string; number: string | null; status: InvoiceStatus; total: number; issuedAt: string | null }[]
+  credited?: number
+  net?: number
+  /** A credit note's original invoice number. */
+  creditsNumber?: string | null
+}
+
+interface InvoiceView {
+  invoice: InvoiceDetail
+  creditNotes: NonNullable<InvoiceDetail['creditNotes']>
+  credited: number
+  net: number
+  creditsNumber: string | null
 }
 
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -69,7 +83,9 @@ const post = <T>(path: string, body?: unknown) => call<T>(path, { method: 'POST'
 
 export const invoicesApi = {
   list: (tenantId?: string) => call<InvoiceSummary[]>(`/api/v1/portal/invoices${tenantId ? `?tenantId=${tenantId}` : ''}`),
-  get: (id: string) => call<InvoiceDetail>(`/api/v1/portal/invoices/${id}`),
+  get: (id: string) => call<InvoiceView>(`/api/v1/portal/invoices/${id}`).then((v) => ({
+    ...v.invoice, creditNotes: v.creditNotes, credited: v.credited, net: v.net, creditsNumber: v.creditsNumber,
+  }) as InvoiceDetail),
   document: (id: string) => call<string>(`/api/v1/portal/invoices/${id}/document`),
   createMonthly: (tenantId: string, month: string) => post<InvoiceDetail>(`/api/v1/portal/tenants/${tenantId}/invoices`, { month }),
   createStandalone: (tenantId: string) => post<InvoiceDetail>(`/api/v1/portal/tenants/${tenantId}/invoices`, { month: null }),

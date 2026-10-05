@@ -43,8 +43,8 @@ export default function InvoiceDetailPage() {
   const [creditReason, setCreditReason] = useState('')
   const [panel, setPanel] = useState<'paid' | 'void' | 'credit' | null>(null)
 
-  async function refresh(next?: InvoiceDetail) {
-    const fresh = next ?? await invoicesApi.get(id)
+  async function refresh(_next?: InvoiceDetail) {
+    const fresh = await invoicesApi.get(id)
     setInv(fresh)
     setNotes(fresh.notes ?? '')
     setHtml(await invoicesApi.document(id))
@@ -81,7 +81,33 @@ export default function InvoiceDetailPage() {
             <span className="ml-auto text-white text-xl font-mono">{money(inv.total)}</span>
           </div>
           {inv.creditsInvoiceId && (
-            <Link to={`/portal/invoices/${inv.creditsInvoiceId}`} className="text-xs text-indigo-400 hover:text-indigo-300">Credits this invoice →</Link>
+            <Link to={`/portal/invoices/${inv.creditsInvoiceId}`} className="text-xs text-indigo-400 hover:text-indigo-300">
+              Credits invoice {inv.creditsNumber ?? ''} →
+            </Link>
+          )}
+          {isCredit && draft && (
+            <div className="mt-3 rounded-lg border border-amber-800 bg-amber-950/40 px-4 py-2 text-sm text-amber-200">
+              Not applied yet — issue this credit note (Actions below) to credit invoice {inv.creditsNumber ?? ''}.
+            </div>
+          )}
+          {!isCredit && (inv.creditNotes?.length ?? 0) > 0 && (
+            <div className="mt-3 rounded-lg border border-gray-800 bg-gray-900 px-4 py-2 text-sm space-y-1">
+              {inv.creditNotes!.map((c) => (
+                <div key={c.id} className="flex items-center gap-3">
+                  <Link to={`/portal/invoices/${c.id}`} className="text-indigo-400 hover:text-indigo-300 font-mono text-xs">
+                    {c.number ?? 'Credit note (draft)'}
+                  </Link>
+                  <span className={`text-[11px] px-1.5 py-0.5 rounded border ${STATUS_STYLE[c.status]}`}>{c.status}</span>
+                  <span className="font-mono text-gray-300">{money(c.total)}</span>
+                  {c.status === 'draft' && <span className="text-xs text-amber-300">not applied until issued</span>}
+                </div>
+              ))}
+              {(inv.credited ?? 0) !== 0 && (
+                <p className="text-gray-300 pt-1">
+                  Credited <span className="font-mono">{money(inv.credited!)}</span> · Net <span className="font-mono text-white">{money(inv.net!)}</span>
+                </p>
+              )}
+            </div>
           )}
           {inv.billToEmail && <p className="text-gray-500 text-xs mt-1">Sent to {inv.billToEmail}</p>}
           {inv.voidReason && <p className="text-red-300 text-xs mt-1">Voided: {inv.voidReason}</p>}

@@ -52,8 +52,18 @@ public static class PortalInvoicesEndpoints
         return await Run(() => svc.CreateMonthlyDraftAsync(tenantId, first.Year, first.Month, Actor(http), ct));
     }
 
-    private static async Task<IResult> Get(Guid id, IInvoiceService svc, CancellationToken ct) =>
-        await svc.GetAsync(id, ct) is { } i ? Results.Ok(Detail(i)) : Results.NotFound();
+    // An invoice with its credit notes (S179): issued credits reduce what's owed — the invoice itself stays frozen.
+    private static async Task<IResult> Get(Guid id, IInvoiceService svc, ContactConnectionDbContext db, CancellationToken ct)
+    {
+        if (await svc.GetAsync(id, ct) is not { } invoice) return Results.NotFound();
+        var credits = await db.Invoices.AsNoTracking().Where(c => c.CreditsInvoiceId == id).OrderBy(c => c.CreatedAt)
+            .Select(c => new { c.Id, c.Number, c.Status, c.Total, c.IssuedAt }).ToListAsync(ct);
+        var credited = credits.Where(c => c.Status is InvoiceStatus.Issued or InvoiceStatus.Paid).Sum(c => c.Total);
+        string? creditsNumber = invoice.CreditsInvoiceId is { } originalId
+            ? await db.Invoices.Where(o => o.Id == originalId).Select(o => o.Number).FirstOrDefaultAsync(ct)
+            : null;
+        return Results.Ok(new { invoice = Detail(invoice), creditNotes = credits, credited, net = invoice.Total + credited, creditsNumber });
+    }
 
     private static async Task<IResult> Document(Guid id, IInvoiceService svc, CancellationToken ct) =>
         await svc.RenderHtmlAsync(id, ct) is { } html ? Results.Content(html, "text/html") : Results.NotFound();
