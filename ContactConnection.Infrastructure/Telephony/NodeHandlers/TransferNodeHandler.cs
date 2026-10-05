@@ -159,14 +159,24 @@ public class TransferNodeHandler : ITelephonyNodeHandler
         if (!Guid.TryParse(node["targetTelephonyFlowId"]?.GetValue<string>(), out var flowId))
             return Follow(transitions, "failed");
 
+        await using (var db = _factory.Create(ctx.TenantSchemaName))
+        {
+            if (!await db.Flows.AnyAsync(f => f.Id == flowId && f.IsActive && f.FlowType == FlowType.Telephony, ct))
+            {
+                _logger.LogWarning("TransferNodeHandler [{Uuid}]: target telephony flow {FlowId} not found / not active",
+                    ctx.ChannelUuid, flowId);
+                return Follow(transitions, "failed");
+            }
+        }
+
         if (await PlayAnnouncementAsync(node, ctx, ct))
             return new TelephonyNodeResult(null, "transferring");
 
-        // Resolve lazily — the engine depends on the handler set, so constructor injection would cycle.
-        var engine = _services.GetRequiredService<ITelephonyFlowEngine>();
-        var ok = await engine.SwitchFlowAsync(ctx.ChannelUuid, flowId, ctx.Esl!, ct);
-
-        return Follow(transitions, ok ? "transferred" : "failed");
+        // Deferred: the engine switches flows once this branch has finished and saved (see
+        // TelephonyFlowEngine.RunPendingFlowSwitchAsync). Switching from inside the handler let the outer
+        // branch's save write the old flow back over the new one.
+        ctx.Vars["_switch_flow_id"] = flowId.ToString();
+        return Follow(transitions, "transferred");
     }
 
     // ── external_number ──────────────────────────────────────────────────────
@@ -266,6 +276,32 @@ public class TransferNodeHandler : ITelephonyNodeHandler
 
         if (midCall && !await PullCallerFromAgentAsync(ctx, esl, agentLeg!, fromAgentId!, ct))
             return Follow(transitions, "failed");
+
+        // Enter through the target campaign's own call flow when it has one (S178, Stephen): the caller gets
+        // that campaign's greeting / IVR / hours / hold pattern and its queue node, as if they'd dialed it.
+        // The campaign's inbound flow, else the flow on one of its numbers. Without either, queue directly.
+        var targetFlowId = target.InboundFlowId
+            ?? await db.PhoneNumbers.Where(p => p.CampaignId == targetCampaignId && p.IsActive && p.TelephonyFlowId != null)
+                .Select(p => p.TelephonyFlowId).FirstOrDefaultAsync(ct);
+        if (targetFlowId is { } enterFlow)
+        {
+            if (!midCall)
+            {
+                var preAgent = await db.CallRecords.FirstOrDefaultAsync(r => r.Id == ctx.CallRecordId, ct);
+                preAgent?.SetCampaign(targetCampaignId, target.ClientId);
+                if (preAgent is not null) await db.SaveChangesAsync(ct);
+            }
+            ctx.Vars["_switch_campaign_id"] = targetCampaignId.ToString();
+            ctx.Vars["_switch_flow_id"]     = enterFlow.ToString();
+            ctx.Vars.Remove("_on_timeout_node_id");
+            ctx.RemoveSessionVar(QueueOffer.RestrictGroupVar);
+            ctx.RemoveSessionVar("_eligible_tier_labels");
+
+            _logger.LogInformation(
+                "TransferNodeHandler [{Uuid}]: transferring to campaign {Campaign} through its call flow {Flow}{MidCall}",
+                ctx.ChannelUuid, targetCampaignId, enterFlow, midCall ? " — mid-call, from agent " + fromAgentId : "");
+            return Follow(transitions, "transferred");
+        }
 
         var ranked = await _ranker.GetRankedEligibleAgentsAsync(db, ctx.TenantId, targetCampaignId, ct: ct);
         var eligible = target.RingStrategy == CampaignRingStrategy.RingTopNByProficiency

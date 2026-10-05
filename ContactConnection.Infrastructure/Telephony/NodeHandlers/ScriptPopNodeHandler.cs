@@ -80,7 +80,10 @@ public class ScriptPopNodeHandler : ITelephonyNodeHandler
             {
                 var phoneNumber = await db.PhoneNumbers
                     .FirstOrDefaultAsync(p => p.Number == ctx.DestinationNumber && p.IsActive, ct);
-                flowId = phoneNumber?.FlowId;
+                // Only for calls still on that number's campaign: a call transferred to another campaign
+                // (sales → CS, S178) gets the new campaign's script, not the dialed number's.
+                if (phoneNumber is not null && phoneNumber.CampaignId == ctx.CampaignId)
+                    flowId = phoneNumber.FlowId;
             }
 
             // 3rd priority: campaign fallback script flow

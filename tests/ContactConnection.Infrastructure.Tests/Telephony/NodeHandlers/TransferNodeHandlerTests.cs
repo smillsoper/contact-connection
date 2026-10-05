@@ -55,6 +55,16 @@ public class TransferNodeHandlerTests
             sp, cfg, NullLogger<TransferNodeHandler>.Instance);
     }
 
+    private static (TenantDbContext Db, Guid FlowId) SeedActiveTelephonyFlow()
+    {
+        var db = NewDb();
+        var flow = Flow.Create(TenantId, Guid.NewGuid(), "Target flow", FlowType.Telephony, "{}");
+        flow.Publish();
+        db.Flows.Add(flow);
+        db.SaveChanges();
+        return (db, flow.Id);
+    }
+
     private static Agent SeedAgent(TenantDbContext db, string ext)
     {
         var a = Agent.Create(TenantId, "Test", "Agent", $"{ext}@x.com", "hash");
@@ -206,30 +216,30 @@ public class TransferNodeHandlerTests
     }
 
     [Fact]
-    public async Task TelephonyFlow_SwitchOk_Transferred()
+    public async Task TelephonyFlow_ActiveTarget_DefersTheSwitchToTheEngine()
     {
         var esl = NewEsl();
-        var flowId = Guid.NewGuid();
-        _engine.Setup(x => x.SwitchFlowAsync(Uuid, flowId, It.IsAny<IEslCommander>(), It.IsAny<CancellationToken>()))
-               .ReturnsAsync(true);
+        var db = NewDb();
+        var flow = Flow.Create(TenantId, Guid.NewGuid(), "CS flow", FlowType.Telephony, "{}");
+        flow.Publish();
+        db.Flows.Add(flow);
+        await db.SaveChangesAsync();
+        var ctx = Ctx(esl.Object);
 
-        var result = await NewHandler().ExecuteAsync(
-            Node("telephony_flow", new JsonObject { ["targetTelephonyFlowId"] = flowId.ToString() }), Ctx(esl.Object));
+        var result = await NewHandler(db: db).ExecuteAsync(
+            Node("telephony_flow", new JsonObject { ["targetTelephonyFlowId"] = flow.Id.ToString() }), ctx);
 
         Assert.Equal("transferred", result.TransitionTaken);
-        _engine.Verify(x => x.SwitchFlowAsync(Uuid, flowId, It.IsAny<IEslCommander>(), It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal(flow.Id.ToString(), ctx.Vars["_switch_flow_id"]);
+        _engine.Verify(x => x.SwitchFlowAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<IEslCommander>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task TelephonyFlow_SwitchReturnsFalse_Fails()
+    public async Task TelephonyFlow_TargetMissing_Fails()
     {
         var esl = NewEsl();
-        var flowId = Guid.NewGuid();
-        _engine.Setup(x => x.SwitchFlowAsync(Uuid, flowId, It.IsAny<IEslCommander>(), It.IsAny<CancellationToken>()))
-               .ReturnsAsync(false);
-
-        var result = await NewHandler().ExecuteAsync(
-            Node("telephony_flow", new JsonObject { ["targetTelephonyFlowId"] = flowId.ToString() }), Ctx(esl.Object));
+        var result = await NewHandler(db: NewDb()).ExecuteAsync(
+            Node("telephony_flow", new JsonObject { ["targetTelephonyFlowId"] = Guid.NewGuid().ToString() }), Ctx(esl.Object));
 
         Assert.Equal("failed", result.TransitionTaken);
     }
@@ -299,11 +309,10 @@ public class TransferNodeHandlerTests
     public async Task Announcement_BuiltinFile_DefersHandoffIntoTtsPlay()
     {
         var esl = NewEsl();
-        var flowId = Guid.NewGuid();
-        _engine.Setup(x => x.SwitchFlowAsync(Uuid, flowId, It.IsAny<IEslCommander>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        var (db, flowId) = SeedActiveTelephonyFlow();
         var ctx = Ctx(esl.Object);
 
-        var result = await NewHandler().ExecuteAsync(
+        var result = await NewHandler(db: db).ExecuteAsync(
             Node("telephony_flow", new JsonObject { ["targetTelephonyFlowId"] = flowId.ToString(), ["announceAudioFileId"] = "__builtin:/hold.wav" }),
             ctx);
 
@@ -322,10 +331,9 @@ public class TransferNodeHandlerTests
     public async Task Announcement_TtsFallback_RoutedThroughFliteChannelVarIntoTtsPlay()
     {
         var esl = NewEsl();
-        var flowId = Guid.NewGuid();
-        _engine.Setup(x => x.SwitchFlowAsync(Uuid, flowId, It.IsAny<IEslCommander>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        var (db, flowId) = SeedActiveTelephonyFlow();
 
-        await NewHandler().ExecuteAsync(
+        await NewHandler(db: db).ExecuteAsync(
             Node("telephony_flow", new JsonObject
             {
                 ["targetTelephonyFlowId"] = flowId.ToString(),
@@ -343,23 +351,22 @@ public class TransferNodeHandlerTests
     public async Task Announcement_SecondPass_SkipsAnnouncement_AndProceedsWithHandoff()
     {
         var esl = NewEsl();
-        var flowId = Guid.NewGuid();
-        _engine.Setup(x => x.SwitchFlowAsync(Uuid, flowId, It.IsAny<IEslCommander>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        var (db, flowId) = SeedActiveTelephonyFlow();
 
         var ctx = Ctx(esl.Object);
         // HandleTtsDoneAsync sets this before re-running the node.
         ctx.Vars["_announce_done"] = "true";
         ctx.Vars["_announce_replay_node"] = "tf_transfer_1";
 
-        var result = await NewHandler().ExecuteAsync(
+        var result = await NewHandler(db: db).ExecuteAsync(
             Node("telephony_flow", new JsonObject { ["targetTelephonyFlowId"] = flowId.ToString(), ["announceAudioFileId"] = "__builtin:/hold.wav" }),
             ctx);
 
         Assert.Equal("transferred", result.TransitionTaken);
-        _engine.Verify(x => x.SwitchFlowAsync(Uuid, flowId, It.IsAny<IEslCommander>(), It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal(flowId.ToString(), ctx.Vars["_switch_flow_id"]);   // handoff deferred to the engine
         esl.Verify(e => e.TransferAsync(Uuid, "tts_play", "XML", "default", It.IsAny<CancellationToken>()), Times.Never);
-        Assert.True(ctx.VarsToRemove.Contains("_announce_done"));
-        Assert.True(ctx.VarsToRemove.Contains("_announce_replay_node"));
+        Assert.Contains("_announce_done", ctx.VarsToRemove);
+        Assert.Contains("_announce_replay_node", ctx.VarsToRemove);
     }
 
     // ── Mid-call transfer (S178): sales agent's script fires a CS-queue transfer ──────────────────
@@ -369,7 +376,7 @@ public class TransferNodeHandlerTests
 
     private async Task<(TelephonyNodeResult Result, TelephonyFlowContext Ctx, CallRecord Seeded, Campaign Target,
         DbContextOptions<TenantDbContext> Options, TelephonyCallSession Live)> RunMidCallTransferAsync(
-        Mock<IEslCommander>? ctxEsl, IEslCommanderFactory? factory = null)
+        Mock<IEslCommander>? ctxEsl, IEslCommanderFactory? factory = null, Guid? targetInboundFlow = null)
     {
         var dbName = Guid.NewGuid().ToString();
         DbContextOptions<TenantDbContext> Options() =>
@@ -379,6 +386,7 @@ public class TransferNodeHandlerTests
         var csFlow = Guid.NewGuid();
         var target = Campaign.Create(TenantId, Guid.NewGuid(), "NeuroQ CS", "neuroq-cs");
         target.AssignFlow(csFlow);
+        if (targetInboundFlow is { } inbound) target.AssignInboundFlow(inbound);
         var record = CallRecord.Create(TenantId, Guid.NewGuid(), salesCampaignId);
         await using (var seedDb = new TenantDbContext(Options()))
         {
@@ -466,5 +474,26 @@ public class TransferNodeHandlerTests
         Assert.Equal("transferred", result.TransitionTaken);
         owned.Verify(e => e.TransferAsync(Uuid, "park_with_moh", "XML", "default", It.IsAny<CancellationToken>()), Times.Once);
         owned.Verify(e => e.DisposeAsync(), Times.Once);
+    }
+
+    // Stephen (S178): a transfer to another campaign enters through that campaign's own call flow (greeting, IVR,
+    // hours, hold pattern, queue node), deferred to the engine, instead of jumping straight into its queue.
+    [Fact]
+    public async Task MidCall_TargetCampaignWithACallFlow_EntersThroughThatFlow()
+    {
+        var esl = NewEsl();
+        esl.Setup(e => e.HangupChannelAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        var csInbound = Guid.NewGuid();
+
+        var (result, ctx, seeded, target, options, live) = await RunMidCallTransferAsync(esl, targetInboundFlow: csInbound);
+
+        Assert.Equal("transferred", result.TransitionTaken);
+        Assert.Equal(csInbound.ToString(), ctx.Vars["_switch_flow_id"]);
+        Assert.Equal(target.Id.ToString(), ctx.Vars["_switch_campaign_id"]);
+        Assert.False(ctx.Vars.ContainsKey("_queued"));                 // the CS flow's own queue node queues it
+        esl.Verify(e => e.HangupChannelAsync(AgentLeg, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal("true", live.Vars["_keep_record_agent"]);
+        await using var verifyDb = new TenantDbContext(options);
+        Assert.Equal(seeded.CampaignId, (await verifyDb.CallRecords.FindAsync(seeded.Id))!.CampaignId);
     }
 }

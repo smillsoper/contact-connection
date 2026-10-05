@@ -19,6 +19,7 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
     private readonly ICallTraceRecorder _traceRecorder;
     private readonly ICallTraceSubscriptionRegistry _traceRegistry;
     private readonly ICallTraceNotifier _traceNotifier;
+    private readonly IEslCommanderFactory? _eslFactory;
     private readonly ISharedCallVariableStore _sharedVars;
     private readonly ILogger<TelephonyFlowEngine> _logger;
 
@@ -30,8 +31,10 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
         ICallTraceSubscriptionRegistry traceRegistry,
         ICallTraceNotifier traceNotifier,
         ISharedCallVariableStore sharedVars,
-        ILogger<TelephonyFlowEngine> logger)
+        ILogger<TelephonyFlowEngine> logger,
+        IEslCommanderFactory? eslFactory = null)
     {
+        _eslFactory     = eslFactory;
         _factory        = factory;
         _sessionStore   = sessionStore;
         _handlers       = handlers.ToDictionary(h => h.NodeType, StringComparer.OrdinalIgnoreCase);
@@ -136,6 +139,7 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
             session.Vars[k] = v;
         ApplyPendingSessionMutations(session, ctx);
         await _sessionStore.SaveAsync(session, ct);
+        await RunPendingFlowSwitchAsync(session, ctx.Esl, ct);
     }
 
     /// <summary>
@@ -153,6 +157,32 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
 
         if (session.Vars.Remove("_switch_campaign_id", out var cid) && Guid.TryParse(cid, out var newCampaignId))
             session.CampaignId = newCampaignId;
+    }
+
+    /// <summary>
+    /// Deferred flow switch (S178). tf_transfer (another campaign's queue / a telephony flow) leaves
+    /// <c>_switch_flow_id</c> instead of calling <see cref="SwitchFlowAsync"/> itself. Calling it from inside a
+    /// handler let the outer branch's end-of-run save write its stale session copy (old FlowId, event handlers)
+    /// back over the switch. Here the current branch has finished and saved, so the new flow runs from its entry
+    /// node on a clean session: e.g. the CS campaign's own greeting / IVR / hours / hold pattern / queue.
+    /// Event branches fired from the CRM side have no ESL, so one is opened for the switch.
+    /// </summary>
+    private async Task RunPendingFlowSwitchAsync(TelephonyCallSession session, IEslCommander? esl, CancellationToken ct)
+    {
+        if (!session.Vars.Remove("_switch_flow_id", out var raw) || !Guid.TryParse(raw, out var flowId)) return;
+        await _sessionStore.SaveAsync(session, ct);   // consume the sentinel before the new flow runs
+
+        await using var owned = esl is null && _eslFactory is not null ? await _eslFactory.CreateAsync(ct) : null;
+        var commander = esl ?? owned;
+        if (commander is null)
+        {
+            _logger.LogWarning("TelephonyFlowEngine [{Uuid}]: flow switch to {FlowId} skipped — no ESL connection",
+                session.ChannelUuid, flowId);
+            return;
+        }
+
+        if (!await SwitchFlowAsync(session.ChannelUuid, flowId, commander, ct))
+            _logger.LogWarning("TelephonyFlowEngine [{Uuid}]: flow switch to {FlowId} failed", session.ChannelUuid, flowId);
     }
 
     // ── Audio playback continuation (PLAYBACK_STOP) ───────────────────────────
@@ -216,6 +246,7 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
             session.Vars[k] = v;
         ApplyPendingSessionMutations(session, ctx);
         await _sessionStore.SaveAsync(session, ct);
+        await RunPendingFlowSwitchAsync(session, ctx.Esl, ct);
     }
 
     // ── Flow handoff (tf_transfer → telephony_flow) ──────────────────────────
@@ -278,6 +309,7 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
             session.Vars[k] = v;
         ApplyPendingSessionMutations(session, ctx);
         await _sessionStore.SaveAsync(session, ct);
+        await RunPendingFlowSwitchAsync(session, ctx.Esl, ct);
         return true;
     }
 
@@ -371,6 +403,7 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
         session.Vars.Remove("_crm_session_json");
         ApplyPendingSessionMutations(session, ctx);
         await _sessionStore.SaveAsync(session, ct);
+        await RunPendingFlowSwitchAsync(session, ctx.Esl, ct);
 
         // Extract CRM session state if tf_script_pop fired during the branch
         FlowNodeState? crmSession = null;
