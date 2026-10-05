@@ -108,14 +108,48 @@ public sealed class UsageTally
 }
 
 /// <summary>The bill for a period: every minute at the base rate, toll-free minutes plus the surcharge, raised to the monthly
-/// minimum when usage falls short.</summary>
-public sealed record UsageCharges(decimal LocalAndOutbound, decimal TollFree, decimal Usage, decimal Minimum, decimal Total)
+/// minimum when usage falls short. Each line (local, toll-free, outbound) is rounded to the cent on its own and the total is
+/// the sum of those rounded lines (S179) — the same numbers an invoice shows, so the lines always add up to the total.</summary>
+public sealed record UsageCharges(decimal Local, decimal TollFree, decimal Outbound, decimal Usage, decimal Minimum, decimal Total)
 {
+    /// <summary>Local inbound + outbound — the base-rate minutes (kept for the Portal usage card).</summary>
+    public decimal LocalAndOutbound => Local + Outbound;
+
+    public static decimal Line(long billedMinutes, decimal pricePerMinute) =>
+        Math.Round(billedMinutes * pricePerMinute, 2, MidpointRounding.AwayFromZero);
+
     public static UsageCharges Calculate(UsageTally t, decimal ratePerMinute, decimal tollFreeSurcharge, decimal monthlyMinimum)
     {
-        var local = Math.Round((t.InboundLocal.BilledMinutes + t.Outbound.BilledMinutes) * ratePerMinute, 2, MidpointRounding.AwayFromZero);
-        var tollFree = Math.Round(t.InboundTollFree.BilledMinutes * (ratePerMinute + tollFreeSurcharge), 2, MidpointRounding.AwayFromZero);
-        var usage = local + tollFree;
-        return new UsageCharges(local, tollFree, usage, monthlyMinimum, Math.Max(usage, monthlyMinimum));
+        var local = Line(t.InboundLocal.BilledMinutes, ratePerMinute);
+        var tollFree = Line(t.InboundTollFree.BilledMinutes, ratePerMinute + tollFreeSurcharge);
+        var outbound = Line(t.Outbound.BilledMinutes, ratePerMinute);
+        var usage = local + tollFree + outbound;
+        return new UsageCharges(local, tollFree, outbound, usage, monthlyMinimum, Math.Max(usage, monthlyMinimum));
+    }
+}
+
+/// <summary>A month's usage as invoice lines (S179): one line per category with billed minutes (rates copied on), plus a
+/// monthly-minimum top-up when usage falls short. Same arithmetic as <see cref="UsageCharges"/>.</summary>
+public static class InvoiceUsageLines
+{
+    public sealed record Line(string Kind, string Description, decimal Quantity, decimal UnitPrice);
+
+    public static IReadOnlyList<Line> Build(UsageTally t, decimal ratePerMinute, decimal tollFreeSurcharge, decimal monthlyMinimum, string periodLabel)
+    {
+        var lines = new List<Line>();
+        if (t.InboundLocal.BilledMinutes > 0)
+            lines.Add(new("usage_local", $"Inbound calls, local numbers — {periodLabel} ({t.InboundLocal.Calls:N0} calls)",
+                t.InboundLocal.BilledMinutes, ratePerMinute));
+        if (t.InboundTollFree.BilledMinutes > 0)
+            lines.Add(new("usage_tollfree", $"Inbound calls, toll-free numbers — {periodLabel} ({t.InboundTollFree.Calls:N0} calls)",
+                t.InboundTollFree.BilledMinutes, ratePerMinute + tollFreeSurcharge));
+        if (t.Outbound.BilledMinutes > 0)
+            lines.Add(new("usage_outbound", $"Outbound calls — {periodLabel} ({t.Outbound.Calls:N0} calls)",
+                t.Outbound.BilledMinutes, ratePerMinute));
+
+        var usage = UsageCharges.Calculate(t, ratePerMinute, tollFreeSurcharge, monthlyMinimum).Usage;
+        if (monthlyMinimum > usage)
+            lines.Add(new("minimum", $"Monthly minimum {monthlyMinimum:C} — usage {usage:C}", 1, monthlyMinimum - usage));
+        return lines;
     }
 }

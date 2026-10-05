@@ -13,6 +13,7 @@ import PortalLoginPage from './pages/portal/PortalLoginPage'
 import PortalAuthCallbackPage from './pages/portal/PortalAuthCallbackPage'
 import TenantListPage from './pages/portal/TenantListPage'
 import TenantDetailPage from './pages/portal/TenantDetailPage'
+import InvoiceDetailPage from './pages/portal/InvoiceDetailPage'
 import ProvisionTenantPage from './pages/portal/ProvisionTenantPage'
 import OnboardingPage from './pages/OnboardingPage'
 import TenantAdminInviteAcceptPage from './pages/TenantAdminInviteAcceptPage'
@@ -185,6 +186,14 @@ export default function App() {
           element={
             <RequirePortalAuth>
               <TenantDetailPage />
+            </RequirePortalAuth>
+          }
+        />
+        <Route
+          path="/portal/invoices/:id"
+          element={
+            <RequirePortalAuth>
+              <InvoiceDetailPage />
             </RequirePortalAuth>
           }
         />

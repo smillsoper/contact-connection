@@ -288,15 +288,12 @@ public static class PortalTenantsEndpoints
     /// </summary>
     private static async Task<IResult> Usage(
         Guid id, string? month, decimal? rate, decimal? tollFreeSurcharge, decimal? minimum,
-        ITenantRepository tenants, TenantContext tenantContext, ScopedTenantDbContextFactory dbFactory, CancellationToken ct)
+        ITenantRepository tenants, IUsageMeter meter, CancellationToken ct)
     {
         var tenant = await tenants.GetByIdAsync(id, ct);
         if (tenant is null) return Results.NotFound();
 
-        TimeZoneInfo zone;
-        try { zone = TimeZoneInfo.FindSystemTimeZoneById(string.IsNullOrWhiteSpace(tenant.Timezone) ? "America/Los_Angeles" : tenant.Timezone); }
-        catch (TimeZoneNotFoundException) { zone = TimeZoneInfo.Utc; }
-
+        var zone = ContactConnection.Infrastructure.Billing.UsageMeter.ZoneFor(tenant);
         var nowLocal = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, zone);
         var first = new DateTime(nowLocal.Year, nowLocal.Month, 1);
         if (!string.IsNullOrWhiteSpace(month))
@@ -304,23 +301,11 @@ public static class PortalTenantsEndpoints
             if (!DateTime.TryParseExact(month + "-01", "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out first))
                 return Results.BadRequest(new { error = "month must be yyyy-MM" });
         }
-        var from = new DateTimeOffset(first, zone.GetUtcOffset(first)).ToUniversalTime();
-        var nextMonth = first.AddMonths(1);
-        var to = new DateTimeOffset(nextMonth, zone.GetUtcOffset(nextMonth)).ToUniversalTime();
-
-        tenantContext.Current = tenant;
-        await using var db = dbFactory.Create();
-        var calls = await db.CallRecords.AsNoTracking()
-            .Where(r => r.CallStartAt >= from && r.CallStartAt < to && r.RunMode == CallRunMode.Production)
-            .Select(r => new
-            {
-                r.Source, r.CallerId, r.Dnis, r.CallStartAt, r.DisconnectedAt, Closed = r.CallEndAt != null,
-            })
-            .ToListAsync(ct);
-
-        var tally = new UsageTally();
-        foreach (var c in calls)
-            tally.Add(new MeteredCall(c.Source, c.CallerId, c.Dnis, c.CallStartAt, c.DisconnectedAt, c.Closed));
+        // The same meter invoices are built from (S179).
+        var usage = await meter.TallyMonthAsync(tenant, first.Year, first.Month, ct);
+        var tally = usage.Tally;
+        var from = usage.From;
+        var to = usage.To;
 
         var r = rate ?? tenant.BillingRatePerMinute ?? Tenant.DefaultRatePerMinute;
         var tf = tollFreeSurcharge ?? tenant.BillingTollFreeSurcharge ?? Tenant.DefaultTollFreeSurcharge;

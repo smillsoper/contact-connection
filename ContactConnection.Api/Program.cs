@@ -258,6 +258,7 @@ app.MapAdminWebhooksEndpoints();
 // Portal (platform administration)
 app.MapPortalAuthEndpoints();
 app.MapPortalTenantsEndpoints();
+app.MapPortalInvoicesEndpoints();
 app.MapPortalApiDefinitionsEndpoints();
 app.MapPortalApiEndpointsEndpoints();
 app.MapApiTemplateEndpoints();

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import PortalShell from '../../components/portal/PortalShell'
 import TenantUsageCard from '../../components/portal/TenantUsageCard'
+import TenantInvoicesCard from '../../components/portal/TenantInvoicesCard'
 import {
   getTenant,
   updateTenant,
@@ -455,6 +456,7 @@ export default function TenantDetailPage() {
         </section>
 
         {id && <TenantUsageCard tenantId={id} />}
+        {id && <TenantInvoicesCard tenantId={id} />}
       </div>
     </PortalShell>
   )
