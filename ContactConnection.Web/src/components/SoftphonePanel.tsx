@@ -12,6 +12,8 @@ import { useSupervisorMonitorStore } from '../stores/supervisorMonitorStore'
 import { useIntercomStore } from '../stores/intercomStore'
 import { supervisorApi, MONITOR_MODE_LABEL } from '../api/supervisor'
 import AudioSettingsPanel from './AudioSettingsPanel'
+import PlaceCallPanel, { type OutboundDialResult } from './softphone/PlaceCallPanel'
+import Keypad from './softphone/Keypad'
 import { applySpeaker, getInputDeviceId, micConstraints, onAudioDevicesChanged } from '../utils/audioDevices'
 import { startRinging } from '../utils/ringtone'
 import { loadIceServers, rtcConfig } from '../utils/iceServers'
@@ -204,7 +206,19 @@ export default function SoftphonePanel() {
   const autoAnswerBridgeRef = useRef(false)
 
   const [elapsed, setElapsed]                       = useState(0)
-  const [dialInput, setDialInput]                   = useState('')
+  const [showKeypad, setShowKeypad]                 = useState(false)
+  const [dtmfSent, setDtmfSent]                     = useState('')
+  // An internal (extension) call placed from Place call — not a customer call, so no call record.
+  const internalDialRef = useRef(false)
+  const outboundNotice = useCallStore((s) => s.outboundNotice)
+  const setOutboundNotice = useCallStore((s) => s.setOutboundNotice)
+  useEffect(() => {
+    if (!outboundNotice) return
+    const t = setTimeout(() => setOutboundNotice(null), 6000)
+    return () => clearTimeout(t)
+  }, [outboundNotice, setOutboundNotice])
+  // A new call starts with the keypad closed and no digits shown.
+  useEffect(() => { if (callStatus !== 'on-call') { setShowKeypad(false); setDtmfSent('') } }, [callStatus])
   const [transferNumbers, setTransferNumbers]       = useState<ClientTransferNumber[]>([])
   const [showTransfers, setShowTransfers]           = useState(false)
   const [pickingUp, setPickingUp]                   = useState(false)
@@ -420,6 +434,30 @@ export default function SoftphonePanel() {
         return
       }
 
+      // Manual outbound (S179): the server placed this agent's call — this INVITE is the agent's own leg (labelled
+      // X-CC-Leg: outbound, carrying the call record id). Answer it; the customer is rung next. "Calling…" until the
+      // server says they answered (receiveOutboundAnswered); the server closes the record when the call ends.
+      if (session.direction === 'incoming' && ccLeg === 'outbound') {
+        const recordId: string | null = session.request?.getHeader?.('X-CC-Call-Record') || null
+        const customer: string | null = session.remote_identity?.uri?.user ?? null
+        sessionRef.current = session
+        const store = useCallStore.getState()
+        store.setDialing(customer ?? 'Outbound call')
+        if (recordId) store.setCallRecordId(recordId)
+        const wireOutbound = (pc: RTCPeerConnection) => pc.addEventListener('track', (e: RTCTrackEvent) => {
+          if (remoteAudioRef.current && e.streams[0]) {
+            remoteAudioRef.current.srcObject = e.streams[0]
+            remoteAudioRef.current.play().catch(() => {})
+          }
+        })
+        session.on('peerconnection', ({ peerconnection }: { peerconnection: RTCPeerConnection }) => wireOutbound(peerconnection))
+        const done = () => { if (sessionRef.current === session) { sessionRef.current = null; useCallStore.getState().reset() } }
+        session.on('ended', done)
+        session.on('failed', done)
+        try { session.answer({ mediaConstraints: micConstraints(), pcConfig: rtcConfig() }) } catch { /* ignore */ }
+        return
+      }
+
       // Decide whether this is a consultation leg or a new primary call
       const isTransfer = nextIsTransferRef.current
       nextIsTransferRef.current = false
@@ -489,10 +527,14 @@ export default function SoftphonePanel() {
             setRinging(num, name)
           }
         } else {
-          // Outbound direct dial (idle → dialing)
+          // Softphone-dialed call (idle → dialing): an internal extension from Place call. Customer calls are placed
+          // by the server now (X-CC-Leg: outbound above), so only a non-internal dial still opens a record here.
+          const isInternal = internalDialRef.current
+          internalDialRef.current = false
           let dialRecord: Promise<string | null> | null = null
           session.on('accepted', () => {
             setOnCall()
+            if (isInternal) return
             dialRecord = createOutboundRecord(session.remote_identity?.uri?.user ?? null)
             dialRecord.then((id) => { if (id) setCallRecordId(id) })
           })
@@ -772,23 +814,35 @@ export default function SoftphonePanel() {
     return e164 ? [`X-CC-Caller-Id: ${e164}`] : []
   }
 
-  // Manual outbound dial from idle state
-  const handleDial = () => {
+  // Place call → Internal: ring a colleague's extension (agent-to-agent, no call record).
+  const handleInternalDial = (extension: string, name: string) => {
     const ua = uaRef.current
-    const number = dialInput.trim()
-    if (!ua || !tenantSubdomain || !number) return
-    setDialing(number)
-    setDialInput('')
+    if (!ua || !tenantSubdomain) return
+    internalDialRef.current = true
+    setDialing(name)
     try {
-      ua.call(`sip:${number}@${tenantSubdomain}`, {
-        mediaConstraints: micConstraints(),
-        pcConfig: rtcConfig(),
-      })
-    } catch { reset() }
+      ua.call(`sip:${extension}@${tenantSubdomain}`, { mediaConstraints: micConstraints(), pcConfig: rtcConfig() })
+    } catch { internalDialRef.current = false; reset() }
   }
 
-  const handleDialKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') handleDial()
+  // Place call → External: the server has placed the call (its INVITE usually arrives first and set "Calling…");
+  // this adds the campaign so the agent can open its script on the call.
+  const handleOutboundDialed = (result: OutboundDialResult) => {
+    const s = useCallStore.getState()
+    if (s.callRecordId === result.callRecordId && result.campaignId) s.setCampaignId(result.campaignId)
+    else if (s.callStatus === 'idle') {
+      s.setDialing(result.number)
+      s.setCallRecordId(result.callRecordId)
+      if (result.campaignId) s.setCampaignId(result.campaignId)
+    }
+  }
+
+  // DTMF on the live leg — the consult leg during a warm transfer, else the main call (RFC 2833 in the media).
+  const sendDtmf = (digit: string) => {
+    const target = transferSessionRef.current ?? sessionRef.current
+    if (!target) return
+    try { target.sendDTMF(digit, { transportType: 'RFC2833', duration: 120, interToneGap: 70 }) } catch { return }
+    setDtmfSent((d) => (d + digit).slice(-20))
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -1177,6 +1231,17 @@ export default function SoftphonePanel() {
                   {isOnHold ? <PlayIcon className="w-5 h-5 text-white" /> : <PauseIcon className="w-5 h-5 text-white" />}
                 </button>
 
+                {/* Keypad (DTMF) */}
+                <button
+                  onClick={() => setShowKeypad((v) => !v)}
+                  className={`w-11 h-11 rounded-full flex items-center justify-center transition-colors text-white text-[10px] font-semibold ${
+                    showKeypad ? 'bg-blue-600 hover:bg-blue-500' : 'bg-gray-700 hover:bg-gray-600'
+                  }`}
+                  title="Keypad — send tones (menus, extensions)"
+                >
+                  ⌗
+                </button>
+
                 {/* Hang up */}
                 <button
                   onClick={handleHangUp}
@@ -1186,6 +1251,13 @@ export default function SoftphonePanel() {
                   <PhoneIcon className="w-5 h-5 text-white rotate-135" />
                 </button>
               </div>
+
+              {showKeypad && (
+                <div className="flex flex-col gap-1.5">
+                  <p className="text-center font-mono text-sm text-gray-200 h-5 tracking-widest">{dtmfSent}</p>
+                  <Keypad compact onDigit={sendDtmf} />
+                </div>
+              )}
 
               {/* Transfer numbers */}
               {transferNumbers.length > 0 && (
@@ -1330,27 +1402,15 @@ export default function SoftphonePanel() {
         </div>
       )}
 
-      {/* ── IDLE: dialpad ── */}
+      {/* ── IDLE: Place call (S179) ── */}
       {callStatus === 'idle' && sipExtension && registrationStatus === 'registered' && (
         <div className="flex flex-col gap-2">
-          <div className="flex gap-1">
-            <input
-              type="tel"
-              value={dialInput}
-              onChange={(e) => setDialInput(e.target.value)}
-              onKeyDown={handleDialKeyDown}
-              placeholder="Number to dial"
-              className="flex-1 min-w-0 bg-gray-800 text-white text-sm rounded-lg px-3 py-2 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-            <button
-              onClick={handleDial}
-              disabled={!dialInput.trim()}
-              className="w-10 h-10 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 flex items-center justify-center transition-colors shrink-0"
-              title="Call"
-            >
-              <PhoneIcon className="w-4 h-4 text-white" />
-            </button>
-          </div>
+          {outboundNotice && (
+            <div className="rounded-lg border border-amber-800 bg-amber-950/50 px-3 py-1.5 text-center text-xs text-amber-200">
+              Call ended · {outboundNotice.text}
+            </div>
+          )}
+          <PlaceCallPanel onInternalDial={handleInternalDial} onDialed={handleOutboundDialed} />
           <p className="text-gray-700 text-xs text-center pt-1">Waiting for calls…</p>
         </div>
       )}

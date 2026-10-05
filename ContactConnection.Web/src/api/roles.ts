@@ -41,6 +41,8 @@ export const PERMISSION_LABELS: Record<string, string> = {
   'blocklist.view':        'View Block List',
   'blocklist.manage':      'Manage Block List',
   'training.mode':         'Launch Scripts in Training Mode',
+  'calls.direct_dial':     'Can Direct Dial (no client or campaign)',
+  'softphone.internal_list': 'Included in Softphone Internal Dial List',
 }
 
 export const PERMISSION_GROUPS: Record<string, string[]> = {
@@ -54,6 +56,7 @@ export const PERMISSION_GROUPS: Record<string, string[]> = {
   Reporting:   ['reports.view', 'reports.manage'],
   Blocklist:   ['blocklist.view', 'blocklist.manage'],
   Training:    ['training.mode'],
+  Softphone:   ['calls.direct_dial', 'softphone.internal_list'],
 }
 
 export const LANDING_PAGE_LABELS: Record<string, string> = {

@@ -455,6 +455,15 @@ export default function FlowPanel() {
     })
 
     // Supervisor listen-in (S167): arm the softphone for the eavesdrop INVITE, or a mode switch.
+    // Manual outbound (S179): the server placed the call; these say when the customer answered and how it ended.
+    connection.on('receiveOutboundAnswered', (callRecordId: string) => {
+      const s = useCallStore.getState()
+      if (s.callStatus === 'dialing' && s.callRecordId === callRecordId) s.setOnCall()
+    })
+    connection.on('receiveOutboundEnded', (_callRecordId: string, reason: string | null) => {
+      if (reason) useCallStore.getState().setOutboundNotice(reason)
+    })
+
     connection.on('receiveSupervisorConnecting', (kind: string, label: string, mode: string) => {
       if (kind === 'intercom') { useIntercomStore.getState().start(label, 'caller'); return }
       if (kind === 'intercom-incoming') { useIntercomStore.getState().start(label, 'callee'); return }

@@ -1,3 +1,4 @@
+import { api } from '../../api/client'
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import AdminShell from '../../components/admin/AdminShell'
@@ -43,6 +44,8 @@ function SettingsForm({ campaign, flows, onSaved }: SettingsFormProps) {
   const [priority, setPriority] = useState(campaign.priority)
   const [acwSeconds, setAcwSeconds] = useState(campaign.afterCallWorkSeconds)
   const [callerIdNumber, setCallerIdNumber] = useState(campaign.callerIdNumber ?? '')
+  const [hoursStart, setHoursStart] = useState(campaign.outboundHoursStart ?? '')
+  const [hoursEnd, setHoursEnd] = useState(campaign.outboundHoursEnd ?? '')
   const [flowId, setFlowId] = useState(campaign.flowId ?? '')
   const [inboundFlowId, setInboundFlowId] = useState(campaign.inboundFlowId ?? '')
   const [outboundFlowId, setOutboundFlowId] = useState(campaign.outboundFlowId ?? '')
@@ -84,6 +87,12 @@ function SettingsForm({ campaign, flows, onSaved }: SettingsFormProps) {
         ringStrategy: hasQueue ? ringStrategy : 'ring_all',
         ringTopN,
       })
+      // Manual outbound calling window (S179) — its own endpoint; both blank = the 8 AM – 9 PM default.
+      let hours: { outboundHoursStart: string | null; outboundHoursEnd: string | null } | null = null
+      if (isOutbound && dialMode === 'manual'
+          && (hoursStart !== (campaign.outboundHoursStart ?? '') || hoursEnd !== (campaign.outboundHoursEnd ?? ''))) {
+        hours = await api.put(`/api/v1/campaigns/${campaign.id}/outbound-hours`, { start: hoursStart || null, end: hoursEnd || null })
+      }
       // Save fallback script flow
       if (flowId && flowId !== campaign.flowId) {
         await setCampaignFlow(campaign.id, flowId)
@@ -106,7 +115,7 @@ function SettingsForm({ campaign, flows, onSaved }: SettingsFormProps) {
           await removeCampaignOutboundFlow(campaign.id)
         }
       }
-      onSaved({ ...campaign, ...updated, flowId: flowId || undefined, inboundFlowId: inboundFlowId || undefined, outboundFlowId: outboundFlowId || undefined })
+      onSaved({ ...campaign, ...updated, ...(hours ?? {}), flowId: flowId || undefined, inboundFlowId: inboundFlowId || undefined, outboundFlowId: outboundFlowId || undefined })
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
     } catch (e) {
@@ -231,6 +240,28 @@ function SettingsForm({ campaign, flows, onSaved }: SettingsFormProps) {
               placeholder="+15035551234"
               className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
             />
+            <p className="text-[11px] text-gray-500 mt-1">Agents' manual outbound calls on this campaign show this number. Blank = the tenant default (Telephony → Phone Numbers).</p>
+          </div>
+        )}
+
+        {/* Manual outbound calling window (S179) */}
+        {direction === 'outbound' && dialMode === 'manual' && (
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Calling hours (customer's local time)</label>
+            <div className="flex items-center gap-2">
+              <input type="time" value={hoursStart} onChange={(e) => setHoursStart(e.target.value)} min="08:00" max="21:00"
+                className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+              <span className="text-gray-500 text-sm">to</span>
+              <input type="time" value={hoursEnd} onChange={(e) => setHoursEnd(e.target.value)} min="08:00" max="21:00"
+                className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+              {(hoursStart || hoursEnd) && (
+                <button type="button" onClick={() => { setHoursStart(''); setHoursEnd('') }} className="text-xs text-gray-400 hover:text-white">Use default</button>
+              )}
+            </div>
+            <p className="text-[11px] text-gray-500 mt-1">
+              Blank = 8:00 AM – 9:00 PM (the federal TCPA window). You can narrow it, not widen it. Dials outside the window
+              are blocked and logged; the customer's time zone comes from their last call's address, else the tenant's.
+            </p>
           </div>
         )}
 

@@ -27,6 +27,9 @@ export interface Campaign {
   direction: string
   dialMode: string
   callerIdNumber?: string
+  /** Manual outbound calling window, callee's local time ("HH:mm"); null = 8:00 AM – 9:00 PM. */
+  outboundHoursStart?: string | null
+  outboundHoursEnd?: string | null
   priority: number
   afterCallWorkSeconds: number
   maxQueueSize: number

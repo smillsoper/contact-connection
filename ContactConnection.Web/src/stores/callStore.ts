@@ -44,6 +44,10 @@ interface CallState {
   // earlier node/event never double-fires.
   lastTelephonyEventEnded: { callRecordId: string; eventName: string; outcome: string; at: number } | null
 
+  // Manual outbound (S179): how the last server-placed call ended (Busy, No answer…), shown briefly in the softphone.
+  outboundNotice: { text: string; at: number } | null
+  setOutboundNotice: (text: string | null) => void
+
   // "Playing greeting…" indicator (project_agent_connect_tone) — true while a connect prompt is
   // playing to the CALLER during the receiveAutoConnecting window, so the agent knows to hold off
   // rather than speak before the caller has actually been greeted. Pushed via receivePlayingGreeting.
@@ -114,6 +118,8 @@ export const useCallStore = create<CallState>((set) => ({
   transferTargetLabel: null,
   secureCollect: null,
   lastTelephonyEventEnded: null,
+  outboundNotice: null,
+  setOutboundNotice: (text) => set({ outboundNotice: text ? { text, at: Date.now() } : null }),
   playingGreeting: false,
   cartVersion: 0,
 

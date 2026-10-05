@@ -563,6 +563,44 @@ function CampaignsTab() {
 
 // ── Phone Numbers Tab ─────────────────────────────────────────────────────────
 
+/** Tenant default outbound caller ID (S179) — direct dials, and manual outbound campaigns with no caller ID of their own. */
+function DefaultOutboundCallerId({ numbers }: { numbers: PhoneNumber[] }) {
+  const [value, setValue] = useState('')
+  const [saved, setSaved] = useState('')
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  useEffect(() => {
+    api.get<{ defaultOutboundCallerId: string | null }>('/api/v1/telephony/outbound-settings')
+      .then((r) => { setValue(r.defaultOutboundCallerId ?? ''); setSaved(r.defaultOutboundCallerId ?? '') })
+      .catch(() => {})
+  }, [])
+  async function save() {
+    setMsg(null)
+    try {
+      const r = await api.put<{ defaultOutboundCallerId: string | null }>('/api/v1/telephony/outbound-settings',
+        { defaultOutboundCallerId: value.trim() || null })
+      setValue(r.defaultOutboundCallerId ?? ''); setSaved(r.defaultOutboundCallerId ?? '')
+      setMsg({ ok: true, text: 'Saved.' })
+    } catch (e) { setMsg({ ok: false, text: e instanceof Error ? e.message : 'Save failed.' }) }
+  }
+  return (
+    <div className="mb-5 rounded-lg border border-gray-800 bg-gray-900/60 px-4 py-3">
+      <label className="block text-xs text-gray-400 mb-1">Default outbound caller ID</label>
+      <div className="flex flex-wrap items-center gap-2">
+        <input list="tenant-dids" value={value} onChange={(e) => setValue(e.target.value)} placeholder="+15415551234"
+          className="w-56 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm font-mono outline-none focus:ring-2 focus:ring-indigo-500" />
+        <datalist id="tenant-dids">{numbers.map((n) => <option key={n.id} value={n.number}>{n.label ?? ''}</option>)}</datalist>
+        <button onClick={() => void save()} disabled={value.trim() === saved}
+          className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded-lg px-3 py-2 text-sm">Save</button>
+        {msg && <span className={`text-xs ${msg.ok ? 'text-emerald-400' : 'text-red-400'}`}>{msg.text}</span>}
+      </div>
+      <p className="text-[11px] text-gray-500 mt-1">
+        Used for direct dials and for manual outbound campaigns that have no caller ID of their own. Use a number on your
+        carrier account — the carrier rejects any other.
+      </p>
+    </div>
+  )
+}
+
 function PhoneNumbersTab() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [numbers, setNumbers] = useState<PhoneNumber[]>([])
@@ -667,6 +705,7 @@ function PhoneNumbersTab() {
         <MediaAssignmentsModal phoneNumberId={mediaFor.id} number={mediaFor.number}
           clientNumber={mediaFor.clientNumber} onClose={() => setMediaFor(null)} />
       )}
+      <DefaultOutboundCallerId numbers={numbers} />
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <p className="text-gray-500 text-sm">DIDs assigned to campaigns.</p>
