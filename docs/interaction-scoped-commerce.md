@@ -1,4 +1,4 @@
-# Interaction-Scoped Commerce (planned S178, 2026-10-04)
+# Interaction-Scoped Commerce (planned and DONE S178, 2026-10-04: all 5 phases built + live-verified)
 
 **Why:** a caller transferred sales → CS is one call with two interactions (ARCHITECTURE §22). CS agents can place
 orders too: the NeuroQ and My Best Heart customer-service scripts do save-the-sale scripting and free-form orders (items
@@ -49,3 +49,8 @@ API calls, cart/order). Drop the record-level cart/order columns.
 - Customer identity and addresses stay on the record and follow the caller to CS (correct today).
 - Usage billing stays per record (one caller leg).
 - Interactions not transferred behave exactly as now; the first interaction is "the sale" for single-agent calls.
+
+## Setup note (from the live test)
+
+Offers must be assigned to the CS campaign before a CS agent can add them to their cart (offer availability follows the
+interaction's campaign).

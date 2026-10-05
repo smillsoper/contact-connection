@@ -187,6 +187,7 @@
 | 175 | 2026-10-03 | 4:02 PM PDT | 7:03 PM PDT | 181 min | ~21408 min |
 | 176 | 2026-10-04 | 12:30 PM PDT | 1:13 PM PDT | 43 min | ~21451 min |
 | 177 | 2026-10-04 | 3:30 PM PDT | 3:55 PM PDT | 25 min | ~21476 min |
+| 178 | 2026-10-04 | 5:07 PM PDT | 8:03 PM PDT | 176 min | ~21652 min |
 
 ---
 
@@ -11419,3 +11420,49 @@ Bugs Stephen found while building a CS Transfer section in the NeuroQ - LF TV sc
 ### Next
 
 - Tuesday: Sprint 1 item 0 (mid-call CS transfer), then launch modes. Stephen will bring any other bugs he finds while testing.
+
+## Session 178
+
+**Date:** 2026-10-04
+**Start:** 5:07 PM PDT
+**End:** 8:03 PM PDT
+**Duration:** 176 minutes
+**Total Duration:** ~21652 minutes
+
+### Focus
+
+Sprint 1 started early (a free usage reset). Stephen's two bugs, then item 0: a mid-call transfer from sales to the CS queue.
+That grew into **interaction-scoped commerce**: cart, order, payments, commissions and AI summaries per interaction. All
+of it was live-verified on transfer calls.
+
+### Done
+
+- **Abandoned calls** (`056aaf0`, `31ada96`): the Call Records list shows "Abandoned · in queue · short" (badge under Source),
+  and the detail page shows type, length and time. They were never supervisor-finalized; they just read "incomplete".
+- **Shared variables in the call trace** (`d03edc5`): `sharedVars` is recorded in CRM + telephony snapshots, with PCI redaction.
+- **Mid-call transfer sales → CS** (`db674a5`, `8f791bd`, `ee0240b`, live-verified):
+  - Event branches fired from the CRM had no ESL, so `tf_transfer` always failed; it now opens its own connection.
+  - Cold transfer: caller → hold music, sales leg dropped (guards saved first; the sales agent goes to ACW once).
+  - The caller **enters through the CS campaign's own call flow** via a deferred flow switch. This also fixes a latent clobber in
+    the `telephony_flow` destination.
+  - The CS agent gets the CS script.
+  - Fix: FreeSWITCH reports the dropped leg's hangup twice; the guard now holds until the next bridge.
+- **Per-interaction custom fields** (`24b778a`): a transferred interaction's script writes go to that interaction's own fields;
+  the record keeps the sales values. Interaction numbering fixed (`68e2168`).
+- **Interaction-scoped commerce**, plan `docs/interaction-scoped-commerce.md`, 5 phases, each tested + committed:
+  1. Every script session runs inside a saved interaction; past sessions backfilled (`e020048`).
+  2. Storage: interaction cart / order / payment status / totals / tier; payments + orders linked (`e03c4cc`).
+  3. Writers: cart (agent tab → session → interaction), payments (CS can't void the sales auth), order numbers per
+     interaction, order submitted, Order entity, routing tier (`76704ae`). Live: separate sales and CS carts in the DB.
+  4. Readers: script variables + Liquid order model (`ea5423b`); commissions (unchanged for non-transferred calls, plus
+     transferred interactions earn under their own campaign); AI summaries per interaction (`3abd970`). Live: one summary per
+     campaign's script; the CS agent gets their own wrap-up card.
+  5. Record-level commerce columns dropped after verifying every value on interactions; review edits per interaction
+     (`30305b9`); **call detail page = shared header + one collapsible section per interaction** (`dda5118`). Live-verified.
+- Tests: **1,521 passing** (Domain 281, Application 20, Infrastructure 1,095, Api 125).
+
+### Next
+
+- Run tenant migrations for other tenants (Portal).
+- Offers must be assigned to the CS campaign before CS agents can sell them (setup note for Clint).
+- Sprint 1 item 1: script launch modes; then invoices, null guards, Stripe test mode.
