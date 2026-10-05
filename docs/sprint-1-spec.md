@@ -37,6 +37,10 @@ Life Seasons doesn't want an IVR menu on the sales line.
 
 ## 1. Script launch modes (≈2 sessions)
 
+**Status (S179):** built — part 1 (`2582b10`…`578e254`) + part 2 (`599cfc2`, `7ddf2f8`). Sandbox credential tabs, training
+responses on tenant API endpoints, practice runs filtered out of Call Records / usage / commissions / AI / media.
+**When the export engine and KPI queries are built (Sprint 2), they must filter `run_mode = 'production'`** — they don't exist yet.
+
 ### Modes
 
 | Mode | Who | Requires | Credentials |
