@@ -118,7 +118,17 @@ function FlowSessionView({ entry, hub, onEnd }: FlowSessionViewProps) {
   useEffect(() => {
     if (state.phase !== 'running') return
     const waitEventName = state.node.waitForTelephonyEventName
-    if (!waitEventName || !lastTelephonyEventEnded) return
+    if (!waitEventName) return
+    // A practice run (training / sandbox, S179) has no telephony call, so no branch will ever report back — carry on
+    // as if the event had finished.
+    if (state.node.runMode && state.node.runMode !== 'production') {
+      const key = `${state.node.nodeId}:practice`
+      if (autoAdvancedForRef.current === key) return
+      autoAdvancedForRef.current = key
+      advance()
+      return
+    }
+    if (!lastTelephonyEventEnded) return
     if (lastTelephonyEventEnded.eventName !== waitEventName) return
     const key = `${state.node.nodeId}:${lastTelephonyEventEnded.at}`
     if (autoAdvancedForRef.current === key) return

@@ -181,8 +181,10 @@ export default function NodeDisplay({ node, onAdvance, onJump, advancing, valida
     lastTelephonyEventEnded.eventName === node.waitForTelephonyEventName &&
     lastTelephonyEventEnded.at >= nodeDisplayedAtRef.current,
   )
+  // Practice runs (S179) never wait — there's no telephony call to report back.
+  const practiceRun = Boolean(node.runMode) && node.runMode !== 'production'
   const waitingOnTelephonyEvent =
-    Boolean(node.waitForTelephonyEventName) && !hasMatchingTelephonyEndedPush && !telephonyWaitTimedOut
+    Boolean(node.waitForTelephonyEventName) && !practiceRun && !hasMatchingTelephonyEndedPush && !telephonyWaitTimedOut
 
   // Address form state
   const [addrForm, setAddrForm] = useState<AddrForm>(EMPTY_ADDR)
