@@ -549,6 +549,7 @@ public static class CampaignsEndpoints
     {
         c.Id, c.TenantId, c.ClientId, c.Name, c.Slug, c.Status, c.Description, c.FlowId, c.InboundFlowId, c.OutboundFlowId,
         c.Direction, c.DialMode, c.CallerIdNumber, c.Priority, c.AfterCallWorkSeconds,
+        OutboundHoursStart = c.OutboundHoursStart?.ToString("HH:mm"), OutboundHoursEnd = c.OutboundHoursEnd?.ToString("HH:mm"),
         c.MaxQueueSize, c.QueueTimeoutSeconds, c.ServiceLevelThresholdSeconds, c.ShortAbandonThresholdSeconds,
         c.QueueAccelerationEnabled, c.QueueAccelerationIntervalSeconds, c.QueueAccelerationPriorityBoost,
         c.RingStrategy, c.RingTopN,
@@ -565,6 +566,7 @@ public static class CampaignsEndpoints
     {
         c.Id, c.TenantId, c.ClientId, c.Name, c.Slug, c.Status, c.Description, c.FlowId, c.InboundFlowId, c.OutboundFlowId,
         c.Direction, c.DialMode, c.CallerIdNumber, c.Priority, c.AfterCallWorkSeconds,
+        OutboundHoursStart = c.OutboundHoursStart?.ToString("HH:mm"), OutboundHoursEnd = c.OutboundHoursEnd?.ToString("HH:mm"),
         c.MaxQueueSize, c.QueueTimeoutSeconds, c.ServiceLevelThresholdSeconds, c.ShortAbandonThresholdSeconds,
         c.QueueAccelerationEnabled, c.QueueAccelerationIntervalSeconds, c.QueueAccelerationPriorityBoost,
         c.RingStrategy, c.RingTopN,

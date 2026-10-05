@@ -68,6 +68,11 @@ public class FlowHub : Hub<IFlowHubClient>
 /// </summary>
 public interface IFlowHubClient
 {
+    /// <summary>Manual outbound (S179): the customer answered the call the server placed for this agent.</summary>
+    Task ReceiveOutboundAnswered(string callRecordId);
+    /// <summary>Manual outbound (S179): the call ended — <paramref name="reason"/> is a plain outcome (Busy, No answer…) or null.</summary>
+    Task ReceiveOutboundEnded(string callRecordId, string? reason);
+
     /// <summary>Push the current node state to the agent UI after each advance.</summary>
     Task ReceiveNodeState(FlowNodeState state);
 

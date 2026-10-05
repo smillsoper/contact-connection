@@ -219,6 +219,21 @@ public class CallRecord
     }
 
     /// <summary>
+    /// A manual outbound call the server places for an agent (S179): campaign dials carry their client and campaign so
+    /// reporting, scripts, billing and commissions attach; a direct dial has neither. <paramref name="callerId"/> is the
+    /// number we presented — stored as the DNIS (our side of the call), the dialed customer as the caller ID.
+    /// </summary>
+    public static CallRecord CreateManualOutbound(
+        Guid tenantId, Guid agentId, string dialedNumber, string callerId, Guid? clientId, Guid? campaignId)
+    {
+        var record = CreateOutbound(tenantId, dialedNumber, agentId);
+        record.ClientId = clientId ?? Guid.Empty;
+        record.CampaignId = campaignId ?? Guid.Empty;
+        record.Dnis = callerId;
+        return record;
+    }
+
+    /// <summary>
     /// Creates the call record for the outbound leg placed when a scheduled <see cref="Callback"/>
     /// fires. Campaign is known (the callback carries it); no agent yet — one is assigned when the
     /// answered leg routes into the queue. <paramref name="callbackNumber"/> is the number dialled.

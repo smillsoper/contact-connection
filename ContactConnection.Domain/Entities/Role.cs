@@ -79,6 +79,12 @@ public static class Permission
     /// billing, commissions and reporting.</summary>
     public const string TrainingMode = "training.mode";
 
+    /// <summary>Manual outbound (S179): dial any number without a client or campaign, as the tenant's default outbound
+    /// caller ID. Campaign dials need only an assignment to a manual outbound campaign.</summary>
+    public const string DirectDial = "calls.direct_dial";
+    /// <summary>Listed in other users' softphone Internal dial list (with presence) — a role switch, not an action.</summary>
+    public const string InternalDialList = "softphone.internal_list";
+
     public static readonly IReadOnlyList<string> All = [
         AgentsView, AgentsManage, RolesManage,
         FlowsView, FlowsManage, FlowsPublish,
@@ -88,14 +94,15 @@ public static class Permission
         SupervisorMonitor, SupervisorOverride,
         ReportsView, ReportsManage,
         BlocklistView, BlocklistManage,
-        TrainingMode
+        TrainingMode,
+        DirectDial, InternalDialList
     ];
 
     // Permissions derived from legacy AgentRole strings (for agents without a custom RoleId)
     public static IReadOnlyList<string> ForLegacyRole(string role) => role switch
     {
         AgentRole.Admin      => All.ToList(),
-        AgentRole.Supervisor => [AgentsView, FlowsView, CallsView, CallsExport, SupervisorMonitor, SupervisorOverride, ReportsView],
+        AgentRole.Supervisor => [AgentsView, FlowsView, CallsView, CallsExport, SupervisorMonitor, SupervisorOverride, ReportsView, InternalDialList],
         _                    => [CallsView]
     };
 }

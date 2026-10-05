@@ -221,13 +221,10 @@ public static class CommissionsEndpoints
 
         var row = await platformDb.Tenants.FirstOrDefaultAsync(t => t.Id == tenant.Current!.Id, ct);
         if (row is null) return Results.NotFound();
-        var s = row.Settings;
-        row.UpdateSettings(new TenantSettings
-        {
-            DateFormat = s.DateFormat, TimeFormat = s.TimeFormat, SupportEmail = s.SupportEmail, BillingEmail = s.BillingEmail,
-            SessionTimeoutMinutes = s.SessionTimeoutMinutes, MfaRequirement = s.MfaRequirement,
-            PayPeriodFrequency = req.Frequency!, PayPeriodStart = start.ToString("yyyy-MM-dd"),
-        });
+        var settings = row.Settings.Clone();
+        settings.PayPeriodFrequency = req.Frequency!;
+        settings.PayPeriodStart = start.ToString("yyyy-MM-dd");
+        row.UpdateSettings(settings);
         await platformDb.SaveChangesAsync(ct);
         tenant.Current = row;
         return GetSettings(tenant);

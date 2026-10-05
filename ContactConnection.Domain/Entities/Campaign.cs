@@ -24,6 +24,15 @@ public class Campaign
     public string Direction { get; private set; } = CampaignDirection.Inbound;
     public string DialMode { get; private set; } = CampaignDialMode.Manual;  // outbound only
     public string? CallerIdNumber { get; private set; }   // outbound only
+    /// <summary>Manual outbound calling window in the CALLEE's local time (S179). Null = the federal TCPA window,
+    /// 8:00 AM – 9:00 PM (<see cref="DefaultOutboundHoursStart"/>/<see cref="DefaultOutboundHoursEnd"/>).</summary>
+    public TimeOnly? OutboundHoursStart { get; private set; }
+    public TimeOnly? OutboundHoursEnd { get; private set; }
+
+    public static readonly TimeOnly DefaultOutboundHoursStart = new(8, 0);
+    public static readonly TimeOnly DefaultOutboundHoursEnd = new(21, 0);
+    public TimeOnly EffectiveOutboundHoursStart => OutboundHoursStart ?? DefaultOutboundHoursStart;
+    public TimeOnly EffectiveOutboundHoursEnd => OutboundHoursEnd ?? DefaultOutboundHoursEnd;
 
     // Campaign-level routing priority (1–10; higher = preferred when agent eligible for multiple)
     public int Priority { get; private set; } = 5;
@@ -250,6 +259,21 @@ public class Campaign
             throw new ArgumentException($"Unknown tax provider '{provider}'.", nameof(provider));
         TaxProvider = provider;
         TaxSettings = string.IsNullOrWhiteSpace(settingsJson) ? null : settingsJson;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>Both null = the TCPA default. The window must lie inside 8 AM – 9 PM: a tenant can narrow it, never widen it.</summary>
+    public void SetOutboundHours(TimeOnly? start, TimeOnly? end)
+    {
+        if ((start is null) != (end is null)) throw new ArgumentException("Set both the start and end of the calling window, or neither.");
+        if (start is { } s && end is { } e)
+        {
+            if (e <= s) throw new ArgumentException("The calling window must end after it starts.");
+            if (s < DefaultOutboundHoursStart || e > DefaultOutboundHoursEnd)
+                throw new ArgumentException("The calling window must fall within 8:00 AM – 9:00 PM (the callee's local time).");
+        }
+        OutboundHoursStart = start;
+        OutboundHoursEnd = end;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 

@@ -24,6 +24,10 @@ public class CampaignConfiguration : IEntityTypeConfiguration<Campaign>
         builder.Property(c => c.Direction).HasColumnName("direction").HasMaxLength(20).IsRequired();
         builder.Property(c => c.DialMode).HasColumnName("dial_mode").HasMaxLength(20).IsRequired();
         builder.Property(c => c.CallerIdNumber).HasColumnName("caller_id_number").HasMaxLength(30);
+        builder.Property(c => c.OutboundHoursStart).HasColumnName("outbound_hours_start");
+        builder.Property(c => c.OutboundHoursEnd).HasColumnName("outbound_hours_end");
+        builder.Ignore(c => c.EffectiveOutboundHoursStart);
+        builder.Ignore(c => c.EffectiveOutboundHoursEnd);
         builder.Property(c => c.Priority).HasColumnName("priority");
         builder.Property(c => c.RingStrategy).HasColumnName("ring_strategy").HasMaxLength(30).IsRequired();
         builder.Property(c => c.RingTopN).HasColumnName("ring_top_n");

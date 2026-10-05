@@ -42,6 +42,15 @@ public interface IEslCommander
     /// the returned supervisor leg is the handle (its hangup ends the call).</summary>
     Task<(string? Uuid, string? Error)> OriginateIntercomAsync(
         string legUuid, string supervisorExtension, string agentExtension, string domain, string supervisorLabel, string agentLabel, CancellationToken ct = default);
+    /// <summary>
+    /// Manual outbound (S179): rings the agent's softphone (auto-answer, labelled X-CC-Leg: outbound with the call
+    /// record id), then bridges it to <paramref name="customerE164"/> through <paramref name="gateway"/> presenting
+    /// <paramref name="callerIdE164"/> — the caller ID is set here, server-side, never taken from the softphone.
+    /// <paramref name="legUuid"/> is the agent leg (the handle: its bridge = answered, its hangup = call over).
+    /// </summary>
+    Task<string?> OriginateManualOutboundAsync(
+        string legUuid, string agentExtension, string domain, string customerE164, string callerIdE164,
+        Guid callRecordId, string gateway, CancellationToken ct = default);
     /// <summary>uuid_recv_dtmf — as if <paramref name="uuid"/>'s own endpoint pressed the digits
     /// (drives eavesdrop's mode switches without anyone hearing a tone).</summary>
     Task RecvDtmfAsync(string uuid, string digits, CancellationToken ct = default);

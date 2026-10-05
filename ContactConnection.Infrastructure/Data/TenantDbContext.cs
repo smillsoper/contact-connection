@@ -73,6 +73,7 @@ public class TenantDbContext : DbContext
     public DbSet<MediaReplayBatch> MediaReplayBatches => Set<MediaReplayBatch>();
     public DbSet<CallSummary> CallSummaries => Set<CallSummary>();
     public DbSet<CallRecordAuditEntry> CallRecordAuditEntries => Set<CallRecordAuditEntry>();
+    public DbSet<OutboundDialAttempt> OutboundDialAttempts => Set<OutboundDialAttempt>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -134,6 +135,7 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new MediaAssignmentChangeConfiguration());
         modelBuilder.ApplyConfiguration(new MediaReplayBatchConfiguration());
         modelBuilder.ApplyConfiguration(new CallSummaryConfiguration());
+        modelBuilder.ApplyConfiguration(new OutboundDialAttemptConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 

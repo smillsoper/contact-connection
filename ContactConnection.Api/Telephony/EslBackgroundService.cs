@@ -1453,6 +1453,31 @@ public sealed class EslBackgroundService : BackgroundService
         // session may be keyed under this event's own uuid or its bridge partner's (see
         // ResolveSessionAsync). session.ChannelUuid (not the raw event uuid) is the correct key
         // for all session-store/CallRecord lookups below once a session is found.
+        // A manual outbound call ended (S179) — its agent leg is the handle. Close the record, start after-call work and
+        // tell the softphone how it ended. No call session involved. (Hangup fires twice; the key goes on the first.)
+        var outboundJson = await _sessionStore.GetKeyAsync(ManualOutboundCallService.LegKey(channelUuid), ct);
+        if (!string.IsNullOrEmpty(outboundJson))
+        {
+            await _sessionStore.DeleteKeyAsync(ManualOutboundCallService.LegKey(channelUuid), ct);
+            if (System.Text.Json.JsonSerializer.Deserialize<ManualOutboundLeg>(outboundJson) is { } outboundLeg)
+            {
+                // The customer leg's failure (busy, no answer…) lands in originate_disposition on the agent leg; a call
+                // that connected reads SUCCESS.
+                var disposition = vars.GetValueOrDefault("variable_originate_disposition");
+                try
+                {
+                    using var outboundScope = _scopeFactory.CreateScope();
+                    await ManualOutboundCallService.EndAsync(outboundLeg,
+                        disposition is null or "SUCCESS" ? null : disposition,
+                        outboundScope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>(), _stateStore, _hub, ct);
+                }
+                catch (Exception ex) { _logger.LogWarning(ex, "Ending manual outbound call {Uuid} failed", channelUuid); }
+            }
+            _logger.LogInformation("CHANNEL_HANGUP {Uuid}: manual outbound call ended ({Disposition})", channelUuid,
+                vars.GetValueOrDefault("variable_originate_disposition") ?? cause);
+            return;
+        }
+
         // A supervisor → agent internal call ended (its supervisor leg is the handle; the agent leg
         // ends with it). Give both their previous status back. No call session / record involved.
         var intercomJson = await _sessionStore.GetKeyAsync(SupervisorCallService.IntercomLegKey(channelUuid), ct);
@@ -1889,6 +1914,15 @@ public sealed class EslBackgroundService : BackgroundService
         await LogBridgeLegStateAsync(esl, "A/" + uuid, uuid, ct);
         if (!string.IsNullOrEmpty(other))
             await LogBridgeLegStateAsync(esl, "B/" + other, other, ct);
+
+        // Manual outbound (S179): the agent leg bridged to the customer — they answered.
+        if (await _sessionStore.GetKeyAsync(ManualOutboundCallService.LegKey(uuid), ct) is { Length: > 0 } outboundJson
+            && System.Text.Json.JsonSerializer.Deserialize<ManualOutboundLeg>(outboundJson) is { } outboundLeg)
+        {
+            try { await ManualOutboundCallService.AnsweredAsync(outboundLeg, _hub); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Manual outbound answered push failed for {Uuid}", uuid); }
+            return;
+        }
 
         var bridgeSession = await _sessionStore.GetAsync(uuid, ct);
         if (bridgeSession is null) return;

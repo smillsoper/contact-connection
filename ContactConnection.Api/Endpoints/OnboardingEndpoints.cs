@@ -67,15 +67,15 @@ public static class OnboardingEndpoints
         // Apply wizard settings
         tenant.SetDisplayName(string.IsNullOrWhiteSpace(request.DisplayName) ? null : request.DisplayName);
         tenant.SetLogoUrl(string.IsNullOrWhiteSpace(request.LogoUrl) ? null : request.LogoUrl);
-        tenant.UpdateSettings(new TenantSettings
-        {
-            DateFormat = request.DateFormat,
-            TimeFormat = request.TimeFormat,
-            SupportEmail = request.SupportEmail,
-            BillingEmail = request.BillingEmail,
-            SessionTimeoutMinutes = request.SessionTimeoutMinutes,
-            MfaRequirement = request.MfaRequirement,
-        });
+        // Start from the current settings so fields the wizard doesn't show (pay periods, outbound caller ID…) survive.
+        var settings = tenant.Settings.Clone();
+        settings.DateFormat = request.DateFormat;
+        settings.TimeFormat = request.TimeFormat;
+        settings.SupportEmail = request.SupportEmail;
+        settings.BillingEmail = request.BillingEmail;
+        settings.SessionTimeoutMinutes = request.SessionTimeoutMinutes;
+        settings.MfaRequirement = request.MfaRequirement;
+        tenant.UpdateSettings(settings);
         tenant.CompleteOnboarding();
         if (request.FeatureFlags is not null)
             tenant.UpdateFeatureFlags(request.FeatureFlags);

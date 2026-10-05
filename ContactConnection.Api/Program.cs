@@ -69,6 +69,7 @@ builder.Services.AddScoped<QueueCallbackDeliveryService>();
 // registered in AddInfrastructure) â€” its forced unmask fires after the triggering node is gone.
 builder.Services.AddSingleton<IEslCommanderFactory, EslCommanderFactory>();
 builder.Services.AddScoped<ContactConnection.Api.Telephony.SupervisorCallService>();
+builder.Services.AddScoped<ContactConnection.Api.Telephony.ManualOutboundCallService>();
 
 // ESL background service â€” connects to FreeSWITCH and handles CHANNEL_PARK / CHANNEL_HANGUP
 builder.Services.AddHostedService<EslBackgroundService>();
@@ -208,6 +209,7 @@ app.MapCallReviewEndpoints();
 app.MapAgentLockEndpoints();
 app.MapSupervisorEndpoints();
 app.MapCampaignCredentialsEndpoints();
+app.MapSoftphoneOutboundEndpoints();
 app.MapSoftphoneEndpoints();
 app.MapMediaEndpoints();
 app.MapCommissionsEndpoints();

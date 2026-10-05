@@ -410,6 +410,32 @@ public sealed class EslClient(ILogger<EslClient>? logger = null, IConfiguration?
         return (null, $"originate → {response ?? "(null)"}");
     }
 
+    public async Task<string?> OriginateManualOutboundAsync(
+        string legUuid, string agentExtension, string domain, string customerE164, string callerIdE164,
+        Guid callRecordId, string gateway, CancellationToken ct = default)
+    {
+        var contact = await ResolveAgentContactAsync(agentExtension, domain, ct);
+        if (!IsResolvedContact(contact)) return "Your softphone isn't registered.";
+
+        var customer = new string(customerE164.Where(c => char.IsDigit(c) || c == '+').ToArray());
+        var callerId = new string(callerIdE164.Where(c => char.IsDigit(c) || c == '+').ToArray());
+        // A-leg: the agent (auto-answer). Shown the customer's number; X-CC-Leg / X-CC-Call-Record tell the softphone
+        // what this INVITE is before any push arrives. B-leg: the customer, as the campaign's caller ID (SignalWire takes
+        // it from P-Asserted-Identity — the gateway's sip_cid_type=pid).
+        var aVars = $"{{origination_uuid={legUuid},originate_timeout=30,sip_auto_answer=true,sip_h_Alert-Info=answer-after=0," +
+                    $"sip_h_X-CC-Leg=outbound,sip_h_X-CC-Call-Record={callRecordId},cc_manual_outbound=true," +
+                    $"origination_caller_id_number={customer},origination_caller_id_name={customer}}}";
+        var bVars = $"{{origination_caller_id_number={callerId},origination_caller_id_name={callerId}," +
+                    $"effective_caller_id_number={callerId},effective_caller_id_name={callerId}," +
+                    $"call_timeout=45,cc_manual_outbound=true,cc_call_record_id={callRecordId}}}";
+        var response = await SendApiBodyAsync($"originate {aVars}{contact} &bridge({bVars}sofia/gateway/{gateway}/{customer})", ct);
+        if (response?.StartsWith("+OK") == true) return null;
+
+        await SendApiAsync($"uuid_kill {legUuid} ORIGINATOR_CANCEL", ct);
+        logger?.LogWarning("OriginateManualOutboundAsync: originate failed → {Response}", response ?? "(null)");
+        return "Your softphone didn't pick up the call — check that it's registered and try again.";
+    }
+
     public Task RecvDtmfAsync(string uuid, string digits, CancellationToken ct = default) =>
         SendApiAsync($"uuid_recv_dtmf {uuid} {digits}", ct);
 
