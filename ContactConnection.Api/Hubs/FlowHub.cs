@@ -68,6 +68,9 @@ public class FlowHub : Hub<IFlowHubClient>
 /// </summary>
 public interface IFlowHubClient
 {
+    /// <summary>Manual outbound (S179): the server is about to ring this agent's softphone for their own outbound call —
+    /// answer the next INVITE automatically (the INVITE's X-CC-Leg header says the same; this doesn't depend on it).</summary>
+    Task ReceiveOutboundConnecting(string callRecordId, string number);
     /// <summary>Manual outbound (S179): the customer answered the call the server placed for this agent.</summary>
     Task ReceiveOutboundAnswered(string callRecordId);
     /// <summary>Manual outbound (S179): the call ended — <paramref name="reason"/> is a plain outcome (Busy, No answer…) or null.</summary>

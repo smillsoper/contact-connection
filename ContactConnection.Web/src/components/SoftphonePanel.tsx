@@ -437,9 +437,16 @@ export default function SoftphonePanel() {
       // Manual outbound (S179): the server placed this agent's call — this INVITE is the agent's own leg (labelled
       // X-CC-Leg: outbound, carrying the call record id). Answer it; the customer is rung next. "Calling…" until the
       // server says they answered (receiveOutboundAnswered); the server closes the record when the call ends.
-      if (session.direction === 'incoming' && ccLeg === 'outbound') {
-        const recordId: string | null = session.request?.getHeader?.('X-CC-Call-Record') || null
-        const customer: string | null = session.remote_identity?.uri?.user ?? null
+      // Armed by the server's push (receiveOutboundConnecting) or labelled by the INVITE itself — either is enough.
+      const pendingOutbound = useCallStore.getState().outboundPending
+      const outboundArmed = !!pendingOutbound && Date.now() - pendingOutbound.at < 45_000
+      if (session.direction === 'incoming') {
+        console.debug('[softphone] incoming INVITE', { ccLeg, ccRecord: session.request?.getHeader?.('X-CC-Call-Record'), outboundArmed })
+      }
+      if (session.direction === 'incoming' && (ccLeg === 'outbound' || outboundArmed)) {
+        useCallStore.getState().setOutboundPending(null)
+        const recordId: string | null = session.request?.getHeader?.('X-CC-Call-Record') || pendingOutbound?.callRecordId || null
+        const customer: string | null = pendingOutbound?.number ?? session.remote_identity?.uri?.user ?? null
         sessionRef.current = session
         const store = useCallStore.getState()
         store.setDialing(customer ?? 'Outbound call')
@@ -1239,7 +1246,9 @@ export default function SoftphonePanel() {
                   }`}
                   title="Keypad — send tones (menus, extensions)"
                 >
-                  ⌗
+                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-label="Keypad">
+                    {[5, 12, 19].flatMap((y) => [5, 12, 19].map((x) => <circle key={`${x}-${y}`} cx={x} cy={y} r="2" />))}
+                  </svg>
                 </button>
 
                 {/* Hang up */}

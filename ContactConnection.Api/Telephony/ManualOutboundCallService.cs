@@ -61,6 +61,9 @@ public sealed class ManualOutboundCallService(
             decision.AfterCallWorkSeconds, decision.CampaignId is not null, previous);
         await telephonySessions.SetKeyAsync(LegKey(legUuid), JsonSerializer.Serialize(leg), LegTtl, ct);
 
+        // Arm the softphone to answer this INVITE itself, before it arrives.
+        await hub.Clients.Group($"agent:{agent.Id}").ReceiveOutboundConnecting(decision.CallRecordId.Value.ToString(), decision.Number!);
+
         string? error;
         try
         {
@@ -100,8 +103,8 @@ public sealed class ManualOutboundCallService(
         await hub.Clients.Group($"agent:{leg.AgentId}").ReceiveOutboundAnswered(leg.CallRecordId.ToString());
 
     /// <summary>
-    /// The agent leg hung up — the call is over. Closes the record, puts a campaign dial into the campaign's after-call
-    /// work (a direct dial gets the agent's previous status back) and tells the softphone why it ended.
+    /// The agent leg hung up — the call is over. Closes the record, gives the agent back the status they had before the
+    /// dial (Stephen, S179: never force an agent into Available) and tells the softphone why it ended.
     /// </summary>
     public static async Task EndAsync(
         ManualOutboundLeg leg, string? farEndCause, ITenantDbContextFactory dbFactory, IAgentStateStore states,
@@ -117,10 +120,7 @@ public sealed class ManualOutboundCallService(
             }
         }
 
-        if (leg.IsCampaignDial)
-            await AfterCallWork.StartAsync(states, hub, leg.TenantId, leg.AgentId, leg.TenantSchema, leg.AfterCallWorkSeconds, ct);
-        else
-            await RestoreAsync(states, hub, leg.TenantId, leg.TenantSchema, leg.AgentId, leg.Previous, ct);
+        await RestoreAsync(states, hub, leg.TenantId, leg.TenantSchema, leg.AgentId, leg.Previous, ct);
 
         await hub.Clients.Group($"agent:{leg.AgentId}").ReceiveOutboundEnded(leg.CallRecordId.ToString(), Outcome(farEndCause));
     }
@@ -142,12 +142,11 @@ public sealed class ManualOutboundCallService(
     {
         var current = await states.GetAsync(tenantId, agentId, ct);
         if (current is not null && (current.Code != AgentStateCodes.OnCall || current.Label != OutboundLabel)) return;   // changed meanwhile
-        // An ACW's return-to-Available timer belonged to the earlier call — come back Available instead of stuck in ACW.
-        var back = previous is null || previous.Code == AgentStateCodes.OnCall
+        // The status from before the dial. ACW is the exception: its countdown belonged to the earlier call and has gone,
+        // so the agent comes back Unavailable (never pushed into Available behind their back).
+        var back = previous is null || previous.Code is AgentStateCodes.OnCall or AgentStateCodes.Acw
             ? new AgentStateEntry(AgentStateCodes.Unavailable, "Unavailable", null, DateTimeOffset.UtcNow)
-            : previous.Code == AgentStateCodes.Acw
-                ? new AgentStateEntry(AgentStateCodes.Available, "Available", null, DateTimeOffset.UtcNow)
-                : previous with { SetAt = DateTimeOffset.UtcNow };
+            : previous with { SetAt = DateTimeOffset.UtcNow };
         await states.SetAsync(tenantId, agentId, schema, back, ct);
         await hub.Clients.Group($"agent:{agentId}").ReceiveAgentStateChange(back.Code, back.Label, null);
     }

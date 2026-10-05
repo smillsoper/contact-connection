@@ -456,6 +456,9 @@ export default function FlowPanel() {
 
     // Supervisor listen-in (S167): arm the softphone for the eavesdrop INVITE, or a mode switch.
     // Manual outbound (S179): the server placed the call; these say when the customer answered and how it ended.
+    connection.on('receiveOutboundConnecting', (callRecordId: string, number: string) => {
+      useCallStore.getState().setOutboundPending({ callRecordId, number })
+    })
     connection.on('receiveOutboundAnswered', (callRecordId: string) => {
       const s = useCallStore.getState()
       if (s.callStatus === 'dialing' && s.callRecordId === callRecordId) s.setOnCall()

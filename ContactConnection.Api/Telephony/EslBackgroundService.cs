@@ -1478,6 +1478,10 @@ public sealed class EslBackgroundService : BackgroundService
             return;
         }
 
+        // The customer leg of a manual outbound call: the agent leg (above) is the handle — nothing to do here, and it
+        // must not fall through to the tenant scan below.
+        if (vars.GetValueOrDefault("variable_cc_manual_outbound") == "true") return;
+
         // A supervisor → agent internal call ended (its supervisor leg is the handle; the agent leg
         // ends with it). Give both their previous status back. No call session / record involved.
         var intercomJson = await _sessionStore.GetKeyAsync(SupervisorCallService.IntercomLegKey(channelUuid), ct);
@@ -2846,8 +2850,19 @@ public sealed class EslBackgroundService : BackgroundService
         foreach (var tenant in tenants)
         {
             await using var db = dbFactory.Create(tenant.SchemaName);
-            var record = await db.CallRecords.Include(r => r.Interactions).FirstOrDefaultAsync(
-                r => r.ContactIdExternal == channelUuid, ct);
+            CallRecord? record;
+            try
+            {
+                record = await db.CallRecords.Include(r => r.Interactions).FirstOrDefaultAsync(
+                    r => r.ContactIdExternal == channelUuid, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // One tenant's schema can't be read (e.g. its migrations haven't run yet). Skip it — letting this throw
+                // dropped the whole ESL connection and lost every event until it reconnected (S179).
+                _logger.LogWarning(ex, "Hangup tenant scan: skipping tenant {Tenant} — its call records can't be read", tenant.Subdomain);
+                continue;
+            }
             if (record is null) continue;
 
             // Already finalized — this is the second leg of a bridged call hanging up. The

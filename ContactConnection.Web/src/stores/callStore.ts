@@ -46,6 +46,9 @@ interface CallState {
 
   // Manual outbound (S179): how the last server-placed call ended (Busy, No answer…), shown briefly in the softphone.
   outboundNotice: { text: string; at: number } | null
+  // Armed by receiveOutboundConnecting just before the server rings this softphone for the agent's own outbound call.
+  outboundPending: { callRecordId: string; number: string; at: number } | null
+  setOutboundPending: (pending: { callRecordId: string; number: string } | null) => void
   setOutboundNotice: (text: string | null) => void
 
   // "Playing greeting…" indicator (project_agent_connect_tone) — true while a connect prompt is
@@ -119,6 +122,8 @@ export const useCallStore = create<CallState>((set) => ({
   secureCollect: null,
   lastTelephonyEventEnded: null,
   outboundNotice: null,
+  outboundPending: null,
+  setOutboundPending: (p) => set({ outboundPending: p ? { ...p, at: Date.now() } : null }),
   setOutboundNotice: (text) => set({ outboundNotice: text ? { text, at: Date.now() } : null }),
   playingGreeting: false,
   cartVersion: 0,
