@@ -135,7 +135,7 @@ public class ExportTemplateAndDeliveryTests
         var path = TempFile("hello vendor");
         try
         {
-            Assert.Equal("ops@example.com", await sut.DeliverAsync(Req(target, path)));
+            Assert.Equal("ops@example.com", (await sut.DeliverAsync(Req(target, path))).SentAs);
             var att = Assert.Single(Assert.Single(sent).Attachments);
             Assert.Equal("NERQ_TMS_100426.zip", att.FileName);
             Assert.Equal("Cannella SF — NERQ_TMS_100426.zip", sent[0].Subject);
@@ -175,14 +175,24 @@ public class ExportTemplateAndDeliveryTests
         finally { File.Delete(path); }
     }
 
+    /// <summary>No pinned key = accept-new: the send goes ahead (here it can't reach the made-up host, which is a retryable
+    /// failure — not a refusal over the missing pin).</summary>
     [Fact]
-    public async Task Sftp_WithoutAPinnedHostKey_IsRefused_Permanently()
+    public async Task Sftp_WithoutAPinnedHostKey_TriesToConnect_AcceptNew()
     {
         var (sut, _) = Service();
+        var creds = new Mock<ITenantCredentialStore>();
+        creds.Setup(c => c.GetForTenantAsync("t", "pw", It.IsAny<CancellationToken>())).ReturnsAsync("x");
+        var accepting = new ExportDeliveryService(creds.Object, Mock.Of<IEmailService>());
         var target = new ExportDeliveryTarget { Name = "Cannella", Type = ExportDeliveryType.Sftp, Host = "sftp.invalid", Username = "u", PasswordCredential = "pw" };
-        var ex = await Assert.ThrowsAsync<ExportDeliveryException>(() => sut.DeliverAsync(Req(target, "unused")));
-        Assert.True(ex.Permanent);
-        Assert.Contains("host key", ex.Message);
+        var path = TempFile("x");
+        try
+        {
+            var ex = await Assert.ThrowsAsync<ExportDeliveryException>(() => accepting.DeliverAsync(Req(target, path)));
+            Assert.False(ex.Permanent);
+            Assert.DoesNotContain("pinned", ex.Message);
+        }
+        finally { File.Delete(path); }
     }
 
     [Fact]

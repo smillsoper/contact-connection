@@ -302,14 +302,17 @@ export default function AdminExportEditorPage() {
     refreshRuns(); refreshVersions(); refreshActivity()
   }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Follow a file being generated until it finishes (stops as soon as nothing is queued or running).
-  const pending = runs.some((r) => r.status === 'queued' || r.status === 'running'
+  // Follow files being generated / sent until they finish: quickly while something is happening or due within a minute,
+  // slowly while a delivery waits out a retry backoff, not at all once nothing is pending.
+  const soon = runs.some((r) => r.status === 'queued' || r.status === 'running'
     || r.deliveries.some((d) => d.status === 'running' || (d.status === 'queued' && new Date(d.nextAttemptAt).getTime() < Date.now() + 60_000)))
+  const waiting = runs.some((r) => r.deliveries.some((d) => d.status === 'queued'))
+  const pollEvery = soon ? 2500 : waiting ? 20_000 : 0
   useEffect(() => {
-    if (!pending) { refreshActivity(); return }
-    const t = setInterval(refreshRuns, 2500)
+    if (!pollEvery) { refreshActivity(); return }
+    const t = setInterval(refreshRuns, pollEvery)
     return () => clearInterval(t)
-  }, [pending]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pollEvery]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const campaignOptions = useMemo(
     () => campaigns.filter((c) => !spec.clientId || c.clientId === spec.clientId).sort((a, b) => a.name.localeCompare(b.name)),
@@ -632,10 +635,15 @@ export default function AdminExportEditorPage() {
                               </span>
                               <span className="text-gray-300"> → {d.targetName}</span>
                               {d.deliveredAt && <span className="text-gray-500"> {when(d.deliveredAt)}</span>}
+                              {d.status === 'queued' && d.attempts > 0 && new Date(d.nextAttemptAt).getTime() > Date.now() && (
+                                <span className="text-gray-400"> — next try {new Date(d.nextAttemptAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })} (attempt {d.attempts + 1} of {d.maxAttempts})</span>
+                              )}
                               {d.error && <span className="block text-red-400 whitespace-pre-wrap">{d.error}</span>}
-                              {d.status === 'failed' && (
+                              {(d.status === 'failed' || (d.status === 'queued' && d.attempts > 0)) && (
                                 <button className="text-indigo-400 hover:text-indigo-300 ml-1"
-                                  onClick={() => exportsApi.retryDelivery(d.id).then(refreshRuns).catch((e: Error) => setError(e.message))}>Retry</button>
+                                  onClick={() => exportsApi.retryDelivery(d.id).then(refreshRuns).catch((e: Error) => setError(e.message))}>
+                                  {d.status === 'failed' ? 'Retry' : 'Retry now'}
+                                </button>
                               )}
                             </span>
                           ))}
@@ -670,7 +678,7 @@ export default function AdminExportEditorPage() {
                 <li key={a.id} className="text-gray-300">
                   <span className="text-gray-500 text-xs mr-2">{when(a.at)}</span>
                   <span className={a.action === 'delivery_failed' ? 'text-red-400' : a.action === 'delivered' ? 'text-emerald-300' : 'text-gray-200'}>
-                    {{ downloaded: 'Downloaded', delivered: 'Sent', delivery_failed: 'Send failed', send_requested: 'Send requested', file_expired: 'File deleted' }[a.action] ?? a.action}
+                    {{ downloaded: 'Downloaded', delivered: 'Sent', delivery_failed: 'Send failed', send_requested: 'Send requested', file_expired: 'File deleted', host_key_pinned: 'Host key pinned' }[a.action] ?? a.action}
                   </span>
                   {a.detail && <span> — {a.detail}</span>}
                   {a.actorName && <span className="text-gray-500"> — {a.actorName}</span>}

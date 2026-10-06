@@ -90,4 +90,22 @@ public class ExportScheduleTests
         var email = new ExportDeliveryTarget { Name = "Ops", Type = ExportDeliveryType.Email, EmailTo = ["not-an-address"] };
         Assert.NotNull(email.Validate());
     }
+
+    [Fact]
+    public void Delivery_RetryNow_BringsAWaitingDeliveryForward_AndRetryRestartsAFailedOne()
+    {
+        var def = ContactConnection.Domain.Entities.ExportDefinition.Create(Guid.NewGuid(), "x", null, new ExportSpec());
+        var now = DateTimeOffset.UtcNow;
+        var run = ContactConnection.Domain.Entities.ExportRun.Queue(def, "test", true, "production", now.AddDays(-1), now, null, null);
+        var d = ContactConnection.Domain.Entities.ExportDelivery.Queue(run, Guid.NewGuid(), "SFTP", "sftp", null);
+        d.Fail("down");                                   // waiting out its backoff
+        Assert.True(d.NextAttemptAt > DateTimeOffset.UtcNow.AddSeconds(30));
+        d.Retry("Stephen");
+        Assert.True(d.NextAttemptAt <= DateTimeOffset.UtcNow);
+        d.Fail("bad", permanent: true);
+        d.Retry("Stephen");
+        Assert.Equal(ContactConnection.Domain.Entities.ExportDeliveryStatus.Queued, d.Status);
+        d.Succeed("sftp://x/y");
+        Assert.Throws<InvalidOperationException>(() => d.Retry("Stephen"));
+    }
 }

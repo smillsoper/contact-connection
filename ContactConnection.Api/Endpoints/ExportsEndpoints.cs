@@ -384,7 +384,16 @@ public static class ExportsEndpoints
         var chosen = d.DeliveryTargets.Where(t => req.TargetIds?.Contains(t.Id) == true).ToList();
         if (chosen.Count == 0) return Results.BadRequest(new { error = "Choose where to send it." });
         if (chosen.FirstOrDefault(t => !t.Enabled) is { } off) return Results.BadRequest(new { error = $"'{off.Name}' is turned off." });
-        foreach (var t in chosen) db.ExportDeliveries.Add(ExportDelivery.Queue(run, t.Id, t.Name, t.Type, actor?.Name));
+        // A target already waiting to retry this file is brought forward rather than sent twice.
+        var waiting = await db.ExportDeliveries
+            .Where(x => x.RunId == run.Id && (x.Status == ExportDeliveryStatus.Queued || x.Status == ExportDeliveryStatus.Running))
+            .ToListAsync(ct);
+        foreach (var t in chosen)
+        {
+            var existing = waiting.FirstOrDefault(x => x.TargetId == t.Id);
+            if (existing is null) db.ExportDeliveries.Add(ExportDelivery.Queue(run, t.Id, t.Name, t.Type, actor?.Name));
+            else if (existing.Status == ExportDeliveryStatus.Queued) existing.Retry(actor?.Name);
+        }
         db.ExportAuditEntries.Add(ExportAuditEntry.Record(run.TenantId, run.DefinitionId, run.Id, ExportAuditAction.SendRequested,
             actor?.Name, $"{run.FileName}{(run.IsTest ? " (test)" : "")} → {string.Join(", ", chosen.Select(t => t.Name))}"));
         await db.SaveChangesAsync(ct);

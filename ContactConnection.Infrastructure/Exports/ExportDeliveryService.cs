@@ -21,7 +21,7 @@ public sealed class ExportDeliveryService(ITenantCredentialStore credentials, IE
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(30);
     private const long MaxEmailBytes = 20 * 1024 * 1024;
 
-    public async Task<string> DeliverAsync(ExportDeliveryRequest r, CancellationToken ct = default)
+    public async Task<ExportDeliveryResult> DeliverAsync(ExportDeliveryRequest r, CancellationToken ct = default)
     {
         var t = r.Target;
         if (t.Validate() is { } invalid) throw new ExportDeliveryException(invalid, permanent: true);
@@ -32,8 +32,8 @@ public sealed class ExportDeliveryService(ITenantCredentialStore credentials, IE
             return t.Type switch
             {
                 ExportDeliveryType.Sftp => await SftpAsync(r.TenantSubdomain, t, path, name, ct),
-                ExportDeliveryType.Ftps => await FtpsAsync(r.TenantSubdomain, t, path, name, ct),
-                _ => await EmailAsync(r, path, name, ct),
+                ExportDeliveryType.Ftps => new ExportDeliveryResult(await FtpsAsync(r.TenantSubdomain, t, path, name, ct)),
+                _ => new ExportDeliveryResult(await EmailAsync(r, path, name, ct)),
             };
         }
         finally
@@ -86,18 +86,18 @@ public sealed class ExportDeliveryService(ITenantCredentialStore credentials, IE
 
     // ── SFTP ───────────────────────────────────────────────────────────────────
 
-    private async Task<string> SftpAsync(string tenant, ExportDeliveryTarget t, string path, string name, CancellationToken ct)
+    /// <summary>Host keys follow SSH's "accept-new" (what WinSCP does on first connect): with no key pinned, the first
+    /// connection's key is accepted and returned for pinning; once pinned, any other key is refused and nothing is sent.</summary>
+    private async Task<ExportDeliveryResult> SftpAsync(string tenant, ExportDeliveryTarget t, string path, string name, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(t.HostKeyFingerprint))
-            throw new ExportDeliveryException($"{t.Name}: the server's host key isn't pinned — use Test connection and trust its key first.", permanent: true);
-
+        var acceptNew = string.IsNullOrWhiteSpace(t.HostKeyFingerprint);
         string? seen = null;
         using var client = new SftpClient(await SftpConnectionAsync(tenant, t, ct));
-        client.HostKeyReceived += (_, e) => { seen = e.FingerPrintSHA256; e.CanTrust = Same(seen, t.HostKeyFingerprint); };
+        client.HostKeyReceived += (_, e) => { seen = e.FingerPrintSHA256; e.CanTrust = acceptNew || Same(seen, t.HostKeyFingerprint); };
         try { await client.ConnectAsync(ct); }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            if (seen is not null && !Same(seen, t.HostKeyFingerprint))
+            if (!acceptNew && seen is not null && !Same(seen, t.HostKeyFingerprint))
                 throw new ExportDeliveryException(
                     $"{t.Name}: the server's host key has changed (now {seen}). Nothing was sent. If the vendor confirms the change, pin the new key.",
                     permanent: true);
@@ -108,7 +108,7 @@ public sealed class ExportDeliveryService(ITenantCredentialStore credentials, IE
         await using (var file = File.OpenRead(path))
             await client.UploadFileAsync(file, remote, ct);
         client.Disconnect();
-        return $"sftp://{t.Host}{(remote.StartsWith('/') ? "" : "/")}{remote}";
+        return new ExportDeliveryResult($"sftp://{t.Host}{(remote.StartsWith('/') ? "" : "/")}{remote}", acceptNew ? seen : null);
     }
 
     private async Task<Renci.SshNet.ConnectionInfo> SftpConnectionAsync(string tenant, ExportDeliveryTarget t, CancellationToken ct)

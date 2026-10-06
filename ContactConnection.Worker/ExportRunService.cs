@@ -303,9 +303,21 @@ public sealed class ExportRunService : BackgroundService
             }
 
             var sender = scope.ServiceProvider.GetRequiredService<IExportDeliveryService>();
-            var sentAs = await sender.DeliverAsync(new ExportDeliveryRequest(
+            var result = await sender.DeliverAsync(new ExportDeliveryRequest(
                 tenant.Subdomain, target, temp, run.FileName!, run.ContentType ?? "application/octet-stream",
                 ExportGenerator.Context(Request(run)), run.Spec.TimeZone), ct);
+            var sentAs = result.SentAs;
+
+            // First send to an unpinned SFTP server: pin the key it presented, so every later send must match it.
+            if (result.PinnedHostKey is { } hostKey
+                && await db.ExportDefinitions.FirstOrDefaultAsync(d => d.Id == delivery.DefinitionId, ct) is { } tracked)
+            {
+                tracked.SetDeliveryTargets(tracked.DeliveryTargets
+                    .Select(t => t.Id == target.Id && string.IsNullOrWhiteSpace(t.HostKeyFingerprint) ? t with { HostKeyFingerprint = hostKey } : t)
+                    .ToList());
+                db.ExportAuditEntries.Add(ExportAuditEntry.Record(delivery.TenantId, delivery.DefinitionId, delivery.RunId,
+                    ExportAuditAction.HostKeyPinned, null, $"{target.Name}: pinned host key {hostKey} on first connection"));
+            }
 
             delivery.Succeed(sentAs);
             db.ExportAuditEntries.Add(ExportAuditEntry.Record(delivery.TenantId, delivery.DefinitionId, delivery.RunId,

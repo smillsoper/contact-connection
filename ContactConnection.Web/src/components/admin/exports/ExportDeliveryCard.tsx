@@ -4,7 +4,8 @@ import { listAdminCredentials, setAdminCredential } from '../../../api/adminCred
 
 // Delivery targets (S180, session 2): where an export's files go — SFTP, FTPS, email — each optionally PGP / zip encrypted.
 // Passwords and keys live in Credentials (Key Vault); a target only names them. Test connection signs in and shows the
-// server's fingerprint; pinning it is what makes the server trusted (an SFTP target won't send until its key is pinned).
+// server's fingerprint and pins it when none is pinned yet; an SFTP target with no pin also pins the key it sees on its first
+// send (SSH "accept-new", like WinSCP). Once pinned, a different key blocks the send — that's the impostor-server case.
 
 const input = 'w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500'
 const label = 'block text-xs text-gray-400 mb-1'
@@ -84,13 +85,22 @@ function TargetForm({ defId, t, set, names, remove, onAddCredential }: {
 }) {
   const [test, setTest] = useState<ConnectionTest | null>(null)
   const [testing, setTesting] = useState(false)
+  const [autoPinned, setAutoPinned] = useState(false)
   const patch = (p: Partial<DeliveryTarget>) => set({ ...t, ...p })
   const server = t.type !== 'email'
   const pinned = t.type === 'sftp' ? t.hostKeyFingerprint : t.certificateFingerprint
 
   async function runTest() {
-    setTesting(true); setTest(null)
-    try { setTest(await exportsApi.testTarget(defId, t)) }
+    setTesting(true); setTest(null); setAutoPinned(false)
+    try {
+      const result = await exportsApi.testTarget(defId, t)
+      setTest(result)
+      // Nothing pinned yet: take the server's fingerprint now (the WinSCP-style first connect).
+      if (result.success && result.fingerprint && result.matchesPinned === null) {
+        patch(t.type === 'sftp' ? { hostKeyFingerprint: result.fingerprint } : { certificateFingerprint: result.fingerprint })
+        setAutoPinned(true)
+      }
+    }
     catch (e) { setTest({ success: false, message: e instanceof Error ? e.message : 'Test failed.', fingerprint: null, matchesPinned: null }) }
     finally { setTesting(false) }
   }
@@ -152,7 +162,9 @@ function TargetForm({ defId, t, set, names, remove, onAddCredential }: {
             )}
             <div className="sm:col-span-4">
               <label className={label}>
-                {t.type === 'sftp' ? 'Pinned host key (SHA-256) — required to send' : 'Pinned certificate (SHA-256) — optional; blank = the certificate must be valid'}
+                {t.type === 'sftp'
+                  ? 'Pinned host key (SHA-256) — filled in by Test connection, or pinned automatically on the first send'
+                  : 'Pinned certificate (SHA-256) — optional; blank = the certificate must be valid'}
               </label>
               <input className={`${input} font-mono`} value={pinned ?? ''}
                 onChange={(e) => patch(t.type === 'sftp' ? { hostKeyFingerprint: e.target.value.trim() || null } : { certificateFingerprint: e.target.value.trim() || null })} />
@@ -201,9 +213,10 @@ function TargetForm({ defId, t, set, names, remove, onAddCredential }: {
           {test.fingerprint && (
             <div className="mt-1 text-xs text-gray-300">
               Server fingerprint: <code className="text-gray-100">{test.fingerprint}</code>
+              {autoPinned && <span className="ml-2 text-emerald-300">pinned — Save delivery to keep it</span>}
               {test.matchesPinned === true && <span className="ml-2 text-emerald-300">matches the pinned one</span>}
               {test.matchesPinned === false && <span className="ml-2 text-red-300">DOES NOT match the pinned one — confirm with the vendor before changing it</span>}
-              {test.matchesPinned !== true && (
+              {test.matchesPinned === false && (
                 <button className="ml-2 px-2 py-0.5 rounded bg-sky-700 hover:bg-sky-600 text-white"
                   onClick={() => patch(t.type === 'sftp' ? { hostKeyFingerprint: test.fingerprint } : { certificateFingerprint: test.fingerprint })}>
                   Pin this {t.type === 'sftp' ? 'key' : 'certificate'}

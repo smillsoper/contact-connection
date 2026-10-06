@@ -9,9 +9,9 @@ namespace ContactConnection.Application.Interfaces.Services;
 /// </summary>
 public interface IExportDeliveryService
 {
-    /// <summary>Sends the file; returns where it went (remote path / recipients). Throws <see cref="ExportDeliveryException"/>
-    /// (Permanent when retrying can't help — no pinned key, missing credential).</summary>
-    Task<string> DeliverAsync(ExportDeliveryRequest request, CancellationToken ct = default);
+    /// <summary>Sends the file. Throws <see cref="ExportDeliveryException"/> (Permanent when retrying can't help — a changed
+    /// host key, a missing credential).</summary>
+    Task<ExportDeliveryResult> DeliverAsync(ExportDeliveryRequest request, CancellationToken ct = default);
 
     /// <summary>Signs in (SFTP / FTPS) and reports the server's fingerprint — what to pin — without uploading anything.
     /// Email: checks the addresses only.</summary>
@@ -23,6 +23,11 @@ public interface IExportDeliveryService
 public sealed record ExportDeliveryRequest(
     string TenantSubdomain, ExportDeliveryTarget Target, string LocalPath, string FileName, string ContentType,
     IReadOnlyDictionary<string, object?> EmailModel, string TimeZone);
+
+/// <param name="SentAs">Where it went (remote path / recipients).</param>
+/// <param name="PinnedHostKey">SFTP with no pinned key: the host key accepted on this first connection — the caller saves it
+/// to the target so every later send must match it (SSH's "accept-new").</param>
+public sealed record ExportDeliveryResult(string SentAs, string? PinnedHostKey = null);
 
 /// <param name="Fingerprint">SFTP: SHA-256 host-key fingerprint. FTPS: SHA-256 certificate fingerprint.</param>
 /// <param name="MatchesPinned">Whether it matches the fingerprint already saved on the target (null when none is saved).</param>

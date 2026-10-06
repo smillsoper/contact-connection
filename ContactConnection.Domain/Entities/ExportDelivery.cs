@@ -68,13 +68,23 @@ public class ExportDelivery
         NextAttemptAt = DateTimeOffset.UtcNow.AddMinutes(Math.Pow(2, Math.Max(1, Attempts)));
     }
 
-    /// <summary>Someone pressed Retry on a failed delivery.</summary>
+    /// <summary>Someone pressed Retry (a failed delivery: back to the queue with fresh attempts) or Retry now (one waiting
+    /// out its backoff: due immediately, attempts kept).</summary>
     public void Retry(string? requestedByName)
     {
-        if (Status != ExportDeliveryStatus.Failed) throw new InvalidOperationException("Only a failed delivery can be retried.");
-        Status = ExportDeliveryStatus.Queued;
-        Attempts = 0;
-        Error = null;
+        switch (Status)
+        {
+            case ExportDeliveryStatus.Failed:
+                Status = ExportDeliveryStatus.Queued;
+                Attempts = 0;
+                Error = null;
+                break;
+            case ExportDeliveryStatus.Queued:
+                break;
+            default:
+                throw new InvalidOperationException(Status == ExportDeliveryStatus.Running
+                    ? "It's being sent right now." : "It was already sent.");
+        }
         NextAttemptAt = DateTimeOffset.UtcNow;
         RequestedByName = requestedByName;
     }
@@ -115,5 +125,7 @@ public static class ExportAuditAction
     public const string Delivered = "delivered";
     public const string DeliveryFailed = "delivery_failed";
     public const string SendRequested = "send_requested";
+    /// <summary>An SFTP target's host key was pinned on its first connection (accept-new).</summary>
+    public const string HostKeyPinned = "host_key_pinned";
     public const string FileExpired = "file_expired";
 }
