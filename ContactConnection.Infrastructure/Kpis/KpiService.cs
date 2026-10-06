@@ -1,14 +1,21 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using ContactConnection.Domain.Entities;
+using ContactConnection.Domain.ValueObjects;
 using ContactConnection.Infrastructure.Commerce;
 using ContactConnection.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 
 namespace ContactConnection.Infrastructure.Kpis;
 
-/// <param name="GroupBy"><c>none</c>, <c>campaign</c> or <c>client</c>.</param>
-public sealed record KpiQuery(DateTimeOffset Since, DateTimeOffset Until, Guid? ClientId, Guid? CampaignId, string GroupBy);
+/// <param name="GroupBy"><c>none</c> or a <see cref="KpiDimension"/>; <paramref name="GroupBy2"/> breaks each of those down
+/// again (with a subtotal row per first-level group). <paramref name="TimeZone"/>: the zone day / hour rows are in.</param>
+public sealed record KpiQuery(DateTimeOffset Since, DateTimeOffset Until, Guid? ClientId, Guid? CampaignId, string GroupBy,
+    string? GroupBy2 = null, string TimeZone = "UTC");
 
-public sealed record KpiRow(string Key, string Label, KpiMetrics Metrics);
+/// <param name="Label2">The second-level value (two-dimension reports).</param>
+/// <param name="Subtotal">A first-level group's subtotal row (two-dimension reports).</param>
+public sealed record KpiRow(string Key, string Label, KpiMetrics Metrics, string? Label2 = null, bool Subtotal = false);
 
 public sealed record KpiResult(KpiMetrics Total, IReadOnlyList<KpiRow> Rows, DateTimeOffset Since, DateTimeOffset Until);
 
@@ -46,6 +53,7 @@ public sealed class KpiService(ScopedTenantDbContextFactory dbFactory)
             {
                 i.Id, i.AgentId, IxCampaign = i.CampaignId, RecordCampaign = r.CampaignId, r.ClientId, r.RunMode,
                 i.DispositionId, i.Disposition, i.OrderSubmittedAt, i.Cart, i.StartedAt, i.CompletedAt,
+                r.Dnis, r.MediaAttribution, IxFields = i.CustomFields, RecordFields = r.CustomFields,
             })
             .Where(x => x.RunMode == CallRunMode.Production
                         && (x.CompletedAt ?? x.StartedAt) >= q.Since && (x.CompletedAt ?? x.StartedAt) < q.Until)
@@ -55,6 +63,40 @@ public sealed class KpiService(ScopedTenantDbContextFactory dbFactory)
                 .Where(p => p.InteractionId != null && ixIds.Contains(p.InteractionId.Value))
                 .Select(p => new { p.InteractionId, p.Status, p.VoidedAt }).ToListAsync(ct))
             .GroupBy(p => p.InteractionId!.Value).ToDictionary(g => g.Key, g => g.ToList());
+
+        // Report dimensions (S181): names for ids, the tenant zone for day / hour.
+        var zone = ResolveZone(q.TimeZone);
+        var agentName = await db.Agents.AsNoTracking().ToDictionaryAsync(a => a.Id, a => a.FullName, ct);
+        var dims = new[] { q.GroupBy, q.GroupBy2 }.Where(KpiDimension.IsValid).Select(d => d!).Distinct().ToList();
+        string CampaignLabel(Guid id) => id == Guid.Empty ? "Not routed to a campaign" : campaignName.GetValueOrDefault(id, "Unknown campaign");
+        string ClientLabel(Guid id) => id == Guid.Empty ? "No client" : clientName.GetValueOrDefault(id, "Unknown client");
+        string AgentLabel(Guid? id) => id is { } a ? agentName.GetValueOrDefault(a, "Unknown agent") : "No agent";
+        Dictionary<string, string>? Dims(Guid campaignId, Guid clientId, Guid? agentId, DateTimeOffset? at, string? dnis,
+            MediaAttribution? media, string? fieldsJson, string? fallbackFieldsJson, string? disposition, string? category, bool isCall)
+        {
+            if (dims.Count == 0) return null;
+            var d = new Dictionary<string, string>();
+            foreach (var dim in dims)
+            {
+                string? value = dim switch
+                {
+                    KpiDimension.Campaign => CampaignLabel(campaignId),
+                    KpiDimension.Client => ClientLabel(clientId),
+                    KpiDimension.Agent => AgentLabel(agentId),
+                    KpiDimension.Disposition => isCall ? null : disposition ?? "No disposition",
+                    KpiDimension.Category => isCall ? null : category ?? "No category",
+                    KpiDimension.Day => at is { } t ? TimeZoneInfo.ConvertTime(t, zone).ToString("yyyy-MM-dd ddd") : "No date",
+                    KpiDimension.Hour => at is { } h ? TimeZoneInfo.ConvertTime(h, zone).ToString("HH:00") : "No time",
+                    KpiDimension.Agency => media?.Agency is { Length: > 0 } ag ? ag : "No media agency",
+                    KpiDimension.Station => media?.Station is { Length: > 0 } st ? st : "No station",
+                    KpiDimension.Dnis => string.IsNullOrWhiteSpace(dnis) ? "No number" : dnis,
+                    _ => FieldValue(fieldsJson, dim[KpiDimension.CustomFieldPrefix.Length..])
+                         ?? FieldValue(fallbackFieldsJson, dim[KpiDimension.CustomFieldPrefix.Length..]) ?? "(blank)",
+                };
+                if (value is not null) d[dim] = value;
+            }
+            return d;
+        }
 
         var interactions = new List<KpiInteraction>();
         foreach (var x in rawIx)
@@ -84,22 +126,36 @@ public sealed class KpiService(ScopedTenantDbContextFactory dbFactory)
                 Units: items.Sum(i => i.Quantity),
                 HasUpsell: items.Any(i => i.IsUpsell),
                 HandleSeconds: x.CompletedAt is { } done && x.StartedAt is { } started ? (done - started).TotalSeconds : 0,
-                DispositionId: x.DispositionId));
+                DispositionId: x.DispositionId,
+                Dims: Dims(campaignId, clientId, x.AgentId, x.CompletedAt ?? x.StartedAt, x.Dnis, x.MediaAttribution,
+                    x.IxFields, x.IxCampaign is { } own && own != x.RecordCampaign ? null : x.RecordFields,
+                    string.IsNullOrWhiteSpace(x.Disposition) ? null : x.Disposition.Trim(),
+                    category?.Name ?? (string.IsNullOrWhiteSpace(x.Disposition) ? null : "Unmapped"), isCall: false)));
         }
 
         // ── Calls (call handling) ──
         var rawCalls = await db.CallRecords.AsNoTracking()
             .Where(r => r.RunMode == CallRunMode.Production && r.Source == CallSource.Inbound && r.CreatedAt >= q.Since && r.CreatedAt < q.Until)
-            .Select(r => new { r.Id, r.CampaignId, r.ClientId }).ToListAsync(ct);
+            .Select(r => new { r.Id, r.CampaignId, r.ClientId, r.CreatedAt, r.Dnis, r.MediaAttribution, r.CustomFields }).ToListAsync(ct);
         var callIds = rawCalls.Select(r => r.Id).ToList();
         var states = (await db.CallStateHistory.AsNoTracking().Where(s => callIds.Contains(s.CallRecordId))
-                .Select(s => new { s.CallRecordId, s.Sequence, s.State, s.EnteredAt, s.MetServiceLevel }).ToListAsync(ct))
+                .Select(s => new { s.CallRecordId, s.Sequence, s.State, s.EnteredAt, s.MetServiceLevel, s.AgentId }).ToListAsync(ct))
             .GroupBy(s => s.CallRecordId).ToDictionary(g => g.Key, g => g.OrderBy(s => s.Sequence).ToList());
+        // Test calls (S181): a call whose dispositioned interactions are all in a category excluded from KPIs is left out of
+        // call handling too — test calls never count toward offered / handled / AHT / service level, as in TMS View.
+        var excludedCategories = categories.Values.Where(c => c.ExcludedFromKpis).Select(c => c.Id).ToHashSet();
+        var testCalls = excludedCategories.Count == 0 ? new HashSet<Guid>() : (await db.CallInteractions.AsNoTracking()
+                .Where(i => callIds.Contains(i.CallRecordId) && i.DispositionId != null)
+                .Select(i => new { i.CallRecordId, i.DispositionId }).ToListAsync(ct))
+            .GroupBy(i => i.CallRecordId)
+            .Where(g => g.All(i => dispositionCategory.TryGetValue(i.DispositionId!.Value, out var c) && excludedCategories.Contains(c)))
+            .Select(g => g.Key).ToHashSet();
+
         var calls = new List<KpiCall>();
         foreach (var r in rawCalls)
         {
             var clientId = campaignClient.GetValueOrDefault(r.CampaignId, r.ClientId);
-            if (!InScope(r.CampaignId, clientId)) continue;
+            if (!InScope(r.CampaignId, clientId) || testCalls.Contains(r.Id)) continue;
             var history = states.GetValueOrDefault(r.Id) ?? [];
             double talk = 0;
             for (var i = 0; i < history.Count; i++)
@@ -109,7 +165,10 @@ public sealed class KpiService(ScopedTenantDbContextFactory dbFactory)
                 Handled: history.Any(s => s.State == "active"),
                 Abandoned: history.Any(s => s.State == "abandoned"),
                 MetServiceLevel: history.LastOrDefault(s => s.MetServiceLevel is not null)?.MetServiceLevel,
-                TalkSeconds: Math.Max(0, talk)));
+                TalkSeconds: Math.Max(0, talk),
+                // The agent who took the call (first "active" state) — call handling broken down by agent.
+                Dims: Dims(r.CampaignId, clientId, history.FirstOrDefault(s => s.State == "active")?.AgentId, r.CreatedAt, r.Dnis,
+                    r.MediaAttribution, r.CustomFields, null, null, null, isCall: true)));
         }
 
         // ── Agent time ──
@@ -128,19 +187,49 @@ public sealed class KpiService(ScopedTenantDbContextFactory dbFactory)
             return KpiCalculator.Compute(list, cs.ToList(), agents, custom, names);
         }
 
-        var rows = q.GroupBy switch
+        var rows = new List<KpiRow>();
+        if (KpiDimension.IsValid(q.GroupBy))
         {
-            "campaign" => interactions.Select(i => i.CampaignId).Concat(calls.Select(c => c.CampaignId)).Distinct()
-                .Select(id => new KpiRow(id.ToString(), id == Guid.Empty ? "Not routed to a campaign" : campaignName.GetValueOrDefault(id, "Unknown campaign"),
-                    Metrics(interactions.Where(i => i.CampaignId == id), calls.Where(c => c.CampaignId == id))))
-                .OrderBy(r => r.Label).ToList(),
-            "client" => interactions.Select(i => i.ClientId).Concat(calls.Select(c => c.ClientId)).Distinct()
-                .Select(id => new KpiRow(id.ToString(), id == Guid.Empty ? "No client" : clientName.GetValueOrDefault(id, "Unknown client"),
-                    Metrics(interactions.Where(i => i.ClientId == id), calls.Where(c => c.ClientId == id))))
-                .OrderBy(r => r.Label).ToList(),
-            _ => new List<KpiRow>(),
-        };
+            var d1 = q.GroupBy;
+            var d2 = KpiDimension.IsValid(q.GroupBy2) && q.GroupBy2 != d1 ? q.GroupBy2 : null;
+            static string? Of(IReadOnlyDictionary<string, string>? dims, string dim) => dims?.GetValueOrDefault(dim);
+            foreach (var v1 in interactions.Select(i => Of(i.Dims, d1)).Concat(calls.Select(c => Of(c.Dims, d1)))
+                         .OfType<string>().Distinct().Order(StringComparer.OrdinalIgnoreCase))
+            {
+                var ix1 = interactions.Where(i => Of(i.Dims, d1) == v1).ToList();
+                var calls1 = calls.Where(c => Of(c.Dims, d1) == v1).ToList();
+                if (d2 is null)
+                {
+                    rows.Add(new KpiRow(v1, v1, Metrics(ix1, calls1)));
+                    continue;
+                }
+                foreach (var v2 in ix1.Select(i => Of(i.Dims, d2)).Concat(calls1.Select(c => Of(c.Dims, d2)))
+                             .OfType<string>().Distinct().Order(StringComparer.OrdinalIgnoreCase))
+                    rows.Add(new KpiRow($"{v1}|{v2}", v1,
+                        Metrics(ix1.Where(i => Of(i.Dims, d2) == v2), calls1.Where(c => Of(c.Dims, d2) == v2)), v2));
+                rows.Add(new KpiRow($"{v1}|", v1, Metrics(ix1, calls1), null, Subtotal: true));
+            }
+        }
         return new KpiResult(Metrics(interactions, calls), rows, q.Since, q.Until);
+    }
+
+    private static TimeZoneInfo ResolveZone(string? id)
+    {
+        try { return string.IsNullOrWhiteSpace(id) ? TimeZoneInfo.Utc : TimeZoneInfo.FindSystemTimeZoneById(id); }
+        catch (Exception) { return TimeZoneInfo.Utc; }
+    }
+
+    /// <summary>A custom field's value from a call's / interaction's custom-field snapshot, as text.</summary>
+    private static string? FieldValue(string? json, string field)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            return JsonNode.Parse(json) is JsonObject o && o.FirstOrDefault(kv => string.Equals(kv.Key, field, StringComparison.OrdinalIgnoreCase)).Value is { } v
+                ? (v is JsonValue jv && jv.TryGetValue<string>(out var s) ? s : v.ToJsonString()) is { Length: > 0 } text ? text : null
+                : null;
+        }
+        catch (JsonException) { return null; }
     }
 
     /// <summary>The tenant's category and disposition variable names (<c>Cat_…</c>, <c>Disp_…</c>).</summary>

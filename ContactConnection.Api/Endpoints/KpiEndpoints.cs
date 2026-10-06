@@ -28,13 +28,13 @@ public static class KpiEndpoints
     }
 
     private static async Task<IResult> Get(
-        Guid? campaignId, Guid? clientId, string? groupBy, string? timeWindowMode, int? timeWindowValue,
+        Guid? campaignId, Guid? clientId, string? groupBy, string? groupBy2, string? timeWindowMode, int? timeWindowValue,
         KpiService kpis, TenantContext tc, CancellationToken ct)
     {
         if (tc.Current is not { } tenant) return Results.Unauthorized();
         var (since, until) = Window(tenant.Timezone, timeWindowMode, timeWindowValue, DateTimeOffset.UtcNow);
         var result = await kpis.ComputeAsync(new KpiQuery(since, until, clientId, campaignId,
-            groupBy is "campaign" or "client" ? groupBy : "none"), ct);
+            KpiDimension.IsValid(groupBy) ? groupBy! : "none", KpiDimension.IsValid(groupBy2) ? groupBy2 : null, tenant.Timezone), ct);
         return Results.Ok(result);
     }
 

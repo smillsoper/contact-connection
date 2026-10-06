@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import SearchableSelect from '../SearchableSelect'
 import { listClients, listCampaigns, listAgentGroups } from '../../api/telephony'
 import type { KpiWidgetConfig, TimeWindowConfig, WidgetFilterConfig, WidgetFilterFields } from '../../types/dashboard'
-import { KPI_CATALOG, DEFAULT_KPIS } from './widgets/KpiWidget'
+import { KPI_CATALOG, DEFAULT_KPIS, KPI_DIMENSIONS } from './widgets/KpiWidget'
+import { customFieldsApi } from '../../api/customFields'
+import type { KpiTarget } from '../../types/dashboard'
 import { customKpisApi, type CustomKpi } from '../../api/dashboardWidgets'
 
 interface Props {
@@ -29,7 +31,11 @@ export default function WidgetConfigModal({ title, fields, initial, initialWidge
   const [groupId, setGroupId] = useState(initial.groupId ?? '')
   const [loggedInOnly, setLoggedInOnly] = useState(initial.loggedInOnly ?? false)
   const [timeWindowMode, setTimeWindowMode] = useState<TimeWindowConfig['mode']>(initial.timeWindow?.mode ?? 'today')
-  const [groupBy, setGroupBy] = useState<NonNullable<KpiWidgetConfig['groupBy']>>(initial.groupBy ?? 'none')
+  const [groupBy, setGroupBy] = useState<string>(initial.groupBy ?? 'none')
+  const [groupBy2, setGroupBy2] = useState<string>(initial.groupBy2 ?? '')
+  const [percentOfTotal, setPercentOfTotal] = useState(initial.percentOfTotal ?? false)
+  const [targets, setTargets] = useState<Record<string, KpiTarget>>(initial.targets ?? {})
+  const [fieldNames, setFieldNames] = useState<{ name: string; label: string }[]>([])
   const [kpis, setKpis] = useState<string[]>(initial.kpis ?? DEFAULT_KPIS)
   const [revenueBasis, setRevenueBasis] = useState<NonNullable<KpiWidgetConfig['revenueBasis']>>(initial.revenueBasis ?? 'exclTax')
   const [netRevenue, setNetRevenue] = useState(initial.netRevenue ?? false)
@@ -43,6 +49,9 @@ export default function WidgetConfigModal({ title, fields, initial, initialWidge
     listCampaigns().then(setCampaigns).catch(() => {})
     listAgentGroups().then(setGroups).catch(() => {})
     if (fields.kpi) customKpisApi.list().then((k) => setCustomKpis(k.filter((x) => x.isActive))).catch(() => {})
+    if (fields.kpi) customFieldsApi.listDefinitions()
+      .then((d) => setFieldNames([...new Map(d.filter((x) => x.isActive).map((x) => [x.fieldName, { name: x.fieldName, label: x.displayLabel }])).values()]))
+      .catch(() => {})
   }, [fields.kpi])
 
   function handleSave() {
@@ -54,7 +63,11 @@ export default function WidgetConfigModal({ title, fields, initial, initialWidge
       timeWindow: fields.timeWindow
         ? (timeWindowMode === 'hours' || timeWindowMode === 'minutes' ? { mode: timeWindowMode, value: timeWindowValue } : { mode: timeWindowMode })
         : undefined,
-      ...(fields.kpi ? { groupBy, kpis, revenueBasis, netRevenue } : {}),
+      ...(fields.kpi ? {
+        groupBy, groupBy2: groupBy !== 'none' && groupBy2 && groupBy2 !== groupBy ? groupBy2 : undefined, kpis, revenueBasis, netRevenue,
+        percentOfTotal: percentOfTotal || undefined,
+        targets: Object.fromEntries(Object.entries(targets).filter(([k, t]) => kpis.includes(k) && (t.good != null || t.warn != null))),
+      } : {}),
     }, widgetTitle.trim() || undefined)
     onClose()
   }
@@ -170,11 +183,13 @@ export default function WidgetConfigModal({ title, fields, initial, initialWidge
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block text-xs text-gray-400 mb-1">Break down by</label>
-                  <select value={groupBy} onChange={(e) => setGroupBy(e.target.value as typeof groupBy)}
+                  <select value={groupBy} onChange={(e) => setGroupBy(e.target.value)}
                     className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white">
-                    <option value="none">Totals only</option>
-                    <option value="campaign">Campaign</option>
-                    <option value="client">Client</option>
+                    <option value="none">Totals only (tiles)</option>
+                    {KPI_DIMENSIONS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+                    {fieldNames.length > 0 && <optgroup label="Custom field">
+                      {fieldNames.map((f) => <option key={f.name} value={`cf:${f.name}`}>{f.label}</option>)}
+                    </optgroup>}
                   </select>
                 </div>
                 <div>
@@ -187,6 +202,25 @@ export default function WidgetConfigModal({ title, fields, initial, initialWidge
                   </select>
                 </div>
               </div>
+              {groupBy !== 'none' && (
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Then by (optional)</label>
+                    <select value={groupBy2} onChange={(e) => setGroupBy2(e.target.value)}
+                      className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white">
+                      <option value="">—</option>
+                      {KPI_DIMENSIONS.filter((d) => d.value !== groupBy).map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+                      {fieldNames.length > 0 && <optgroup label="Custom field">
+                        {fieldNames.filter((f) => `cf:${f.name}` !== groupBy).map((f) => <option key={f.name} value={`cf:${f.name}`}>{f.label}</option>)}
+                      </optgroup>}
+                    </select>
+                  </div>
+                  <label className="flex items-end gap-2 text-sm text-gray-300 pb-1.5">
+                    <input type="checkbox" checked={percentOfTotal} onChange={(e) => setPercentOfTotal(e.target.checked)} />
+                    % of total for counts
+                  </label>
+                </div>
+              )}
               <label className="flex items-center gap-2 text-sm text-gray-300">
                 <input type="checkbox" checked={netRevenue} onChange={(e) => setNetRevenue(e.target.checked)} />
                 Net revenue (only orders whose payment went through)
@@ -204,6 +238,35 @@ export default function WidgetConfigModal({ title, fields, initial, initialWidge
                   ))}
                 </div>
               </div>
+              {kpis.length > 0 && (
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Targets (optional) — colours the value green / amber / red</label>
+                  <div className="max-h-40 overflow-y-auto border border-gray-800 rounded p-2 space-y-1">
+                    {kpis.map((key) => {
+                      const def = KPI_CATALOG.find((k) => k.key === key)
+                      const name = def?.label ?? customKpis.find((c) => `custom:${c.id}` === key)?.name ?? key
+                      const t = targets[key] ?? { higherIsBetter: true }
+                      const set = (p: Partial<KpiTarget>) => setTargets({ ...targets, [key]: { ...t, ...p } })
+                      const num = (v: string) => v.trim() === '' ? null : Number(v)
+                      return (
+                        <div key={key} className="flex items-center gap-1.5 text-[11px] text-gray-300">
+                          <span className="flex-1 truncate" title={name}>{name}</span>
+                          <input type="number" placeholder="good" value={t.good ?? ''} onChange={(e) => set({ good: num(e.target.value) })}
+                            className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-white" />
+                          <input type="number" placeholder="warn" value={t.warn ?? ''} onChange={(e) => set({ warn: num(e.target.value) })}
+                            className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-white" />
+                          <select value={t.higherIsBetter ? 'up' : 'down'} onChange={(e) => set({ higherIsBetter: e.target.value === 'up' })}
+                            className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-white">
+                            <option value="up">higher better</option>
+                            <option value="down">lower better</option>
+                          </select>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <p className="text-[10px] text-gray-500 mt-1">In the KPI's own units: 25 = 25%, 4.50 = $4.50, 180 = 3:00 for times.</p>
+                </div>
+              )}
             </>
           )}
         </div>

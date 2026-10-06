@@ -9,8 +9,19 @@ export interface TimeWindowConfig {
 }
 
 /** KPI widget settings (S181, docs/dispositions-kpi-plan.md). */
+/** Good / warning thresholds for one KPI on a widget (S181), in the KPI's displayed units (%, $, seconds…). */
+export interface KpiTarget { good?: number | null; warn?: number | null; higherIsBetter: boolean }
+
 export interface KpiWidgetConfig {
-  groupBy?: 'none' | 'campaign' | 'client'
+  /** 'none' or a report dimension: campaign, client, agent, disposition, category, day, hour, agency, station, dnis,
+   *  or "cf:<custom field name>". */
+  groupBy?: string
+  /** Second-level breakdown (subtotal per first-level group). */
+  groupBy2?: string
+  /** Count KPIs get a "% of total" column. */
+  percentOfTotal?: boolean
+  /** KPI key → thresholds that colour the value. */
+  targets?: Record<string, KpiTarget>
   /** Which KPIs to show, in order — keys from KPI_CATALOG, or "custom:<id>". */
   kpis?: string[]
   revenueBasis?: 'gross' | 'exclTax' | 'merch'

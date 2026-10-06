@@ -20,10 +20,34 @@ public sealed record KpiInteraction(
     int Units, bool HasUpsell,
     double HandleSeconds,
     /// <summary>The catalog disposition (formula KPIs count dispositions as well as categories).</summary>
-    Guid? DispositionId = null);
+    Guid? DispositionId = null,
+    /// <summary>Report dimensions → this interaction's label (agent, day, station…), see <see cref="KpiDimension"/>.</summary>
+    IReadOnlyDictionary<string, string>? Dims = null);
 
 /// <summary>One inbound production call as the call-handling KPIs see it.</summary>
-public sealed record KpiCall(Guid CampaignId, Guid ClientId, bool Handled, bool Abandoned, bool? MetServiceLevel, double TalkSeconds);
+public sealed record KpiCall(Guid CampaignId, Guid ClientId, bool Handled, bool Abandoned, bool? MetServiceLevel, double TalkSeconds,
+    IReadOnlyDictionary<string, string>? Dims = null);
+
+/// <summary>What a KPI report can be broken down by (S181). Calls have no disposition / category, so call-handling KPIs
+/// show "—" on those rows. <c>cf:&lt;field name&gt;</c> breaks down by a custom field's value.</summary>
+public static class KpiDimension
+{
+    public const string Campaign = "campaign";
+    public const string Client = "client";
+    public const string Agent = "agent";
+    public const string Disposition = "disposition";
+    public const string Category = "category";
+    public const string Day = "day";
+    public const string Hour = "hour";
+    public const string Agency = "agency";
+    public const string Station = "station";
+    public const string Dnis = "dnis";
+    public const string CustomFieldPrefix = "cf:";
+
+    public static bool IsValid(string? d) =>
+        d is Campaign or Client or Agent or Disposition or Category or Day or Hour or Agency or Station or Dnis
+        || (d?.StartsWith(CustomFieldPrefix, StringComparison.Ordinal) == true && d.Length > CustomFieldPrefix.Length);
+}
 
 /// <summary>An agent's time in the window: logged in (any state but logged out) and after-call work.</summary>
 public sealed record KpiAgentTime(double LoggedInSeconds, double AcwSeconds, int AcwSegments);

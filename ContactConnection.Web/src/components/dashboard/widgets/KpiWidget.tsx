@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { dashboardWidgetsApi, type KpiMetrics, type KpiResult } from '../../../api/dashboardWidgets'
-import type { WidgetFilterConfig } from '../../../types/dashboard'
+import type { KpiTarget, WidgetFilterConfig } from '../../../types/dashboard'
 import { useDashboardLiveAgentSessions, useDashboardLiveAgentState, useDashboardLiveCallState } from '../DashboardLiveContext'
 
 // KPI widget (S181, docs/dispositions-kpi-plan.md): CRM + telephony KPIs together — close rates from the disposition
@@ -50,6 +50,29 @@ export const KPI_CATALOG: KpiDef[] = [
   { key: 'unmapped', label: 'Unmapped dispositions', group: 'Data quality', format: 'int', value: (m) => m.unmapped },
 ]
 
+/** Report dimensions (S181) — what a KPI table can be broken down by. Custom fields are added as "cf:<name>". */
+export const KPI_DIMENSIONS: { value: string; label: string }[] = [
+  { value: 'campaign', label: 'Campaign' }, { value: 'client', label: 'Client' }, { value: 'agent', label: 'Agent' },
+  { value: 'disposition', label: 'Disposition' }, { value: 'category', label: 'Reporting category' },
+  { value: 'day', label: 'Day' }, { value: 'hour', label: 'Hour of day' },
+  { value: 'agency', label: 'Media agency' }, { value: 'station', label: 'Station' }, { value: 'dnis', label: 'Number dialed (DNIS)' },
+]
+
+export function dimensionLabel(d: string | undefined) {
+  if (!d) return ''
+  if (d.startsWith('cf:')) return d.slice(3)
+  return KPI_DIMENSIONS.find((x) => x.value === d)?.label ?? d
+}
+
+/** Green when the value meets "good", amber when it meets "warning", red otherwise — in the KPI's displayed units. */
+export function targetColor(value: number | null | undefined, t: KpiTarget | undefined): string {
+  if (value == null || !t || t.good == null) return ''
+  const meets = (limit: number) => t.higherIsBetter ? value >= limit : value <= limit
+  if (meets(t.good)) return 'text-emerald-400'
+  if (t.warn != null && meets(t.warn)) return 'text-amber-300'
+  return 'text-red-400'
+}
+
 export const DEFAULT_KPIS = ['grossCloseRate', 'netCloseRate', 'orders', 'revenue', 'revenuePerCall', 'averageOrder',
   'revenuePerAgentHour', 'callsOffered', 'serviceLevel', 'aht']
 
@@ -80,7 +103,7 @@ export default function KpiWidget({ config }: { config: WidgetFilterConfig }) {
     dashboardWidgetsApi.kpi(config).then((d) => { setData(d); setError(null) })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.campaignId, config.clientId, config.groupBy, config.timeWindow?.mode, config.timeWindow?.value])
+  }, [config.campaignId, config.clientId, config.groupBy, config.groupBy2, config.timeWindow?.mode, config.timeWindow?.value])
 
   useEffect(() => { load() }, [load])
 
@@ -130,17 +153,37 @@ export default function KpiWidget({ config }: { config: WidgetFilterConfig }) {
     return (
       <div className="h-full flex flex-col">
         <div className="flex-1 min-h-0 overflow-y-auto grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(118px, 1fr))' }}>
-          {defs.map((d) => (
-            <div key={d.key} className="bg-gray-800/50 rounded-lg px-2.5 py-2" title={d.hint}>
-              <div className="text-[11px] text-gray-400 leading-tight">{d.label}</div>
-              <div className="text-lg font-semibold text-white tabular-nums">{fmt(valueOf(d, data.total), d.format)}</div>
-            </div>
-          ))}
+          {defs.map((d) => {
+            const v = valueOf(d, data.total)
+            const color = targetColor(v, config.targets?.[d.key])
+            return (
+              <div key={d.key} className="bg-gray-800/50 rounded-lg px-2.5 py-2" title={d.hint}>
+                <div className="text-[11px] text-gray-400 leading-tight">{d.label}</div>
+                <div className={`text-lg font-semibold tabular-nums ${color || 'text-white'}`}>{fmt(v, d.format)}</div>
+              </div>
+            )
+          })}
         </div>
         {footer}
       </div>
     )
   }
+
+  // Report table (S181): one or two dimensions, subtotals per first-level group, "% of total" beside count KPIs.
+  const twoLevel = !!config.groupBy2 && data.rows.some((r) => r.label2 != null)
+  const pct = (d: KpiDef) => !!config.percentOfTotal && d.format === 'int'
+  const cells = (m: KpiMetrics, strong: boolean) => defs.flatMap((d) => {
+    const v = valueOf(d, m)
+    const color = targetColor(v, config.targets?.[d.key])
+    const out = [<td key={d.key} className={`py-1 px-2 text-right tabular-nums ${color}`}>{fmt(v, d.format)}</td>]
+    if (pct(d)) {
+      const total = valueOf(d, data.total)
+      out.push(<td key={`${d.key}%`} className={`py-1 px-2 text-right tabular-nums ${strong ? '' : 'text-gray-500'}`}>
+        {v == null || !total ? '—' : `${((v / total) * 100).toFixed(1)}%`}</td>)
+    }
+    return out
+  })
+  let lastGroup: string | null = null
 
   return (
     <div className="h-full flex flex-col">
@@ -148,20 +191,30 @@ export default function KpiWidget({ config }: { config: WidgetFilterConfig }) {
         <table className="w-full text-xs">
           <thead className="sticky top-0 bg-gray-900">
             <tr className="text-left text-gray-500 border-b border-gray-800">
-              <th className="py-1 pr-2 font-medium">{config.groupBy === 'client' ? 'Client' : 'Campaign'}</th>
-              {defs.map((d) => <th key={d.key} className="py-1 px-2 font-medium text-right whitespace-nowrap" title={d.hint}>{d.label}</th>)}
+              <th className="py-1 pr-2 font-medium">{dimensionLabel(config.groupBy)}</th>
+              {twoLevel && <th className="py-1 pr-2 font-medium">{dimensionLabel(config.groupBy2)}</th>}
+              {defs.flatMap((d) => [
+                <th key={d.key} className="py-1 px-2 font-medium text-right whitespace-nowrap" title={d.hint}>{d.label}</th>,
+                ...(pct(d) ? [<th key={`${d.key}%`} className="py-1 px-2 font-medium text-right whitespace-nowrap">% of total</th>] : []),
+              ])}
             </tr>
           </thead>
           <tbody>
-            {data.rows.map((r) => (
-              <tr key={r.key} className="border-b border-gray-800/60 text-gray-300">
-                <td className="py-1 pr-2 whitespace-nowrap">{r.label}</td>
-                {defs.map((d) => <td key={d.key} className="py-1 px-2 text-right tabular-nums">{fmt(valueOf(d, r.metrics), d.format)}</td>)}
-              </tr>
-            ))}
+            {data.rows.map((r) => {
+              const showGroup = r.label !== lastGroup
+              lastGroup = r.label
+              return (
+                <tr key={r.key} className={r.subtotal ? 'border-b border-gray-700 text-gray-100 font-semibold bg-gray-800/40' : 'border-b border-gray-800/60 text-gray-300'}>
+                  <td className="py-1 pr-2 whitespace-nowrap">{r.subtotal ? `${r.label} subtotal` : twoLevel && !showGroup ? '' : r.label}</td>
+                  {twoLevel && <td className="py-1 pr-2 whitespace-nowrap">{r.subtotal ? '' : r.label2}</td>}
+                  {cells(r.metrics, r.subtotal)}
+                </tr>
+              )
+            })}
             <tr className="text-white font-semibold">
               <td className="py-1 pr-2">Total</td>
-              {defs.map((d) => <td key={d.key} className="py-1 px-2 text-right tabular-nums">{fmt(valueOf(d, data.total), d.format)}</td>)}
+              {twoLevel && <td />}
+              {cells(data.total, true)}
             </tr>
           </tbody>
         </table>

@@ -113,7 +113,7 @@ export const dashboardWidgetsApi = {
 
   kpi: (params: WidgetFilterConfig) => {
     const q = buildQuery(params)
-    const extra = `groupBy=${params.groupBy ?? 'none'}`
+    const extra = `groupBy=${encodeURIComponent(params.groupBy ?? 'none')}${params.groupBy2 ? `&groupBy2=${encodeURIComponent(params.groupBy2)}` : ''}`
     return api.get<KpiResult>(`/api/v1/dashboard-widgets/kpi${q ? `${q}&${extra}` : `?${extra}`}`)
   },
 }
@@ -140,7 +140,11 @@ export interface KpiMetrics {
 
 export type KpiFormatName = 'number' | 'currency' | 'percent' | 'duration' | 'integer'
 export interface KpiVariable { name: string; label: string; group: string }
-export interface KpiResult { total: KpiMetrics; rows: { key: string; label: string; metrics: KpiMetrics }[]; since: string; until: string }
+export interface KpiResult {
+  total: KpiMetrics
+  rows: { key: string; label: string; label2: string | null; subtotal: boolean; metrics: KpiMetrics }[]
+  since: string; until: string
+}
 
 export interface CustomKpi {
   id: string; name: string; description: string | null; numeratorCategoryIds: string[]; denominatorCategoryIds: string[]
