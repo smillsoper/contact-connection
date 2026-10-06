@@ -15,6 +15,8 @@ interface Props {
   initialWidgetTitle: string
   onSave: (config: WidgetFilterConfig, widgetTitle: string | undefined) => void
   onClose: () => void
+  /** Client dashboard (S181): only these campaigns can be picked (empty = the client's own, via clientId). */
+  scope?: { clientId: string; campaignIds: string[] }
 }
 
 const DEFAULT_HOURS = 1
@@ -22,7 +24,9 @@ const DEFAULT_MINUTES = 30
 
 // Exactly one of client/campaign/group scopes a widget at a time — picking one clears the
 // others, since the backend's agent-set resolution only honors a single filter dimension.
-export default function WidgetConfigModal({ title, fields, initial, initialWidgetTitle, onSave, onClose }: Props) {
+export default function WidgetConfigModal({ title, fields: rawFields, initial, initialWidgetTitle, onSave, onClose, scope }: Props) {
+  // On a client dashboard the client is fixed by the dashboard, so the widget can't pick one.
+  const fields = scope ? { ...rawFields, client: false, group: false } : rawFields
   const [clients, setClients] = useState<{ id: string; name: string }[]>([])
   const [campaigns, setCampaigns] = useState<{ id: string; name: string }[]>([])
   const [groups, setGroups] = useState<{ id: string; name: string }[]>([])
@@ -48,12 +52,15 @@ export default function WidgetConfigModal({ title, fields, initial, initialWidge
 
   useEffect(() => {
     listClients().then(setClients).catch(() => {})
-    listCampaigns().then(setCampaigns).catch(() => {})
+    listCampaigns(scope?.clientId)
+      .then((c) => setCampaigns(scope?.campaignIds.length ? c.filter((x) => scope.campaignIds.includes(x.id)) : c))
+      .catch(() => {})
     listAgentGroups().then(setGroups).catch(() => {})
     if (fields.kpi) customKpisApi.list().then((k) => setCustomKpis(k.filter((x) => x.isActive))).catch(() => {})
     if (fields.kpi) customFieldsApi.listDefinitions()
       .then((d) => setFieldNames([...new Map(d.filter((x) => x.isActive).map((x) => [x.fieldName, { name: x.fieldName, label: x.displayLabel }])).values()]))
       .catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fields.kpi])
 
   function handleSave() {

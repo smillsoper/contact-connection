@@ -109,6 +109,9 @@ export const WIDGET_META: Record<DashboardWidgetType, WidgetMeta> = {
   },
 }
 
+/** Report widgets only — what a client dashboard (S181) may hold. Mirrors Dashboard.ClientWidgetTypes on the server. */
+export const CLIENT_WIDGET_TYPES: DashboardWidgetType[] = ['kpi', 'service_level_threshold', 'call_state_by_campaign']
+
 export const WIDGET_TYPES: DashboardWidgetType[] =
   ['agent_state_counter', 'agent_list', 'call_state_by_campaign', 'callbacks', 'service_level_threshold', 'queued_calls', 'active_calls', 'kpi']
 

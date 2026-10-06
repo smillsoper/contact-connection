@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { dashboardWidgetsApi, type KpiMetrics, type KpiResult } from '../../../api/dashboardWidgets'
 import type { KpiTarget, WidgetFilterConfig } from '../../../types/dashboard'
 import { useDashboardLiveAgentSessions, useDashboardLiveAgentState, useDashboardLiveCallState } from '../DashboardLiveContext'
+import { useWidgetFetch } from '../WidgetDataSource'
 
 // KPI widget (S181, docs/dispositions-kpi-plan.md): CRM + telephony KPIs together — close rates from the disposition
 // catalog, revenue from orders, handling from call / agent state history. Production calls only; interactions counted by
@@ -104,8 +105,9 @@ export default function KpiWidget({ config }: { config: WidgetFilterConfig }) {
   const callState = useDashboardLiveCallState()
   const agentState = useDashboardLiveAgentState()
 
+  const fetchData = useWidgetFetch(() => dashboardWidgetsApi.kpi(config))
   const load = useCallback(() => {
-    dashboardWidgetsApi.kpi(config).then((d) => { setData(d); setError(null) })
+    fetchData().then((d) => { setData(d); setError(null) })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.campaignId, config.clientId, config.groupBy, config.groupBy2, config.timeWindow?.mode, config.timeWindow?.value])

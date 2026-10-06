@@ -28,6 +28,9 @@ import BillingPage from './pages/admin/BillingPage'
 import CommissionReportPage from './pages/CommissionReportPage'
 import AdminExportsPage from './pages/admin/AdminExportsPage'
 import AdminDispositionsPage from './pages/admin/AdminDispositionsPage'
+import AdminClientUsersPage from './pages/admin/AdminClientUsersPage'
+import { ClientLoginPage, ClientInvitePage, ClientMfaPage } from './pages/client/ClientAuthPages'
+import ClientPortalPage from './pages/client/ClientPortalPage'
 import AdminExportEditorPage from './pages/admin/AdminExportEditorPage'
 import AdminProductOffersPage from './pages/admin/AdminProductOffersPage'
 import AdminApiDefinitionsPage from './pages/admin/AdminApiDefinitionsPage'
@@ -108,6 +111,12 @@ export default function App() {
 
         {/* ── Agent routes ── */}
         <Route path="/login" element={isAdminSubdomain ? <PortalLoginPage /> : <LoginPage />} />
+        {/* Client portal (S181) — client users, separate session from agents */}
+        <Route path="/client/login" element={<ClientLoginPage />} />
+        <Route path="/client/invite/:token" element={<ClientInvitePage />} />
+        <Route path="/client/mfa" element={<ClientMfaPage />} />
+        <Route path="/client" element={<ClientPortalPage />} />
+        <Route path="/client/d/:id" element={<ClientPortalPage />} />
         <Route path="/mfa/setup" element={<MfaSetupPage />} />
         <Route path="/mfa/verify" element={<MfaVerifyPage />} />
         <Route
@@ -261,6 +270,14 @@ export default function App() {
           element={
             <RequireAdminAuth>
               <AdminRolesPage />
+            </RequireAdminAuth>
+          }
+        />
+        <Route
+          path="/admin/client-users"
+          element={
+            <RequireAdminAuth>
+              <AdminClientUsersPage />
             </RequireAdminAuth>
           }
         />

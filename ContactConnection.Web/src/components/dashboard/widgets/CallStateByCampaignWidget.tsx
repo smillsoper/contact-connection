@@ -3,6 +3,7 @@ import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, XAxis, YAxis
 import { dashboardWidgetsApi, type CampaignStateCountRow } from '../../../api/dashboardWidgets'
 import type { WidgetFilterConfig } from '../../../types/dashboard'
 import { useDashboardLiveCallState } from '../DashboardLiveContext'
+import { useWidgetFetch } from '../WidgetDataSource'
 
 const BUCKET_COLORS: Record<string, string> = {
   pre_queue: '#eab308',
@@ -71,8 +72,9 @@ export default function CallStateByCampaignWidget({ config }: { config: WidgetFi
   const liveEvent = useDashboardLiveCallState()
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  const fetchData = useWidgetFetch(() => dashboardWidgetsApi.callStateByCampaign(config))
   const load = useCallback(() => {
-    dashboardWidgetsApi.callStateByCampaign(config)
+    fetchData()
       .then(setRows)
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -6,8 +6,10 @@ import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 import { useAuthStore } from '../stores/authStore'
 import { dashboardsApi } from '../api/dashboards'
+import ClientScopeModal, { type ClientScope } from '../components/dashboard/ClientScopeModal'
+import { listClients } from '../api/telephony'
 import {
-  WIDGET_META, WIDGET_TYPES, WIDGET_FILTER_FIELDS, newWidgetId,
+  WIDGET_META, WIDGET_TYPES, WIDGET_FILTER_FIELDS, CLIENT_WIDGET_TYPES, newWidgetId,
   type DashboardWidgetInstance, type DashboardWidgetType, type WidgetFilterConfig,
 } from '../types/dashboard'
 import WidgetShell from '../components/dashboard/WidgetShell'
@@ -72,6 +74,9 @@ export default function DashboardBuilderPage() {
   const [dashboardId, setDashboardId] = useState<string | null>(id ?? null)
   const [name, setName] = useState('New Dashboard')
   const [isShared, setIsShared] = useState(false)
+  const [scope, setScope] = useState<ClientScope>({ isClientDashboard: false, scopeClientId: null, scopeCampaignIds: [] })
+  const [scopeOpen, setScopeOpen] = useState(false)
+  const [clientNames, setClientNames] = useState<Record<string, string>>({})
   const [widgets, setWidgets] = useState<DashboardWidgetInstance[]>([])
   const [loading, setLoading] = useState(!!id)
   const [saving, setSaving] = useState(false)
@@ -104,6 +109,7 @@ export default function DashboardBuilderPage() {
         setDashboardId(detail.id)
         setName(detail.name)
         setIsShared(detail.is_shared)
+        setScope({ isClientDashboard: detail.is_client_dashboard, scopeClientId: detail.scope_client_id, scopeCampaignIds: detail.scope_campaign_ids ?? [] })
         setCanEditThis(detail.can_edit)
         try {
           setWidgets(JSON.parse(detail.layout) as DashboardWidgetInstance[])
@@ -119,6 +125,21 @@ export default function DashboardBuilderPage() {
     if (!id) return
     loadDashboard(id)
   }, [id, loadDashboard])
+
+  useEffect(() => {
+    listClients().then((c) => setClientNames(Object.fromEntries(c.map((x) => [x.id, x.name])))).catch(() => {})
+  }, [])
+
+  // Preview a client dashboard inside its scope — the client is fixed, and a widget's campaign filter only counts when
+  // it's one of the scope's (the server applies the same rule for client users; a multi-campaign scope previews the
+  // whole client here).
+  const previewConfig = useCallback((config: WidgetFilterConfig): WidgetFilterConfig => {
+    if (!scope.isClientDashboard || !scope.scopeClientId) return config
+    const ids = scope.scopeCampaignIds
+    const campaignId = config.campaignId && (ids.length === 0 || ids.includes(config.campaignId)) ? config.campaignId
+      : ids.length === 1 ? ids[0] : undefined
+    return { ...config, groupId: undefined, clientId: campaignId ? undefined : scope.scopeClientId, campaignId }
+  }, [scope])
 
   const handleCancelEdit = useCallback(() => {
     // A brand-new, never-saved dashboard has nothing to revert to — leave the page entirely,
@@ -241,14 +262,14 @@ export default function DashboardBuilderPage() {
     setSaving(true)
     setError(null)
     try {
-      const created = await dashboardsApi.create(`${name} (copy)`, false, JSON.stringify(widgets))
+      const created = await dashboardsApi.create(`${name} (copy)`, false, JSON.stringify(widgets), scope)
       navigate(`/dashboard-builder/${created.id}`)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to copy dashboard')
     } finally {
       setSaving(false)
     }
-  }, [name, widgets, navigate])
+  }, [name, widgets, navigate, scope])
 
   const handleSave = useCallback(async () => {
     setSaving(true)
@@ -256,9 +277,9 @@ export default function DashboardBuilderPage() {
     try {
       const layoutJson = JSON.stringify(widgets)
       if (dashboardId) {
-        await dashboardsApi.update(dashboardId, name, isShared, layoutJson)
+        await dashboardsApi.update(dashboardId, name, isShared, layoutJson, scope)
       } else {
-        const created = await dashboardsApi.create(name, isShared, layoutJson)
+        const created = await dashboardsApi.create(name, isShared, layoutJson, scope)
         setDashboardId(created.id)
         navigate(`/dashboard-builder/${created.id}`, { replace: true })
       }
@@ -267,7 +288,7 @@ export default function DashboardBuilderPage() {
     } finally {
       setSaving(false)
     }
-  }, [dashboardId, name, isShared, widgets, navigate])
+  }, [dashboardId, name, isShared, widgets, navigate, scope])
 
   const configuringWidget = widgets.find((w) => w.id === configuringId)
 
@@ -302,6 +323,16 @@ export default function DashboardBuilderPage() {
               />
               Shared
             </label>
+            {editMode ? (
+              <button onClick={() => setScopeOpen(true)}
+                className={`text-xs rounded-full px-2.5 py-0.5 border shrink-0 transition-colors ${scope.isClientDashboard ? 'border-violet-500/60 text-violet-200 bg-violet-500/10' : 'border-gray-700 text-gray-400 hover:text-gray-200'}`}>
+                {scope.isClientDashboard ? `Client: ${clientNames[scope.scopeClientId ?? ''] ?? '…'}` : 'Make client dashboard…'}
+              </button>
+            ) : scope.isClientDashboard && (
+              <span className="text-xs rounded-full px-2.5 py-0.5 border border-violet-500/60 text-violet-200 bg-violet-500/10 shrink-0">
+                Client: {clientNames[scope.scopeClientId ?? ''] ?? '…'}
+              </span>
+            )}
             {!canManage && (
               <span className="text-xs text-gray-500 border border-gray-700 rounded-full px-2.5 py-0.5 shrink-0">
                 View only
@@ -361,7 +392,7 @@ export default function DashboardBuilderPage() {
       {/* Widget palette — edit-mode only */}
       {editMode && (
       <div className="flex items-center gap-3 bg-gray-900 border-b border-gray-800 px-6 py-4 overflow-x-auto shrink-0">
-        {WIDGET_TYPES.map((type) => {
+        {(scope.isClientDashboard ? CLIENT_WIDGET_TYPES : WIDGET_TYPES).map((type) => {
           const meta = WIDGET_META[type]
           return (
             <div
@@ -427,7 +458,7 @@ export default function DashboardBuilderPage() {
                     onConfigure={editMode ? () => setConfiguringId(w.id) : undefined}
                     onRemove={editMode ? () => handleRemove(w.id) : undefined}
                   >
-                    {renderWidget(w.widgetType, w.config)}
+                    {renderWidget(w.widgetType, previewConfig(w.config))}
                   </WidgetShell>
                 </div>
               ))}
@@ -454,7 +485,11 @@ export default function DashboardBuilderPage() {
           initialWidgetTitle={configuringWidget.title ?? ''}
           onSave={(config, title) => handleConfigSave(configuringWidget.id, config, title)}
           onClose={() => setConfiguringId(null)}
+          scope={scope.isClientDashboard && scope.scopeClientId ? { clientId: scope.scopeClientId, campaignIds: scope.scopeCampaignIds } : undefined}
         />
+      )}
+      {scopeOpen && (
+        <ClientScopeModal initial={scope} widgets={widgets} onSave={setScope} onClose={() => setScopeOpen(false)} />
       )}
     </div>
   )

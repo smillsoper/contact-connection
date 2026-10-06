@@ -27,6 +27,7 @@ const NAV_SECTIONS: NavSection[] = [
     cards: [
       { title: 'Users', desc: 'Manage team members — invite, assign roles, reset passwords.', path: '/admin/agents', live: true },
       { title: 'Roles', desc: 'Define roles and the permissions each one grants.', path: '/admin/roles', live: true },
+      { title: 'Client users', desc: 'Give clients and vendors (e.g. a media agency) sign-ins to their client dashboards — with or without recordings.', path: '/admin/client-users', live: true },
     ],
   },
   {

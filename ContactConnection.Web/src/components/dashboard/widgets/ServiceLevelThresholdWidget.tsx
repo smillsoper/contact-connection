@@ -3,6 +3,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts'
 import { dashboardWidgetsApi, type ServiceLevelThresholdData } from '../../../api/dashboardWidgets'
 import type { WidgetFilterConfig } from '../../../types/dashboard'
 import { useDashboardLiveCallState } from '../DashboardLiveContext'
+import { useWidgetFetch } from '../WidgetDataSource'
 
 const MET_COLOR = '#22c55e'
 const MISSED_COLOR = '#ef4444'
@@ -14,8 +15,9 @@ export default function ServiceLevelThresholdWidget({ config }: { config: Widget
   const liveEvent = useDashboardLiveCallState()
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  const fetchData = useWidgetFetch(() => dashboardWidgetsApi.serviceLevelThreshold(config))
   const load = useCallback(() => {
-    dashboardWidgetsApi.serviceLevelThreshold(config)
+    fetchData()
       .then(setData)
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
     // eslint-disable-next-line react-hooks/exhaustive-deps
