@@ -189,6 +189,7 @@
 | 177 | 2026-10-04 | 3:30 PM PDT | 3:55 PM PDT | 25 min | ~21476 min |
 | 178 | 2026-10-04 | 5:07 PM PDT | 8:03 PM PDT | 176 min | ~21652 min |
 | 179 | 2026-10-05 | 7:38 AM PDT | 7:38 PM PDT | 720 min | ~22372 min |
+| 180 | 2026-10-05 | 7:38 PM PDT | 10:54 PM PDT | 196 min | ~22568 min |
 
 ---
 
@@ -11537,3 +11538,96 @@ billing (test mode), each live-tested by Stephen. Plus Avalara verified against 
 - **Carried:** keypad `#` (SIP INFO) retest and the outbound half of the item 3 live check, once vetting clears.
   `test_contact_center` tenant migrations (Portal).
 - **Sprint 2:** Active Calls widget → Export Worker + Cannella report → KPI widgets (production calls only).
+
+---
+
+## Session 180
+
+**Date:** 2026-10-05
+**Start:** 7:38 PM PDT
+**End:** 10:54 PM PDT
+**Duration:** 196 minutes
+**Total Duration:** ~22568 minutes
+
+### Focus
+
+**Sprint 2, items 1 and 2.** Built the Active Calls widget, then the whole Export Worker. Its first real use is Life Seasons'
+Cannella LF / SF files.
+
+### Done
+
+- **Active Calls widget** (`262d5f4`, `096f2b6`, live-verified by Stephen):
+  - every call an agent is on, inbound / callback / manual outbound, with the hold, card capture and recording flags;
+  - the script and the **script section** the agent is in now;
+  - a detail modal with the supervisor tools;
+  - SignalR push only (hold, secure-capture, section changes).
+- **Export plan + Cannella layouts** (`7391b4c`, `d82c548`): read from the CRMPro dump, layout only, no credentials.
+  - Stephen: **LF goes out in true Eastern time**, like SF. CRMPro's double +3 h shift is a bug and is not reproduced.
+  - Stephen: vendors need **test files** approved before going live, sometimes before they release delivery details.
+- **Export Worker session 1** (`ca72eb7`):
+  - Export definitions with the vendor lifecycle: draft → testing → approved (who at the vendor, which test file) → live / paused.
+    A layout change after approval is flagged rather than dropped from production.
+  - Liquid layouts:
+    - **Columns**: delimited with per-column quoting, fixed width, or Excel (own minimal xlsx writer);
+    - **Document**: one template over every call;
+    - filters `format_time` (export zone), `pad_left` / `pad_right`, `digits`, `number`, `money`, `csv`, `xml`.
+  - Rows per call, interaction or cart line, with an optional Liquid condition.
+  - **Production calls only**; practice (training / sandbox) calls only in test files.
+  - Preview against real calls; test files (`_TEST` suffix, `export.is_test`, never counted as a run).
+  - Run now, re-run a past window, run history, download.
+  - Durable queue (`FOR UPDATE SKIP LOCKED`, at most 5 at once); each run keeps a copy of the spec it was queued with.
+  - Dev: the Worker shares the API's blob folder.
+- **Export Worker session 2** (`b4328d5`):
+  - **Schedules** run in their own time zone; **windows** are counted in the export's zone.
+  - Windows: previous day / week / month, last N hours, since the last run.
+  - A plain-English description plus the next 3 runs.
+  - The scheduler catches up at most 7 missed runs; a unique index blocks queuing the same run twice.
+  - **Delivery** goes through a durable queue, with growing-backoff retries and Retry:
+    - SFTP requires a **pinned host key** (Test connection → Pin); a changed key blocks the send;
+    - FTPS needs a valid or pinned certificate;
+    - email;
+    - per-target PGP or AES-256 zip.
+  - Real files are sent only after vendor approval; test files only on request.
+  - **Retention** 90 days; the vendor-approved test file is kept.
+  - **Activity** audit: downloads, sends, failures, deleted files.
+  - **Cannella LF + SF starter templates**:
+    - true Eastern time, nightly at 9:30 PM Pacific for the previous Eastern day;
+    - SF O/R flag from `export.is_rerun`;
+    - SKU codes from offer flags (`line.flags[...]`);
+    - SF records are 108 characters (tested).
+- **Vendor keys** (`d3b7309`):
+  - Generate an SSH key pair (RSA-4096, OpenSSH public key + SHA256 fingerprint) or a PGP key pair.
+  - Private keys and passphrases go only into the tenant credential store, with the credential audit entry.
+  - Revoke is refused while a delivery target still uses the key.
+- **Verified:**
+  - API smoke tests for both sessions, including a real scheduled run firing at its minute.
+  - SFTP password and generated-key sign-in, host-key refusal, and zip upload, against throwaway local SFTP containers
+    (since removed).
+  - PGP and zip round trips.
+  - 1619 / 1619 tests pass; the solution builds with 0 warnings.
+- **Fixes found during testing:**
+  - The Resend client throws on construction without its key, which broke every delivery → email is now resolved lazily.
+  - Background jobs now log a crash instead of failing silently.
+  - Tenants missing the export columns are skipped with one warning.
+  - Deleting an export waits for pending sends.
+
+### Next
+
+- **Stephen's browser check** of Data Exports:
+  - schedule;
+  - delivery and Test connection;
+  - Send…;
+  - the Cannella templates;
+  - vendor keys (generating one writes to the dev Key Vault).
+- **Decision pending:** copy `KeyVault:VaultUri`, `EntraId:*` and `Resend:ApiKey` into the **Worker's** User Secrets. Without them
+  the Worker can't read delivery credentials or send email locally; production reads Key Vault.
+- **Cannella:**
+  - Clint's SFTP / FTPS details;
+  - a test file to Cannella;
+  - confirm GREV rounding, the SF file-name date, and the LF call-type wording.
+- **Sprint 2 item 3:** KPI widgets (production calls only).
+- **Carried:**
+  - keypad `#` (SIP INFO) and the outbound live check once vetting clears;
+  - `test_contact_center` tenant migrations;
+  - LLC reinstatement → SignalWire proof.
+
