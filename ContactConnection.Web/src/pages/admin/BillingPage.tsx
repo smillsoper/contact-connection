@@ -182,7 +182,11 @@ export default function BillingPage() {
                         </td>
                         <td className="py-2 pr-4 text-right font-mono text-gray-200">
                           {money(i.total)}
-                          {i.credited !== 0 && <p className="text-[11px] text-gray-500">owed {money(i.owed)}</p>}
+                          {i.credited !== 0 && (
+                            <p className="text-[11px] text-gray-500">
+                              {i.status === 'issued' ? `owed ${money(i.owed)}` : `credited ${money(i.credited)}`}
+                            </p>
+                          )}
                         </td>
                         <td className="py-2 pr-4 text-gray-400 text-xs">{i.kind === 'invoice' ? i.dueOn ?? '—' : '—'}</td>
                         <td className="py-2 text-right whitespace-nowrap space-x-2">
