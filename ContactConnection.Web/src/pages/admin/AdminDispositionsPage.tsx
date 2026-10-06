@@ -5,7 +5,7 @@ import {
   type Disposition, type DispositionCategory, type DispositionInput, type RecordingAction, type UnmappedDisposition,
 } from '../../api/dispositions'
 import { listCampaigns, listClients, type Campaign, type Client } from '../../api/telephony'
-import { customKpisApi, type CustomKpi } from '../../api/dashboardWidgets'
+import CustomKpisTab from '../../components/admin/CustomKpisTab'
 
 // Dispositions (S181, docs/dispositions-kpi-plan.md). A disposition is the outcome of an interaction; its reporting
 // category is what the KPIs read. Scoped like custom fields: everywhere (tenant), a client, or a campaign — the narrowest
@@ -17,93 +17,6 @@ const card = 'bg-gray-800/60 border border-gray-700 rounded-lg p-4 mb-4'
 const btn = 'px-3 py-1.5 rounded text-sm disabled:opacity-50'
 
 type Tab = 'dispositions' | 'categories' | 'unmapped' | 'kpis'
-
-/** Tenant-defined KPIs (S181): share of interactions in the counted categories, out of those in the "out of" categories
- *  (none = all interactions). Shown in the dashboard KPI widget. */
-function CustomKpisTab({ categories }: { categories: DispositionCategory[] }) {
-  const [kpis, setKpis] = useState<CustomKpi[]>([])
-  const [edit, setEdit] = useState<{ id: string | null; name: string; description: string; numerator: string[]; denominator: string[] } | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const load = () => customKpisApi.list().then(setKpis).catch((e: Error) => setError(e.message))
-  useEffect(() => { load() }, [])
-  const name = (id: string) => categories.find((c) => c.id === id)?.name ?? '?'
-  const pick = (list: string[], id: string, on: boolean) => on ? [...list, id] : list.filter((x) => x !== id)
-
-  async function save() {
-    if (!edit) return
-    setError(null)
-    const body = { name: edit.name, description: edit.description || null, numeratorCategoryIds: edit.numerator, denominatorCategoryIds: edit.denominator }
-    try {
-      if (edit.id) await customKpisApi.update(edit.id, body); else await customKpisApi.create(body)
-      setEdit(null); load()
-    } catch (e) { setError(e instanceof Error ? e.message : 'Save failed.') }
-  }
-
-  return (
-    <>
-      <p className="text-xs text-gray-400 mb-3">
-        Your own rates, built on reporting categories — e.g. <b className="text-gray-300">Lead capture rate</b> = Lead captured ÷ (Lead captured + Lead opportunity, not captured),
-        or <b className="text-gray-300">Transfer-to-CS rate</b> = a category ÷ all interactions. They appear in the dashboard KPI widget's KPI list.
-      </p>
-      {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
-      {edit ? (
-        <div className={card}>
-          <div className="grid sm:grid-cols-2 gap-3 mb-3">
-            <div><label className={label}>Name</label><input className={input} value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} placeholder="e.g. Lead capture rate" /></div>
-            <div><label className={label}>Description</label><input className={input} value={edit.description} onChange={(e) => setEdit({ ...edit, description: e.target.value })} /></div>
-          </div>
-          <div className="grid sm:grid-cols-2 gap-4">
-            <div>
-              <label className={label}>Count interactions in…</label>
-              {categories.filter((c) => c.isActive).map((c) => (
-                <label key={c.id} className="flex items-center gap-2 text-sm text-gray-300">
-                  <input type="checkbox" checked={edit.numerator.includes(c.id)} onChange={(e) => setEdit({ ...edit, numerator: pick(edit.numerator, c.id, e.target.checked) })} /> {c.name}
-                </label>
-              ))}
-            </div>
-            <div>
-              <label className={label}>…out of interactions in (none checked = all interactions)</label>
-              {categories.filter((c) => c.isActive).map((c) => (
-                <label key={c.id} className="flex items-center gap-2 text-sm text-gray-300">
-                  <input type="checkbox" checked={edit.denominator.includes(c.id)} onChange={(e) => setEdit({ ...edit, denominator: pick(edit.denominator, c.id, e.target.checked) })} /> {c.name}
-                </label>
-              ))}
-            </div>
-          </div>
-          <div className="flex gap-2 mt-3">
-            <button className={`${btn} bg-indigo-600 hover:bg-indigo-500 text-white`} disabled={!edit.name.trim() || edit.numerator.length === 0} onClick={save}>Save</button>
-            <button className={`${btn} bg-gray-700 hover:bg-gray-600 text-white`} onClick={() => setEdit(null)}>Cancel</button>
-          </div>
-        </div>
-      ) : (
-        <button className={`${btn} bg-indigo-600 hover:bg-indigo-500 text-white mb-4`}
-          onClick={() => setEdit({ id: null, name: '', description: '', numerator: [], denominator: [] })}>New KPI</button>
-      )}
-      {kpis.length === 0 ? <p className="text-gray-500 italic text-sm">No custom KPIs yet.</p> : (
-        <table className="w-full text-sm">
-          <tbody>
-            {kpis.map((k) => (
-              <tr key={k.id} className={`border-b border-gray-800 ${k.isActive ? '' : 'opacity-50'}`}>
-                <td className="py-2 pr-3 text-gray-100">{k.name}{k.description && <span className="block text-xs text-gray-500">{k.description}</span>}</td>
-                <td className="py-2 pr-3 text-xs text-gray-400">
-                  {k.numeratorCategoryIds.map(name).join(' + ')} ÷ {k.denominatorCategoryIds.length === 0 ? 'all interactions' : k.denominatorCategoryIds.map(name).join(' + ')}
-                </td>
-                <td className="py-2 text-right whitespace-nowrap text-sm">
-                  <button className="text-indigo-400 hover:text-indigo-300 mr-3"
-                    onClick={() => setEdit({ id: k.id, name: k.name, description: k.description ?? '', numerator: k.numeratorCategoryIds, denominator: k.denominatorCategoryIds })}>Edit</button>
-                  <button className="text-gray-400 hover:text-white mr-3" onClick={() => customKpisApi.update(k.id, {
-                    name: k.name, description: k.description, numeratorCategoryIds: k.numeratorCategoryIds, denominatorCategoryIds: k.denominatorCategoryIds, isActive: !k.isActive,
-                  }).then(load).catch((e: Error) => setError(e.message))}>{k.isActive ? 'Hide' : 'Show'}</button>
-                  <button className="text-red-400 hover:text-red-300" onClick={() => customKpisApi.remove(k.id).then(load).catch((e: Error) => setError(e.message))}>Delete</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </>
-  )
-}
 
 /** Recording rule for "Always record, retain by disposition" campaigns (S181). Blank = inherit. */
 function RecordingRuleFields({ action, days, inheritLabel, onChange }: {

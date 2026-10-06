@@ -37,7 +37,8 @@ public sealed class KpiService(ScopedTenantDbContextFactory dbFactory)
         var categories = await db.DispositionCategories.AsNoTracking().ToDictionaryAsync(c => c.Id, ct);
         var dispositionCategory = await db.Dispositions.AsNoTracking().ToDictionaryAsync(d => d.Id, d => d.CategoryId, ct);
         var custom = (await db.CustomKpis.AsNoTracking().Where(k => k.IsActive).OrderBy(k => k.DisplayOrder).ThenBy(k => k.Name).ToListAsync(ct))
-            .Select(k => new KpiCustomDefinition(k.Id, k.Name, k.NumeratorCategoryIds, k.DenominatorCategoryIds)).ToList();
+            .Select(k => new KpiCustomDefinition(k.Id, k.Name, k.NumeratorCategoryIds, k.DenominatorCategoryIds, k.Kind, k.Formula, k.Format)).ToList();
+        var names = await VariableNamesAsync(db, ct);
 
         // ── Interactions ──
         var rawIx = await db.CallInteractions.AsNoTracking()
@@ -82,7 +83,8 @@ public sealed class KpiService(ScopedTenantDbContextFactory dbFactory)
                 RevenueMerch: cart is null ? 0 : CommissionCalculator.OrderBasis(cart),
                 Units: items.Sum(i => i.Quantity),
                 HasUpsell: items.Any(i => i.IsUpsell),
-                HandleSeconds: x.CompletedAt is { } done && x.StartedAt is { } started ? (done - started).TotalSeconds : 0));
+                HandleSeconds: x.CompletedAt is { } done && x.StartedAt is { } started ? (done - started).TotalSeconds : 0,
+                DispositionId: x.DispositionId));
         }
 
         // ── Calls (call handling) ──
@@ -123,7 +125,7 @@ public sealed class KpiService(ScopedTenantDbContextFactory dbFactory)
             var list = ix.ToList();
             var agents = list.Where(i => i.AgentId is not null).Select(i => i.AgentId!.Value).Distinct()
                 .Select(a => agentTime.GetValueOrDefault(a)).OfType<KpiAgentTime>().ToList();
-            return KpiCalculator.Compute(list, cs.ToList(), agents, custom);
+            return KpiCalculator.Compute(list, cs.ToList(), agents, custom, names);
         }
 
         var rows = q.GroupBy switch
@@ -139,5 +141,28 @@ public sealed class KpiService(ScopedTenantDbContextFactory dbFactory)
             _ => new List<KpiRow>(),
         };
         return new KpiResult(Metrics(interactions, calls), rows, q.Since, q.Until);
+    }
+
+    /// <summary>The tenant's category and disposition variable names (<c>Cat_…</c>, <c>Disp_…</c>).</summary>
+    public static async Task<KpiVariableNames> VariableNamesAsync(TenantDbContext db, CancellationToken ct)
+    {
+        var categories = await db.DispositionCategories.AsNoTracking().Select(c => new { c.Id, c.Name }).ToListAsync(ct);
+        var dispositions = await db.Dispositions.AsNoTracking().Select(d => new { d.Id, d.Name }).ToListAsync(ct);
+        return new KpiVariableNames(
+            KpiFormula.Names(categories.Select(c => (c.Id, c.Name)), "Cat_"),
+            KpiFormula.Names(dispositions.Select(d => (d.Id, d.Name)), "Disp_"));
+    }
+
+    /// <summary>Every variable a formula can use, grouped for the designer's sidebar.</summary>
+    public async Task<IReadOnlyList<KpiVariable>> VariablesAsync(CancellationToken ct = default)
+    {
+        await using var db = dbFactory.Create();
+        var names = await VariableNamesAsync(db, ct);
+        var categoryLabels = await db.DispositionCategories.AsNoTracking().ToDictionaryAsync(c => c.Id, c => c.Name, ct);
+        var dispositionLabels = await db.Dispositions.AsNoTracking().ToDictionaryAsync(d => d.Id, d => d.Name, ct);
+        return KpiFormula.Fixed
+            .Concat(names.Categories.OrderBy(n => n.Value).Select(n => new KpiVariable(n.Value, $"Interactions in “{categoryLabels.GetValueOrDefault(n.Key)}”", "Categories")))
+            .Concat(names.Dispositions.OrderBy(n => n.Value).Select(n => new KpiVariable(n.Value, $"Interactions dispositioned “{dispositionLabels.GetValueOrDefault(n.Key)}”", "Dispositions")))
+            .ToList();
     }
 }

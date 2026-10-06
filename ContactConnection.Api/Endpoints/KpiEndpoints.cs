@@ -19,6 +19,8 @@ public static class KpiEndpoints
 
         var g = app.MapGroup("/api/v1/custom-kpis");
         g.MapGet("", List).RequireAuthorization();
+        g.MapGet("variables", Variables).RequireAuthorization();
+        g.MapPost("validate", ValidateFormula).RequireAuthorization();
         g.MapPost("", Create).RequireAuthorization("TenantAdmin");
         g.MapPut("{id:guid}", Update).RequireAuthorization("TenantAdmin");
         g.MapDelete("{id:guid}", Delete).RequireAuthorization("TenantAdmin");
@@ -73,7 +75,8 @@ public static class KpiEndpoints
         if (await ValidateAsync(db, req, ct) is { } error) return error;
         try
         {
-            var k = CustomKpi.Create(tenant.Id, req.Name, req.Description, req.NumeratorCategoryIds ?? [], req.DenominatorCategoryIds ?? [], req.DisplayOrder ?? 0);
+            var k = CustomKpi.Create(tenant.Id, req.Name, req.Description, req.NumeratorCategoryIds ?? [], req.DenominatorCategoryIds ?? [], req.DisplayOrder ?? 0,
+                req.Kind ?? "ratio", req.Formula, req.Format ?? "percent");
             db.CustomKpis.Add(k);
             await db.SaveChangesAsync(ct);
             return Results.Created($"/api/v1/custom-kpis/{k.Id}", k);
@@ -90,7 +93,8 @@ public static class KpiEndpoints
         if (await ValidateAsync(db, req, ct) is { } error) return error;
         try
         {
-            k.Update(req.Name, req.Description, req.NumeratorCategoryIds ?? [], req.DenominatorCategoryIds ?? [], req.DisplayOrder ?? k.DisplayOrder);
+            k.Update(req.Name, req.Description, req.NumeratorCategoryIds ?? [], req.DenominatorCategoryIds ?? [], req.DisplayOrder ?? k.DisplayOrder,
+                req.Kind ?? k.Kind, req.Formula ?? k.Formula, req.Format ?? k.Format);
             if (req.IsActive is { } active) k.SetActive(active);
             await db.SaveChangesAsync(ct);
             return Results.Ok(k);
@@ -109,13 +113,33 @@ public static class KpiEndpoints
         return Results.NoContent();
     }
 
+    private static async Task<IResult> Variables(KpiService kpis, TenantContext tc, CancellationToken ct) =>
+        !tc.HasTenant ? Results.Unauthorized() : Results.Ok(await kpis.VariablesAsync(ct));
+
+    /// <summary>The designer's live check: null error = usable.</summary>
+    private static async Task<IResult> ValidateFormula(FormulaRequest req, KpiService kpis, TenantContext tc, CancellationToken ct)
+    {
+        if (!tc.HasTenant) return Results.Unauthorized();
+        var known = (await kpis.VariablesAsync(ct)).Select(v => v.Name);
+        return Results.Ok(new { error = KpiFormula.Validate(req.Formula ?? "", known) });
+    }
+
     private static async Task<IResult?> ValidateAsync(TenantDbContext db, CustomKpiRequest req, CancellationToken ct)
     {
+        if (req.Kind == "formula")
+        {
+            if (!KpiFormat.IsValid(req.Format ?? KpiFormat.Percent)) return Results.BadRequest(new { error = $"Unknown format '{req.Format}'." });
+            var names = await KpiService.VariableNamesAsync(db, ct);
+            var variableNames = KpiFormula.Fixed.Select(v => v.Name).Concat(names.Categories.Values).Concat(names.Dispositions.Values);
+            return KpiFormula.Validate(req.Formula ?? "", variableNames) is { } formulaError ? Results.BadRequest(new { error = formulaError }) : null;
+        }
         var ids = (req.NumeratorCategoryIds ?? []).Concat(req.DenominatorCategoryIds ?? []).Distinct().ToList();
         var known = await db.DispositionCategories.Where(c => ids.Contains(c.Id)).CountAsync(ct);
         return known == ids.Count ? null : Results.BadRequest(new { error = "One of the chosen categories doesn't exist." });
     }
 
     public sealed record CustomKpiRequest(string Name, string? Description, List<Guid>? NumeratorCategoryIds,
-        List<Guid>? DenominatorCategoryIds, int? DisplayOrder, bool? IsActive);
+        List<Guid>? DenominatorCategoryIds, int? DisplayOrder, bool? IsActive,
+        string? Kind = null, string? Formula = null, string? Format = null);
+    public sealed record FormulaRequest(string? Formula);
 }

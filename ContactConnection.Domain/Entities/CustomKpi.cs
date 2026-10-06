@@ -14,6 +14,11 @@ public class CustomKpi
     public string? Description { get; private set; }
     public List<Guid> NumeratorCategoryIds { get; private set; } = [];
     public List<Guid> DenominatorCategoryIds { get; private set; } = [];
+    /// <summary><c>ratio</c> (categories ÷ categories) or <c>formula</c> (an NCalc expression over the KPI variables).</summary>
+    public string Kind { get; private set; } = "ratio";
+    public string? Formula { get; private set; }
+    /// <summary>number / currency / percent / duration / integer.</summary>
+    public string Format { get; private set; } = "percent";
     public int DisplayOrder { get; private set; }
     public bool IsActive { get; private set; } = true;
     public DateTimeOffset CreatedAt { get; private set; }
@@ -21,18 +26,25 @@ public class CustomKpi
 
     private CustomKpi() { }
 
-    public static CustomKpi Create(Guid tenantId, string name, string? description, IEnumerable<Guid> numerator, IEnumerable<Guid> denominator, int displayOrder)
+    public static CustomKpi Create(Guid tenantId, string name, string? description, IEnumerable<Guid> numerator, IEnumerable<Guid> denominator,
+        int displayOrder, string kind = "ratio", string? formula = null, string format = "percent")
     {
         var k = new CustomKpi { Id = Guid.NewGuid(), TenantId = tenantId, CreatedAt = DateTimeOffset.UtcNow };
-        k.Update(name, description, numerator, denominator, displayOrder);
+        k.Update(name, description, numerator, denominator, displayOrder, kind, formula, format);
         return k;
     }
 
-    public void Update(string name, string? description, IEnumerable<Guid> numerator, IEnumerable<Guid> denominator, int displayOrder)
+    public void Update(string name, string? description, IEnumerable<Guid> numerator, IEnumerable<Guid> denominator, int displayOrder,
+        string kind = "ratio", string? formula = null, string format = "percent")
     {
         if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("Name the KPI.");
+        if (kind is not ("ratio" or "formula")) throw new ArgumentException($"Unknown KPI kind '{kind}'.");
         var num = numerator.Distinct().ToList();
-        if (num.Count == 0) throw new ArgumentException("Choose at least one category to count.");
+        if (kind == "ratio" && num.Count == 0) throw new ArgumentException("Choose at least one category to count.");
+        if (kind == "formula" && string.IsNullOrWhiteSpace(formula)) throw new ArgumentException("Enter a formula.");
+        Kind = kind;
+        Formula = kind == "formula" ? formula!.Trim() : null;
+        Format = kind == "formula" ? format : "percent";
         Name = name.Trim();
         Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim();
         NumeratorCategoryIds = num;

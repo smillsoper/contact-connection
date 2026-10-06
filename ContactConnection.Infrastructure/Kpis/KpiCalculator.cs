@@ -18,7 +18,9 @@ public sealed record KpiInteraction(
     bool Declined,
     decimal RevenueGross, decimal RevenueExclTax, decimal RevenueMerch,
     int Units, bool HasUpsell,
-    double HandleSeconds);
+    double HandleSeconds,
+    /// <summary>The catalog disposition (formula KPIs count dispositions as well as categories).</summary>
+    Guid? DispositionId = null);
 
 /// <summary>One inbound production call as the call-handling KPIs see it.</summary>
 public sealed record KpiCall(Guid CampaignId, Guid ClientId, bool Handled, bool Abandoned, bool? MetServiceLevel, double TalkSeconds);
@@ -26,15 +28,45 @@ public sealed record KpiCall(Guid CampaignId, Guid ClientId, bool Handled, bool 
 /// <summary>An agent's time in the window: logged in (any state but logged out) and after-call work.</summary>
 public sealed record KpiAgentTime(double LoggedInSeconds, double AcwSeconds, int AcwSegments);
 
-/// <summary>A tenant-defined KPI: share of interactions in the numerator categories out of those in the denominator
-/// categories (empty denominator = all interactions).</summary>
-public sealed record KpiCustomDefinition(Guid Id, string Name, IReadOnlyList<Guid> Numerator, IReadOnlyList<Guid> Denominator);
+/// <summary>A tenant-defined KPI: either a ratio (share of interactions in the numerator categories out of those in the
+/// denominator categories; empty denominator = all interactions) or an NCalc formula over the KPI variables
+/// (<see cref="KpiFormula"/>), shown in <paramref name="Format"/>.</summary>
+public sealed record KpiCustomDefinition(Guid Id, string Name, IReadOnlyList<Guid> Numerator, IReadOnlyList<Guid> Denominator,
+    string Kind = KpiCustomKind.Ratio, string? Formula = null, string Format = KpiFormat.Percent);
+
+public static class KpiCustomKind
+{
+    public const string Ratio = "ratio";
+    public const string Formula = "formula";
+}
+
+/// <summary>How a formula KPI's value is shown. Percent multiplies by 100 (a formula returns a fraction).</summary>
+public static class KpiFormat
+{
+    public const string Number = "number";
+    public const string Currency = "currency";
+    public const string Percent = "percent";
+    public const string Duration = "duration";
+    public const string Integer = "integer";
+    public static bool IsValid(string? v) => v is Number or Currency or Percent or Duration or Integer;
+}
+
+/// <summary>Raw totals behind the metrics — the variables formula KPIs read.</summary>
+public sealed record KpiRaw(
+    int Units, int UpsellOrders, double TalkSeconds, double AcwSeconds, double HandleSeconds, double LoggedInSeconds,
+    IReadOnlyDictionary<Guid, int> CategoryCounts, IReadOnlyDictionary<Guid, int> DispositionCounts);
+
+/// <summary>Variable names for the tenant's categories and dispositions (<see cref="KpiFormula.Names"/>).</summary>
+public sealed record KpiVariableNames(IReadOnlyDictionary<Guid, string> Categories, IReadOnlyDictionary<Guid, string> Dispositions);
 
 public sealed record KpiRevenue(
     decimal Total, decimal Net, decimal? PerCall, decimal? PerOpportunity, decimal? AverageOrder,
     decimal? PerAgentHour, decimal? PerTalkHour);
 
-public sealed record KpiCustomValue(Guid Id, string Name, int Numerator, int Denominator, double? Percent);
+/// <param name="Percent">Ratio KPIs: the percentage. <paramref name="Value"/> is the display value for every kind (a
+/// formula KPI in percent format is already ×100).</param>
+public sealed record KpiCustomValue(Guid Id, string Name, int Numerator, int Denominator, double? Percent,
+    string Kind = KpiCustomKind.Ratio, string Format = KpiFormat.Percent, double? Value = null);
 
 public sealed record KpiMetrics(
     int Interactions, int Opportunities, int Orders, int NetOrders, int Declines,
@@ -45,7 +77,8 @@ public sealed record KpiMetrics(
     double? AvgTalkSeconds, double? AvgAcwSeconds, double? AhtSeconds,
     double LoggedInHours, double TalkHours,
     int SaleWithoutOrder, int Unmapped,
-    IReadOnlyList<KpiCustomValue> Custom);
+    IReadOnlyList<KpiCustomValue> Custom,
+    KpiRaw Raw);
 
 /// <summary>
 /// The KPI formulas (S181, docs/dispositions-kpi-plan.md) — pure, so every number is unit-tested.
@@ -62,7 +95,8 @@ public static class KpiCalculator
 {
     public static KpiMetrics Compute(
         IReadOnlyCollection<KpiInteraction> ix, IReadOnlyCollection<KpiCall> calls,
-        IReadOnlyCollection<KpiAgentTime> agents, IReadOnlyCollection<KpiCustomDefinition>? custom = null)
+        IReadOnlyCollection<KpiAgentTime> agents, IReadOnlyCollection<KpiCustomDefinition>? custom = null,
+        KpiVariableNames? names = null)
     {
         var orders = ix.Where(i => i.HasOrder).ToList();
         var opportunities = ix.Count(i => i.SalesOpportunity);
@@ -88,15 +122,13 @@ public static class KpiCalculator
         double? avgTalk = handled.Count > 0 ? handled.Average(c => c.TalkSeconds) : null;
         double? avgAcw = acwSegments > 0 ? agents.Sum(a => a.AcwSeconds) / acwSegments : null;
 
-        var customValues = (custom ?? []).Select(k =>
-        {
-            var denominator = k.Denominator.Count == 0 ? ix.Count : ix.Count(i => i.CategoryId is { } c && k.Denominator.Contains(c));
-            var numerator = ix.Count(i => i.CategoryId is { } c && k.Numerator.Contains(c)
-                && (k.Denominator.Count == 0 || k.Denominator.Contains(c)));
-            return new KpiCustomValue(k.Id, k.Name, numerator, denominator, Rate(numerator, denominator));
-        }).ToList();
+        var raw = new KpiRaw(
+            orders.Sum(o => o.Units), orders.Count(o => o.HasUpsell), talkSeconds, agents.Sum(a => a.AcwSeconds),
+            ix.Sum(i => i.HandleSeconds), agents.Sum(a => a.LoggedInSeconds),
+            ix.Where(i => i.CategoryId is not null).GroupBy(i => i.CategoryId!.Value).ToDictionary(g => g.Key, g => g.Count()),
+            ix.Where(i => i.DispositionId is not null).GroupBy(i => i.DispositionId!.Value).ToDictionary(g => g.Key, g => g.Count()));
 
-        return new KpiMetrics(
+        var metrics = new KpiMetrics(
             ix.Count, opportunities, orders.Count, orders.Count(o => o.NetOrder), ix.Count(i => i.Declined && !i.HasOrder),
             Rate(orders.Count, ix.Count), Rate(ordersOnOpp, opportunities), Rate(netOrdersOnOpp, opportunities),
             Revenue(i => i.RevenueGross), Revenue(i => i.RevenueExclTax), Revenue(i => i.RevenueMerch),
@@ -108,7 +140,33 @@ public static class KpiCalculator
             Seconds(avgTalk), Seconds(avgAcw), avgTalk is null ? null : Seconds(avgTalk.Value + (avgAcw ?? 0)),
             Math.Round(loggedInHours, 2), Math.Round(talkHours, 2),
             ix.Count(i => i.CategoryKey == "sale" && !i.HasOrder), ix.Count(i => i.Unmapped),
-            customValues);
+            [], raw);
+
+        if (custom is not { Count: > 0 }) return metrics;
+        var variables = names is null ? null : KpiFormula.Values(metrics, names.Categories, names.Dispositions);
+        return metrics with { Custom = custom.Select(k => k.Kind == KpiCustomKind.Formula ? FormulaValue(k, variables) : RatioValue(k, ix)).ToList() };
+    }
+
+    private static KpiCustomValue RatioValue(KpiCustomDefinition k, IReadOnlyCollection<KpiInteraction> ix)
+    {
+        var denominator = k.Denominator.Count == 0 ? ix.Count : ix.Count(i => i.CategoryId is { } c && k.Denominator.Contains(c));
+        var numerator = ix.Count(i => i.CategoryId is { } c && k.Numerator.Contains(c)
+            && (k.Denominator.Count == 0 || k.Denominator.Contains(c)));
+        var pct = Rate(numerator, denominator);
+        return new KpiCustomValue(k.Id, k.Name, numerator, denominator, pct, KpiCustomKind.Ratio, KpiFormat.Percent, pct);
+    }
+
+    private static KpiCustomValue FormulaValue(KpiCustomDefinition k, IReadOnlyDictionary<string, double>? variables)
+    {
+        var result = variables is null || string.IsNullOrWhiteSpace(k.Formula) ? null : KpiFormula.Evaluate(k.Formula, variables);
+        double? value = result is not { } v ? null : k.Format switch
+        {
+            KpiFormat.Percent => Math.Round(v * 100, 1),
+            KpiFormat.Integer => Math.Round(v),
+            KpiFormat.Duration => Math.Round(v, 1),
+            _ => Math.Round(v, 2),
+        };
+        return new KpiCustomValue(k.Id, k.Name, 0, 0, null, KpiCustomKind.Formula, k.Format, value);
     }
 
     /// <summary>A percentage to one decimal place, or null when there's nothing to divide by.</summary>

@@ -39,6 +39,9 @@ public class CustomKpiConfiguration : IEntityTypeConfiguration<CustomKpi>
         b.Property(k => k.Description).HasColumnName("description").HasMaxLength(500);
         b.Property(k => k.NumeratorCategoryIds).MapJson("numerator_category_ids", () => new List<Guid>()).HasDefaultValueSql("'[]'::jsonb").IsRequired();
         b.Property(k => k.DenominatorCategoryIds).MapJson("denominator_category_ids", () => new List<Guid>()).HasDefaultValueSql("'[]'::jsonb").IsRequired();
+        b.Property(k => k.Kind).HasColumnName("kind").HasMaxLength(20).HasDefaultValue("ratio").IsRequired();
+        b.Property(k => k.Formula).HasColumnName("formula").HasMaxLength(2000);
+        b.Property(k => k.Format).HasColumnName("format").HasMaxLength(20).HasDefaultValue("percent").IsRequired();
         b.Property(k => k.DisplayOrder).HasColumnName("display_order");
         b.Property(k => k.IsActive).HasColumnName("is_active");
         b.Property(k => k.CreatedAt).HasColumnName("created_at");

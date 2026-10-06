@@ -132,21 +132,33 @@ export interface KpiMetrics {
   avgTalkSeconds: number | null; avgAcwSeconds: number | null; ahtSeconds: number | null
   loggedInHours: number; talkHours: number
   saleWithoutOrder: number; unmapped: number
-  custom: { id: string; name: string; numerator: number; denominator: number; percent: number | null }[]
+  custom: {
+    id: string; name: string; numerator: number; denominator: number; percent: number | null
+    kind: 'ratio' | 'formula'; format: KpiFormatName; value: number | null
+  }[]
 }
+
+export type KpiFormatName = 'number' | 'currency' | 'percent' | 'duration' | 'integer'
+export interface KpiVariable { name: string; label: string; group: string }
 export interface KpiResult { total: KpiMetrics; rows: { key: string; label: string; metrics: KpiMetrics }[]; since: string; until: string }
 
 export interface CustomKpi {
   id: string; name: string; description: string | null; numeratorCategoryIds: string[]; denominatorCategoryIds: string[]
   displayOrder: number; isActive: boolean
+  /** S181: ratio (categories) or formula (NCalc over the KPI variables). */
+  kind: 'ratio' | 'formula'; formula: string | null; format: KpiFormatName
+}
+type CustomKpiInput = {
+  name: string; description: string | null; numeratorCategoryIds: string[]; denominatorCategoryIds: string[]
+  kind?: 'ratio' | 'formula'; formula?: string | null; format?: KpiFormatName; isActive?: boolean
 }
 export const customKpisApi = {
   list: () => api.get<CustomKpi[]>('/api/v1/custom-kpis'),
-  create: (k: { name: string; description: string | null; numeratorCategoryIds: string[]; denominatorCategoryIds: string[] }) =>
-    api.post<CustomKpi>('/api/v1/custom-kpis', k),
-  update: (id: string, k: { name: string; description: string | null; numeratorCategoryIds: string[]; denominatorCategoryIds: string[]; isActive?: boolean }) =>
-    api.put<CustomKpi>(`/api/v1/custom-kpis/${id}`, k),
+  create: (k: CustomKpiInput) => api.post<CustomKpi>('/api/v1/custom-kpis', k),
+  update: (id: string, k: CustomKpiInput) => api.put<CustomKpi>(`/api/v1/custom-kpis/${id}`, k),
   remove: (id: string) => api.delete<void>(`/api/v1/custom-kpis/${id}`),
+  variables: () => api.get<KpiVariable[]>('/api/v1/custom-kpis/variables'),
+  validate: (formula: string) => api.post<{ error: string | null }>('/api/v1/custom-kpis/validate', { formula }),
 }
 
 /** Active Calls widget (S180): one call an agent is on right now. */

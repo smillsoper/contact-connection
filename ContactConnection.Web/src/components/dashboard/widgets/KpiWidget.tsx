@@ -103,8 +103,10 @@ export default function KpiWidget({ config }: { config: WidgetFilterConfig }) {
     if (key.startsWith('custom:')) {
       const id = key.slice(7)
       const k = custom.find((c) => c.id === id)
-      return k ? [{ key, label: k.name, group: 'Your KPIs', format: 'pct' as Format,
-        value: (m: KpiMetrics) => m.custom.find((c) => c.id === id)?.percent ?? null }] : []
+      const format: Format = !k ? 'pct' : k.format === 'currency' ? 'money' : k.format === 'duration' ? 'secs'
+        : k.format === 'integer' ? 'int' : k.format === 'number' ? 'num' : 'pct'
+      return k ? [{ key, label: k.name, group: 'Your KPIs', format,
+        value: (m: KpiMetrics) => m.custom.find((c) => c.id === id)?.value ?? null }] : []
     }
     const d = KPI_CATALOG.find((x) => x.key === key)
     return d ? [d] : []
