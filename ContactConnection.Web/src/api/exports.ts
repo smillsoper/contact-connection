@@ -182,6 +182,25 @@ export const defaultSpec = (timeZone: string): ExportSpec => ({
   testFileSuffix: '_TEST', timeZone,
 })
 
+export interface ExportKeyRow {
+  id: string
+  name: string
+  type: 'ssh' | 'pgp'
+  publicKey: string
+  fingerprint: string
+  privateKeyCredential: string
+  createdByName: string
+  createdAt: string
+  revokedAt: string | null
+  revokedByName: string | null
+}
+
+export const exportKeysApi = {
+  list: () => api.get<ExportKeyRow[]>('/api/v1/export-keys'),
+  generate: (name: string, type: 'ssh' | 'pgp') => api.post<ExportKeyRow>('/api/v1/export-keys', { name, type }),
+  revoke: (id: string) => api.post<ExportKeyRow>(`/api/v1/export-keys/${id}/revoke`),
+}
+
 export const exportsApi = {
   list: () => api.get<ExportDefinition[]>('/api/v1/exports'),
   get: (id: string) => api.get<ExportDefinition>(`/api/v1/exports/${id}`),

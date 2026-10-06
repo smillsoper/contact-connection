@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import AdminShell from '../../components/admin/AdminShell'
 import { exportsApi, STATUS_LABEL, STATUS_STYLE, type ExportDefinition } from '../../api/exports'
+import ExportKeysCard from '../../components/admin/exports/ExportKeysCard'
 
 // Data Exports (S180, Export Worker) — every export file this tenant sends (e.g. the nightly media-agency files), with
 // where each one is in the vendor lifecycle and how its last file went.
@@ -68,6 +69,7 @@ export default function AdminExportsPage() {
               </table>
             </div>
           )}
+        <ExportKeysCard />
       </div>
     </AdminShell>
   )

@@ -78,6 +78,7 @@ public class TenantDbContext : DbContext
     public DbSet<ExportRun> ExportRuns => Set<ExportRun>();
     public DbSet<ExportDelivery> ExportDeliveries => Set<ExportDelivery>();
     public DbSet<ExportAuditEntry> ExportAuditEntries => Set<ExportAuditEntry>();
+    public DbSet<ExportKey> ExportKeys => Set<ExportKey>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -144,6 +145,7 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new ExportRunConfiguration());
         modelBuilder.ApplyConfiguration(new ExportDeliveryConfiguration());
         modelBuilder.ApplyConfiguration(new ExportAuditEntryConfiguration());
+        modelBuilder.ApplyConfiguration(new ExportKeyConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 

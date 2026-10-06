@@ -39,8 +39,11 @@
    sent only on request, real files only once approved; retention (90 days, the approved test file kept forever);
    activity audit (downloads, sends, failures, expiry); Cannella LF + SF starter templates (true Eastern; O/R flag from
    `export.is_rerun`; Cannella SKUs from offer flags `line.flags[...]`).
-3. Next: key management (generate an SSH key pair per vendor — we keep the private key; PGP key pairs for inbound files);
-   later plain FTP and cloud connectors (S3 / Box / Drive / SharePoint).
+3. **DONE S180:** vendor keys — generate an SSH key pair (RSA-4096; PKCS#1 private key in the credential store, OpenSSH
+   public key + SHA256 fingerprint shown; an SFTP target signs in with it — verified against a key-only SFTP server) or
+   a PGP key pair (private key + random passphrase in the credential store; public key for vendors to encrypt to us).
+   Revoke deletes the private key (refused while a delivery target uses it). Inbound file ingestion itself is later.
+4. Later: plain FTP and cloud connectors (S3 / Box / Drive / SharePoint) when a vendor needs one.
 
 **Local dev note:** the Worker sends deliveries, so it needs the tenant credential store (Key Vault settings) and the
 email key in its own User Secrets; production reads both from Key Vault.

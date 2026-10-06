@@ -141,6 +141,28 @@ public class ExportDeliveryConfiguration : IEntityTypeConfiguration<ExportDelive
     }
 }
 
+public class ExportKeyConfiguration : IEntityTypeConfiguration<ExportKey>
+{
+    public void Configure(EntityTypeBuilder<ExportKey> b)
+    {
+        b.ToTable("export_keys");
+        b.HasKey(k => k.Id);
+        b.Property(k => k.Id).HasColumnName("id");
+        b.Property(k => k.TenantId).HasColumnName("tenant_id");
+        b.Property(k => k.Name).HasColumnName("name").HasMaxLength(200).IsRequired();
+        b.Property(k => k.Type).HasColumnName("type").HasMaxLength(10).IsRequired();
+        b.Property(k => k.PublicKey).HasColumnName("public_key").IsRequired();
+        b.Property(k => k.Fingerprint).HasColumnName("fingerprint").HasMaxLength(200).IsRequired();
+        b.Property(k => k.PrivateKeyCredential).HasColumnName("private_key_credential").HasMaxLength(200).IsRequired();
+        b.Property(k => k.PassphraseCredential).HasColumnName("passphrase_credential").HasMaxLength(200);
+        b.Property(k => k.CreatedByName).HasColumnName("created_by_name").HasMaxLength(200).IsRequired();
+        b.Property(k => k.CreatedAt).HasColumnName("created_at");
+        b.Property(k => k.RevokedAt).HasColumnName("revoked_at");
+        b.Property(k => k.RevokedByName).HasColumnName("revoked_by_name").HasMaxLength(200);
+        b.HasIndex(k => k.PrivateKeyCredential).IsUnique().HasDatabaseName("ux_export_keys_credential");
+    }
+}
+
 public class ExportAuditEntryConfiguration : IEntityTypeConfiguration<ExportAuditEntry>
 {
     public void Configure(EntityTypeBuilder<ExportAuditEntry> b)

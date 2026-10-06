@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { exportsApi, newTarget, type ConnectionTest, type DeliveryTarget, type DeliveryType, type ExportDefinition } from '../../../api/exports'
+import { exportKeysApi, exportsApi, newTarget, type ConnectionTest, type DeliveryTarget, type DeliveryType, type ExportDefinition } from '../../../api/exports'
 import { listAdminCredentials } from '../../../api/adminCredentials'
 
 // Delivery targets (S180, session 2): where an export's files go — SFTP, FTPS, email — each optionally PGP / zip encrypted.
@@ -168,7 +168,13 @@ export default function ExportDeliveryCard({ def, onSaved }: { def: ExportDefini
   const [saving, setSaving] = useState(false)
 
   useEffect(() => { setTargets(def.deliveryTargets); setDirty(false) }, [def.id, def.deliveryTargets])
-  useEffect(() => { listAdminCredentials().then((c) => setNames(c.map((x) => x.keyName))).catch(() => setNames([])) }, [])
+  useEffect(() => {
+    // Saved credentials (needs the credentials permission) plus the SSH keys generated here (Keys, on Data Exports).
+    Promise.all([
+      listAdminCredentials().then((c) => c.map((x) => x.keyName)).catch(() => [] as string[]),
+      exportKeysApi.list().then((k) => k.filter((x) => x.type === 'ssh' && !x.revokedAt).map((x) => x.privateKeyCredential)).catch(() => [] as string[]),
+    ]).then(([a, b]) => setNames([...new Set([...b, ...a])]))
+  }, [])
 
   const update = (next: DeliveryTarget[]) => { setTargets(next); setDirty(true) }
 
