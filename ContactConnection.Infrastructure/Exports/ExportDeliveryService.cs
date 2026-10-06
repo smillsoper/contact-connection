@@ -59,7 +59,9 @@ public sealed class ExportDeliveryService(ITenantCredentialStore credentials, IE
                     var exists = dir is null || client.Exists(dir);
                     client.Disconnect();
                     var matches = string.IsNullOrWhiteSpace(t.HostKeyFingerprint) ? (bool?)null : Same(seen, t.HostKeyFingerprint);
-                    return new(exists, exists ? "Signed in." : $"Signed in, but the folder {dir} doesn't exist.", seen, matches);
+                    return new(exists, !exists ? $"Signed in, but the folder {dir} doesn't exist."
+                        : dir is null ? "Signed in. No remote folder is set — files will go to the login folder, which many servers don't allow writing to."
+                        : $"Signed in; the folder {dir} exists.", seen, matches);
                 }
                 case ExportDeliveryType.Ftps:
                 {
@@ -105,8 +107,23 @@ public sealed class ExportDeliveryService(ITenantCredentialStore credentials, IE
         }
 
         var remote = Remote(t, name);
-        await using (var file = File.OpenRead(path))
+        try
+        {
+            await using var file = File.OpenRead(path);
             await client.UploadFileAsync(file, remote, ct);
+        }
+        // Folder problems don't fix themselves — say what's wrong and don't burn the retries.
+        catch (Renci.SshNet.Common.SftpPermissionDeniedException)
+        {
+            throw new ExportDeliveryException(
+                $"{t.Name}: the server refused to write {remote} (permission denied). " +
+                (Dir(t) is null ? "No remote folder is set, so it went to the login folder — set the folder the vendor gave you." : "Check the remote folder with the vendor."),
+                permanent: true);
+        }
+        catch (Renci.SshNet.Common.SftpPathNotFoundException)
+        {
+            throw new ExportDeliveryException($"{t.Name}: the folder {Dir(t)} doesn't exist on the server.", permanent: true);
+        }
         client.Disconnect();
         return new ExportDeliveryResult($"sftp://{t.Host}{(remote.StartsWith('/') ? "" : "/")}{remote}", acceptNew ? seen : null);
     }

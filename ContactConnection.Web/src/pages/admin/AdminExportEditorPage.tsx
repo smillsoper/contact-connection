@@ -248,6 +248,18 @@ function SendDialog({ run, def, onClose, onSent }: {
   )
 }
 
+/** "next try in 4:32" — ticks every second until the retry is due. */
+function RetryCountdown({ at, attempt, max }: { at: string; attempt: number; max: number }) {
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [])
+  const left = Math.max(0, Math.round((new Date(at).getTime() - now) / 1000))
+  const text = left === 0 ? 'trying now…' : `next try in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`
+  return <span className="text-gray-400"> — {text} (attempt {attempt} of {max})</span>
+}
+
 const DELIVERY_STYLE: Record<string, string> = {
   succeeded: 'text-emerald-300', failed: 'text-red-400', queued: 'text-amber-300', running: 'text-amber-300',
 }
@@ -635,8 +647,8 @@ export default function AdminExportEditorPage() {
                               </span>
                               <span className="text-gray-300"> → {d.targetName}</span>
                               {d.deliveredAt && <span className="text-gray-500"> {when(d.deliveredAt)}</span>}
-                              {d.status === 'queued' && d.attempts > 0 && new Date(d.nextAttemptAt).getTime() > Date.now() && (
-                                <span className="text-gray-400"> — next try {new Date(d.nextAttemptAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })} (attempt {d.attempts + 1} of {d.maxAttempts})</span>
+                              {d.status === 'queued' && d.attempts > 0 && (
+                                <RetryCountdown at={d.nextAttemptAt} attempt={d.attempts + 1} max={d.maxAttempts} />
                               )}
                               {d.error && <span className="block text-red-400 whitespace-pre-wrap">{d.error}</span>}
                               {(d.status === 'failed' || (d.status === 'queued' && d.attempts > 0)) && (
