@@ -76,6 +76,8 @@ public class TenantDbContext : DbContext
     public DbSet<OutboundDialAttempt> OutboundDialAttempts => Set<OutboundDialAttempt>();
     public DbSet<ExportDefinition> ExportDefinitions => Set<ExportDefinition>();
     public DbSet<ExportRun> ExportRuns => Set<ExportRun>();
+    public DbSet<ExportDelivery> ExportDeliveries => Set<ExportDelivery>();
+    public DbSet<ExportAuditEntry> ExportAuditEntries => Set<ExportAuditEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -140,6 +142,8 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new OutboundDialAttemptConfiguration());
         modelBuilder.ApplyConfiguration(new ExportDefinitionConfiguration());
         modelBuilder.ApplyConfiguration(new ExportRunConfiguration());
+        modelBuilder.ApplyConfiguration(new ExportDeliveryConfiguration());
+        modelBuilder.ApplyConfiguration(new ExportAuditEntryConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 

@@ -58,7 +58,9 @@ doesn't fit. Business blockers (LLC reinstatement, letter of intent, Clint's fig
 
 **Sprint 2: supervisors and reporting (week of Oct 12; SupportTier meeting Oct 14)**
 1. **Active Calls widget**: list + drill-down modal reusing the supervisor tools from the agent-state widget. (1–2)
-2. **Export Worker framework** + its first real export (media-agency / Cannella report). (2)
+2. **Export Worker framework** + its first real export (media-agency / Cannella report). (2) — **BUILT S180** (sessions 1–2:
+   definitions, vendor test-file approval lifecycle, Liquid layouts, schedules + windows, SFTP/FTPS/email + PGP/zip,
+   retention, audit, Cannella LF + SF templates). Left: key management, real Cannella creds from Clint, live send.
 3. **Internal KPI widgets** (campaign KPIs) on the existing dashboards. (1)
 
 **Sprint 3: client-facing (week of Oct 19)**
@@ -658,7 +660,10 @@ immediately once calls are live, not deferrable.
 
 ## Tier 3 — Operational scale & reporting infrastructure
 
-- [ ] **Data Output / Export Worker — general framework.** A new scheduled worker process (likely
+- [x] **Data Output / Export Worker — general framework.** *(S180 — built: CSV any delimiter + quoting, fixed width,
+      Excel, Document/Liquid mode; SFTP / FTPS / email; PGP + AES zip; schedules with separate run-time and data-window
+      zones and a plain-English preview; test files + vendor approval. Not built: plain FTP, cloud connectors
+      (S3/Box/Drive/SharePoint) — add when a vendor needs one.)* A new scheduled worker process (likely
       alongside/extending `ContactConnection.Worker`) that runs export jobs on a schedule. This is
       the reusable engine Tier 4's Cannella exports will plug into, so build it generally, not
       Cannella-specific:

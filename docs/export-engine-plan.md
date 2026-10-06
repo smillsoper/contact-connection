@@ -30,9 +30,20 @@
 
 ## Build order
 
-1. Definitions + lifecycle, Columns + Document modes, CSV / fixed width / Excel, Preview, **test files**, Run now, run history
-   + download, the queue.
-2. Schedules + windows UI, SFTP / FTPS / email, PGP / zip, Cannella LF + SF as the first real exports.
+1. **DONE S180 (ca72eb7):** definitions + lifecycle, Columns + Document modes, CSV / fixed width / Excel, Preview, test
+   files, Run now, run history + download, the queue.
+2. **DONE S180:** schedules (daily / weekdays / monthly, own time zone) + windows (previous day / week / month, last N
+   hours, since last run — in the export's time zone), scheduler with catch-up (max 7) and a unique (definition,
+   scheduled_for) guard; delivery targets SFTP (pinned host key, password or key) / FTPS (valid or pinned certificate) /
+   email, each optionally PGP- or AES-zip-encrypted; a delivery queue with growing-backoff retries and Retry; test files
+   sent only on request, real files only once approved; retention (90 days, the approved test file kept forever);
+   activity audit (downloads, sends, failures, expiry); Cannella LF + SF starter templates (true Eastern; O/R flag from
+   `export.is_rerun`; Cannella SKUs from offer flags `line.flags[...]`).
+3. Next: key management (generate an SSH key pair per vendor — we keep the private key; PGP key pairs for inbound files);
+   later plain FTP and cloud connectors (S3 / Box / Drive / SharePoint).
+
+**Local dev note:** the Worker sends deliveries, so it needs the tenant credential store (Key Vault settings) and the
+email key in its own User Secrets; production reads both from Key Vault.
 
 ## CRMPro reference: Life Seasons' Cannella exports (from the CRMPro dump, layout only — no credentials read)
 

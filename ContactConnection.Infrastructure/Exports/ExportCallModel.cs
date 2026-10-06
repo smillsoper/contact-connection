@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using ContactConnection.Domain.Entities;
+using ContactConnection.Domain.ValueObjects.Commerce;
 using ContactConnection.Infrastructure.ApiExecution;
 using ContactConnection.Infrastructure.FlowEngine;
 using ContactConnection.Infrastructure.Media;
@@ -27,7 +28,8 @@ public static class ExportCallModel
     public sealed record Lookups(
         IReadOnlyDictionary<Guid, string> Clients,
         IReadOnlyDictionary<Guid, string> Campaigns,
-        IReadOnlyDictionary<Guid, string> Agents);
+        IReadOnlyDictionary<Guid, string> Agents,
+        IReadOnlyDictionary<Guid, IReadOnlyList<ProductFlag>>? OfferFlags = null);
 
     public static JsonObject Build(CallRecord r, Lookups lk, IReadOnlyList<PaymentTransaction> payments)
     {
@@ -103,7 +105,7 @@ public static class ExportCallModel
             ["tax"] = i.TaxAmount ?? i.Cart?.SalesTax ?? 0m,
             ["payment_status"] = i.PaymentStatus ?? "",
             ["tier_label"] = i.RoutedTierLabel ?? "",
-            ["cart"] = ApiTemplateModelBuilder.Cart(i.Cart),
+            ["cart"] = CartWithFlags(i.Cart, lk),
             ["payment"] = payment is null ? new JsonObject() : new JsonObject
             {
                 ["gateway"] = payment.Gateway,
@@ -115,6 +117,23 @@ public static class ExportCallModel
                 ["order_number"] = payment.OrderNumber ?? "",
             },
         };
+    }
+
+    /// <summary>The API cart model, plus each line's offer flags (<c>line.flags["Cannella Order SKU"]</c>) — per-offer codes
+    /// a vendor file needs live there.</summary>
+    private static JsonObject CartWithFlags(CartDocument? cart, Lookups lk)
+    {
+        var json = ApiTemplateModelBuilder.Cart(cart);
+        if (json["items"] is not JsonArray items) return json;
+        foreach (var item in items.OfType<JsonObject>())
+        {
+            var flags = new JsonObject();
+            if (Guid.TryParse(item["offer_id"]?.GetValue<string>(), out var offerId)
+                && lk.OfferFlags?.GetValueOrDefault(offerId) is { } list)
+                foreach (var f in list) flags[f.Name] = f.Value;
+            item["flags"] = flags;
+        }
+        return json;
     }
 
     /// <summary>The area code of a North American number (a leading country code 1 is skipped).</summary>

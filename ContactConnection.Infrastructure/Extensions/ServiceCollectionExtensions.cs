@@ -341,6 +341,10 @@ public static class ServiceCollectionExtensions
 
         // Export Worker (S180) — the file engine, shared by the API's Preview and the Worker's runs.
         services.AddScoped<IExportGenerator, ContactConnection.Infrastructure.Exports.ExportGenerator>();
+        // Email is resolved only when an email target sends: the Resend client refuses to construct without its key, and
+        // that mustn't stop SFTP / FTPS deliveries (or a Worker without email configured).
+        services.AddScoped<IExportDeliveryService>(sp => new ContactConnection.Infrastructure.Exports.ExportDeliveryService(
+            sp.GetRequiredService<ITenantCredentialStore>(), new ContactConnection.Infrastructure.Exports.DeferredEmailService(sp)));
 
         // Recording transcode / A/V merge — the RecordingMergeService worker drives these.
         // FfmpegRunner is a stateless CLI seam (singleton); the merger orchestrates blob I/O

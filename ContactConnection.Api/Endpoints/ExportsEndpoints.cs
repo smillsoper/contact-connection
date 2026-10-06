@@ -34,10 +34,19 @@ public static class ExportsEndpoints
         g.MapPost("{id:guid}/lifecycle", Lifecycle);
         g.MapGet("{id:guid}/runs", Runs);
         g.MapPost("{id:guid}/runs", QueueRun);
+        g.MapGet("templates", Templates);
+        g.MapPut("{id:guid}/schedule", SaveSchedule);
+        g.MapPost("schedule-preview", SchedulePreview);
+        g.MapPut("{id:guid}/delivery-targets", SaveTargets);
+        g.MapPost("{id:guid}/delivery-targets/test", TestTarget);
+        g.MapGet("{id:guid}/activity", Activity);
 
         var r = app.MapGroup("/api/v1/export-runs").RequireAuthorization("ReportsManage");
         r.MapGet("{runId:guid}/download", Download);
         r.MapPost("{runId:guid}/rerun", Rerun);
+        r.MapPost("{runId:guid}/send", Send);
+
+        app.MapPost("/api/v1/export-deliveries/{deliveryId:guid}/retry", RetryDelivery).RequireAuthorization("ReportsManage");
         return app;
     }
 
@@ -122,6 +131,10 @@ public static class ExportsEndpoints
             return Results.Conflict(new { error = "Only a draft export can be deleted — move it back to draft first." });
         if (await db.ExportRuns.AnyAsync(x => x.DefinitionId == id && (x.Status == ExportRunStatus.Queued || x.Status == ExportRunStatus.Running), ct))
             return Results.Conflict(new { error = "A file is being generated — try again when it finishes." });
+        if (await db.ExportDeliveries.AnyAsync(x => x.DefinitionId == id && (x.Status == ExportDeliveryStatus.Queued || x.Status == ExportDeliveryStatus.Running), ct))
+            return Results.Conflict(new { error = "A file is still being sent — try again when it finishes." });
+        db.ExportDeliveries.RemoveRange(db.ExportDeliveries.Where(x => x.DefinitionId == id));
+        db.ExportAuditEntries.RemoveRange(db.ExportAuditEntries.Where(x => x.DefinitionId == id));
         db.ExportRuns.RemoveRange(db.ExportRuns.Where(x => x.DefinitionId == id));
         db.ExportDefinitions.Remove(d);
         await db.SaveChangesAsync(ct);
@@ -219,7 +232,10 @@ public static class ExportsEndpoints
         await using var db = dbf.Create();
         var runs = await db.ExportRuns.AsNoTracking().Where(x => x.DefinitionId == id)
             .OrderByDescending(x => x.QueuedAt).Take(Math.Clamp(limit ?? 50, 1, 500)).ToListAsync(ct);
-        return Results.Ok(runs.Select(RunResponse));
+        var runIds = runs.Select(x => x.Id).ToList();
+        var deliveries = (await db.ExportDeliveries.AsNoTracking().Where(x => runIds.Contains(x.RunId)).OrderBy(x => x.QueuedAt).ToListAsync(ct))
+            .ToLookup(x => x.RunId);
+        return Results.Ok(runs.Select(x => RunResponse(x, deliveries[x.Id])));
     }
 
     /// <summary>Run now / Generate test file for a date range (dates in the export's time zone, both inclusive).</summary>
@@ -237,8 +253,9 @@ public static class ExportsEndpoints
         if (source == ExportDataSource.Practice && !req.IsTest)
             return Results.BadRequest(new { error = "Practice calls can only go into a test file." });
 
+        if (req.Deliver && !req.IsTest && SendBlocked(d) is { } blocked) return Results.Conflict(new { error = blocked });
         var run = ExportRun.Queue(d, req.IsTest ? ExportRunKind.Test : ExportRunKind.Manual, req.IsTest, source, start, end,
-            actor?.Id, actor?.Name);
+            actor?.Id, actor?.Name, deliver: req.Deliver && !req.IsTest);
         db.ExportRuns.Add(run);
         await db.SaveChangesAsync(ct);
         return Results.Accepted($"/api/v1/exports/{id}/runs", RunResponse(run));
@@ -246,7 +263,7 @@ public static class ExportsEndpoints
 
     /// <summary>Generate a past run's window again with today's data and the export's current layout (agencies send late
     /// changes). A test run re-runs as a test.</summary>
-    private static async Task<IResult> Rerun(Guid runId, ScopedTenantDbContextFactory dbf, TenantContext tc, HttpContext http, CancellationToken ct)
+    private static async Task<IResult> Rerun(Guid runId, RerunRequest? req, ScopedTenantDbContextFactory dbf, TenantContext tc, HttpContext http, CancellationToken ct)
     {
         if (!tc.HasTenant) return Results.Unauthorized();
         var actor = ActorResolver.Resolve(http.User);
@@ -255,28 +272,162 @@ public static class ExportsEndpoints
         if (old is null) return Results.NotFound();
         var d = await db.ExportDefinitions.AsNoTracking().FirstOrDefaultAsync(x => x.Id == old.DefinitionId, ct);
         if (d is null) return Results.NotFound();
+        var deliver = req?.Deliver == true && !old.IsTest;
+        if (deliver && SendBlocked(d) is { } blocked) return Results.Conflict(new { error = blocked });
         var run = ExportRun.Queue(d, old.IsTest ? ExportRunKind.Test : ExportRunKind.Rerun, old.IsTest, old.DataSource,
-            old.WindowStart, old.WindowEnd, actor?.Id, actor?.Name);
+            old.WindowStart, old.WindowEnd, actor?.Id, actor?.Name, deliver: deliver);
         db.ExportRuns.Add(run);
         await db.SaveChangesAsync(ct);
         return Results.Accepted($"/api/v1/exports/{d.Id}/runs", RunResponse(run));
     }
 
     private static async Task<IResult> Download(
-        Guid runId, ScopedTenantDbContextFactory dbf, IBlobStorage blobs, TenantContext tc, HttpContext http,
-        ILoggerFactory loggers, CancellationToken ct)
+        Guid runId, ScopedTenantDbContextFactory dbf, IBlobStorage blobs, TenantContext tc, HttpContext http, CancellationToken ct)
     {
         if (!tc.HasTenant) return Results.Unauthorized();
         await using var db = dbf.Create();
         var run = await db.ExportRuns.AsNoTracking().FirstOrDefaultAsync(x => x.Id == runId, ct);
         if (run is not { Status: ExportRunStatus.Succeeded, BlobKey: { } key }) return Results.NotFound();
+        if (run.FileDeletedAt is not null)
+            return Results.Json(new { error = "This file was deleted by the retention policy — re-run its window to make it again." }, statusCode: 410);
         var stream = await blobs.OpenReadAsync(key, ct);
         if (stream is null) return Results.NotFound(new { error = "The file is no longer stored." });
         var actor = ActorResolver.Resolve(http.User);
-        loggers.CreateLogger("ContactConnection.Exports").LogInformation(
-            "Export file downloaded: run {RunId} ({File}, {Name}) by {Actor}", run.Id, run.FileName, run.DefinitionName, actor?.Name ?? "unknown");
+        db.ExportAuditEntries.Add(ExportAuditEntry.Record(run.TenantId, run.DefinitionId, run.Id, ExportAuditAction.Downloaded,
+            actor?.Name, run.FileName));
+        await db.SaveChangesAsync(ct);
         return Results.File(stream, run.ContentType ?? "application/octet-stream", run.FileName);
     }
+
+    // ── Schedule + delivery (session 2) ────────────────────────────────────────
+
+    private static IResult Templates() => Results.Ok(ExportStarterTemplates.All);
+
+    /// <summary>Saves (or clears) the schedule. Not part of the vendor-approved spec, so it doesn't mark the export
+    /// changed since approval.</summary>
+    private static async Task<IResult> SaveSchedule(
+        Guid id, ScheduleRequest req, ScopedTenantDbContextFactory dbf,
+        [FromKeyedServices("tenant")] IVersionHistoryService versions, TenantContext tc, HttpContext http, CancellationToken ct)
+    {
+        if (!tc.HasTenant) return Results.Unauthorized();
+        if (ActorResolver.Resolve(http.User) is not { } actor) return Results.Unauthorized();
+        if (req.Schedule is { } sch && ExportScheduleCalculator.Validate(sch) is { } error) return Results.BadRequest(new { error });
+        await using var db = dbf.Create();
+        var d = await db.ExportDefinitions.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (d is null) return Results.NotFound();
+        d.SetSchedule(req.Schedule);
+        await db.SaveChangesAsync(ct);
+        var summary = req.Schedule is null ? "Schedule removed" : "Schedule: " + ExportScheduleCalculator.Describe(req.Schedule, d.Spec.TimeZone);
+        await versions.SnapshotAsync(VersionedEntityType.ExportDefinition, d.Id, Snapshot(d), actor.Id, actor.Name, summary, ct);
+        return Results.Ok(ToResponse(d, null));
+    }
+
+    /// <summary>What an unsaved schedule would do — the editor's plain-English line and next run times.</summary>
+    private static IResult SchedulePreview(SchedulePreviewRequest req)
+    {
+        if (ExportScheduleCalculator.Validate(req.Schedule) is { } error) return Results.Ok(new { error, description = (string?)null, nextRuns = new List<object>() });
+        return Results.Ok(new
+        {
+            error = (string?)null,
+            description = ExportScheduleCalculator.Describe(req.Schedule, req.DataTimeZone),
+            nextRuns = NextRuns(req.Schedule, req.DataTimeZone),
+        });
+    }
+
+    private static async Task<IResult> SaveTargets(
+        Guid id, TargetsRequest req, ScopedTenantDbContextFactory dbf,
+        [FromKeyedServices("tenant")] IVersionHistoryService versions, TenantContext tc, HttpContext http, CancellationToken ct)
+    {
+        if (!tc.HasTenant) return Results.Unauthorized();
+        if (ActorResolver.Resolve(http.User) is not { } actor) return Results.Unauthorized();
+        var targets = req.Targets ?? [];
+        foreach (var t in targets)
+            if (t.Validate() is { } error) return Results.BadRequest(new { error });
+        if (targets.GroupBy(t => t.Name.Trim(), StringComparer.OrdinalIgnoreCase).FirstOrDefault(g => g.Count() > 1) is { } dup)
+            return Results.BadRequest(new { error = $"Two delivery targets are named '{dup.Key}'." });
+        if (targets.GroupBy(t => t.Id).Any(g => g.Count() > 1)) return Results.BadRequest(new { error = "Duplicate target ids." });
+
+        await using var db = dbf.Create();
+        var d = await db.ExportDefinitions.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (d is null) return Results.NotFound();
+        d.SetDeliveryTargets(targets.Select(t => t with { Name = t.Name.Trim() }).ToList());
+        await db.SaveChangesAsync(ct);
+        await versions.SnapshotAsync(VersionedEntityType.ExportDefinition, d.Id, Snapshot(d), actor.Id, actor.Name,
+            "Delivery targets: " + (targets.Count == 0 ? "none" : string.Join(", ", targets.Select(t => $"{t.Name} ({t.Type}{(t.Enabled ? "" : ", off")})"))), ct);
+        return Results.Ok(ToResponse(d, null));
+    }
+
+    /// <summary>Signs in to the (possibly unsaved) target and reports the fingerprint to pin. Uploads nothing.</summary>
+    private static async Task<IResult> TestTarget(
+        Guid id, TestTargetRequest req, IExportDeliveryService delivery, TenantContext tc, CancellationToken ct)
+    {
+        if (tc.Current is not { } tenant) return Results.Unauthorized();
+        return Results.Ok(await delivery.TestAsync(tenant.Subdomain, req.Target, ct));
+    }
+
+    /// <summary>Sends an existing file to the chosen targets — a test file to the vendor's test folder, or a past file
+    /// again. A real (non-test) file only goes out once the vendor has approved the export.</summary>
+    private static async Task<IResult> Send(
+        Guid runId, SendRequest req, ScopedTenantDbContextFactory dbf, TenantContext tc, HttpContext http, CancellationToken ct)
+    {
+        if (!tc.HasTenant) return Results.Unauthorized();
+        var actor = ActorResolver.Resolve(http.User);
+        await using var db = dbf.Create();
+        var run = await db.ExportRuns.AsNoTracking().FirstOrDefaultAsync(x => x.Id == runId, ct);
+        if (run is null) return Results.NotFound();
+        if (run.Status != ExportRunStatus.Succeeded || run.FileDeletedAt is not null)
+            return Results.Conflict(new { error = "Only a finished, still-stored file can be sent." });
+        var d = await db.ExportDefinitions.AsNoTracking().FirstOrDefaultAsync(x => x.Id == run.DefinitionId, ct);
+        if (d is null) return Results.NotFound();
+        if (!run.IsTest && SendBlocked(d, requireTarget: false) is { } blocked) return Results.Conflict(new { error = blocked });
+
+        var chosen = d.DeliveryTargets.Where(t => req.TargetIds?.Contains(t.Id) == true).ToList();
+        if (chosen.Count == 0) return Results.BadRequest(new { error = "Choose where to send it." });
+        if (chosen.FirstOrDefault(t => !t.Enabled) is { } off) return Results.BadRequest(new { error = $"'{off.Name}' is turned off." });
+        foreach (var t in chosen) db.ExportDeliveries.Add(ExportDelivery.Queue(run, t.Id, t.Name, t.Type, actor?.Name));
+        db.ExportAuditEntries.Add(ExportAuditEntry.Record(run.TenantId, run.DefinitionId, run.Id, ExportAuditAction.SendRequested,
+            actor?.Name, $"{run.FileName}{(run.IsTest ? " (test)" : "")} → {string.Join(", ", chosen.Select(t => t.Name))}"));
+        await db.SaveChangesAsync(ct);
+        return Results.Accepted();
+    }
+
+    private static async Task<IResult> RetryDelivery(
+        Guid deliveryId, ScopedTenantDbContextFactory dbf, TenantContext tc, HttpContext http, CancellationToken ct)
+    {
+        if (!tc.HasTenant) return Results.Unauthorized();
+        await using var db = dbf.Create();
+        var delivery = await db.ExportDeliveries.FirstOrDefaultAsync(x => x.Id == deliveryId, ct);
+        if (delivery is null) return Results.NotFound();
+        try { delivery.Retry(ActorResolver.Resolve(http.User)?.Name); }
+        catch (InvalidOperationException ex) { return Results.Conflict(new { error = ex.Message }); }
+        await db.SaveChangesAsync(ct);
+        return Results.Accepted();
+    }
+
+    private static async Task<IResult> Activity(Guid id, ScopedTenantDbContextFactory dbf, TenantContext tc, CancellationToken ct)
+    {
+        if (!tc.HasTenant) return Results.Unauthorized();
+        await using var db = dbf.Create();
+        return Results.Ok(await db.ExportAuditEntries.AsNoTracking().Where(x => x.DefinitionId == id)
+            .OrderByDescending(x => x.At).Take(200)
+            .Select(x => new { x.Id, x.RunId, x.Action, x.ActorName, x.Detail, x.At }).ToListAsync(ct));
+    }
+
+    /// <summary>Why a real file can't go to the vendor yet, or null. Test files are never blocked.</summary>
+    private static string? SendBlocked(ExportDefinition d, bool requireTarget = true)
+    {
+        if (d.Status is not (ExportStatus.Approved or ExportStatus.Live or ExportStatus.Paused))
+            return "A real file can only be sent once the vendor has approved this export — send a test file instead.";
+        if (requireTarget && !d.DeliveryTargets.Any(t => t.Enabled)) return "There's no delivery target to send it to.";
+        return null;
+    }
+
+    private static List<object> NextRuns(ExportSchedule schedule, string dataTimeZone) =>
+        ExportScheduleCalculator.Next(schedule, DateTimeOffset.UtcNow, 3).Select(at =>
+        {
+            var (start, end) = ExportScheduleCalculator.Window(schedule, dataTimeZone, at, null);
+            return (object)new { runAt = at, windowStart = start, windowEnd = end };
+        }).ToList();
 
     // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -309,6 +460,7 @@ public static class ExportsEndpoints
     {
         d.Name, d.Description, d.Status, d.SpecRevision, d.Spec,
         Approval = d.ApprovedAt is null ? null : new { d.ApprovedAt, d.ApprovedByVendorContact, d.ApprovalRecordedByName, d.ApprovalNote, d.ApprovedRunId, d.ApprovedSpecRevision },
+        d.Schedule, d.DeliveryTargets,
     }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
     private static object ToResponse(ExportDefinition d, ExportRun? lastRun) => new
@@ -319,20 +471,36 @@ public static class ExportsEndpoints
             At = d.ApprovedAt, VendorContact = d.ApprovedByVendorContact, RecordedBy = d.ApprovalRecordedByName,
             Note = d.ApprovalNote, RunId = d.ApprovedRunId, SpecRevision = d.ApprovedSpecRevision,
         },
+        d.Schedule, d.DeliveryTargets, d.LastScheduledFor,
+        ScheduleDescription = d.Schedule is null ? null : ExportScheduleCalculator.Describe(d.Schedule, d.Spec.TimeZone),
+        NextRuns = d.Schedule is null || d.Status != ExportStatus.Live ? [] : NextRuns(d.Schedule, d.Spec.TimeZone),
         d.CreatedAt, d.UpdatedAt,
-        LastRun = lastRun is null ? null : RunResponse(lastRun),
+        LastRun = lastRun is null ? null : RunResponse(lastRun, []),
     };
 
-    private static object RunResponse(ExportRun r) => new
+    private static object RunResponse(ExportRun r) => RunResponse(r, []);
+
+    private static object RunResponse(ExportRun r, IEnumerable<ExportDelivery> deliveries) => new
     {
         r.Id, r.DefinitionId, r.DefinitionName, r.SpecRevision, r.Kind, r.IsTest, r.DataSource, r.WindowStart, r.WindowEnd,
         r.Status, r.Attempts, r.Error, r.RequestedByName, r.RowCount, r.CallCount, r.FileName, r.FileSize, r.Sha256,
-        r.QueuedAt, r.StartedAt, r.FinishedAt,
+        r.QueuedAt, r.StartedAt, r.FinishedAt, r.ScheduledFor, r.Deliver, r.FileDeletedAt,
+        Deliveries = deliveries.Select(x => new
+        {
+            x.Id, x.TargetId, x.TargetName, x.TargetType, x.Status, x.Attempts, x.MaxAttempts, x.NextAttemptAt, x.Error,
+            x.SentAs, x.RequestedByName, x.QueuedAt, x.DeliveredAt,
+        }).ToList(),
     };
 
     public sealed record SaveExportRequest(string Name, string? Description, ExportSpec? Spec);
     public sealed record LifecycleRequest(string Action, string? VendorContact, string? Note, Guid? RunId);
     public sealed record PreviewRequest(ExportSpec Spec, string? Name, DateOnly? From, DateOnly? To, string? DataSource, bool IsTest, int? MaxCalls);
     public sealed record PreviewResponse(bool Success, string? Error, int RowCount, int CallCount, bool Truncated, string Text, string FileName, bool Grid);
-    public sealed record QueueRunRequest(DateOnly? From, DateOnly? To, bool IsTest, string? DataSource);
+    public sealed record QueueRunRequest(DateOnly? From, DateOnly? To, bool IsTest, string? DataSource, bool Deliver = false);
+    public sealed record RerunRequest(bool Deliver = false);
+    public sealed record ScheduleRequest(ExportSchedule? Schedule);
+    public sealed record SchedulePreviewRequest(ExportSchedule Schedule, string DataTimeZone);
+    public sealed record TargetsRequest(List<ExportDeliveryTarget>? Targets);
+    public sealed record TestTargetRequest(ExportDeliveryTarget Target);
+    public sealed record SendRequest(List<Guid>? TargetIds);
 }

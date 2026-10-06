@@ -83,7 +83,9 @@ public sealed class ExportGenerator(ScopedTenantDbContextFactory dbFactory) : IE
         var lookups = new ExportCallModel.Lookups(
             await db.Clients.AsNoTracking().ToDictionaryAsync(c => c.Id, c => c.Name, ct),
             await db.Campaigns.AsNoTracking().ToDictionaryAsync(c => c.Id, c => c.Name, ct),
-            await db.Agents.AsNoTracking().ToDictionaryAsync(a => a.Id, a => a.FullName, ct));
+            await db.Agents.AsNoTracking().ToDictionaryAsync(a => a.Id, a => a.FullName, ct),
+            (await db.Offers.AsNoTracking().Select(o => new { o.Id, o.Flags }).ToListAsync(ct))
+                .ToDictionary(o => o.Id, o => (IReadOnlyList<ContactConnection.Domain.ValueObjects.Commerce.ProductFlag>)o.Flags));
 
         var calls = 0;
         var rows = 0;
@@ -237,12 +239,16 @@ public sealed class ExportGenerator(ScopedTenantDbContextFactory dbFactory) : IE
 
     private static string Where(Dictionary<string, object?> call) => $"Call {call["id"]} ({call["started_at"]})";
 
-    private static Dictionary<string, object?> Context(ExportGenerationRequest r) => new()
+    /// <summary>The <c>export</c> + <c>window</c> objects every template sees (also the email subject's model).</summary>
+    public static Dictionary<string, object?> Context(ExportGenerationRequest r) => new()
     {
         ["export"] = new Dictionary<string, object?>
         {
             ["name"] = r.ExportName,
             ["is_test"] = r.IsTest,
+            // scheduled / manual / test / rerun — a vendor format with an original-vs-resend flag (Cannella SF's O/R) reads is_rerun.
+            ["kind"] = r.Kind,
+            ["is_rerun"] = r.Kind == ExportRunKind.Rerun,
             ["run_id"] = r.RunId?.ToString() ?? "",
             ["data_source"] = r.DataSource,
             ["time_zone"] = r.Spec.TimeZone,

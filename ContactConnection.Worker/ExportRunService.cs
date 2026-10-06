@@ -2,19 +2,29 @@ using System.Security.Cryptography;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
 using ContactConnection.Domain.Entities;
+using ContactConnection.Domain.ValueObjects.Exports;
 using ContactConnection.Infrastructure.Data;
+using ContactConnection.Infrastructure.Exports;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
 namespace ContactConnection.Worker;
 
 /// <summary>
-/// The Export Worker's engine (S180). Every few seconds, for each active tenant: reap runs stuck in <c>running</c>
-/// (a worker restart mid-file), claim queued runs with <c>FOR UPDATE SKIP LOCKED</c> — safe with more than one Worker —
-/// and generate them, at most <c>Exports:MaxConcurrent</c> (5) at once across all tenants. Each file is rendered to a temp
-/// file (so it can be hashed and sized), then stored at <c>exports/{definitionId}/{runId}/{fileName}</c> for download and,
-/// in session 2, delivery. A template error fails the run at once (retrying won't fix it); anything else retries with a
-/// backoff up to the run's MaxAttempts.
+/// The Export Worker's engine (S180). Every few seconds, for each active tenant:
+///
+///   1. <b>Schedule</b> (every 30 s) — each live export with a schedule gets a run queued for every run time that has come
+///      due since the last one (at most the last 7 if the Worker was down; a unique index means two Workers can't queue
+///      the same run time twice). Its window comes from the schedule in the export's own time zone.
+///   2. <b>Reap</b> runs / deliveries stuck in <c>running</c> (a Worker restart mid-file).
+///   3. <b>Generate</b> claimed runs (<c>FOR UPDATE SKIP LOCKED</c>), rendered to a temp file, hashed, stored at
+///      <c>exports/{definitionId}/{runId}/{fileName}</c>. A run marked Deliver then queues one delivery per enabled target.
+///   4. <b>Deliver</b> claimed deliveries — the stored file to SFTP / FTPS / email (encrypted per target), retried with a
+///      growing backoff.
+///   5. <b>Retention</b> (hourly) — stored files older than <c>Exports:RetentionDays</c> (90) are deleted; the file a vendor
+///      approved never is.
+///
+/// Generation and delivery share <c>Exports:MaxConcurrent</c> (5) slots across all tenants.
 /// </summary>
 public sealed class ExportRunService : BackgroundService
 {
@@ -25,10 +35,16 @@ public sealed class ExportRunService : BackgroundService
     private readonly TimeSpan _interval;
     private readonly TimeSpan _stuckAfter;
     private readonly TimeSpan _retryBackoff = TimeSpan.FromMinutes(2);
+    private readonly TimeSpan _scheduleEvery = TimeSpan.FromSeconds(30);
+    private readonly int _retentionDays;
     private readonly SemaphoreSlim _slots;
     private readonly int _maxConcurrent;
     private readonly List<Task> _inFlight = [];
     private readonly HashSet<Guid> _unmigrated = [];
+    private DateTimeOffset _lastScheduling = DateTimeOffset.MinValue;
+    private DateTimeOffset _lastRetention = DateTimeOffset.MinValue;
+
+    private const int MaxCatchUp = 7;
 
     public ExportRunService(IServiceScopeFactory scopeFactory, IBlobStorage blobs, IConfiguration config, ILogger<ExportRunService> logger)
     {
@@ -38,6 +54,7 @@ public sealed class ExportRunService : BackgroundService
         _enabled = !bool.TryParse(config["Exports:Enabled"], out var en) || en;
         _interval = TimeSpan.FromSeconds(int.TryParse(config["Exports:PollSeconds"], out var p) && p > 0 ? p : 5);
         _stuckAfter = TimeSpan.FromMinutes(int.TryParse(config["Exports:StuckRunMinutes"], out var s) && s > 0 ? s : 30);
+        _retentionDays = int.TryParse(config["Exports:RetentionDays"], out var r) && r > 0 ? r : 90;
         _maxConcurrent = int.TryParse(config["Exports:MaxConcurrent"], out var m) && m > 0 ? m : 5;
         _slots = new SemaphoreSlim(_maxConcurrent, _maxConcurrent);
     }
@@ -45,7 +62,8 @@ public sealed class ExportRunService : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         if (!_enabled) { _logger.LogInformation("ExportRunService disabled (Exports:Enabled=false)."); return; }
-        _logger.LogInformation("ExportRunService started — poll {Interval}s, max {Max} at once.", _interval.TotalSeconds, _maxConcurrent);
+        _logger.LogInformation("ExportRunService started — poll {Interval}s, max {Max} at once, files kept {Days} days.",
+            _interval.TotalSeconds, _maxConcurrent, _retentionDays);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -68,27 +86,30 @@ public sealed class ExportRunService : BackgroundService
             tenants = await scope.ServiceProvider.GetRequiredService<ContactConnectionDbContext>()
                 .Tenants.Where(t => t.IsActive).ToListAsync(ct);
 
+        var now = DateTimeOffset.UtcNow;
+        var schedule = now - _lastScheduling >= _scheduleEvery;
+        var retention = now - _lastRetention >= TimeSpan.FromHours(1);
+        if (schedule) _lastScheduling = now;
+        if (retention) _lastRetention = now;
+
         foreach (var tenant in tenants)
         {
-            if (ct.IsCancellationRequested || _slots.CurrentCount == 0) return;
+            if (ct.IsCancellationRequested) return;
             try
             {
+                if (schedule) await ScheduleAsync(tenant, ct);
+                if (retention) await RetentionAsync(tenant, ct);
                 await ReapStuckAsync(tenant, ct);
-                foreach (var runId in await ClaimAsync(tenant, _slots.CurrentCount, ct))
-                {
-                    await _slots.WaitAsync(ct);
-                    _inFlight.Add(Task.Run(async () =>
-                    {
-                        try { await ProcessAsync(tenant, runId, ct); }
-                        finally { _slots.Release(); }
-                    }, CancellationToken.None));
-                }
+                foreach (var runId in await ClaimAsync(tenant, "export_runs", "queued_at", _slots.CurrentCount, ct))
+                    Start(() => ProcessAsync(tenant, runId, ct));
+                foreach (var deliveryId in await ClaimAsync(tenant, "export_deliveries", "queued_at", _slots.CurrentCount, ct))
+                    Start(() => DeliverAsync(tenant, deliveryId, ct));
             }
-            catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
+            catch (PostgresException ex) when (ex.SqlState is PostgresErrorCodes.UndefinedTable or PostgresErrorCodes.UndefinedColumn)
             {
-                // A tenant schema that hasn't had the exports migration yet — say so once, not every few seconds.
+                // A tenant schema behind on the exports migrations — say so once, not every few seconds.
                 if (_unmigrated.Add(tenant.Id))
-                    _logger.LogWarning("Tenant {Subdomain} has no export tables yet (run the tenant migrations); skipping it.", tenant.Subdomain);
+                    _logger.LogWarning("Tenant {Subdomain} is missing export tables/columns (run the tenant migrations); skipping it.", tenant.Subdomain);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -97,20 +118,37 @@ public sealed class ExportRunService : BackgroundService
         }
     }
 
-    /// <summary>Atomically flips up to <paramref name="limit"/> due runs to running. SKIP LOCKED: another Worker claiming
-    /// at the same moment gets different rows, never the same one.</summary>
-    private async Task<List<Guid>> ClaimAsync(Tenant tenant, int limit, CancellationToken ct)
+    private void Start(Func<Task> work)
+    {
+        // Claims never exceed the free slots, so this wait is immediate.
+        _slots.Wait();
+        _inFlight.Add(Task.Run(async () =>
+        {
+            try { await work(); }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Anything thrown before a job's own error handling would otherwise vanish with the task.
+                _logger.LogError(ex, "Export job crashed; it will be retried after the stuck-job timeout.");
+            }
+            finally { _slots.Release(); }
+        }, CancellationToken.None));
+    }
+
+    /// <summary>Atomically flips up to <paramref name="limit"/> due rows of a queue table to running. SKIP LOCKED: another
+    /// Worker claiming at the same moment gets different rows, never the same one.</summary>
+    private async Task<List<Guid>> ClaimAsync(Tenant tenant, string table, string orderBy, int limit, CancellationToken ct)
     {
         if (limit <= 0) return [];
         using var scope = TenantScope(tenant);
         await using var db = scope.ServiceProvider.GetRequiredService<ScopedTenantDbContextFactory>().Create();
         var conn = (NpgsqlConnection)db.Database.GetDbConnection();
         await conn.OpenAsync(ct);
-        await using var cmd = new NpgsqlCommand("""
-            UPDATE export_runs SET status = 'running', attempts = attempts + 1, started_at = @now
-            WHERE id IN (SELECT id FROM export_runs
+        // table / orderBy are compile-time constants from this class, never input.
+        await using var cmd = new NpgsqlCommand($"""
+            UPDATE {table} SET status = 'running', attempts = attempts + 1, started_at = @now
+            WHERE id IN (SELECT id FROM {table}
                          WHERE status = 'queued' AND next_attempt_at <= @now
-                         ORDER BY queued_at LIMIT @limit FOR UPDATE SKIP LOCKED)
+                         ORDER BY {orderBy} LIMIT @limit FOR UPDATE SKIP LOCKED)
             RETURNING id
             """, conn);
         cmd.Parameters.AddWithValue("now", DateTimeOffset.UtcNow);
@@ -120,6 +158,61 @@ public sealed class ExportRunService : BackgroundService
         while (await reader.ReadAsync(ct)) ids.Add(reader.GetGuid(0));
         return ids;
     }
+
+    // ── 1. Schedule ────────────────────────────────────────────────────────────
+
+    private async Task ScheduleAsync(Tenant tenant, CancellationToken ct)
+    {
+        using var scope = TenantScope(tenant);
+        await using var db = scope.ServiceProvider.GetRequiredService<ScopedTenantDbContextFactory>().Create();
+        var defs = await db.ExportDefinitions.Where(d => d.Status == ExportStatus.Live && d.Schedule != null).ToListAsync(ct);
+        if (defs.Count == 0) return;
+
+        var now = DateTimeOffset.UtcNow;
+        var queued = 0;
+        foreach (var def in defs)
+        {
+            var schedule = def.Schedule!;
+            var due = ExportScheduleCalculator.Occurrences(schedule, def.LastScheduledFor ?? now, now).ToList();
+            if (due.Count == 0) continue;
+            if (due.Count > MaxCatchUp)
+            {
+                _logger.LogWarning("Export {Name}: {Missed} scheduled runs were missed; queuing only the last {Max}.",
+                    def.Name, due.Count, MaxCatchUp);
+                due = due.TakeLast(MaxCatchUp).ToList();
+            }
+
+            // "Since the last run" starts where the last real file's window ended.
+            DateTimeOffset? lastEnd = await db.ExportRuns
+                .Where(r => r.DefinitionId == def.Id && !r.IsTest && r.Status != ExportRunStatus.Failed)
+                .MaxAsync(r => (DateTimeOffset?)r.WindowEnd, ct);
+            var already = (await db.ExportRuns.Where(r => r.DefinitionId == def.Id && r.ScheduledFor != null && due.Contains(r.ScheduledFor.Value))
+                .Select(r => r.ScheduledFor!.Value).ToListAsync(ct)).ToHashSet();
+
+            foreach (var runAt in due)
+            {
+                if (already.Contains(runAt)) continue;
+                var (start, end) = ExportScheduleCalculator.Window(schedule, def.Spec.TimeZone, runAt, lastEnd);
+                if (end <= start) continue;
+                db.ExportRuns.Add(ExportRun.Queue(def, ExportRunKind.Scheduled, false, ExportDataSource.Production, start, end,
+                    null, "Schedule", deliver: schedule.AutoDeliver, scheduledFor: runAt));
+                lastEnd = end;
+                queued++;
+            }
+            def.MarkScheduled(due[^1]);
+        }
+
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            // Another Worker queued the same run time first — it'll be generated once, by them.
+            _logger.LogInformation("Scheduled export runs for {Subdomain} were already queued elsewhere.", tenant.Subdomain);
+            return;
+        }
+        if (queued > 0) _logger.LogInformation("Queued {Count} scheduled export run(s) for {Subdomain}.", queued, tenant.Subdomain);
+    }
+
+    // ── 3. Generate ────────────────────────────────────────────────────────────
 
     private async Task ProcessAsync(Tenant tenant, Guid runId, CancellationToken ct)
     {
@@ -132,8 +225,7 @@ public sealed class ExportRunService : BackgroundService
         var temp = Path.Combine(Path.GetTempPath(), $"cc-export-{run.Id:N}.tmp");
         try
         {
-            var request = new ExportGenerationRequest(run.Spec, run.DefinitionName, run.Id, run.IsTest, run.DataSource,
-                run.WindowStart, run.WindowEnd);
+            var request = Request(run);
             ExportGenerationResult result;
             await using (var file = new FileStream(temp, FileMode.Create, FileAccess.ReadWrite, FileShare.None))
                 result = await generator.GenerateAsync(request, file, ct);
@@ -159,6 +251,12 @@ public sealed class ExportRunService : BackgroundService
             }
 
             run.Succeed(result.RowCount, result.CallCount, fileName, key, generator.ContentType(run.Spec), size, sha);
+
+            // Scheduled / "Run now and send" files go straight to every enabled target.
+            if (run.Deliver && await db.ExportDefinitions.AsNoTracking().FirstOrDefaultAsync(d => d.Id == run.DefinitionId, ct) is { } def)
+                foreach (var target in def.DeliveryTargets.Where(t => t.Enabled))
+                    db.ExportDeliveries.Add(ExportDelivery.Queue(run, target.Id, target.Name, target.Type, run.RequestedByName));
+
             await db.SaveChangesAsync(CancellationToken.None);
             _logger.LogInformation("Export run {RunId} ({Name}{Test}) → {File}: {Rows} rows from {Calls} calls.",
                 run.Id, run.DefinitionName, run.IsTest ? ", test" : "", fileName, result.RowCount, result.CallCount);
@@ -171,9 +269,78 @@ public sealed class ExportRunService : BackgroundService
         }
         finally
         {
-            try { File.Delete(temp); } catch { /* temp dir cleanup is best-effort */ }
+            TryDelete(temp);
         }
     }
+
+    private static ExportGenerationRequest Request(ExportRun run) =>
+        new(run.Spec, run.DefinitionName, run.Id, run.IsTest, run.DataSource, run.WindowStart, run.WindowEnd, Kind: run.Kind);
+
+    // ── 4. Deliver ─────────────────────────────────────────────────────────────
+
+    private async Task DeliverAsync(Tenant tenant, Guid deliveryId, CancellationToken ct)
+    {
+        using var scope = TenantScope(tenant);
+        await using var db = scope.ServiceProvider.GetRequiredService<ScopedTenantDbContextFactory>().Create();
+        var delivery = await db.ExportDeliveries.FirstOrDefaultAsync(d => d.Id == deliveryId, ct);
+        if (delivery is null || delivery.Status != ExportDeliveryStatus.Running) return;
+
+        var temp = Path.Combine(Path.GetTempPath(), $"cc-export-send-{delivery.Id:N}.tmp");
+        try
+        {
+            var run = await db.ExportRuns.AsNoTracking().FirstOrDefaultAsync(r => r.Id == delivery.RunId, ct);
+            var def = await db.ExportDefinitions.AsNoTracking().FirstOrDefaultAsync(d => d.Id == delivery.DefinitionId, ct);
+            var target = def?.DeliveryTargets.FirstOrDefault(t => t.Id == delivery.TargetId);
+            if (run?.BlobKey is null || run.FileDeletedAt is not null) { await FailAsync(db, delivery, "The file is no longer stored.", true); return; }
+            if (target is null) { await FailAsync(db, delivery, $"The delivery target '{delivery.TargetName}' was removed.", true); return; }
+            if (!target.Enabled) { await FailAsync(db, delivery, $"The delivery target '{target.Name}' is turned off.", true); return; }
+
+            await using (var blob = await _blobs.OpenReadAsync(run.BlobKey, ct))
+            {
+                if (blob is null) { await FailAsync(db, delivery, "The file is no longer stored.", true); return; }
+                await using var file = File.Create(temp);
+                await blob.CopyToAsync(file, ct);
+            }
+
+            var sender = scope.ServiceProvider.GetRequiredService<IExportDeliveryService>();
+            var sentAs = await sender.DeliverAsync(new ExportDeliveryRequest(
+                tenant.Subdomain, target, temp, run.FileName!, run.ContentType ?? "application/octet-stream",
+                ExportGenerator.Context(Request(run)), run.Spec.TimeZone), ct);
+
+            delivery.Succeed(sentAs);
+            db.ExportAuditEntries.Add(ExportAuditEntry.Record(delivery.TenantId, delivery.DefinitionId, delivery.RunId,
+                ExportAuditAction.Delivered, delivery.RequestedByName, $"{run.FileName} → {target.Name} ({sentAs})"));
+            await db.SaveChangesAsync(CancellationToken.None);
+            _logger.LogInformation("Export file {File} delivered to {Target}.", run.FileName, target.Name);
+        }
+        catch (ExportDeliveryException ex)
+        {
+            await FailAsync(db, delivery, ex.Message, ex.Permanent);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Export delivery {DeliveryId} threw.", delivery.Id);
+            await FailAsync(db, delivery, ex.Message, false);
+        }
+        finally
+        {
+            TryDelete(temp);
+        }
+    }
+
+    private async Task FailAsync(TenantDbContext db, ExportDelivery delivery, string error, bool permanent)
+    {
+        delivery.Fail(error, permanent);
+        if (delivery.Status == ExportDeliveryStatus.Failed)
+            db.ExportAuditEntries.Add(ExportAuditEntry.Record(delivery.TenantId, delivery.DefinitionId, delivery.RunId,
+                ExportAuditAction.DeliveryFailed, null,
+                error.StartsWith(delivery.TargetName + ":", StringComparison.Ordinal) ? error : $"{delivery.TargetName}: {error}"));
+        await db.SaveChangesAsync(CancellationToken.None);
+        _logger.LogWarning("Export delivery to {Target} {Outcome}: {Error}", delivery.TargetName,
+            delivery.Status == ExportDeliveryStatus.Failed ? "failed" : "will retry", error);
+    }
+
+    // ── 2. Reap, 5. Retention ──────────────────────────────────────────────────
 
     private async Task ReapStuckAsync(Tenant tenant, CancellationToken ct)
     {
@@ -182,10 +349,35 @@ public sealed class ExportRunService : BackgroundService
         var cutoff = DateTimeOffset.UtcNow - _stuckAfter;
         var stuck = await db.ExportRuns
             .Where(r => r.Status == ExportRunStatus.Running && r.StartedAt != null && r.StartedAt < cutoff).ToListAsync(ct);
-        if (stuck.Count == 0) return;
         foreach (var run in stuck) run.Fail("stopped mid-file (worker restart) — retrying", TimeSpan.Zero);
+        var stuckSends = await db.ExportDeliveries
+            .Where(d => d.Status == ExportDeliveryStatus.Running && d.StartedAt != null && d.StartedAt < cutoff).ToListAsync(ct);
+        foreach (var d in stuckSends) d.Fail("stopped mid-send (worker restart) — retrying");
+        if (stuck.Count + stuckSends.Count == 0) return;
         await db.SaveChangesAsync(ct);
-        _logger.LogWarning("Re-queued {Count} stuck export run(s) for tenant {Subdomain}.", stuck.Count, tenant.Subdomain);
+        _logger.LogWarning("Re-queued {Runs} stuck export run(s) and {Sends} delivery(ies) for {Subdomain}.",
+            stuck.Count, stuckSends.Count, tenant.Subdomain);
+    }
+
+    private async Task RetentionAsync(Tenant tenant, CancellationToken ct)
+    {
+        using var scope = TenantScope(tenant);
+        await using var db = scope.ServiceProvider.GetRequiredService<ScopedTenantDbContextFactory>().Create();
+        var cutoff = DateTimeOffset.UtcNow.AddDays(-_retentionDays);
+        var keep = await db.ExportDefinitions.Where(d => d.ApprovedRunId != null).Select(d => d.ApprovedRunId!.Value).ToListAsync(ct);
+        var expired = await db.ExportRuns
+            .Where(r => r.BlobKey != null && r.FileDeletedAt == null && r.FinishedAt != null && r.FinishedAt < cutoff && !keep.Contains(r.Id))
+            .OrderBy(r => r.FinishedAt).Take(200).ToListAsync(ct);
+        foreach (var run in expired)
+        {
+            await _blobs.DeleteAsync(run.BlobKey!, ct);
+            run.MarkFileDeleted();
+            db.ExportAuditEntries.Add(ExportAuditEntry.Record(run.TenantId, run.DefinitionId, run.Id,
+                ExportAuditAction.FileExpired, null, $"{run.FileName} deleted after {_retentionDays} days"));
+        }
+        if (expired.Count == 0) return;
+        await db.SaveChangesAsync(ct);
+        _logger.LogInformation("Deleted {Count} export file(s) past {Days} days for {Subdomain}.", expired.Count, _retentionDays, tenant.Subdomain);
     }
 
     private IServiceScope TenantScope(Tenant tenant)
@@ -193,5 +385,10 @@ public sealed class ExportRunService : BackgroundService
         var scope = _scopeFactory.CreateScope();
         scope.ServiceProvider.GetRequiredService<TenantContext>().Current = tenant;
         return scope;
+    }
+
+    private static void TryDelete(string path)
+    {
+        try { File.Delete(path); } catch { /* temp cleanup is best-effort */ }
     }
 }

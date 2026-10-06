@@ -25,6 +25,6 @@ public interface IExportGenerator
 /// <param name="MaxCalls">Preview: stop after this many calls.</param>
 public sealed record ExportGenerationRequest(
     ExportSpec Spec, string ExportName, Guid? RunId, bool IsTest, string DataSource,
-    DateTimeOffset WindowStart, DateTimeOffset WindowEnd, int? MaxCalls = null);
+    DateTimeOffset WindowStart, DateTimeOffset WindowEnd, int? MaxCalls = null, string Kind = "manual");
 
 public sealed record ExportGenerationResult(bool Success, int RowCount, int CallCount, bool Truncated, string? Error);

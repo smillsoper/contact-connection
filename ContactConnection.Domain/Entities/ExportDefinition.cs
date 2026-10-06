@@ -27,6 +27,14 @@ public class ExportDefinition
     public ExportSpec Spec { get; private set; } = new();
     public int SpecRevision { get; private set; } = 1;
 
+    // ── Schedule + delivery (session 2) — not part of the vendor-approved spec ─
+    /// <summary>Null = runs only when asked (Run now / test files). Only a live export runs on its schedule.</summary>
+    public ExportSchedule? Schedule { get; private set; }
+    public List<ExportDeliveryTarget> DeliveryTargets { get; private set; } = [];
+    /// <summary>The last scheduled run time already queued. Going live sets it to now, so a schedule never back-fills
+    /// files for the time before (or while paused).</summary>
+    public DateTimeOffset? LastScheduledFor { get; private set; }
+
     // ── Vendor approval ────────────────────────────────────────────────────────
     public DateTimeOffset? ApprovedAt { get; private set; }
     /// <summary>Who at the vendor approved it (free text — "Jane at Cannella").</summary>
@@ -72,6 +80,24 @@ public class ExportDefinition
         return true;
     }
 
+    public void SetSchedule(ExportSchedule? schedule)
+    {
+        Schedule = schedule;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void SetDeliveryTargets(List<ExportDeliveryTarget> targets)
+    {
+        DeliveryTargets = targets;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>The scheduler queued the run for <paramref name="runAt"/>.</summary>
+    public void MarkScheduled(DateTimeOffset runAt)
+    {
+        if (LastScheduledFor is null || runAt > LastScheduledFor) LastScheduledFor = runAt;
+    }
+
     // ── Lifecycle ──────────────────────────────────────────────────────────────
 
     public void StartTesting() => Move(ExportStatus.Testing, from: [ExportStatus.Draft, ExportStatus.Approved, ExportStatus.Live, ExportStatus.Paused]);
@@ -87,7 +113,11 @@ public class ExportDefinition
         ApprovedSpecRevision = SpecRevision;
     }
 
-    public void GoLive() => Move(ExportStatus.Live, from: [ExportStatus.Approved, ExportStatus.Paused]);
+    public void GoLive()
+    {
+        Move(ExportStatus.Live, from: [ExportStatus.Approved, ExportStatus.Paused]);
+        LastScheduledFor = DateTimeOffset.UtcNow;
+    }
     public void Pause() => Move(ExportStatus.Paused, from: [ExportStatus.Live]);
     public void BackToDraft() => Move(ExportStatus.Draft, from: [ExportStatus.Testing, ExportStatus.Approved, ExportStatus.Paused]);
 

@@ -39,6 +39,64 @@ export interface ExportSpec {
   timeZone: string
 }
 
+export interface ExportSchedule {
+  frequency: 'daily' | 'monthly'
+  daysOfWeek: number[]
+  dayOfMonth: number
+  timeOfDay: string
+  timeZone: string
+  window: 'previous_day' | 'previous_week' | 'previous_month' | 'last_hours' | 'since_last_run'
+  lastHours: number
+  autoDeliver: boolean
+}
+
+export type DeliveryType = 'sftp' | 'ftps' | 'email'
+
+export interface DeliveryTarget {
+  id: string
+  name: string
+  type: DeliveryType
+  enabled: boolean
+  host?: string | null
+  port?: number | null
+  username?: string | null
+  passwordCredential?: string | null
+  privateKeyCredential?: string | null
+  hostKeyFingerprint?: string | null
+  ftpsImplicit?: boolean
+  certificateFingerprint?: string | null
+  remoteDirectory?: string | null
+  emailTo: string[]
+  emailSubject?: string | null
+  encryption: 'none' | 'pgp' | 'zip'
+  pgpPublicKey?: string | null
+  zipPasswordCredential?: string | null
+}
+
+export interface ExportDeliveryRow {
+  id: string
+  targetId: string
+  targetName: string
+  targetType: DeliveryType
+  status: 'queued' | 'running' | 'succeeded' | 'failed'
+  attempts: number
+  maxAttempts: number
+  nextAttemptAt: string
+  error: string | null
+  sentAs: string | null
+  requestedByName: string | null
+  queuedAt: string
+  deliveredAt: string | null
+}
+
+export interface NextRun { runAt: string; windowStart: string; windowEnd: string }
+
+export interface ConnectionTest { success: boolean; message: string; fingerprint: string | null; matchesPinned: boolean | null }
+
+export interface ActivityRow { id: string; runId: string | null; action: string; actorName: string | null; detail: string | null; at: string }
+
+export interface StarterTemplate { key: string; name: string; description: string; notes: string; spec: ExportSpec; schedule: ExportSchedule }
+
 export interface ExportRunRow {
   id: string
   definitionId: string
@@ -61,6 +119,10 @@ export interface ExportRunRow {
   queuedAt: string
   startedAt: string | null
   finishedAt: string | null
+  scheduledFor: string | null
+  deliver: boolean
+  fileDeletedAt: string | null
+  deliveries: ExportDeliveryRow[]
 }
 
 export interface ExportDefinition {
@@ -74,6 +136,11 @@ export interface ExportDefinition {
   approval: {
     at: string; vendorContact: string; recordedBy: string; note: string | null; runId: string; specRevision: number
   } | null
+  schedule: ExportSchedule | null
+  deliveryTargets: DeliveryTarget[]
+  lastScheduledFor: string | null
+  scheduleDescription: string | null
+  nextRuns: NextRun[]
   createdAt: string
   updatedAt: string
   lastRun: ExportRunRow | null
@@ -129,9 +196,18 @@ export const exportsApi = {
   preview: (body: { spec: ExportSpec; name: string; from: string; to: string; dataSource: DataSource; isTest: boolean; maxCalls: number }) =>
     api.post<PreviewResult>('/api/v1/exports/preview', body),
   runs: (id: string) => api.get<ExportRunRow[]>(`/api/v1/exports/${id}/runs`),
-  queueRun: (id: string, body: { from: string; to: string; isTest: boolean; dataSource: DataSource }) =>
+  queueRun: (id: string, body: { from: string; to: string; isTest: boolean; dataSource: DataSource; deliver?: boolean }) =>
     api.post<ExportRunRow>(`/api/v1/exports/${id}/runs`, body),
-  rerun: (runId: string) => api.post<ExportRunRow>(`/api/v1/export-runs/${runId}/rerun`),
+  rerun: (runId: string, deliver = false) => api.post<ExportRunRow>(`/api/v1/export-runs/${runId}/rerun`, { deliver }),
+  templates: () => api.get<StarterTemplate[]>('/api/v1/exports/templates'),
+  saveSchedule: (id: string, schedule: ExportSchedule | null) => api.put<ExportDefinition>(`/api/v1/exports/${id}/schedule`, { schedule }),
+  schedulePreview: (schedule: ExportSchedule, dataTimeZone: string) =>
+    api.post<{ error: string | null; description: string | null; nextRuns: NextRun[] }>('/api/v1/exports/schedule-preview', { schedule, dataTimeZone }),
+  saveTargets: (id: string, targets: DeliveryTarget[]) => api.put<ExportDefinition>(`/api/v1/exports/${id}/delivery-targets`, { targets }),
+  testTarget: (id: string, target: DeliveryTarget) => api.post<ConnectionTest>(`/api/v1/exports/${id}/delivery-targets/test`, { target }),
+  send: (runId: string, targetIds: string[]) => api.post<void>(`/api/v1/export-runs/${runId}/send`, { targetIds }),
+  retryDelivery: (deliveryId: string) => api.post<void>(`/api/v1/export-deliveries/${deliveryId}/retry`),
+  activity: (id: string) => api.get<ActivityRow[]>(`/api/v1/exports/${id}/activity`),
 
   async download(run: ExportRunRow) {
     const { token, tenantSubdomain } = useAuthStore.getState()
@@ -163,3 +239,13 @@ export const STATUS_STYLE: Record<ExportStatus, string> = {
 export const STATUS_LABEL: Record<ExportStatus, string> = {
   draft: 'Draft', testing: 'Testing with vendor', approved: 'Vendor approved', live: 'Live', paused: 'Paused',
 }
+
+export const defaultSchedule = (): ExportSchedule => ({
+  frequency: 'daily', daysOfWeek: [], dayOfMonth: 1, timeOfDay: '02:00', timeZone: 'America/Los_Angeles',
+  window: 'previous_day', lastHours: 24, autoDeliver: true,
+})
+
+export const newTarget = (type: DeliveryType): DeliveryTarget => ({
+  id: crypto.randomUUID(), name: '', type, enabled: true, emailTo: [], encryption: 'none',
+  port: null, ftpsImplicit: false,
+})

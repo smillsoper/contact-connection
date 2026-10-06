@@ -30,6 +30,10 @@ public class ExportRun
     public string DataSource { get; private set; } = ExportDataSource.Production;
     public DateTimeOffset WindowStart { get; private set; }
     public DateTimeOffset WindowEnd { get; private set; }
+    /// <summary>Scheduled runs: the run time this file is for (unique per export — the scheduler can't queue it twice).</summary>
+    public DateTimeOffset? ScheduledFor { get; private set; }
+    /// <summary>Send to the export's delivery targets once generated.</summary>
+    public bool Deliver { get; private set; }
 
     public string Status { get; private set; } = ExportRunStatus.Queued;
     public int Attempts { get; private set; }
@@ -48,6 +52,8 @@ public class ExportRun
     public string? ContentType { get; private set; }
     public long? FileSize { get; private set; }
     public string? Sha256 { get; private set; }
+    /// <summary>The stored file was removed by retention (the vendor-approved test file never is).</summary>
+    public DateTimeOffset? FileDeletedAt { get; private set; }
 
     public DateTimeOffset QueuedAt { get; private set; }
     public DateTimeOffset? StartedAt { get; private set; }
@@ -57,7 +63,8 @@ public class ExportRun
 
     public static ExportRun Queue(
         ExportDefinition definition, string kind, bool isTest, string dataSource,
-        DateTimeOffset windowStart, DateTimeOffset windowEnd, Guid? requestedById, string? requestedByName)
+        DateTimeOffset windowStart, DateTimeOffset windowEnd, Guid? requestedById, string? requestedByName,
+        bool deliver = false, DateTimeOffset? scheduledFor = null)
     {
         if (!ExportRunKind.IsValid(kind)) throw new ArgumentException($"Unknown run kind '{kind}'.", nameof(kind));
         if (dataSource == ExportDataSource.Practice && !isTest)
@@ -72,6 +79,7 @@ public class ExportRun
             WindowStart = windowStart.ToUniversalTime(), WindowEnd = windowEnd.ToUniversalTime(),
             Status = ExportRunStatus.Queued, NextAttemptAt = now, QueuedAt = now,
             RequestedById = requestedById, RequestedByName = requestedByName,
+            Deliver = deliver && !isTest, ScheduledFor = scheduledFor?.ToUniversalTime(),
         };
     }
 
@@ -100,6 +108,8 @@ public class ExportRun
             NextAttemptAt = DateTimeOffset.UtcNow + backoff;
         }
     }
+
+    public void MarkFileDeleted() => FileDeletedAt = DateTimeOffset.UtcNow;
 
     /// <summary>The file name for this run: test files get the spec's test suffix before the extension.</summary>
     public static string ApplyTestSuffix(string fileName, string? suffix)

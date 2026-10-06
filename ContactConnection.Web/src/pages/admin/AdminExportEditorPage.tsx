@@ -4,8 +4,10 @@ import AdminShell from '../../components/admin/AdminShell'
 import {
   defaultSpec, exportsApi, STATUS_LABEL, STATUS_STYLE,
   type DataSource, type ExportColumn, type ExportDefinition, type ExportRunRow, type ExportSpec,
-  type LifecycleAction, type PreviewResult, type VersionRow,
+  type LifecycleAction, type PreviewResult, type VersionRow, type ActivityRow, type ExportSchedule, type StarterTemplate,
 } from '../../api/exports'
+import ExportScheduleCard from '../../components/admin/exports/ExportScheduleCard'
+import ExportDeliveryCard from '../../components/admin/exports/ExportDeliveryCard'
 import { listCampaigns, listClients, type Campaign, type Client } from '../../api/telephony'
 import { mediaApi, type MediaAgency } from '../../api/media'
 import { when } from './AdminExportsPage'
@@ -209,6 +211,47 @@ function ApproveDialog({ runs, onClose, onApprove }: {
   )
 }
 
+function SendDialog({ run, def, onClose, onSent }: {
+  run: ExportRunRow; def: ExportDefinition; onClose: () => void; onSent: () => void
+}) {
+  const targets = def.deliveryTargets.filter((t) => t.enabled)
+  const [chosen, setChosen] = useState<string[]>([])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+      <div className="bg-gray-800 border border-gray-700 rounded-lg p-5 w-full max-w-md">
+        <h2 className="text-white font-semibold mb-1">Send {run.fileName}</h2>
+        <p className="text-xs text-gray-400 mb-4">{run.isTest ? 'A test file — e.g. to the vendor for approval.' : 'This file again, to the targets you pick.'}</p>
+        {targets.length === 0 ? <p className="text-amber-300 text-sm mb-4">Add a delivery target first (Delivery, above).</p> : (
+          <div className="space-y-1 mb-4">
+            {targets.map((t) => (
+              <label key={t.id} className="flex items-center gap-2 text-sm text-gray-200">
+                <input type="checkbox" checked={chosen.includes(t.id)}
+                  onChange={(e) => setChosen(e.target.checked ? [...chosen, t.id] : chosen.filter((x) => x !== t.id))} />
+                {t.name} <span className="text-xs text-gray-500">{t.type.toUpperCase()}{t.encryption !== 'none' ? ` · ${t.encryption}` : ''}</span>
+              </label>
+            ))}
+          </div>
+        )}
+        {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <button className={`${btn} bg-gray-700 hover:bg-gray-600 text-white`} onClick={onClose}>Cancel</button>
+          <button className={`${btn} bg-indigo-600 hover:bg-indigo-500 text-white`} disabled={busy || chosen.length === 0}
+            onClick={async () => {
+              setBusy(true); setError(null)
+              try { await exportsApi.send(run.id, chosen); onSent() } catch (e) { setError(e instanceof Error ? e.message : 'Failed.'); setBusy(false) }
+            }}>Send</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const DELIVERY_STYLE: Record<string, string> = {
+  succeeded: 'text-emerald-300', failed: 'text-red-400', queued: 'text-amber-300', running: 'text-amber-300',
+}
+
 export default function AdminExportEditorPage() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -232,6 +275,10 @@ export default function AdminExportEditorPage() {
   const [preview, setPreview] = useState<PreviewResult | null>(null)
   const [previewing, setPreviewing] = useState(false)
   const [approving, setApproving] = useState(false)
+  const [sending, setSending] = useState<ExportRunRow | null>(null)
+  const [activity, setActivity] = useState<ActivityRow[]>([])
+  const [templates, setTemplates] = useState<StarterTemplate[]>([])
+  const [pendingSchedule, setPendingSchedule] = useState<ExportSchedule | null>(null)
 
   const setS = (s: ExportSpec) => { setSpec(s); setDirty(true) }
 
@@ -240,23 +287,26 @@ export default function AdminExportEditorPage() {
   }
   const refreshRuns = () => id ? exportsApi.runs(id).then(setRuns).catch(() => { }) : Promise.resolve()
   const refreshVersions = () => id ? exportsApi.versions(id).then(setVersions).catch(() => { }) : Promise.resolve()
+  const refreshActivity = () => id ? exportsApi.activity(id).then(setActivity).catch(() => { }) : Promise.resolve()
 
   useEffect(() => {
     listClients().then(setClients).catch(() => { })
     listCampaigns().then(setCampaigns).catch(() => { })
     mediaApi.agencies().then(setAgencies).catch(() => { })
+    exportsApi.templates().then(setTemplates).catch(() => { })
   }, [])
 
   useEffect(() => {
     if (!id) return
     exportsApi.get(id).then(load).catch((e: Error) => setError(e.message))
-    refreshRuns(); refreshVersions()
+    refreshRuns(); refreshVersions(); refreshActivity()
   }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Follow a file being generated until it finishes (stops as soon as nothing is queued or running).
-  const pending = runs.some((r) => r.status === 'queued' || r.status === 'running')
+  const pending = runs.some((r) => r.status === 'queued' || r.status === 'running'
+    || r.deliveries.some((d) => d.status === 'running' || (d.status === 'queued' && new Date(d.nextAttemptAt).getTime() < Date.now() + 60_000)))
   useEffect(() => {
-    if (!pending) return
+    if (!pending) { refreshActivity(); return }
     const t = setInterval(refreshRuns, 2500)
     return () => clearInterval(t)
   }, [pending]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -270,6 +320,7 @@ export default function AdminExportEditorPage() {
     try {
       if (isNew) {
         const d = await exportsApi.create(name, description || null, spec)
+        if (pendingSchedule) await exportsApi.saveSchedule(d.id, pendingSchedule)
         navigate(`/admin/exports/${d.id}`, { replace: true })
       } else {
         load(await exportsApi.update(id!, name, description || null, spec))
@@ -286,13 +337,13 @@ export default function AdminExportEditorPage() {
     finally { setPreviewing(false) }
   }
 
-  async function queue(isTest: boolean) {
+  async function queue(isTest: boolean, deliver = false) {
     if (!id) return
     if (dirty) { setError('Save your changes first — files are generated from the saved export.'); return }
     setError(null); setNotice(null)
     try {
-      await exportsApi.queueRun(id, { from, to, isTest, dataSource: isTest ? source : 'production' })
-      setNotice(isTest ? 'Test file queued.' : 'File queued.')
+      await exportsApi.queueRun(id, { from, to, isTest, dataSource: isTest ? source : 'production', deliver })
+      setNotice(isTest ? 'Test file queued.' : deliver ? 'File queued — it will be sent when it is ready.' : 'File queued.')
       refreshRuns()
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not queue the file.') }
   }
@@ -334,6 +385,14 @@ export default function AdminExportEditorPage() {
           </div>
         </div>
 
+        {def?.scheduleDescription && (
+          <p className="text-sm text-gray-400 mb-3">
+            {def.scheduleDescription}{' '}
+            {def.status === 'live' && def.nextRuns[0]
+              ? <span className="text-emerald-300">Next run {when(def.nextRuns[0].runAt)}.</span>
+              : <span className="text-amber-300">Not running — the export isn't live.</span>}
+          </p>
+        )}
         {error && <p className="text-red-400 text-sm mb-3 whitespace-pre-wrap">{error}</p>}
         {notice && <p className="text-emerald-400 text-sm mb-3">{notice}</p>}
 
@@ -349,6 +408,23 @@ export default function AdminExportEditorPage() {
                 Consider sending the vendor a new test file.
               </p>
             )}
+          </div>
+        )}
+
+        {isNew && templates.length > 0 && (
+          <div className={card}>
+            <label className={label}>Start from</label>
+            <select className={input} defaultValue="" onChange={(e) => {
+              const t = templates.find((x) => x.key === e.target.value)
+              if (!t) { setSpec(defaultSpec('')); setPendingSchedule(null); return }
+              setSpec(t.spec); setPendingSchedule(t.schedule); setDirty(true)
+              if (!name.trim()) setName(t.name.replace(/ \(.*\)$/, ''))
+              setNotice(t.notes)
+            }}>
+              <option value="">Blank export</option>
+              {templates.map((t) => <option key={t.key} value={t.key}>{t.name} — {t.description}</option>)}
+            </select>
+            {pendingSchedule && <p className="text-xs text-gray-400 mt-2">Comes with a schedule (nightly) — it only runs once the export is live.</p>}
           </div>
         )}
 
@@ -463,6 +539,9 @@ export default function AdminExportEditorPage() {
           </div>
         </div>
 
+        {def && <ExportScheduleCard def={def} onSaved={(d) => { setDef(d); refreshVersions() }} />}
+        {def && <ExportDeliveryCard def={def} onSaved={(d) => { setDef(d); refreshVersions() }} />}
+
         <FieldReference />
 
         <div className={card}>
@@ -486,6 +565,9 @@ export default function AdminExportEditorPage() {
             <button className={`${btn} bg-gray-700 hover:bg-gray-600 text-white`} disabled={previewing} onClick={runPreview}>{previewing ? 'Rendering…' : 'Preview'}</button>
             {!isNew && <button className={`${btn} bg-amber-700 hover:bg-amber-600 text-white`} onClick={() => queue(true)}>Generate test file</button>}
             {!isNew && <button className={`${btn} bg-indigo-600 hover:bg-indigo-500 text-white`} disabled={source === 'practice'} title={source === 'practice' ? 'Practice calls only go into test files' : ''} onClick={() => queue(false)}>Run now</button>}
+            {!isNew && def && ['approved', 'live', 'paused'].includes(def.status) && def.deliveryTargets.some((t) => t.enabled) && (
+              <button className={`${btn} bg-emerald-700 hover:bg-emerald-600 text-white`} disabled={source === 'practice'} onClick={() => queue(false, true)}>Run now &amp; send</button>
+            )}
           </div>
           <p className="text-xs text-gray-500 mb-3">Dates are whole days in the export's time zone. A test file is marked as a test (file name suffix,
             <code> export.is_test</code>) and never counts as a real run.</p>
@@ -538,15 +620,34 @@ export default function AdminExportEditorPage() {
                             : <span className={r.status === 'failed' ? 'text-red-400' : 'text-amber-300'}>{r.status === 'failed' ? 'Failed' : r.status === 'running' ? 'Generating…' : 'Queued…'}</span>}
                           {r.isTest && <span className="ml-2 px-1.5 rounded bg-amber-900/60 text-amber-300 text-xs">test{r.dataSource === 'practice' ? ' · practice calls' : ''}</span>}
                           {r.kind === 'rerun' && <span className="ml-2 text-xs text-gray-400">re-run</span>}
+                          {r.kind === 'scheduled' && <span className="ml-2 text-xs text-gray-400">scheduled</span>}
+                          {r.fileDeletedAt && <span className="ml-2 text-xs text-gray-500">file deleted (retention)</span>}
                           {def?.approval?.runId === r.id && <span className="ml-2 px-1.5 rounded bg-sky-900/60 text-sky-300 text-xs">vendor approved</span>}
                           {r.error && <span className="block text-xs text-red-400 whitespace-pre-wrap">{r.error}</span>}
                           {r.status === 'succeeded' && <span className="block text-xs text-gray-500">{size(r.fileSize)} · revision {r.specRevision}</span>}
+                          {r.deliveries.map((d) => (
+                            <span key={d.id} className="block text-xs mt-0.5">
+                              <span className={DELIVERY_STYLE[d.status]}>
+                                {d.status === 'succeeded' ? '✓ Sent' : d.status === 'failed' ? '✕ Not sent' : d.attempts > 0 ? '↻ Retrying' : '… Sending'}
+                              </span>
+                              <span className="text-gray-300"> → {d.targetName}</span>
+                              {d.deliveredAt && <span className="text-gray-500"> {when(d.deliveredAt)}</span>}
+                              {d.error && <span className="block text-red-400 whitespace-pre-wrap">{d.error}</span>}
+                              {d.status === 'failed' && (
+                                <button className="text-indigo-400 hover:text-indigo-300 ml-1"
+                                  onClick={() => exportsApi.retryDelivery(d.id).then(refreshRuns).catch((e: Error) => setError(e.message))}>Retry</button>
+                              )}
+                            </span>
+                          ))}
                         </td>
                         <td className="py-1.5 pr-3 text-gray-300 whitespace-nowrap text-xs">{when(r.windowStart)}<br />→ {when(r.windowEnd)}</td>
                         <td className="py-1.5 pr-3 text-gray-300">{r.rowCount ?? '—'}{r.callCount != null && <span className="block text-xs text-gray-500">{r.callCount} calls</span>}</td>
                         <td className="py-1.5 pr-3 text-gray-400 text-xs">{when(r.queuedAt)}<br />{r.requestedByName}</td>
                         <td className="py-1.5 whitespace-nowrap text-right">
-                          {r.status === 'succeeded' && <button className="text-indigo-400 hover:text-indigo-300 text-sm mr-3" onClick={() => exportsApi.download(r).catch((e: Error) => setError(e.message))}>Download</button>}
+                          {r.status === 'succeeded' && !r.fileDeletedAt && <button className="text-indigo-400 hover:text-indigo-300 text-sm mr-3" onClick={() => exportsApi.download(r).then(refreshActivity).catch((e: Error) => setError(e.message))}>Download</button>}
+                          {r.status === 'succeeded' && !r.fileDeletedAt && def && (r.isTest || ['approved', 'live', 'paused'].includes(def.status)) && (
+                            <button className="text-indigo-400 hover:text-indigo-300 text-sm mr-3" onClick={() => setSending(r)}>Send…</button>
+                          )}
                           {(r.status === 'succeeded' || r.status === 'failed') && (
                             <button className="text-gray-400 hover:text-white text-sm" title="Generate this window again with today's data and the current layout"
                               onClick={() => exportsApi.rerun(r.id).then(refreshRuns).catch((e: Error) => setError(e.message))}>Re-run</button>
@@ -560,6 +661,24 @@ export default function AdminExportEditorPage() {
             )
           )}
         </div>
+
+        {activity.length > 0 && (
+          <details className={card}>
+            <summary className="cursor-pointer text-sm text-gray-200 font-medium">Activity — downloads &amp; sends ({activity.length})</summary>
+            <ul className="mt-3 space-y-1 text-sm">
+              {activity.map((a) => (
+                <li key={a.id} className="text-gray-300">
+                  <span className="text-gray-500 text-xs mr-2">{when(a.at)}</span>
+                  <span className={a.action === 'delivery_failed' ? 'text-red-400' : a.action === 'delivered' ? 'text-emerald-300' : 'text-gray-200'}>
+                    {{ downloaded: 'Downloaded', delivered: 'Sent', delivery_failed: 'Send failed', send_requested: 'Send requested', file_expired: 'File deleted' }[a.action] ?? a.action}
+                  </span>
+                  {a.detail && <span> — {a.detail}</span>}
+                  {a.actorName && <span className="text-gray-500"> — {a.actorName}</span>}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
 
         {versions.length > 0 && (
           <details className={card}>
@@ -575,6 +694,11 @@ export default function AdminExportEditorPage() {
           </details>
         )}
       </div>
+
+      {sending && def && (
+        <SendDialog run={sending} def={def} onClose={() => setSending(null)}
+          onSent={() => { setSending(null); setNotice('Queued to send.'); refreshRuns(); refreshActivity() }} />
+      )}
 
       {approving && (
         <ApproveDialog runs={runs} onClose={() => setApproving(false)}
