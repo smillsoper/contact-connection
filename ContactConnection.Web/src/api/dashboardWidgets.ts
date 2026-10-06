@@ -102,9 +102,32 @@ export const dashboardWidgetsApi = {
   pendingQueueCallbacks: (params: WidgetFilterConfig) =>
     api.get<PendingQueueCallbackRow[]>(`/api/v1/dashboard-widgets/pending-queue-callbacks${buildQuery(params)}`),
 
+  activeCalls: (params: WidgetFilterConfig) =>
+    api.get<ActiveCallRow[]>(`/api/v1/dashboard-widgets/active-calls${buildQuery(params)}`),
+
   queuedCalls: (params: WidgetFilterConfig) =>
     api.get<QueuedCallRow[]>(`/api/v1/dashboard-widgets/queued-calls${buildQuery(params)}`),
 
   serviceLevelThreshold: (params: WidgetFilterConfig) =>
     api.get<ServiceLevelThresholdData>(`/api/v1/dashboard-widgets/service-level-threshold${buildQuery(params)}`),
+}
+
+/** Active Calls widget (S180): one call an agent is on right now. */
+export interface ActiveCallRow {
+  callRecordId: string
+  direction: 'inbound' | 'callback' | 'outbound'
+  customerNumber: string | null
+  ourNumber: string | null
+  campaignId: string | null
+  campaignName: string | null
+  agentId: string
+  agentName: string | null
+  connectedAt: string | null
+  tierLabel: string | null
+  onHold: boolean
+  secureCapture: boolean
+  recording: boolean
+  /** Monitor / Coach / Barge / Take over can reach it (inbound + callbacks; not manual outbound yet). */
+  supervisable: boolean
+  scriptName: string | null
 }

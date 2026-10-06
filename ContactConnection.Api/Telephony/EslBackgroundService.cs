@@ -1390,6 +1390,20 @@ public sealed class EslBackgroundService : BackgroundService
         var dbFactory           = scope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
         var recordingController = scope.ServiceProvider.GetRequiredService<ICallRecordingController>();
 
+        // Active Calls widget (S180): the call shows "on hold" while the agent has it held; the push refreshes dashboards.
+        var held = mask ? "true" : "false";
+        if (session.Vars.GetValueOrDefault("_on_hold") != held)
+        {
+            session.Vars["_on_hold"] = held;
+            await _sessionStore.SaveAsync(session, ct);
+            try
+            {
+                await scope.ServiceProvider.GetRequiredService<IDashboardNotifier>()
+                    .NotifyCallStateChangedAsync(session.TenantId, session.CampaignId, mask ? "on_hold" : "off_hold", ct);
+            }
+            catch (Exception ex) { _logger.LogDebug(ex, "Hold push failed for {Uuid}", eventUuid); }
+        }
+
         await using var db = dbFactory.Create(session.TenantSchemaName);
 
         var campaign = await db.Campaigns.FirstOrDefaultAsync(c => c.Id == session.CampaignId, ct);

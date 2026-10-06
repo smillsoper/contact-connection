@@ -244,6 +244,7 @@ app.MapTtsServiceStatusEndpoints();
 app.MapCallTracesEndpoints();
 app.MapDashboardsEndpoints();
 app.MapDashboardWidgetsEndpoints();
+app.MapActiveCallsWidget();
 
 // Tenant admin portal
 app.MapAdminAgentsEndpoints();

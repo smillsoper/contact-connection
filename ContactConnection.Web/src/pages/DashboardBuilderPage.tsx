@@ -19,6 +19,7 @@ import CallStateByCampaignWidget from '../components/dashboard/widgets/CallState
 import CallbacksWidget from '../components/dashboard/widgets/CallbacksWidget'
 import ServiceLevelThresholdWidget from '../components/dashboard/widgets/ServiceLevelThresholdWidget'
 import QueuedCallsWidget from '../components/dashboard/widgets/QueuedCallsWidget'
+import ActiveCallsWidget from '../components/dashboard/widgets/ActiveCallsWidget'
 import {
   DashboardLiveContext, DashboardCallStateLiveContext, DashboardRegistrationLiveContext,
   DashboardScheduledCallbackLiveContext, DashboardQueueOfferLiveContext, DashboardAgentSessionsLiveContext,
@@ -36,6 +37,7 @@ function renderWidget(type: DashboardWidgetType, config: WidgetFilterConfig) {
     case 'callbacks':                 return <CallbacksWidget config={config} />
     case 'service_level_threshold':   return <ServiceLevelThresholdWidget config={config} />
     case 'queued_calls':              return <QueuedCallsWidget config={config} />
+    case 'active_calls':              return <ActiveCallsWidget config={config} />
   }
 }
 
