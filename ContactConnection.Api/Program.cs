@@ -7,6 +7,8 @@ using ContactConnection.Api.Telephony;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Domain.Entities;
 using ContactConnection.Infrastructure.Extensions;
+using System.Threading.RateLimiting;
+using ContactConnection.Infrastructure.Auth;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 
@@ -99,7 +101,8 @@ builder.Services.AddHostedService<ContactConnection.Api.Realtime.DashboardRelayS
 var signingKey = builder.Configuration["Jwt:SigningKey"]
     ?? throw new InvalidOperationException("Jwt:SigningKey is not configured.");
 
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+var authBuilder = builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme);
+authBuilder
     .AddJwtBearer(options =>
     {
         // Keep JWT claim names as-is (don't map "sub" â†’ ClaimTypes.NameIdentifier, etc.)
@@ -143,8 +146,66 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
+// Client portal (S181): client users get tokens with their own audience, validated only by this scheme — the default
+// scheme above rejects them, so no agent / admin endpoint ever accepts a client user. Deactivating a client user
+// (or the account vanishing) stops their existing tokens at once.
+authBuilder.AddJwtBearer(ClientUserTokens.Scheme, options =>
+{
+    options.MapInboundClaims = false;
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuer = true,
+        ValidateAudience = true,
+        ValidateLifetime = true,
+        ValidateIssuerSigningKey = true,
+        ValidIssuer = builder.Configuration["Jwt:Issuer"],
+        ValidAudience = ClientUserTokens.Audience(builder.Configuration),
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(signingKey)),
+        ClockSkew = TimeSpan.FromMinutes(1)
+    };
+    options.Events = new JwtBearerEvents
+    {
+        OnMessageReceived = context =>
+        {
+            var accessToken = context.Request.Query["access_token"];
+            if (!string.IsNullOrEmpty(accessToken) && context.HttpContext.Request.Path.StartsWithSegments("/hubs/client"))
+                context.Token = accessToken;
+            return Task.CompletedTask;
+        },
+        OnTokenValidated = async context =>
+        {
+            var schema = context.Principal?.FindFirst("tenant_schema")?.Value;
+            if (string.IsNullOrEmpty(schema) || !Guid.TryParse(context.Principal?.FindFirst("sub")?.Value, out var userId))
+            {
+                context.Fail("Not a client-portal token.");
+                return;
+            }
+            var reader = context.HttpContext.RequestServices.GetRequiredService<ContactConnection.Infrastructure.ClientPortal.ClientUserStatusReader>();
+            if (!await reader.IsActiveAsync(schema, userId, context.HttpContext.RequestAborted))
+                context.Fail("This account is no longer active.");
+        },
+    };
+});
+
+// Client-portal sign-in is reachable by people outside the tenant — throttle it per IP.
+builder.Services.AddRateLimiter(o =>
+{
+    o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    o.AddPolicy("client-auth", http => RateLimitPartition.GetFixedWindowLimiter(
+        http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+});
+
 builder.Services.AddAuthorization(options =>
 {
+    options.AddPolicy("ClientUser", policy => policy
+        .AddAuthenticationSchemes(ClientUserTokens.Scheme)
+        .RequireAuthenticatedUser()
+        .RequireClaim("role", ClientUserTokens.Role));
+    options.AddPolicy("ClientMfaPending", policy => policy
+        .AddAuthenticationSchemes(ClientUserTokens.Scheme)
+        .RequireAuthenticatedUser()
+        .RequireClaim("role", ClientUserTokens.MfaPendingRole));
     options.AddPolicy("PlatformAdmin", policy =>
         policy.RequireClaim("role", "platform_admin"));
     options.AddPolicy("TenantAdmin", policy =>
@@ -200,6 +261,7 @@ app.UseWebSockets();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseTenantResolution();
+app.UseRateLimiter();
 
 app.MapAuthEndpoints();
 app.MapAgentsEndpoints();
@@ -249,6 +311,9 @@ app.MapExportsEndpoints();
 app.MapExportKeysEndpoints();
 app.MapDispositionsEndpoints();
 app.MapKpiEndpoints();
+app.MapClientPortalAuthEndpoints();
+app.MapClientPortalEndpoints();
+app.MapAdminClientUsersEndpoints();
 
 // Tenant admin portal
 app.MapAdminAgentsEndpoints();
@@ -288,5 +353,6 @@ app.MapWebhooksEndpoints();
 // SignalR hubs
 app.MapHub<FlowHub>("/hubs/flow");
 app.MapHub<CallTraceHub>("/hubs/call-trace");
+app.MapHub<ClientDashboardHub>("/hubs/client");
 
 app.Run();

@@ -8,7 +8,8 @@ namespace ContactConnection.Api.Hubs;
 /// Registered as a singleton (IHubContext is itself singleton-safe) since it's consumed by
 /// AgentStateStore, which is a singleton with no HTTP request scope.
 /// </summary>
-public class DashboardNotifier(IHubContext<FlowHub, IFlowHubClient> hubContext) : IDashboardNotifier
+public class DashboardNotifier(IHubContext<FlowHub, IFlowHubClient> hubContext,
+    IHubContext<ClientDashboardHub, IClientDashboardHubClient> clientHub) : IDashboardNotifier
 {
     public Task NotifyAgentStateChangedAsync(
         Guid tenantId, Guid agentId, string stateCode, string label, DateTimeOffset since, CancellationToken ct = default) =>
@@ -17,8 +18,10 @@ public class DashboardNotifier(IHubContext<FlowHub, IFlowHubClient> hubContext) 
 
     public Task NotifyCallStateChangedAsync(
         Guid tenantId, Guid campaignId, string state, CancellationToken ct = default) =>
-        hubContext.Clients.Group($"supervisor:{tenantId}")
-            .ReceiveCallStateSnapshot(campaignId.ToString(), state);
+        Task.WhenAll(
+            hubContext.Clients.Group($"supervisor:{tenantId}").ReceiveCallStateSnapshot(campaignId.ToString(), state),
+            // Client portal (S181): a data-free nudge; client dashboards refetch through their scoped endpoints.
+            clientHub.Clients.Group(ClientDashboardHub.Group(tenantId)).ReceiveRefresh());
 
     public Task NotifyAgentRegistrationChangedAsync(
         Guid tenantId, Guid agentId, bool registered, DateTimeOffset? since, CancellationToken ct = default) =>

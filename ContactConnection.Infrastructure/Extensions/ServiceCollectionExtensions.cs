@@ -304,6 +304,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IAgentStateHistoryRepository, AgentStateHistoryRepository>();
         services.AddMemoryCache();
         services.AddSingleton<IAgentLockReader, AgentLockReader>();
+        services.AddSingleton<ContactConnection.Infrastructure.ClientPortal.ClientUserStatusReader>();
         services.AddSingleton<IAgentStateStore, AgentStateStore>();
 
         // SIP registration presence per agent extension — in-memory, seeded + kept live from

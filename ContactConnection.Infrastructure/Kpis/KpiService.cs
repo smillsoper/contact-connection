@@ -9,9 +9,11 @@ using Microsoft.EntityFrameworkCore;
 namespace ContactConnection.Infrastructure.Kpis;
 
 /// <param name="GroupBy"><c>none</c> or a <see cref="KpiDimension"/>; <paramref name="GroupBy2"/> breaks each of those down
-/// again (with a subtotal row per first-level group). <paramref name="TimeZone"/>: the zone day / hour rows are in.</param>
+/// again (with a subtotal row per first-level group). <paramref name="TimeZone"/>: the zone day / hour rows are in.
+/// <paramref name="CampaignIds"/>: when set, only these campaigns (a client dashboard's locked scope, S181) — applied on top
+/// of <paramref name="ClientId"/> / <paramref name="CampaignId"/>; an empty set matches nothing.</param>
 public sealed record KpiQuery(DateTimeOffset Since, DateTimeOffset Until, Guid? ClientId, Guid? CampaignId, string GroupBy,
-    string? GroupBy2 = null, string TimeZone = "UTC");
+    string? GroupBy2 = null, string TimeZone = "UTC", IReadOnlySet<Guid>? CampaignIds = null);
 
 /// <param name="Label2">The second-level value (two-dimension reports).</param>
 /// <param name="Subtotal">A first-level group's subtotal row (two-dimension reports).</param>
@@ -38,7 +40,8 @@ public sealed class KpiService(ScopedTenantDbContextFactory dbFactory)
         var campaignName = campaigns.ToDictionary(c => c.Id, c => c.Name);
         var clientName = await db.Clients.AsNoTracking().ToDictionaryAsync(c => c.Id, c => c.Name, ct);
         bool InScope(Guid campaignId, Guid clientId) =>
-            (q.CampaignId is null || q.CampaignId == campaignId) && (q.ClientId is null || q.ClientId == clientId);
+            (q.CampaignId is null || q.CampaignId == campaignId) && (q.ClientId is null || q.ClientId == clientId)
+            && (q.CampaignIds is null || q.CampaignIds.Contains(campaignId));
 
         // ── Disposition catalog: disposition → category ──
         var categories = await db.DispositionCategories.AsNoTracking().ToDictionaryAsync(c => c.Id, ct);

@@ -1,6 +1,7 @@
 using ContactConnection.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using ContactConnection.Infrastructure.Data.Configurations;
 
 namespace ContactConnection.Infrastructure.Persistence.Configurations;
 
@@ -17,6 +18,9 @@ public class DashboardConfiguration : IEntityTypeConfiguration<Dashboard>
         b.Property(x => x.Name).HasColumnName("name").HasMaxLength(200).IsRequired();
         b.Property(x => x.IsShared).HasColumnName("is_shared").IsRequired();
         b.Property(x => x.Layout).HasColumnName("layout").HasColumnType("jsonb").IsRequired();
+        b.Property(x => x.IsClientDashboard).HasColumnName("is_client_dashboard").HasDefaultValue(false);
+        b.Property(x => x.ScopeClientId).HasColumnName("scope_client_id");
+        b.Property(x => x.ScopeCampaignIds).MapJson("scope_campaign_ids", () => new List<Guid>()).HasDefaultValueSql("'[]'::jsonb").IsRequired();
         b.Property(x => x.CreatedAt).HasColumnName("created_at").IsRequired();
         b.Property(x => x.UpdatedAt).HasColumnName("updated_at").IsRequired();
 

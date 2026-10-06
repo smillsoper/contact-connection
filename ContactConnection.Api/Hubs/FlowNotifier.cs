@@ -8,7 +8,8 @@ namespace ContactConnection.Api.Hubs;
 /// Registered in Program.cs after AddSignalR so the Hub types are available.
 /// Infrastructure never references this class directly — it depends on IFlowNotifier only.
 /// </summary>
-public class FlowNotifier(IHubContext<FlowHub, IFlowHubClient> hubContext) : IFlowNotifier
+public class FlowNotifier(IHubContext<FlowHub, IFlowHubClient> hubContext,
+    IHubContext<ClientDashboardHub, IClientDashboardHubClient> clientHub) : IFlowNotifier
 {
     public Task PushNodeStateAsync(Guid sessionId, FlowNodeState state, CancellationToken ct = default) =>
         hubContext.Clients.Group($"session:{sessionId}").ReceiveNodeState(state);
@@ -16,8 +17,11 @@ public class FlowNotifier(IHubContext<FlowHub, IFlowHubClient> hubContext) : IFl
     public Task PushSessionUpdatedAsync(Guid sessionId, FlowNodeState state, string message, CancellationToken ct = default) =>
         hubContext.Clients.Group($"session:{sessionId}").ReceiveSessionUpdated(state, message);
 
+    // Also nudges client dashboards (S181) — a finished script means new orders / dispositions for their KPIs.
     public Task PushAgentSessionsChangedAsync(Guid tenantId, Guid agentId, CancellationToken ct = default) =>
-        hubContext.Clients.Group($"supervisor:{tenantId}").ReceiveAgentSessionsChanged(agentId.ToString());
+        Task.WhenAll(
+            hubContext.Clients.Group($"supervisor:{tenantId}").ReceiveAgentSessionsChanged(agentId.ToString()),
+            clientHub.Clients.Group(ClientDashboardHub.Group(tenantId)).ReceiveRefresh());
 
     public Task PushCallChangedAsync(Guid callRecordId, CancellationToken ct = default) =>
         hubContext.Clients.Group($"call:{callRecordId}").ReceiveCallChanged(callRecordId.ToString());

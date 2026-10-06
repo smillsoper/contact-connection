@@ -82,6 +82,9 @@ public class TenantDbContext : DbContext
     public DbSet<DispositionCategory> DispositionCategories => Set<DispositionCategory>();
     public DbSet<Disposition> Dispositions => Set<Disposition>();
     public DbSet<CustomKpi> CustomKpis => Set<CustomKpi>();
+    public DbSet<ClientUser> ClientUsers => Set<ClientUser>();
+    public DbSet<ClientUserDashboard> ClientUserDashboards => Set<ClientUserDashboard>();
+    public DbSet<ClientUserAuditEntry> ClientUserAudit => Set<ClientUserAuditEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -152,6 +155,9 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new DispositionCategoryConfiguration());
         modelBuilder.ApplyConfiguration(new DispositionConfiguration());
         modelBuilder.ApplyConfiguration(new CustomKpiConfiguration());
+        modelBuilder.ApplyConfiguration(new ClientUserConfiguration());
+        modelBuilder.ApplyConfiguration(new ClientUserDashboardConfiguration());
+        modelBuilder.ApplyConfiguration(new ClientUserAuditEntryConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 
