@@ -60,6 +60,15 @@ public class CallRecordRepository : ICallRecordRepository
             q = q.Where(r => EF.Functions.ILike(r.FirstName ?? "", like) || EF.Functions.ILike(r.LastName ?? "", like)
                           || EF.Functions.ILike((r.FirstName ?? "") + " " + (r.LastName ?? ""), like));
         }
+        if (c.DispositionId is { } dispositionId)
+            q = q.Where(r => r.Interactions.Any(i => i.DispositionId == dispositionId));
+        if (c.DispositionCategoryId is { } categoryId)
+        {
+            var inCategory = Db.Dispositions.Where(d => d.CategoryId == categoryId).Select(d => d.Id);
+            q = q.Where(r => r.Interactions.Any(i => i.DispositionId != null && inCategory.Contains(i.DispositionId.Value)));
+        }
+        if (c.UnmappedDispositionOnly)
+            q = q.Where(r => r.Interactions.Any(i => i.DispositionId == null && i.Disposition != null && i.Disposition != ""));
         if (c.FailedApiCallsOnly)
         {
             var failed = Db.Database.SqlQueryRaw<Guid>(FailedApiCallsSql);

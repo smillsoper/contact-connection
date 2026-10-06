@@ -24,10 +24,35 @@ public static partial class DispositionCatalog
     public static async Task<List<string>> ForCallAsync(TenantDbContext db, Guid callRecordId, CancellationToken ct, Guid? interactionId = null)
     {
         var ix = interactionId is { } want && want != Guid.Empty ? want : (Guid?)null;
+
+        // The campaign's disposition catalog comes first (S181) — the same list scripts pick from and KPIs read.
+        // Campaigns without one fall back to the values their scripts can record.
+        var fromCatalog = await FromManagedCatalogAsync(db, callRecordId, ix, ct);
+        if (fromCatalog.Count > 0) return fromCatalog;
+
         var flowIds = await db.FlowSessions.AsNoTracking().Where(s => s.CallRecordId == callRecordId && (ix == null || s.InteractionId == ix))
             .Select(s => s.FlowId).Distinct().ToListAsync(ct);
         var definitions = await db.Flows.AsNoTracking().Where(f => flowIds.Contains(f.Id)).Select(f => f.Definition).ToListAsync(ct);
         return FromDefinitions(definitions);
+    }
+
+    /// <summary>The active catalog dispositions for the interaction's campaign (narrowest scope wins per name).</summary>
+    private static async Task<List<string>> FromManagedCatalogAsync(TenantDbContext db, Guid callRecordId, Guid? interactionId, CancellationToken ct)
+    {
+        var record = await db.CallRecords.AsNoTracking().Where(r => r.Id == callRecordId)
+            .Select(r => new { r.CampaignId, r.ClientId }).FirstOrDefaultAsync(ct);
+        if (record is null) return [];
+        var ixCampaign = interactionId is { } id
+            ? await db.CallInteractions.AsNoTracking().Where(i => i.Id == id).Select(i => i.CampaignId).FirstOrDefaultAsync(ct)
+            : null;
+        var campaignId = ixCampaign is { } c && c != Guid.Empty ? c : record.CampaignId;
+        var clientId = campaignId == record.CampaignId ? record.ClientId
+            : await db.Campaigns.AsNoTracking().Where(x => x.Id == campaignId).Select(x => x.ClientId).FirstOrDefaultAsync(ct);
+        var active = await db.Dispositions.AsNoTracking().Where(d => d.IsActive).ToListAsync(ct);
+        return active.Where(d => d.AppliesTo(clientId, campaignId))
+            .GroupBy(d => ContactConnection.Domain.Entities.Disposition.Normalize(d.Name))
+            .Select(g => g.OrderBy(d => d.ScopeRank).First().Name)
+            .Order(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     internal static List<string> FromDefinitions(IEnumerable<string> definitions)

@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { dispositionsApi, type Disposition, type DispositionCategory } from '../../api/dispositions'
 import { Link, useParams } from 'react-router-dom'
 import * as signalR from '@microsoft/signalr'
 import AdminShell from '../../components/admin/AdminShell'
@@ -184,6 +185,9 @@ export default function AdminCallDetailPage() {
           <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 mt-1">
             <h1 className="text-white text-xl font-semibold">{customerName || 'Call'} — {fmtDate(call.callStartAt ?? call.createdAt)}</h1>
             {orderNumbers.length > 0 && <span className="text-gray-400 text-sm font-mono">Order #{orderNumbers.join(', #')}</span>}
+            {call.dispositions.length > 1 && call.compoundDisposition && (
+              <span className="text-gray-300 text-sm" title="Every interaction's disposition, in order">{call.compoundDisposition}</span>
+            )}
           </div>
           <div className="flex flex-wrap gap-x-5 gap-y-1 mt-2 text-xs text-gray-400">
             <span>Client: <span className="text-gray-200">{call.clientName ?? '—'}</span></span>
@@ -279,6 +283,32 @@ export default function AdminCallDetailPage() {
 
 type InteractionView = CallDetail['dispositions'][number]
 
+/** The disposition catalog, loaded once per page view — for the category badge on each interaction (S181). */
+let catalogPromise: Promise<{ categories: DispositionCategory[]; dispositions: Disposition[] }> | null = null
+let catalogLoadedAt = 0
+function useDispositionCatalog() {
+  const [catalog, setCatalog] = useState<{ categories: DispositionCategory[]; dispositions: Disposition[] } | null>(null)
+  useEffect(() => {
+    // Shared by every interaction section on the page; refetched after 30 s so catalog edits show up.
+    if (Date.now() - catalogLoadedAt > 30_000) { catalogPromise = null; catalogLoadedAt = Date.now() }
+    catalogPromise ??= Promise.all([dispositionsApi.categories(), dispositionsApi.list()])
+      .then(([categories, dispositions]) => ({ categories, dispositions }))
+      .catch(() => { catalogPromise = null; return { categories: [], dispositions: [] } })
+    catalogPromise.then(setCatalog)
+  }, [])
+  return catalog
+}
+
+function DispositionBadge({ ix }: { ix: InteractionView }) {
+  const catalog = useDispositionCatalog()
+  if (!ix.disposition || !catalog) return null
+  if (!ix.dispositionId)
+    return <span className="text-[11px] bg-amber-900/40 text-amber-300 border border-amber-800 rounded px-1.5 py-0.5" title="Not in the disposition catalog — map it in Admin → Dispositions">unmapped</span>
+  const d = catalog.dispositions.find((x) => x.id === ix.dispositionId)
+  const cat = d && catalog.categories.find((c) => c.id === d.categoryId)
+  return cat ? <span className="text-[11px] bg-gray-800 text-gray-300 border border-gray-700 rounded px-1.5 py-0.5">{cat.name}</span> : null
+}
+
 function InteractionSection({ call, ix, defaultOpen, canManage, onChanged }: {
   call: CallDetail; ix: InteractionView; defaultOpen: boolean; canManage: boolean; onChanged: () => void
 }) {
@@ -297,6 +327,7 @@ function InteractionSection({ call, ix, defaultOpen, canManage, onChanged }: {
         <span className="text-gray-300 text-sm">{ix.campaignName ?? '—'}</span>
         <span className="text-gray-400 text-sm">{ix.agentName ?? '—'}</span>
         <span className="text-gray-200 text-sm">{ix.disposition ?? <span className="text-gray-500">No disposition</span>}</span>
+        <DispositionBadge ix={ix} />
         <span className="ml-auto flex flex-wrap items-center gap-x-4 text-xs text-gray-500">
           {ix.orderNumber && <span className="font-mono text-gray-400">Order #{ix.orderNumber}</span>}
           {cartTotal != null && <span>Cart {money(cartTotal)}</span>}

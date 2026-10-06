@@ -26,6 +26,10 @@ export interface CallSummary {
   abandon: AbandonInfo | null
   /** production / training / sandbox (S179 launch modes). */
   runMode: string
+  /** Every interaction's disposition in order, e.g. "Transferred to CS + Cancelled Subscription" (S181). */
+  compoundDisposition: string | null
+  /** Some interaction recorded text that matches nothing in the disposition catalog. */
+  hasUnmappedDisposition: boolean
 }
 
 /** The caller hung up before being served: where (pre_queue / in_queue / callback_abandon …) and short/long. */
@@ -53,6 +57,10 @@ export interface CallSearchFilters {
   failedOnly?: boolean
   /** '' = live calls only (default), or training / sandbox / all. */
   runMode?: string
+  /** S181: calls where any interaction recorded this disposition / a disposition in this category / unmapped text. */
+  dispositionId?: string
+  dispositionCategoryId?: string
+  unmappedDisposition?: boolean
   page?: number
   pageSize?: number
 }
@@ -201,9 +209,13 @@ export interface CallDetail {
   payments: CallPayment[]
   customFields: CallCustomField[]
   commitmentEvents: { eventName?: string; timestamp?: string; [k: string]: unknown }[]
+  /** Every interaction's disposition in order, e.g. "Transferred to CS + Cancelled Subscription" (S181). */
+  compoundDisposition: string | null
   /** One per agent who worked the call (a sales → CS transfer has two), in start order. */
   dispositions: {
     interactionNumber: number; type: string; disposition: string | null; status: string; startedAt: string; completedAt: string | null
+    /** The catalog disposition the text matched (S181); null = none recorded, or unmapped. */
+    dispositionId: string | null
     agentId: string | null; agentName: string | null; campaignId: string | null; campaignName: string | null
     /** Interaction-scoped commerce (S178): this agent's own cart, order and payments. */
     id: string

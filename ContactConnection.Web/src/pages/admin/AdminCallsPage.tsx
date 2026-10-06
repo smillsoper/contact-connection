@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { dispositionsApi, type Disposition, type DispositionCategory } from '../../api/dispositions'
 import { Link, useSearchParams } from 'react-router-dom'
 import AdminShell from '../../components/admin/AdminShell'
 import { abandonLabel, callReviewApi, type CallSearchPage } from '../../api/callReview'
@@ -29,6 +30,8 @@ function fmtPhone(p: string | null) {
 export default function AdminCallsPage() {
   const [params, setParams] = useSearchParams()
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
+  const [categories, setCategories] = useState<DispositionCategory[]>([])
+  const [dispositions, setDispositions] = useState<Disposition[]>([])
   const [result, setResult] = useState<CallSearchPage | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -42,12 +45,16 @@ export default function AdminCallsPage() {
     name: params.get('name') ?? '',
     failedOnly: params.get('failedOnly') === 'true',
     runMode: params.get('runMode') ?? '',
+    // One picker (S181): '' | 'unmapped' | 'cat:<id>' | 'disp:<id>'
+    disposition: params.get('disposition') ?? '',
     page: Number(params.get('page') ?? '1') || 1,
   }
   const [draft, setDraft] = useState(filters)
 
   useEffect(() => {
     listCampaigns().then(setCampaigns).catch(() => { /* filter just stays empty */ })
+    dispositionsApi.categories().then(setCategories).catch(() => { })
+    dispositionsApi.list().then(setDispositions).catch(() => { })
   }, [])
 
   const key = params.toString()
@@ -64,6 +71,9 @@ export default function AdminCallsPage() {
       name: filters.name || undefined,
       failedOnly: filters.failedOnly,
       runMode: filters.runMode || undefined,
+      dispositionId: filters.disposition.startsWith('disp:') ? filters.disposition.slice(5) : undefined,
+      dispositionCategoryId: filters.disposition.startsWith('cat:') ? filters.disposition.slice(4) : undefined,
+      unmappedDisposition: filters.disposition === 'unmapped' || undefined,
       page: filters.page,
       pageSize: 50,
     })
@@ -135,12 +145,30 @@ export default function AdminCallsPage() {
               <option value="all">All</option>
             </select>
           </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-gray-500 text-xs">Disposition</label>
+            <select value={draft.disposition} onChange={(e) => setDraft({ ...draft, disposition: e.target.value })} className={`${inputCls} w-52`}
+              title="Calls where any interaction (a transferred call has several) recorded it">
+              <option value="">Any</option>
+              <option value="unmapped">Unmapped (not in the catalog)</option>
+              {categories.length > 0 && (
+                <optgroup label="Reporting category">
+                  {categories.map((c) => <option key={c.id} value={`cat:${c.id}`}>{c.name}</option>)}
+                </optgroup>
+              )}
+              {dispositions.length > 0 && (
+                <optgroup label="Disposition">
+                  {dispositions.map((d) => <option key={d.id} value={`disp:${d.id}`}>{d.name}{d.isActive ? '' : ' (retired)'}</option>)}
+                </optgroup>
+              )}
+            </select>
+          </div>
           <label className="flex items-center gap-2 text-sm text-gray-300 pb-2">
             <input type="checkbox" checked={draft.failedOnly} onChange={(e) => setDraft({ ...draft, failedOnly: e.target.checked })} className="accent-red-500" />
             Failed API call only
           </label>
           <div className="flex gap-2 ml-auto">
-            <button type="button" onClick={() => { const empty = { from: '', to: '', campaignId: '', phone: '', orderNumber: '', name: '', failedOnly: false, runMode: '', page: 1 }; setDraft(empty); apply(empty) }}
+            <button type="button" onClick={() => { const empty = { from: '', to: '', campaignId: '', phone: '', orderNumber: '', name: '', failedOnly: false, runMode: '', disposition: '', page: 1 }; setDraft(empty); apply(empty) }}
               className="text-gray-400 hover:text-white text-sm px-3 py-2">Clear</button>
             <button type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg px-4 py-2 text-sm font-medium">Search</button>
           </div>
@@ -158,6 +186,7 @@ export default function AdminCallsPage() {
                 <th className="px-4 py-2.5 font-medium">Caller ID</th>
                 <th className="px-4 py-2.5 font-medium">Billing / shipping phone</th>
                 <th className="px-4 py-2.5 font-medium">Agent</th>
+                <th className="px-4 py-2.5 font-medium">Disposition</th>
                 <th className="px-4 py-2.5 font-medium">Order #</th>
                 <th className="px-4 py-2.5 font-medium text-right">Cart</th>
                 <th className="px-4 py-2.5 font-medium">Duration</th>
@@ -167,10 +196,10 @@ export default function AdminCallsPage() {
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={11} className="px-4 py-6 text-center text-gray-500">Loading…</td></tr>
+                <tr><td colSpan={12} className="px-4 py-6 text-center text-gray-500">Loading…</td></tr>
               )}
               {!loading && result?.items.length === 0 && (
-                <tr><td colSpan={11} className="px-4 py-6 text-center text-gray-500">No calls match these filters.</td></tr>
+                <tr><td colSpan={12} className="px-4 py-6 text-center text-gray-500">No calls match these filters.</td></tr>
               )}
               {!loading && result?.items.map((c) => (
                 <tr key={c.id} className="border-b border-gray-800/60 hover:bg-gray-800/40">
@@ -185,6 +214,12 @@ export default function AdminCallsPage() {
                     {c.shippingPhone && c.shippingPhone !== c.billingPhone && <span className="text-gray-500"> / {fmtPhone(c.shippingPhone)}</span>}
                   </td>
                   <td className="px-4 py-2 text-gray-300">{c.agentName ?? '—'}</td>
+                  <td className="px-4 py-2 text-gray-300 text-xs">
+                    {c.compoundDisposition ?? <span className="text-gray-600">—</span>}
+                    {c.hasUnmappedDisposition && (
+                      <span className="block w-fit mt-1 bg-amber-900/40 text-amber-300 border border-amber-800 rounded px-1.5 py-0.5" title="Not in the disposition catalog — map it in Admin → Dispositions">unmapped</span>
+                    )}
+                  </td>
                   <td className="px-4 py-2 text-gray-300 font-mono text-xs">{c.orderNumber ?? '—'}</td>
                   <td className="px-4 py-2 text-gray-300 text-right">{c.cartTotal != null ? `$${c.cartTotal.toFixed(2)}` : '—'}</td>
                   <td className="px-4 py-2 text-gray-400">{fmtDuration(c.handleTimeSeconds)}</td>

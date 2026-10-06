@@ -233,6 +233,8 @@ function DesignerCanvas({
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [flowName, setFlowName] = useState(initialFlowName)
   const [flowId, setFlowId] = useState<string | null>(initialFlowId)
+  // The flow's home campaign (S181) — its disposition catalog feeds the disposition pickers.
+  const [flowCampaignId, setFlowCampaignId] = useState<string | null>(null)
   const [flowType, setFlowType] = useState<'crm' | 'telephony'>('crm')
   const [flowDirection, setFlowDirection] = useState<'inbound' | 'outbound' | ''>('')
   const [flowSubType, setFlowSubType] = useState<'manual' | 'progressive' | 'predictive' | ''>('')
@@ -266,6 +268,7 @@ function DesignerCanvas({
   const loadFlow = useCallback((id: string) => {
     return flowsApi.getDetail(id).then((detail) => {
       setFlowName(detail.name)
+      setFlowCampaignId(detail.campaign_id ?? null)
       if (detail.flow_type === 'telephony') setFlowType('telephony')
       if (detail.flow_direction) setFlowDirection(detail.flow_direction as 'inbound' | 'outbound')
       if (detail.flow_sub_type) setFlowSubType(detail.flow_sub_type as 'manual' | 'progressive' | 'predictive')
@@ -629,6 +632,7 @@ function DesignerCanvas({
             nodes={nodes as Node<NodeData>[]}
             edges={edges}
             entryNodeId={entryNodeId}
+            flowCampaignId={flowCampaignId}
           />
         )}
       </div>

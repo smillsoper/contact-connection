@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { dispositionsApi, type Disposition } from '../../api/dispositions'
 import EmailComposeFields from './EmailComposeFields'
 import { findPathsBackBeforeCommit } from '../../utils/commitCheck'
 import type { Node, Edge } from '@xyflow/react'
@@ -42,11 +43,13 @@ interface Props {
   nodes: Node<NodeData>[]
   edges: Edge[]
   entryNodeId: string | null
+  /** The flow's home campaign — whose disposition catalog the disposition pickers offer (S181). */
+  flowCampaignId?: string | null
 }
 
 export default function NodePropertiesPanel({
   node, isEntry, onUpdate, onSetEntry, onDelete, onClose,
-  nodes, edges,
+  nodes, edges, flowCampaignId,
 }: Props) {
   const type = node.type as ContactConnectionNodeType
   const data = node.data
@@ -101,6 +104,16 @@ export default function NodePropertiesPanel({
     if (type !== 'set_custom_field' && type !== 'get_custom_field') return
     flowsApi.listCustomFieldDefinitions().then(setCustomFieldDefs).catch(console.error)
   }, [type])
+
+  // Disposition catalog (S181): the flow's campaign's dispositions, or every active one for a shared flow. Loaded for
+  // the steps that record a disposition (set_custom_field on the disposition field) or offer options (input).
+  const [dispositions, setDispositions] = useState<Disposition[] | null>(null)
+  useEffect(() => {
+    if (type !== 'set_custom_field' && type !== 'input') return
+    const load = flowCampaignId ? dispositionsApi.forCampaign(flowCampaignId)
+      : dispositionsApi.list().then((all) => all.filter((d) => d.isActive))
+    load.then(setDispositions).catch(() => setDispositions([]))
+  }, [type, flowCampaignId])
 
   // Address node — active script tab ('main' | field key)
   const [addrScriptTab, setAddrScriptTab] = useState('main')
@@ -271,6 +284,16 @@ export default function NodePropertiesPanel({
             {/* Select options */}
             {fieldType === 'select' &&
               field('options', 'Options (comma-separated)', textarea('options', 2, 'Option A, Option B, Option C'))}
+            {fieldType === 'select' && dispositions !== null && dispositions.length > 0 && (
+              <button
+                type="button"
+                className="self-start text-[11px] text-sky-400 hover:text-sky-300"
+                title={flowCampaignId ? "The flow's campaign's dispositions" : 'Every active disposition'}
+                onClick={() => onUpdate(node.id, { options: dispositions.map((d) => d.name).join(', ') })}
+              >
+                Fill options from dispositions ({dispositions.length})
+              </button>
+            )}
 
             {/* Text-specific: mask + min/max */}
             {fieldType === 'text' && (
@@ -1202,9 +1225,44 @@ export default function NodePropertiesPanel({
                 No custom fields defined yet. Create one in Admin → Custom Fields.
               </p>
             )}
+            {type === 'set_custom_field' && data.definitionFieldName === 'disposition' && (() => {
+              const value = ((data.value as string) ?? '').trim()
+              const known = (dispositions ?? []).find((d) => d.name.toLowerCase() === value.toLowerCase()
+                || d.aliases.some((a) => a.toLowerCase() === value.toLowerCase()))
+              const literal = value.length > 0 && !value.includes('{{')
+              return (
+                <>
+                  {field(
+                    'value',
+                    'Disposition',
+                    <select
+                      className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-sky-500"
+                      value={known?.name ?? ''}
+                      onChange={(e) => onUpdate(node.id, { value: e.target.value })}
+                    >
+                      <option value="">— Choose a disposition —</option>
+                      {(dispositions ?? []).map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}
+                    </select>,
+                  )}
+                  {dispositions !== null && dispositions.length === 0 && (
+                    <p className="text-[10px] text-amber-400">
+                      No dispositions {flowCampaignId ? "for this flow's campaign" : 'yet'}. Add them in Admin → Dispositions.
+                    </p>
+                  )}
+                  {literal && !known && dispositions !== null && (
+                    <p className="text-[10px] text-amber-400">
+                      "{value}" isn't in the disposition catalog — calls will show it as Unmapped until it's added.
+                    </p>
+                  )}
+                  <p className="text-[10px] text-gray-500 leading-snug">
+                    Or record a variable (e.g. a question's answer) in the field below — its value is matched to the catalog when the call ends.
+                  </p>
+                </>
+              )
+            })()}
             {type === 'set_custom_field' ? (
               <>
-                {field('value', 'Value', input('value', '{{input.node_003}}'))}
+                {field('value', data.definitionFieldName === 'disposition' ? 'Value (or a variable)' : 'Value', input('value', '{{input.node_003}}'))}
                 <p className="text-[10px] text-gray-500 leading-snug">
                   Connect the exit handle to wire up Success / Invalid Value / Error — Invalid
                   Value fires when this value doesn't match the field's data type

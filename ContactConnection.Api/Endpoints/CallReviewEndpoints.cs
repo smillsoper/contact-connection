@@ -50,6 +50,7 @@ public static class CallReviewEndpoints
     private static async Task<IResult> Search(
         DateTimeOffset? from, DateTimeOffset? to, Guid? campaignId, string? phone, string? orderNumber,
         string? name, bool? failedOnly, int? page, int? pageSize, string? runMode,
+        Guid? dispositionId, Guid? dispositionCategoryId, bool? unmappedDisposition,
         HttpContext http,
         ICallRecordRepository callRecords,
         ICampaignRepository campaigns,
@@ -65,7 +66,9 @@ public static class CallReviewEndpoints
         var pageNo = Math.Max(1, page ?? 1);
         var result = await callRecords.SearchAsync(new CallRecordSearchCriteria(
             from, to, campaignId, phone, orderNumber, name, failedOnly == true,
-            Skip: (pageNo - 1) * size, Take: size, RunMode: runMode), ct);
+            Skip: (pageNo - 1) * size, Take: size, RunMode: runMode,
+            DispositionId: dispositionId, DispositionCategoryId: dispositionCategoryId,
+            UnmappedDispositionOnly: unmappedDisposition == true), ct);
 
         var failed = await callRecords.FindWithFailedApiCallsAsync(result.Items.Select(r => r.Id).ToList(), ct);
         var abandons = await AbandonsAsync(dbFactory, result.Items.Select(r => r.Id).ToList(), ct);
@@ -101,6 +104,9 @@ public static class CallReviewEndpoints
                 cartTotal = r.Interactions.Any(i => i.Cart is { Items.Count: > 0 })
                     ? r.Interactions.Where(i => i.Cart is not null).Sum(i => i.Cart!.CartTotal) : (decimal?)null,
                 hasFailedApiCall = failed.Contains(r.Id),
+                // Every interaction's disposition in order (S181), and whether any of them matches nothing in the catalog.
+                compoundDisposition = r.CompoundDisposition,
+                hasUnmappedDisposition = r.Interactions.Any(i => i.DispositionId == null && !string.IsNullOrWhiteSpace(i.Disposition)),
                 abandon = abandons.GetValueOrDefault(r.Id),
             }),
         });

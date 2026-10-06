@@ -49,7 +49,12 @@ public record CallRecordSearchCriteria(
     int Skip = 0,
     int Take = 50,
     /// <summary>S179 launch modes: production (the default — live calls only), training, sandbox, or "all".</summary>
-    string? RunMode = null);
+    string? RunMode = null,
+    /// <summary>S181: calls where any interaction recorded this catalog disposition / a disposition in this reporting
+    /// category / text matching nothing in the catalog.</summary>
+    Guid? DispositionId = null,
+    Guid? DispositionCategoryId = null,
+    bool UnmappedDispositionOnly = false);
 
 public record CallRecordSearchPage(IReadOnlyList<CallRecord> Items, int Total);
 
