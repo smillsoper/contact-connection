@@ -147,7 +147,11 @@ public class Disposition
     public void Update(string name, string? code, Guid categoryId, IEnumerable<string> aliases, int displayOrder)
     {
         if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("A disposition needs a name.");
+        // Renamed: past calls recorded the old name — keep it as an alias so they stay linked (S181).
+        var oldName = Name;
+        var renamed = Normalize(oldName) != Normalize(name);
         Name = name.Trim();
+        if (renamed) aliases = aliases.Append(oldName);
         Code = Blank(code);
         CategoryId = categoryId;
         DisplayOrder = displayOrder;

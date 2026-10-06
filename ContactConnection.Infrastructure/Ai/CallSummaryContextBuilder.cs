@@ -62,7 +62,7 @@ public static partial class CallSummaryContextBuilder
     // Script plumbing, plus read-aloud text and the end marker: the section headings already show how far
     // the call got, and the script wording is the same on every call.
     private static readonly HashSet<string> SkippedNodeTypes =
-        ["set_variable", "set_custom_field", "branch", "start", "delay", "set_shared_variable", "script", "end"];
+        ["set_variable", "set_custom_field", "set_disposition", "branch", "start", "delay", "set_shared_variable", "script", "end"];
 
     private record Step(string NodeType, string Label, string? InputValue);
 

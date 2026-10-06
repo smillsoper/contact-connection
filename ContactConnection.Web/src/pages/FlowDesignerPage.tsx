@@ -38,6 +38,7 @@ import TriggerTelephonyEventNode from '../components/designer/nodes/TriggerTelep
 import ApiCallNode from '../components/designer/nodes/ApiCallNode'
 import ScheduledCallbackNode from '../components/designer/nodes/ScheduledCallbackNode'
 import SetCustomFieldNode from '../components/designer/nodes/SetCustomFieldNode'
+import SetDispositionNode from '../components/designer/nodes/SetDispositionNode'
 import GetCustomFieldNode from '../components/designer/nodes/GetCustomFieldNode'
 import SendEmailNode from '../components/designer/nodes/SendEmailNode'
 import CommitNode from '../components/designer/nodes/CommitNode'
@@ -69,6 +70,7 @@ const nodeTypes = {
   api_call: ApiCallNode,
   scheduled_callback: ScheduledCallbackNode,
   set_custom_field: SetCustomFieldNode,
+  set_disposition: SetDispositionNode,
   get_custom_field: GetCustomFieldNode,
   store_value: StoreValueNode,
   send_email: SendEmailNode,
@@ -92,6 +94,7 @@ const FIXED_EXIT_OPTIONS: Partial<Record<ContactConnectionNodeType, string[]>> =
   api_call: ['success', 'error', 'timeout'],
   scheduled_callback: ['scheduled', 'invalid_time', 'failed'],
   set_custom_field: ['success', 'invalid_value', 'error'],
+  set_disposition: ['success', 'error'],
   branch: ['true', 'false'],
   add_to_cart: ['added', 'failed'],
   remove_cart_item: ['removed', 'failed'],

@@ -109,7 +109,7 @@ export default function NodePropertiesPanel({
   // the steps that record a disposition (set_custom_field on the disposition field) or offer options (input).
   const [dispositions, setDispositions] = useState<Disposition[] | null>(null)
   useEffect(() => {
-    if (type !== 'set_custom_field' && type !== 'input') return
+    if (type !== 'set_custom_field' && type !== 'set_disposition' && type !== 'input') return
     const load = flowCampaignId ? dispositionsApi.forCampaign(flowCampaignId)
       : dispositionsApi.list().then((all) => all.filter((d) => d.isActive))
     load.then(setDispositions).catch(() => setDispositions([]))
@@ -1173,6 +1173,50 @@ export default function NodePropertiesPanel({
               pieces of it with {'{{flow.'}{(data.outputVariable as string) || 'variable'}{'.response.field}}'},
               {' '}{'{{flow.'}{(data.outputVariable as string) || 'variable'}{'.success}}'}, etc. Connect the exit
               handle to wire up Success / Error / Timeout.
+            </p>
+          </>
+        )
+      }
+
+      case 'set_disposition': {
+        const mode = (data.value as string) && !(data.dispositionId as string) ? 'variable' : 'catalog'
+        return (
+          <>
+            {field(
+              'mode',
+              'Disposition',
+              <select
+                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-sky-500"
+                value={mode === 'variable' ? '__variable__' : (data.dispositionId as string) ?? ''}
+                onChange={(e) => {
+                  if (e.target.value === '__variable__') {
+                    onUpdate(node.id, { dispositionId: '', dispositionName: '', value: (data.value as string) || '{{input.}}' })
+                    return
+                  }
+                  const d = (dispositions ?? []).find((x) => x.id === e.target.value)
+                  onUpdate(node.id, { dispositionId: d?.id ?? '', dispositionName: d?.name ?? '', value: '' })
+                }}
+              >
+                <option value="">— Choose a disposition —</option>
+                {(dispositions ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                <option value="__variable__">From a variable (e.g. a question's answer)…</option>
+              </select>,
+            )}
+            {mode === 'variable' && field('value', 'Variable', input('value', '{{input.node_003}}'))}
+            {dispositions !== null && dispositions.length === 0 && (
+              <p className="text-[10px] text-amber-400">
+                No dispositions {flowCampaignId ? "for this flow's campaign" : 'yet'}. Add them in Admin → Dispositions.
+              </p>
+            )}
+            {!!(data.dispositionId as string) && dispositions !== null && !dispositions.some((d) => d.id === data.dispositionId) && (
+              <p className="text-[10px] text-amber-400">
+                "{data.dispositionName as string}" isn't in this campaign's catalog any more — choose another.
+              </p>
+            )}
+            <p className="text-[10px] text-gray-500 leading-snug">
+              Records this interaction's outcome — what KPIs, commissions, recording retention and exports read. A catalog choice
+              always writes the disposition's current name; a variable's value is matched to the catalog when the call ends
+              (anything that doesn't match shows as Unmapped).
             </p>
           </>
         )

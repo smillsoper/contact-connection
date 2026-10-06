@@ -17,7 +17,7 @@ export interface FlowNodeState {
   runMode?: 'production' | 'training' | 'sandbox'
   callRecordId: string
   nodeId: string
-  nodeType: 'script' | 'input' | 'email' | 'phone' | 'address' | 'branch' | 'set_variable' | 'api_call' | 'end' | 'section' | 'execute_flow' | 'transition_to_flow' | 'set_custom_field' | 'get_custom_field' | 'store_value' | 'get_value' | 'add_to_cart' | 'remove_cart_item' | 'reset_cart' | 'authorize_payment' | 'void_payment' | 'send_email' | 'commit'
+  nodeType: 'script' | 'input' | 'email' | 'phone' | 'address' | 'branch' | 'set_variable' | 'api_call' | 'end' | 'section' | 'execute_flow' | 'transition_to_flow' | 'set_custom_field' | 'set_disposition' | 'get_custom_field' | 'store_value' | 'get_value' | 'add_to_cart' | 'remove_cart_item' | 'reset_cart' | 'authorize_payment' | 'void_payment' | 'send_email' | 'commit'
   label: string
   flowName?: string
   content?: string

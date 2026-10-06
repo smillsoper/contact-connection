@@ -65,11 +65,14 @@ public static partial class DispositionCatalog
 
             // 1. Which flow variables feed the disposition field?
             var variables = all
-                .Where(n => Str(n, "type") == "set_custom_field" && Str(n, "definitionFieldName") == FieldName)
+                .Where(n => (Str(n, "type") == "set_custom_field" && Str(n, "definitionFieldName") == FieldName)
+                            || Str(n, "type") == "set_disposition")
                 .Select(n => FlowVar().Match(Str(n, "value") ?? "")).Where(m => m.Success)
                 // Case-sensitive, like the flow engine's variables — "Disposition" and "disposition" are different
                 // variables at runtime, so treating them as one here would report dispositions that never arrive.
                 .Select(m => m.Groups[1].Value).ToHashSet(StringComparer.Ordinal);
+            // Set Disposition steps (S181) name their disposition directly.
+            values.AddRange(all.Where(n => Str(n, "type") == "set_disposition").Select(n => Str(n, "dispositionName")).OfType<string>());
             if (variables.Count == 0) continue;
 
             foreach (var n in all)

@@ -13,6 +13,7 @@ export type ContactConnectionNodeType =
   | 'trigger_telephony_event'
   | 'api_call'
   | 'set_custom_field'
+  | 'set_disposition'
   | 'get_custom_field'
   | 'store_value'
   | 'get_value'
@@ -302,6 +303,12 @@ export const NODE_META: Record<
     description: 'Save a value into a defined custom field for this call',
     handles: 'single',
   },
+  set_disposition: {
+    label: 'Set Disposition',
+    color: '#0d9488',
+    description: "Record this call's outcome from the disposition catalog",
+    handles: 'single',
+  },
   get_custom_field: {
     label: 'Get Call Record Value',
     color: '#4d7c0f',
@@ -406,6 +413,8 @@ export function defaultNodeData(type: ContactConnectionNodeType): NodeData {
       return { label: 'New API Call', apiEndpointId: '', apiDefinitionScope: 'tenant', apiDefinitionName: '', apiEndpointName: '', outputVariable: '', timeoutSeconds: 30 }
     case 'set_custom_field':
       return { label: 'Set Call Record Value', definitionId: '', definitionFieldName: '', definitionDisplayLabel: '', definitionDataTypeName: '', value: '' }
+    case 'set_disposition':
+      return { label: 'Set Disposition', dispositionId: '', dispositionName: '', value: '' }
     case 'get_custom_field':
       return { label: 'Get Call Record Value', definitionId: '', definitionFieldName: '', definitionDisplayLabel: '', definitionDataTypeName: '', outputVariable: '' }
     case 'store_value':

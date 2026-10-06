@@ -226,6 +226,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.ScheduledCallbackNodeHandler>();
         services.AddScoped<INodeHandler, TriggerTelephonyEventNodeHandler>();
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.SetCustomFieldNodeHandler>();
+        services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.SetDispositionNodeHandler>();
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.GetCustomFieldNodeHandler>();
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.StoreValueNodeHandler>();
         services.AddScoped<INodeHandler, FlowEngine.NodeHandlers.SendEmailNodeHandler>();
