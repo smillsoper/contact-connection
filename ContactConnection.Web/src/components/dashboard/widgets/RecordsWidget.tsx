@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { dashboardWidgetsApi, type RecordDetailResponse, type RecordsPage, type RecordsParams } from '../../../api/dashboardWidgets'
 import type { WidgetFilterConfig } from '../../../types/dashboard'
 import { useDashboardLiveAgentSessions, useDashboardLiveCallState } from '../DashboardLiveContext'
@@ -141,10 +142,10 @@ export default function RecordsWidget({ config }: { config: WidgetFilterConfig }
         <button disabled={page >= pages} onClick={() => setPage(page + 1)} className="px-2 py-0.5 border border-gray-700 rounded disabled:opacity-40">Next ›</button>
       </div>
 
-      {openId && (detailError ? (
+      {openId && (detailError ? createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setOpenId(null)}>
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 text-sm text-red-400">{detailError}</div>
-        </div>
+        </div>, document.body
       ) : (
         <CallDetailModal data={detail?.detail ?? null} canPlayRecording={detail?.canPlayRecording ?? false}
           loadRecording={() => (source ? source.recording(openId) : internalRecording(openId))} onClose={() => setOpenId(null)} />

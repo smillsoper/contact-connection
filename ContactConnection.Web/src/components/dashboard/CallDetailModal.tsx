@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import type { CartDocument } from '../../api/cart'
 import RecordingPlayer from './RecordingPlayer'
 
@@ -177,7 +178,19 @@ export default function CallDetailModal({ data, canPlayRecording, loadRecording,
     { key: 'captured', label: `Captured data${capturedCount ? ` (${capturedCount})` : ''}` },
   ]
 
-  return (
+  // Close on Escape; keep the page behind from scrolling while it's open.
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeRef.current() }
+    const overflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', onKey)
+    return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = overflow }
+  }, [])
+
+  // Rendered on <body>: dashboard tiles are CSS-transformed, which would otherwise anchor a fixed overlay to the tile.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-6" onClick={onClose}>
       <div className="bg-gray-900 border border-gray-800 rounded-xl shadow-xl w-full max-w-5xl max-h-[92vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-4 px-5 pt-4">
@@ -272,5 +285,5 @@ export default function CallDetailModal({ data, canPlayRecording, loadRecording,
         </div>
       </div>
     </div>
-  )
+  , document.body)
 }
