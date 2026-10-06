@@ -30,6 +30,8 @@ public static class PortalInvoicesEndpoints
         group.MapPost("invoices/{id:guid}/void", (Guid id, VoidBody body, IInvoiceService svc, CancellationToken ct) =>
             Run(() => svc.VoidAsync(id, body.Reason ?? "", ct)));
         group.MapPost("invoices/{id:guid}/credit-note", CreditNote);
+        group.MapPost("invoices/{id:guid}/settle-credit", (Guid id, SettleCreditBody body, IInvoiceService svc, CancellationToken ct) =>
+            Run(() => svc.SettleCreditNoteAsync(id, body.Disposition ?? "", body.Reference, ct)));
         group.MapDelete("invoices/{id:guid}", Delete);
         return app;
     }
@@ -59,10 +61,18 @@ public static class PortalInvoicesEndpoints
         var credits = await db.Invoices.AsNoTracking().Where(c => c.CreditsInvoiceId == id).OrderBy(c => c.CreatedAt)
             .Select(c => new { c.Id, c.Number, c.Status, c.Total, c.IssuedAt }).ToListAsync(ct);
         var credited = credits.Where(c => c.Status is InvoiceStatus.Issued or InvoiceStatus.Paid).Sum(c => c.Total);
-        string? creditsNumber = invoice.CreditsInvoiceId is { } originalId
-            ? await db.Invoices.Where(o => o.Id == originalId).Select(o => o.Number).FirstOrDefaultAsync(ct)
+        var original = invoice.CreditsInvoiceId is { } originalId
+            ? await db.Invoices.AsNoTracking().Where(o => o.Id == originalId)
+                .Select(o => new { o.Number, o.Status, paidThroughStripe = o.StripePaymentIntentId != null }).FirstOrDefaultAsync(ct)
             : null;
-        return Results.Ok(new { invoice = Detail(invoice), creditNotes = credits, credited, net = invoice.Total + credited, creditsNumber });
+        // A credit note against a paid invoice is money owed back to the tenant — how it's settled, and what's left of it.
+        var creditRemaining = invoice.Kind == InvoiceKind.CreditNote ? await svc.CreditRemainingAsync(id, ct) : 0m;
+        return Results.Ok(new
+        {
+            invoice = Detail(invoice), creditNotes = credits, credited, net = invoice.Total + credited,
+            creditsNumber = original?.Number, originalStatus = original?.Status, originalPaidThroughStripe = original?.paidThroughStripe ?? false,
+            creditRemaining,
+        });
     }
 
     private static async Task<IResult> Document(Guid id, IInvoiceService svc, CancellationToken ct) =>
@@ -102,6 +112,7 @@ public static class PortalInvoicesEndpoints
     {
         try { return Results.Ok(Detail(await action())); }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException) { return Results.BadRequest(new { error = ex.Message }); }
+        catch (Stripe.StripeException ex) { return Results.BadRequest(new { error = ex.StripeError?.Message ?? ex.Message }); }
         catch (KeyNotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
     }
 
@@ -115,7 +126,7 @@ public static class PortalInvoicesEndpoints
     {
         i.Id, i.TenantId, i.Kind, i.Number, i.CreditsInvoiceId, i.PeriodStart, i.PeriodEnd, i.Status, i.Total, i.Notes,
         i.BillToName, i.BillToEmail, i.IssuedAt, i.DueOn, i.PaidAt, i.PaymentReference, i.VoidedAt, i.VoidReason,
-        i.PaymentState, i.PaymentError, i.PaymentAttempts, i.StripePaymentIntentId,
+        i.PaymentState, i.PaymentError, i.PaymentAttempts, i.StripePaymentIntentId, i.CreditDisposition,
         i.CreatedBy, i.CreatedAt, i.UpdatedAt,
         lines = i.Lines.OrderBy(l => l.SortOrder).Select(l => new
         {
@@ -130,4 +141,5 @@ public static class PortalInvoicesEndpoints
     public record MarkPaidBody(DateTimeOffset? PaidAt, string? Reference);
     public record VoidBody(string? Reason);
     public record CreditNoteBody(decimal? Amount, string? Description, string? Reason);
+    public record SettleCreditBody(string? Disposition, string? Reference);
 }

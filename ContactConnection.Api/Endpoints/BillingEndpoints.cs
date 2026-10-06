@@ -57,7 +57,7 @@ public static class BillingEndpoints
         return Results.Ok(list.Select(i => new
         {
             i.Id, i.Kind, i.Number, i.PeriodStart, i.PeriodEnd, i.Status, i.Total, i.IssuedAt, i.DueOn, i.PaidAt,
-            i.PaymentState, i.PaymentError, i.CreditsInvoiceId,
+            i.PaymentState, i.PaymentError, i.CreditsInvoiceId, i.CreditDisposition,
             credited = credits.GetValueOrDefault(i.Id),
             owed = i.Kind == InvoiceKind.Invoice && i.Status == InvoiceStatus.Issued ? Math.Max(0, i.Total + credits.GetValueOrDefault(i.Id)) : 0m,
         }));

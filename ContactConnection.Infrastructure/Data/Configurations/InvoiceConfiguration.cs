@@ -34,6 +34,7 @@ public class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
         builder.Property(i => i.PaymentState).HasColumnName("payment_state").HasMaxLength(20);
         builder.Property(i => i.PaymentError).HasColumnName("payment_error").HasMaxLength(500);
         builder.Property(i => i.PaymentAttempts).HasColumnName("payment_attempts").HasDefaultValue(0);
+        builder.Property(i => i.CreditDisposition).HasColumnName("credit_disposition").HasMaxLength(20);
         builder.HasIndex(i => i.StripePaymentIntentId).HasDatabaseName("ix_invoices_stripe_payment_intent");
         builder.Property(i => i.CreatedBy).HasColumnName("created_by").HasMaxLength(200);
         builder.Property(i => i.CreatedAt).HasColumnName("created_at");
@@ -71,5 +72,7 @@ public class InvoiceLineConfiguration : IEntityTypeConfiguration<InvoiceLine>
         builder.Property(l => l.Reason).HasColumnName("reason").HasMaxLength(500);
         builder.Property(l => l.CreatedBy).HasColumnName("created_by").HasMaxLength(200);
         builder.Property(l => l.CreatedAt).HasColumnName("created_at");
+        builder.Property(l => l.AppliedCreditNoteId).HasColumnName("applied_credit_note_id");
+        builder.HasIndex(l => l.AppliedCreditNoteId).HasDatabaseName("ix_invoice_lines_applied_credit_note");
     }
 }

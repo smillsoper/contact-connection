@@ -23,6 +23,9 @@ public interface IStripeBillingService
     /// <summary>Called when an invoice is issued: charges it when the tenant has autopay on. Null = nothing to do.</summary>
     Task<InvoicePaymentResult?> AutopayAsync(Guid invoiceId, CancellationToken ct = default);
 
+    /// <summary>Refunds <paramref name="amount"/> of a Stripe payment back to the method it was paid with. Returns the refund id.</summary>
+    Task<string> RefundAsync(string paymentIntentId, decimal amount, Guid creditNoteId, CancellationToken ct = default);
+
     /// <summary>A Stripe webhook: verified against Stripe:WebhookSecret, then applied. False = bad signature.</summary>
     Task<bool> HandleWebhookAsync(string json, string? signature, CancellationToken ct = default);
 }

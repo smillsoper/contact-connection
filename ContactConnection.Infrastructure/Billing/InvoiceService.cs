@@ -34,6 +34,7 @@ public class InvoiceService(
         var invoice = Invoice.CreateDraft(tenantId, usage.FirstDay, usage.LastDay, createdBy);
         invoice.ReplaceUsageLines(UsageLines(tenant, usage));
         db.Invoices.Add(invoice);
+        await ApplyCarriedCreditsAsync(invoice, ct);
         await db.SaveChangesAsync(ct);
         return invoice;
     }
@@ -57,6 +58,7 @@ public class InvoiceService(
         invoice.ReplaceUsageLines(lines);
         // New lines carry their own ids, so EF would take them for existing rows (an UPDATE of nothing) — say they're new.
         db.InvoiceLines.AddRange(lines);
+        await ApplyCarriedCreditsAsync(invoice, ct);
         await SaveAsync(ct);
         return invoice;
     }
@@ -106,6 +108,7 @@ public class InvoiceService(
         var number = await NextNumberAsync(invoice.Kind == InvoiceKind.CreditNote ? "CN" : "INV", now.Year, ct);
         invoice.Issue(number, tenant.DisplayName ?? tenant.Name, recipients.Count > 0 ? string.Join(", ", recipients) : null, now, DueDays);
         await SaveAsync(ct);
+        await SettleUsedUpCreditsAsync(invoice, now, ct);
 
         if (recipients.Count == 0)
             return new InvoiceIssueResult(invoice, null, "No billing email on file — set one on the tenant, then resend.");
@@ -159,6 +162,82 @@ public class InvoiceService(
         db.Invoices.Add(note);
         await db.SaveChangesAsync(ct);
         return note;
+    }
+
+    public async Task<Invoice> SettleCreditNoteAsync(Guid creditNoteId, string disposition, string? reference, CancellationToken ct = default)
+    {
+        var note = await RequireAsync(creditNoteId, ct);
+        if (note.Kind != InvoiceKind.CreditNote || note.CreditsInvoiceId is not { } originalId)
+            throw new InvalidOperationException("Only a credit note is settled this way.");
+        var original = await RequireAsync(originalId, ct);
+        if (original.Status != InvoiceStatus.Paid)
+            throw new InvalidOperationException("This credit reduces what's owed on an unpaid invoice — there's nothing to settle.");
+
+        var now = DateTimeOffset.UtcNow;
+        if (disposition == CreditDisposition.RefundStripe)
+        {
+            if (original.StripePaymentIntentId is not { } pi)
+                throw new InvalidOperationException("That invoice wasn't paid through Stripe — record a refund made outside Stripe instead.");
+            var stripe = (IStripeBillingService)services.GetService(typeof(IStripeBillingService))!;
+            var refundId = await stripe.RefundAsync(pi, -note.Total, note.Id, ct);
+            note.SetCreditDisposition(disposition, $"Stripe refund {refundId}", now);
+        }
+        else
+        {
+            note.SetCreditDisposition(disposition, reference, now);
+        }
+        await SaveAsync(ct);
+        return note;
+    }
+
+    public async Task<decimal> CreditRemainingAsync(Guid creditNoteId, CancellationToken ct = default)
+    {
+        var note = await db.Invoices.AsNoTracking().FirstOrDefaultAsync(i => i.Id == creditNoteId, ct);
+        if (note is null || note.Kind != InvoiceKind.CreditNote) return 0m;
+        return await RemainingAsync(note, null, ct);
+    }
+
+    /// <summary>A carried-forward credit's balance: its amount less what invoices (drafts included, voided ones not) have
+    /// drawn from it. <paramref name="excludeInvoiceId"/> leaves one invoice's own lines out (when re-applying to it).</summary>
+    private async Task<decimal> RemainingAsync(Invoice note, Guid? excludeInvoiceId, CancellationToken ct)
+    {
+        var drawn = await db.InvoiceLines
+            .Where(l => l.AppliedCreditNoteId == note.Id && l.InvoiceId != excludeInvoiceId
+                && db.Invoices.Any(i => i.Id == l.InvoiceId && i.Status != InvoiceStatus.Void))
+            .SumAsync(l => (decimal?)l.Amount, ct) ?? 0m;
+        return Math.Max(0m, -note.Total + drawn);   // both negative: -(-5000) + (-1200) = 3800
+    }
+
+    /// <summary>Puts the tenant's open carried-forward credits on a draft (oldest first, never below zero).</summary>
+    private async Task ApplyCarriedCreditsAsync(Invoice invoice, CancellationToken ct)
+    {
+        invoice.RemoveCarriedCredits();
+        var open = await db.Invoices.AsNoTracking()
+            .Where(c => c.TenantId == invoice.TenantId && c.Kind == InvoiceKind.CreditNote
+                && c.CreditDisposition == CreditDisposition.CarryForward && c.Status == InvoiceStatus.Issued)
+            .OrderBy(c => c.IssuedAt).ToListAsync(ct);
+        var available = new List<CreditCarryForward.Available>();
+        foreach (var c in open)
+            available.Add(new(c.Id, c.Number ?? "credit", await RemainingAsync(c, invoice.Id, ct)));
+        foreach (var a in CreditCarryForward.Allocate(available, invoice.Total))
+        {
+            var line = InvoiceLine.CarriedCredit(a.CreditNoteId, a.Number, a.Amount);
+            invoice.AddCarriedCredit(line);
+            db.InvoiceLines.Add(line);
+        }
+    }
+
+    /// <summary>After an invoice is issued: any carried-forward credit it used up is marked settled.</summary>
+    private async Task SettleUsedUpCreditsAsync(Invoice invoice, DateTimeOffset now, CancellationToken ct)
+    {
+        var noteIds = invoice.Lines.Where(l => l.AppliedCreditNoteId is not null).Select(l => l.AppliedCreditNoteId!.Value).Distinct().ToList();
+        foreach (var id in noteIds)
+        {
+            var note = await db.Invoices.FirstOrDefaultAsync(i => i.Id == id, ct);
+            if (note is not null && await RemainingAsync(note, null, ct) == 0m)
+                note.CreditSettled($"Applied in full (last on {invoice.Number})", now);
+        }
+        if (noteIds.Count > 0) await SaveAsync(ct);
     }
 
     public async Task DeleteDraftAsync(Guid invoiceId, CancellationToken ct = default)

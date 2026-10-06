@@ -16,7 +16,15 @@ function period(i: TenantInvoice) {
 }
 
 function statusChip(i: TenantInvoice) {
-  if (i.kind === 'credit_note') return { text: 'credit', cls: 'bg-gray-800 text-gray-300 border-gray-700' }
+  if (i.kind === 'credit_note') {
+    if (i.creditDisposition === 'refund_stripe' || i.creditDisposition === 'refund_manual')
+      return { text: 'refunded', cls: 'bg-emerald-950/50 text-emerald-300 border-emerald-800' }
+    if (i.creditDisposition === 'carry_forward')
+      return i.status === 'paid'
+        ? { text: 'credit applied', cls: 'bg-emerald-950/50 text-emerald-300 border-emerald-800' }
+        : { text: 'credit on next invoice', cls: 'bg-sky-950/50 text-sky-300 border-sky-800' }
+    return { text: 'credit', cls: 'bg-gray-800 text-gray-300 border-gray-700' }
+  }
   if (i.status === 'paid') return { text: 'paid', cls: 'bg-emerald-950/50 text-emerald-300 border-emerald-800' }
   if (i.status === 'void') return { text: 'void', cls: 'bg-gray-800 text-gray-400 border-gray-700' }
   if (i.paymentState === 'processing') return { text: 'payment processing', cls: 'bg-sky-950/50 text-sky-300 border-sky-800' }

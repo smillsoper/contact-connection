@@ -176,4 +176,62 @@ public class InvoiceTests
         invoice.PaymentFailed("pi_1", "late");
         Assert.Equal(InvoiceStatus.Paid, invoice.Status);
     }
+
+    // S179 — settling a credit on a PAID invoice: refund, or carry it to the next invoices.
+    private static Invoice IssuedCredit(decimal amount)
+    {
+        var original = Issued();
+        original.MarkPaid(DateTimeOffset.UtcNow, "ACH 1");
+        var note = Invoice.CreateCreditNote(original, null);
+        note.AddLine(InvoiceLineKind.Credit, "Correction", 1, amount, "Billing error", null);
+        note.Issue("CN-2026-0009", null, null, DateTimeOffset.UtcNow, 15);
+        return note;
+    }
+
+    [Fact]
+    public void Refund_SettlesTheCredit_ManualNeedsAReference()
+    {
+        var manual = IssuedCredit(100m);
+        Assert.Throws<ArgumentException>(() => manual.SetCreditDisposition(CreditDisposition.RefundManual, null, DateTimeOffset.UtcNow));
+        manual.SetCreditDisposition(CreditDisposition.RefundManual, "Check 1042", DateTimeOffset.UtcNow);
+        Assert.Equal((InvoiceStatus.Paid, "Check 1042"), (manual.Status, manual.PaymentReference));
+        Assert.Throws<InvalidOperationException>(() => manual.SetCreditDisposition(CreditDisposition.CarryForward, null, DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
+    public void CarryForward_StaysOpen_UntilApplied()
+    {
+        var note = IssuedCredit(100m);
+        note.SetCreditDisposition(CreditDisposition.CarryForward, null, DateTimeOffset.UtcNow);
+        Assert.Equal(InvoiceStatus.Issued, note.Status);
+        note.CreditSettled("Applied in full", DateTimeOffset.UtcNow);
+        Assert.Equal(InvoiceStatus.Paid, note.Status);
+    }
+
+    [Fact]
+    public void CarriedCredits_OldestFirst_NeverBelowZero()
+    {
+        Guid a = Guid.NewGuid(), b = Guid.NewGuid();
+        var credits = new[] { new CreditCarryForward.Available(a, "CN-1", 300m), new CreditCarryForward.Available(b, "CN-2", 500m) };
+
+        var small = CreditCarryForward.Allocate(credits, 450m);
+        Assert.Equal([(a, 300m), (b, 150m)], small.Select(x => (x.CreditNoteId, x.Amount)));
+
+        Assert.Equal(800m, CreditCarryForward.Allocate(credits, 5000m).Sum(x => x.Amount));
+        Assert.Empty(CreditCarryForward.Allocate(credits, 0m));
+    }
+
+    [Fact]
+    public void CarriedCreditLine_IsNegative_AndPointsAtItsCreditNote()
+    {
+        var invoice = Invoice.CreateDraft(Guid.NewGuid(), new(2026, 10, 1), new(2026, 10, 31), null);
+        invoice.AddLine(InvoiceLineKind.SetupFee, "Usage", 1, 450m, null, null);
+        var noteId = Guid.NewGuid();
+        invoice.AddCarriedCredit(InvoiceLine.CarriedCredit(noteId, "CN-2026-0001", 300m));
+        Assert.Equal(150m, invoice.Total);
+        Assert.Equal(noteId, invoice.Lines.Single(l => l.Kind == InvoiceLineKind.Credit).AppliedCreditNoteId);
+
+        invoice.RemoveCarriedCredits();
+        Assert.Equal(450m, invoice.Total);
+    }
 }

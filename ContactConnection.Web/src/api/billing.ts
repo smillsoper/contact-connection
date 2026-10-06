@@ -20,6 +20,7 @@ export interface TenantInvoice {
   paymentState: 'processing' | 'failed' | 'disputed' | null
   paymentError: string | null
   creditsInvoiceId: string | null
+  creditDisposition: 'refund_stripe' | 'refund_manual' | 'carry_forward' | null
   credited: number
   owed: number
 }

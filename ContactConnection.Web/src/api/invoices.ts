@@ -47,6 +47,7 @@ export interface InvoiceDetail extends Omit<InvoiceSummary, 'tenantName'> {
   paymentState: 'processing' | 'failed' | 'disputed' | null
   paymentError: string | null
   paymentAttempts: number
+  creditDisposition: 'refund_stripe' | 'refund_manual' | 'carry_forward' | null
   createdBy: string | null
   updatedAt: string
   lines: InvoiceLine[]
@@ -56,6 +57,10 @@ export interface InvoiceDetail extends Omit<InvoiceSummary, 'tenantName'> {
   net?: number
   /** A credit note's original invoice number. */
   creditsNumber?: string | null
+  originalStatus?: InvoiceStatus | null
+  originalPaidThroughStripe?: boolean
+  /** A carried-forward credit's balance left. */
+  creditRemaining?: number
 }
 
 interface InvoiceView {
@@ -64,6 +69,9 @@ interface InvoiceView {
   credited: number
   net: number
   creditsNumber: string | null
+  originalStatus: InvoiceStatus | null
+  originalPaidThroughStripe: boolean
+  creditRemaining: number
 }
 
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -88,6 +96,7 @@ export const invoicesApi = {
   list: (tenantId?: string) => call<InvoiceSummary[]>(`/api/v1/portal/invoices${tenantId ? `?tenantId=${tenantId}` : ''}`),
   get: (id: string) => call<InvoiceView>(`/api/v1/portal/invoices/${id}`).then((v) => ({
     ...v.invoice, creditNotes: v.creditNotes, credited: v.credited, net: v.net, creditsNumber: v.creditsNumber,
+    originalStatus: v.originalStatus, originalPaidThroughStripe: v.originalPaidThroughStripe, creditRemaining: v.creditRemaining,
   }) as InvoiceDetail),
   document: (id: string) => call<string>(`/api/v1/portal/invoices/${id}/document`),
   createMonthly: (tenantId: string, month: string) => post<InvoiceDetail>(`/api/v1/portal/tenants/${tenantId}/invoices`, { month }),
@@ -104,6 +113,8 @@ export const invoicesApi = {
   creditNote: (id: string, amount: number, description: string, reason: string) =>
     post<InvoiceDetail>(`/api/v1/portal/invoices/${id}/credit-note`, { amount, description, reason }),
   deleteDraft: (id: string) => call<void>(`/api/v1/portal/invoices/${id}`, { method: 'DELETE' }),
+  settleCredit: (id: string, disposition: 'refund_stripe' | 'refund_manual' | 'carry_forward', reference?: string) =>
+    post<InvoiceDetail>(`/api/v1/portal/invoices/${id}/settle-credit`, { disposition, reference }),
 }
 
 export const money = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' })

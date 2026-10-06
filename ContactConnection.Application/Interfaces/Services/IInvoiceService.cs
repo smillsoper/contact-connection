@@ -34,6 +34,11 @@ public interface IInvoiceService
     Task<Invoice> CreateCreditNoteAsync(Guid invoiceId, decimal amount, string description, string reason, string? createdBy,
         CancellationToken ct = default);
     Task DeleteDraftAsync(Guid invoiceId, CancellationToken ct = default);
+    /// <summary>Settles an issued credit note against a PAID invoice: refund through Stripe, record a refund made outside
+    /// Stripe (<paramref name="reference"/> required), or carry it to the tenant's next invoices.</summary>
+    Task<Invoice> SettleCreditNoteAsync(Guid creditNoteId, string disposition, string? reference, CancellationToken ct = default);
+    /// <summary>What's left of a carried-forward credit note (0 once used up).</summary>
+    Task<decimal> CreditRemainingAsync(Guid creditNoteId, CancellationToken ct = default);
     Task<Invoice?> GetAsync(Guid invoiceId, CancellationToken ct = default);
     Task<IReadOnlyList<Invoice>> ListAsync(Guid? tenantId, CancellationToken ct = default);
     /// <summary>The invoice as a standalone HTML document — the emailed copy and the printable view.</summary>

@@ -40,6 +40,9 @@ public class Invoice
     public string? PaymentState { get; private set; }
     public string? PaymentError { get; private set; }
     public int PaymentAttempts { get; private set; }
+    /// <summary>A credit note against a PAID invoice — how it's settled (S179): refund_stripe | refund_manual | carry_forward.
+    /// Null for a credit against an unpaid invoice (it simply reduces what's owed) or one not yet settled.</summary>
+    public string? CreditDisposition { get; private set; }
     public string? CreatedBy { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -99,6 +102,24 @@ public class Invoice
         Recalculate();
     }
 
+    /// <summary>Drops the carried-forward credit lines (they're recomputed whenever the draft's usage changes).</summary>
+    public void RemoveCarriedCredits()
+    {
+        EnsureDraft();
+        _lines.RemoveAll(l => l.AppliedCreditNoteId is not null);
+        Recalculate();
+    }
+
+    /// <summary>Adds a carried-forward credit line (built by <see cref="InvoiceLine.CarriedCredit"/>).</summary>
+    public void AddCarriedCredit(InvoiceLine line)
+    {
+        EnsureDraft();
+        if (line.AppliedCreditNoteId is null) throw new ArgumentException("Not a carried credit line.");
+        line.AttachTo(Id, _lines.Count);
+        _lines.Add(line);
+        Recalculate();
+    }
+
     /// <summary>Replaces the meter-built lines (usage + monthly minimum) on a draft; hand-added lines stay.</summary>
     public void ReplaceUsageLines(IEnumerable<InvoiceLine> usageLines)
     {
@@ -126,6 +147,34 @@ public class Invoice
         // A credit note is owed to the tenant, not by them — no due date.
         DueOn = Kind == InvoiceKind.Invoice ? DateOnly.FromDateTime(now.UtcDateTime).AddDays(Math.Max(0, dueDays)) : null;
         Status = InvoiceStatus.Issued;
+        UpdatedAt = now;
+    }
+
+    /// <summary>
+    /// Settles a credit note against a paid invoice: refunded (through Stripe or outside it) → marked Paid (settled) with the
+    /// refund reference; carry_forward → stays Issued and later monthly drafts apply it until it's used up
+    /// (<see cref="CreditSettled"/>).
+    /// </summary>
+    public void SetCreditDisposition(string disposition, string? reference, DateTimeOffset now)
+    {
+        if (Kind != InvoiceKind.CreditNote) throw new InvalidOperationException("Only a credit note is settled this way.");
+        if (Status != InvoiceStatus.Issued) throw new InvalidOperationException("Issue the credit note first.");
+        if (CreditDisposition is not null) throw new InvalidOperationException("This credit has already been settled.");
+        if (!Entities.CreditDisposition.IsValid(disposition)) throw new ArgumentException($"Unknown settlement '{disposition}'.");
+        if (disposition == Entities.CreditDisposition.RefundManual && string.IsNullOrWhiteSpace(reference))
+            throw new ArgumentException("Record how it was refunded (e.g. a check number or ACH trace).");
+        CreditDisposition = disposition;
+        if (disposition != Entities.CreditDisposition.CarryForward) CreditSettled(reference, now);
+        else UpdatedAt = now;
+    }
+
+    /// <summary>A credit note fully used (refunded, or carried forward onto invoices until none is left).</summary>
+    public void CreditSettled(string? reference, DateTimeOffset now)
+    {
+        if (Kind != InvoiceKind.CreditNote || Status != InvoiceStatus.Issued) return;
+        Status = InvoiceStatus.Paid;
+        PaidAt = now;
+        PaymentReference = string.IsNullOrWhiteSpace(reference) ? null : reference.Trim();
         UpdatedAt = now;
     }
 
@@ -219,8 +268,19 @@ public class InvoiceLine
     public string? Reason { get; private set; }
     public string? CreatedBy { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
+    /// <summary>A carried-forward credit line: the credit note it draws on (S179).</summary>
+    public Guid? AppliedCreditNoteId { get; private set; }
 
     private InvoiceLine() { }
+
+    /// <summary>"Credit from CN-2026-0001" on a later invoice — draws <paramref name="amount"/> from that credit note.</summary>
+    public static InvoiceLine CarriedCredit(Guid creditNoteId, string creditNumber, decimal amount)
+    {
+        var line = Create(Guid.Empty, InvoiceLineKind.Credit, $"Credit from {creditNumber}", 1, amount,
+            $"Carried forward from credit note {creditNumber}", "carry-forward");
+        line.AppliedCreditNoteId = creditNoteId;
+        return line;
+    }
 
     public static InvoiceLine Create(Guid invoiceId, string kind, string description, decimal quantity, decimal unitPrice,
         string? reason, string? createdBy, int sortOrder = 0)
@@ -279,4 +339,38 @@ public static class InvoiceLineKind
     public static bool IsMetered(string kind) => kind is UsageLocal or UsageTollFree or UsageOutbound or Minimum;
 
     public static bool NeedsReason(string kind) => kind is Adjustment or Credit;
+}
+
+public static class CreditDisposition
+{
+    public const string RefundStripe = "refund_stripe";
+    public const string RefundManual = "refund_manual";
+    public const string CarryForward = "carry_forward";
+
+    public static bool IsValid(string d) => d is RefundStripe or RefundManual or CarryForward;
+}
+
+/// <summary>
+/// Which carried-forward credits a new invoice takes (S179): oldest credit first, never taking the invoice below zero.
+/// Pure — the service supplies each credit note's remaining balance.
+/// </summary>
+public static class CreditCarryForward
+{
+    public sealed record Available(Guid CreditNoteId, string Number, decimal Remaining);
+    public sealed record Allocation(Guid CreditNoteId, string Number, decimal Amount);
+
+    public static IReadOnlyList<Allocation> Allocate(IEnumerable<Available> credits, decimal invoiceTotal)
+    {
+        var result = new List<Allocation>();
+        var room = invoiceTotal;
+        foreach (var c in credits)
+        {
+            if (room <= 0) break;
+            if (c.Remaining <= 0) continue;
+            var take = Math.Min(c.Remaining, room);
+            result.Add(new Allocation(c.CreditNoteId, c.Number, take));
+            room -= take;
+        }
+        return result;
+    }
 }

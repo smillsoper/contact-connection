@@ -183,6 +183,19 @@ public class StripeBillingService(
         }
     }
 
+    public async Task<string> RefundAsync(string paymentIntentId, decimal amount, Guid creditNoteId, CancellationToken ct = default)
+    {
+        var refund = await new RefundService(Client).CreateAsync(new RefundCreateOptions
+        {
+            PaymentIntent = paymentIntentId,
+            Amount = (long)Math.Round(amount * 100m, MidpointRounding.AwayFromZero),
+            Metadata = new() { ["credit_note_id"] = creditNoteId.ToString() },
+        }, new RequestOptions { IdempotencyKey = $"refund-{creditNoteId}" }, ct);
+        if (refund.Status is "failed" or "canceled")
+            throw new InvalidOperationException($"Stripe didn't refund it ({refund.Status}{(refund.FailureReason is { } r ? $": {r}" : "")}).");
+        return refund.Id;
+    }
+
     // ── Webhooks ──────────────────────────────────────────────────────────
 
     public async Task<bool> HandleWebhookAsync(string json, string? signature, CancellationToken ct = default)

@@ -42,6 +42,7 @@ export default function InvoiceDetailPage() {
   const [creditAmount, setCreditAmount] = useState('')
   const [creditReason, setCreditReason] = useState('')
   const [panel, setPanel] = useState<'paid' | 'void' | 'credit' | null>(null)
+  const [refundRef, setRefundRef] = useState('')
 
   async function refresh(_next?: InvoiceDetail) {
     const fresh = await invoicesApi.get(id)
@@ -84,6 +85,40 @@ export default function InvoiceDetailPage() {
             <Link to={`/portal/invoices/${inv.creditsInvoiceId}`} className="text-xs text-indigo-400 hover:text-indigo-300">
               Credits invoice {inv.creditsNumber ?? ''} →
             </Link>
+          )}
+          {isCredit && inv.status === 'issued' && inv.originalStatus === 'paid' && !inv.creditDisposition && (
+            <div className="mt-3 rounded-lg border border-indigo-800 bg-indigo-950/40 px-4 py-3 text-sm space-y-2">
+              <p className="text-indigo-200 font-medium">
+                {inv.creditsNumber} was already paid, so this {money(-inv.total)} is owed back to the tenant. How should it be settled?
+              </p>
+              <div className="flex flex-wrap gap-2 items-center">
+                {inv.originalPaidThroughStripe && (
+                  <button disabled={busy} onClick={() => void act(() => invoicesApi.settleCredit(id, 'refund_stripe'), 'Refunded through Stripe.')}
+                    className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg px-3 py-1.5 text-sm">
+                    Refund {money(-inv.total)} to their payment method
+                  </button>
+                )}
+                <button disabled={busy} onClick={() => void act(() => invoicesApi.settleCredit(id, 'carry_forward'), 'Carried forward — the next invoice will apply it.')}
+                  className="border border-gray-600 hover:bg-gray-800 text-gray-200 rounded-lg px-3 py-1.5 text-sm">
+                  Carry to next invoice
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2 items-center">
+                <input value={refundRef} onChange={(e) => setRefundRef(e.target.value)} placeholder="Refunded outside Stripe — check # / ACH trace"
+                  className={`${inputCls} flex-1 min-w-56`} />
+                <button disabled={busy || !refundRef.trim()} onClick={() => void act(() => invoicesApi.settleCredit(id, 'refund_manual', refundRef), 'Recorded as refunded.')}
+                  className="border border-gray-600 hover:bg-gray-800 disabled:opacity-40 text-gray-200 rounded-lg px-3 py-1.5 text-sm">
+                  Record refund
+                </button>
+              </div>
+            </div>
+          )}
+          {isCredit && inv.creditDisposition && (
+            <p className="mt-2 text-sm text-gray-300">
+              {inv.creditDisposition === 'carry_forward'
+                ? (inv.status === 'paid' ? 'Carried forward — fully applied.' : `Carried forward — ${money(inv.creditRemaining ?? 0)} left to apply to upcoming invoices.`)
+                : `Refunded${inv.paymentReference ? ` · ${inv.paymentReference}` : ''}`}
+            </p>
           )}
           {isCredit && draft && (
             <div className="mt-3 rounded-lg border border-amber-800 bg-amber-950/40 px-4 py-2 text-sm text-amber-200">
