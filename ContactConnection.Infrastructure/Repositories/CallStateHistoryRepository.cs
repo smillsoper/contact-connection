@@ -113,8 +113,10 @@ public class CallStateHistoryRepository(ITenantDbContextFactory factory) : ICall
         if (campaignIds is not null)
             query = query.Where(e => campaignIds.Contains(e.CampaignId));
 
-        var met = await query.CountAsync(e => e.MetServiceLevel == true, ct);
-        var missed = await query.CountAsync(e => e.MetServiceLevel == false, ct);
-        return new ServiceLevelStats(met, missed);
+        // Each call counts once per campaign — its first stamped answer. Rows stamped before S181 could carry a second
+        // stamp for a re-bridge of the same queue entry (take-over / transfer), which isn't a second answer.
+        var rows = await query.Select(e => new { e.CallRecordId, e.CampaignId, e.Sequence, e.MetServiceLevel }).ToListAsync(ct);
+        var firsts = rows.GroupBy(e => (e.CallRecordId, e.CampaignId)).Select(g => g.OrderBy(e => e.Sequence).First().MetServiceLevel).ToList();
+        return new ServiceLevelStats(firsts.Count(m => m == true), firsts.Count(m => m == false));
     }
 }

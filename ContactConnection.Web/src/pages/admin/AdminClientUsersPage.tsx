@@ -199,6 +199,13 @@ export default function AdminClientUsersPage() {
                         }, u.hasPassword ? `Password link sent to ${u.email}.` : `Invitation re-sent to ${u.email}.`)}>
                         {u.hasPassword ? 'Send password link' : 'Resend invite'}
                       </button>
+                      {u.mfaEnabled && (
+                        <button className="text-xs text-indigo-300 hover:text-indigo-200 mr-3" disabled={busy}
+                          title="Lost phone or authenticator? They'll set two-step up again at their next sign-in (or can leave it off unless required)."
+                          onClick={() => run(() => clientUsersApi.resetMfa(u.id), `Two-step sign-in reset for ${u.email}.`)}>
+                          Reset two-step
+                        </button>
+                      )}
                       <button className="text-xs text-indigo-300 hover:text-indigo-200" onClick={() => showAudit(u.id)}>Activity</button>
                     </td>
                   </tr>
@@ -208,12 +215,6 @@ export default function AdminClientUsersPage() {
                         <UserForm value={edit} onChange={setEdit} dashboards={dashboards} clientNames={clientNames} isNew={false} />
                         <div className="flex justify-between gap-2 mt-4 flex-wrap">
                           <div className="flex gap-2">
-                            {u.mfaEnabled && (
-                              <button className={`${btn} border border-gray-700 text-gray-300`} disabled={busy}
-                                onClick={() => run(() => clientUsersApi.resetMfa(u.id), 'Two-step sign-in reset — they set it up again next sign-in.')}>
-                                Reset two-step sign-in
-                              </button>
-                            )}
                             {confirmDelete === u.id ? (
                               <>
                                 <span className="text-xs text-red-300 self-center">Delete this account? The activity log is kept.</span>

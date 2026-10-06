@@ -167,7 +167,8 @@ public sealed class KpiService(ScopedTenantDbContextFactory dbFactory)
             calls.Add(new KpiCall(r.CampaignId, clientId,
                 Handled: history.Any(s => s.State == "active"),
                 Abandoned: history.Any(s => s.State == "abandoned"),
-                MetServiceLevel: history.LastOrDefault(s => s.MetServiceLevel is not null)?.MetServiceLevel,
+                // The call's first answer counts — a later re-bridge (take-over, transfer) isn't a second SL event.
+                MetServiceLevel: history.FirstOrDefault(s => s.MetServiceLevel is not null)?.MetServiceLevel,
                 TalkSeconds: Math.Max(0, talk),
                 // The agent who took the call (first "active" state) — call handling broken down by agent.
                 Dims: Dims(r.CampaignId, clientId, history.FirstOrDefault(s => s.State == "active")?.AgentId, r.CreatedAt, r.Dnis,

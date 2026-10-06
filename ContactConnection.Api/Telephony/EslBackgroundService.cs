@@ -2013,10 +2013,15 @@ public sealed class EslBackgroundService : BackgroundService
             // ServiceLevelThresholdSeconds of entering the queue? Reporting-only — captured here
             // for future dashboard use, no control-flow depends on it. Null when the call never
             // queued at all (e.g. a direct-extension bridge, which has no _in_queue_at).
+            // One answer per queue entry (S181): a later re-bridge of the same queued call (supervisor take-over,
+            // re-bridge after a mid-call step) isn't a new answer — only a new queue entry (a new _in_queue_at) is.
             bool? metServiceLevel = null;
             if (bridgeSession.Vars.TryGetValue("_in_queue_at", out var inQueueAtStr) &&
-                DateTimeOffset.TryParse(inQueueAtStr, out var inQueueAt))
+                DateTimeOffset.TryParse(inQueueAtStr, out var inQueueAt) &&
+                bridgeSession.Vars.GetValueOrDefault("_sl_stamped_for") != inQueueAtStr)
             {
+                bridgeSession.Vars["_sl_stamped_for"] = inQueueAtStr;
+                await _sessionStore.SaveAsync(bridgeSession, ct);
                 var dbFactory = recorderScope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
                 await using var db = dbFactory.Create(bridgeSession.TenantSchemaName);
                 var campaign = await db.Campaigns.FirstOrDefaultAsync(c => c.Id == bridgeSession.CampaignId, ct);
