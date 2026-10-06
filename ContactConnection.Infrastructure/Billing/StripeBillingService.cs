@@ -70,14 +70,18 @@ public class StripeBillingService(
                 : $"The payment method wasn't saved ({intent.Status}).");
 
         var pm = intent.PaymentMethod ?? throw new InvalidOperationException("No payment method came back from Stripe.");
+        await MakeDefaultAsync(tenant, pm, ct);
+        return View(tenant);
+    }
+
+    private async Task MakeDefaultAsync(Tenant tenant, PaymentMethod pm, CancellationToken ct)
+    {
         await new CustomerService(Client).UpdateAsync(tenant.StripeCustomerId!, new CustomerUpdateOptions
         {
             InvoiceSettings = new CustomerInvoiceSettingsOptions { DefaultPaymentMethod = pm.Id },
         }, cancellationToken: ct);
-
         tenant.SetPaymentMethod(pm.Id, pm.Type, Label(pm));
         await db.SaveChangesAsync(ct);
-        return View(tenant);
     }
 
     public async Task<TenantPaymentMethod> SetAutopayAsync(Guid tenantId, bool enabled, CancellationToken ct = default)
@@ -200,6 +204,18 @@ public class StripeBillingService(
                     await db.SaveChangesAsync(ct);
                     logger.LogInformation("Stripe {Type}: invoice {Number} → {State}", stripeEvent.Type, invoice.Number, result.State);
                     if (result.State == "failed" && !wasPaid) await EmailFailureAsync(invoice, result.Message, ct);
+                }
+                break;
+            case EventTypes.SetupIntentSucceeded:
+                // A bank account entered by hand is verified later (micro-deposits) — this is when it becomes the tenant's
+                // payment method. Also harmless after an instant save (same method, already the default).
+                if (stripeEvent.Data.Object is SetupIntent setup && setup.CustomerId is { } customerId && setup.PaymentMethodId is { } pmId
+                    && await db.Tenants.FirstOrDefaultAsync(t => t.StripeCustomerId == customerId, ct) is { } owner
+                    && owner.PaymentMethodId != pmId)
+                {
+                    var method = await new PaymentMethodService(Client).GetAsync(pmId, cancellationToken: ct);
+                    await MakeDefaultAsync(owner, method, ct);
+                    logger.LogInformation("Stripe setup_intent.succeeded: {Tenant} now pays with {Label}", owner.Subdomain, owner.PaymentMethodLabel);
                 }
                 break;
             case EventTypes.ChargeDisputeCreated:

@@ -35,6 +35,8 @@ export default function BillingPage() {
   const [msg, setMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [viewing, setViewing] = useState<{ id: string; html: string } | null>(null)
+  // A hand-entered bank account waiting on its micro-deposit check (Stripe's hosted page); it's saved automatically once verified.
+  const [verifyUrl, setVerifyUrl] = useState<string | null>(null)
   const frame = useRef<HTMLIFrameElement>(null)
 
   const load = () => {
@@ -90,6 +92,15 @@ export default function BillingPage() {
 
         {error && <div className="rounded-lg border border-red-800 bg-red-950/50 px-4 py-2 text-sm text-red-300">{error}</div>}
         {msg && <div className="rounded-lg border border-emerald-800 bg-emerald-950/40 px-4 py-2 text-sm text-emerald-300">{msg}</div>}
+        {verifyUrl && (
+          <div className="rounded-lg border border-sky-800 bg-sky-950/40 px-4 py-3 text-sm text-sky-200 space-y-1">
+            <p>Your bank account needs a quick check: Stripe sends two small deposits (1–2 business days), then you confirm the amounts.</p>
+            <p>
+              <a href={verifyUrl} target="_blank" rel="noreferrer" className="underline font-medium">Verify your bank account →</a>
+              <span className="text-sky-300/70"> · Once verified it becomes your payment method automatically — refresh this page.</span>
+            </p>
+          </div>
+        )}
         {configured === false && (
           <div className="rounded-lg border border-amber-800 bg-amber-950/40 px-4 py-2 text-sm text-amber-200">
             Online payment isn't set up on this server yet — your invoices are still listed below.
@@ -117,6 +128,7 @@ export default function BillingPage() {
                 onCancel={() => setClientSecret(null)}
                 onSaved={(m) => { setMethod(m); setClientSecret(null); setMsg(`Saved ${m.label}.`) }}
                 onError={setError}
+                onPendingVerification={(url) => { setClientSecret(null); setError(null); setVerifyUrl(url) }}
               />
             </Elements>
           )}
@@ -208,10 +220,11 @@ export default function BillingPage() {
 }
 
 /** Stripe's Payment Element in SetupIntent mode: bank account (Financial Connections) or card, saved for later charges. */
-function SetupForm({ onSaved, onCancel, onError }: {
+function SetupForm({ onSaved, onCancel, onError, onPendingVerification }: {
   onSaved: (m: PaymentMethodView) => void
   onCancel: () => void
   onError: (msg: string) => void
+  onPendingVerification: (url: string) => void
 }) {
   const stripe = useStripe()
   const elements = useElements()
@@ -226,7 +239,11 @@ function SetupForm({ onSaved, onCancel, onError }: {
       if (error) { onError(error.message ?? 'Stripe couldn’t save that.'); return }
       if (!setupIntent) { onError('No result from Stripe.'); return }
       if (setupIntent.status === 'requires_action') {
-        onError('Your bank account needs verifying — Stripe will email the steps (small deposits). Come back here once that’s done.')
+        // Hand-entered bank details: verified by micro-deposits on Stripe's hosted page; the server saves the account when
+        // Stripe reports it verified (setup_intent.succeeded).
+        const url = setupIntent.next_action?.verify_with_microdeposits?.hosted_verification_url
+        if (url) onPendingVerification(url)
+        else onError('Your bank account needs verifying — follow the steps Stripe emails you, then refresh this page.')
         return
       }
       onSaved(await billingApi.savePaymentMethod(setupIntent.id))
