@@ -130,4 +130,6 @@ export interface ActiveCallRow {
   /** Monitor / Coach / Barge / Take over can reach it (inbound + callbacks; not manual outbound yet). */
   supervisable: boolean
   scriptName: string | null
+  /** The script section the agent is in right now (null when the script has none). */
+  sectionName: string | null
 }

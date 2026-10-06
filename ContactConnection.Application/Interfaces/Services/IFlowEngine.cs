@@ -74,7 +74,10 @@ public interface IFlowEngine
         IReadOnlyCollection<Guid> agentIds, CancellationToken ct = default);
 }
 
-public record LiveFlowSession(Guid AgentId, Guid SessionId, Guid CallRecordId, string? FlowName, DateTimeOffset StartedAt);
+/// <summary><paramref name="SectionName"/>: the script section the agent is in right now (null when the script has none) —
+/// shown to supervisors on the Active Calls widget (S180).</summary>
+public record LiveFlowSession(Guid AgentId, Guid SessionId, Guid CallRecordId, string? FlowName, DateTimeOffset StartedAt,
+    string? SectionName = null);
 
 public class FlowSessionSnapshot
 {

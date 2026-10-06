@@ -557,7 +557,9 @@ public class FlowEngine : IFlowEngine
             if (!await _redis.KeyExistsAsync(RedisKey(s.Id))) continue;
             if (!flowNames.TryGetValue(s.FlowId, out var name))
                 flowNames[s.FlowId] = name = (await _flows.GetByIdAsync(s.FlowId, ct))?.Name;
-            live.Add(new LiveFlowSession(s.AgentId, s.Id, s.CallRecordId, name, s.StartedAt));
+            var section = await _redis.StringGetAsync(SectionKey(s.Id));
+            live.Add(new LiveFlowSession(s.AgentId, s.Id, s.CallRecordId, name, s.StartedAt,
+                section.HasValue && section.ToString().Length > 0 ? section.ToString() : null));
         }
         return live;
     }
@@ -922,10 +924,23 @@ public class FlowEngine : IFlowEngine
 
     private async Task SaveToRedis(FlowExecutionContext ctx, CancellationToken ct)
     {
+        // Active Calls widget (S180): supervisors see which section each agent is in. Kept in its own tiny key so the widget
+        // never loads whole contexts, and pushed only when the section actually changes — not on every step. Recorded first,
+        // pushed last (after the context is saved) so a dashboard refetch sees the new state.
+        var sectionKey = SectionKey(ctx.SessionId);
+        var section = ctx.CurrentSectionName ?? "";
+        var previous = await _redis.StringGetAsync(sectionKey);
+        var sectionChanged = previous.HasValue && previous.ToString() != section;
+        await _redis.StringSetAsync(sectionKey, section, SessionTtl);
+
         var key   = RedisKey(ctx.SessionId);
         var value = JsonSerializer.Serialize(new RedisCacheEntry(ctx));
         await _redis.StringSetAsync(key, value, SessionTtl);
+
+        if (sectionChanged) await NotifyAgentSessionsChangedAsync(ctx, ct);
     }
+
+    private static string SectionKey(Guid sessionId) => $"flow_section:{sessionId}";
 
     /// <summary>
     /// Write-through of the live state to flow_sessions on every step (S165). Redis stays the

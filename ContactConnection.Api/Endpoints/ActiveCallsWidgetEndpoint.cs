@@ -74,7 +74,7 @@ public static class ActiveCallsWidgetEndpoint
                 OnHold: s.Vars.GetValueOrDefault("_on_hold") == "true",
                 SecureCapture: s.Vars.GetValueOrDefault("_sc_in_progress") == "true",
                 Recording: record is { RecordingStartedAt: not null, RecordingStoppedAt: null },
-                Supervisable: true, ScriptName: null));
+                Supervisable: true, ScriptName: null, SectionName: null));
         }
 
         foreach (var r in records.Where(r => r.Source == CallSource.Outbound && !liveRecordIds.Contains(r.Id)))
@@ -86,15 +86,17 @@ public static class ActiveCallsWidgetEndpoint
                 r.AgentId!.Value, agentNames.GetValueOrDefault(r.AgentId!.Value), r.CallStartAt, null,
                 OnHold: false, SecureCapture: false, Recording: false,
                 // Monitor / Take over find the agent's call through its telephony session; manual outbound has none yet.
-                Supervisable: false, ScriptName: null));
+                Supervisable: false, ScriptName: null, SectionName: null));
         }
 
         // The CRM script each agent has open on that call.
         if (rows.Count > 0)
         {
+            // The latest-started script on the call wins (a sub-flow / second tab is where the agent is now).
             var scripts = (await flowEngine.GetLiveSessionsForAgentsAsync(rows.Select(r => r.AgentId).Distinct().ToList(), ct))
-                .GroupBy(x => (x.AgentId, x.CallRecordId)).ToDictionary(g => g.Key, g => g.First().FlowName);
-            rows = rows.Select(r => r with { ScriptName = scripts.GetValueOrDefault((r.AgentId, r.CallRecordId)) }).ToList();
+                .GroupBy(x => (x.AgentId, x.CallRecordId)).ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.StartedAt).First());
+            rows = rows.Select(r => scripts.TryGetValue((r.AgentId, r.CallRecordId), out var sc)
+                ? r with { ScriptName = sc.FlowName, SectionName = sc.SectionName } : r).ToList();
         }
 
         return Results.Ok(rows.OrderBy(r => r.ConnectedAt ?? DateTimeOffset.MaxValue));
@@ -103,5 +105,5 @@ public static class ActiveCallsWidgetEndpoint
     public sealed record ActiveCallRow(
         Guid CallRecordId, string Direction, string? CustomerNumber, string? OurNumber, Guid? CampaignId, string? CampaignName,
         Guid AgentId, string? AgentName, DateTimeOffset? ConnectedAt, string? TierLabel,
-        bool OnHold, bool SecureCapture, bool Recording, bool Supervisable, string? ScriptName);
+        bool OnHold, bool SecureCapture, bool Recording, bool Supervisable, string? ScriptName, string? SectionName);
 }

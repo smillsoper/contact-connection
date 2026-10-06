@@ -214,7 +214,7 @@ public class FlowSessionReviewTests
             ["CallRecord"] = new JsonObject(), ["Caller"] = new JsonObject { ["last_name"] = "Typo", ["loyalty_tier"] = "gold" },
             ["Agent"] = new JsonObject(), ["Tenant"] = new JsonObject(),
         };
-        _redis.Setup(r => r.StringGetAsync(It.Is<RedisKey>(k => k.ToString().Contains(sessionId.ToString())), It.IsAny<CommandFlags>()))
+        _redis.Setup(r => r.StringGetAsync(It.Is<RedisKey>(k => k.ToString().Contains(sessionId.ToString()) && !k.ToString().StartsWith("flow_section:")), It.IsAny<CommandFlags>()))
             .ReturnsAsync((RedisValue)entry.ToJsonString());
         var input = new RecordingInputHandler();
         var notifier = new Mock<IFlowNotifier>();
@@ -313,7 +313,7 @@ public class FlowSessionReviewTests
             ["CurrentNodeId"] = "n_name", ["DefinitionJson"] = flow.Definition, ["VariableStoreJson"] = "{}", ["ExecutionHistoryJson"] = "[]",
             ["CallRecord"] = new JsonObject(), ["Caller"] = new JsonObject(), ["Agent"] = new JsonObject(), ["Tenant"] = new JsonObject(),
         };
-        _redis.Setup(r => r.StringGetAsync(It.Is<RedisKey>(k => k.ToString().Contains(session.Id.ToString())), It.IsAny<CommandFlags>()))
+        _redis.Setup(r => r.StringGetAsync(It.Is<RedisKey>(k => k.ToString().Contains(session.Id.ToString()) && !k.ToString().StartsWith("flow_section:")), It.IsAny<CommandFlags>()))
             .ReturnsAsync((RedisValue)entry.ToJsonString());
         var notifier = new Mock<IFlowNotifier>();
 
@@ -358,7 +358,7 @@ public class FlowSessionReviewTests
             ["ExecutionHistoryJson"] = "[]",
             ["CallRecord"] = new JsonObject(), ["Caller"] = new JsonObject(), ["Agent"] = new JsonObject(), ["Tenant"] = new JsonObject(),
         };
-        _redis.Setup(r => r.StringGetAsync(It.Is<RedisKey>(k => k.ToString().Contains(session.Id.ToString())), It.IsAny<CommandFlags>()))
+        _redis.Setup(r => r.StringGetAsync(It.Is<RedisKey>(k => k.ToString().Contains(session.Id.ToString()) && !k.ToString().StartsWith("flow_section:")), It.IsAny<CommandFlags>()))
             .ReturnsAsync((RedisValue)entry.ToJsonString());
         var notifier = new Mock<IFlowNotifier>();
         var input = new RecordingInputHandler();

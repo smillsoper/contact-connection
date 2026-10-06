@@ -14,14 +14,17 @@ public class TelEndNodeHandler : ITelephonyNodeHandler
     private readonly ITelephonyCallSessionStore _sessionStore;
     private readonly IConfiguration _config;
     private readonly ILogger<TelEndNodeHandler> _logger;
+    private readonly IDashboardNotifier? _dashboard;
 
     public TelEndNodeHandler(
         ITelephonyEventNotifier eventNotifier,
         ISecureCollectNotifier secureCollectNotifier,
         ITelephonyCallSessionStore sessionStore,
         IConfiguration config,
-        ILogger<TelEndNodeHandler> logger)
+        ILogger<TelEndNodeHandler> logger,
+        IDashboardNotifier? dashboard = null)
     {
+        _dashboard = dashboard;
         _eventNotifier = eventNotifier;
         _secureCollectNotifier = secureCollectNotifier;
         _sessionStore = sessionStore;
@@ -76,6 +79,14 @@ public class TelEndNodeHandler : ITelephonyNodeHandler
             ctx.RemoveSessionVar("_sc_peer_uuid");
             ctx.RemoveSessionVar("_sc_rebridge");
             ctx.RemoveSessionVar("_sc_pending_outcome");
+
+            // Active Calls widget (S180): the capture is over — dashboards drop "card capture". The session is saved right
+            // after this node; the widget's refetch debounce covers that gap.
+            if (!string.IsNullOrEmpty(scPeerUuid) && _dashboard is not null)
+            {
+                try { await _dashboard.NotifyCallStateChangedAsync(ctx.TenantId, ctx.CampaignId, "secure_capture_done", ct); }
+                catch (Exception ex) { _logger.LogDebug(ex, "Secure-capture-done dashboard push failed for {Uuid}", ctx.ChannelUuid); }
+            }
         }
 
         // A trigger_telephony_event branch reaching its own end — the correctly-timed signal for

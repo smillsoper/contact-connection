@@ -95,6 +95,7 @@ export default function ActiveCallsWidget({ config }: { config: WidgetFilterConf
               <th className="py-1 pr-2 font-medium">Customer</th>
               <th className="py-1 pr-2 font-medium">Agent</th>
               <th className="py-1 pr-2 font-medium">Campaign</th>
+              <th className="py-1 pr-2 font-medium">Section</th>
               <th className="py-1 pr-2 font-medium">Time</th>
               <th className="py-1 font-medium" />
             </tr>
@@ -111,6 +112,7 @@ export default function ActiveCallsWidget({ config }: { config: WidgetFilterConf
                   </td>
                   <td className="py-1.5 pr-2 text-gray-300">{r.agentName ?? '—'}</td>
                   <td className="py-1.5 pr-2 text-gray-400">{r.campaignName ?? '—'}</td>
+                  <td className="py-1.5 pr-2 text-emerald-300">{r.sectionName ?? <span className="text-gray-600">—</span>}</td>
                   <td className="py-1.5 pr-2 text-gray-300 font-mono">{elapsed(r.connectedAt)}</td>
                   <td className="py-1.5"><Flags r={r} /></td>
                 </tr>
@@ -149,6 +151,7 @@ function CallDetail({ call, sup, onClose }: { call: ActiveCallRow; sup: Supervis
         <dl className="grid grid-cols-[7rem_1fr] gap-y-1.5 text-xs">
           <dt className="text-gray-500">Agent</dt><dd className="text-gray-200">{call.agentName ?? '—'}</dd>
           <dt className="text-gray-500">Script</dt><dd className="text-gray-200">{call.scriptName ?? <span className="text-gray-600">none open</span>}</dd>
+          <dt className="text-gray-500">Section</dt><dd className="text-emerald-300">{call.sectionName ?? <span className="text-gray-600">{call.scriptName ? 'this script has no sections' : '—'}</span>}</dd>
           <dt className="text-gray-500">Status</dt><dd><Flags r={call} />{!call.onHold && !call.secureCapture && !call.recording && !call.tierLabel && <span className="text-gray-300">talking</span>}</dd>
         </dl>
 

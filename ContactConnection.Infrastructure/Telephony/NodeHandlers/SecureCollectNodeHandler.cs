@@ -45,6 +45,8 @@ public class SecureCollectNodeHandler : ITelephonyNodeHandler
     private readonly IConfiguration _config;
     private readonly ILogger<SecureCollectNodeHandler> _logger;
 
+    private readonly IDashboardNotifier? _dashboard;
+
     public SecureCollectNodeHandler(
         ITenantDbContextFactory dbFactory,
         ITelephonyCallSessionStore sessionStore,
@@ -53,8 +55,10 @@ public class SecureCollectNodeHandler : ITelephonyNodeHandler
         IEslCommanderFactory eslFactory,
         ISecureCollectNotifier notifier,
         IConfiguration config,
-        ILogger<SecureCollectNodeHandler> logger)
+        ILogger<SecureCollectNodeHandler> logger,
+        IDashboardNotifier? dashboard = null)
     {
+        _dashboard    = dashboard;
         _dbFactory    = dbFactory;
         _sessionStore = sessionStore;
         _recording    = recording;
@@ -135,6 +139,12 @@ public class SecureCollectNodeHandler : ITelephonyNodeHandler
             {
                 earlySession.Vars["_sc_in_progress"] = "true";
                 await _sessionStore.SaveAsync(earlySession, ct);
+                // Active Calls widget (S180): show "card capture" on the supervisor dashboards now.
+                if (_dashboard is not null)
+                {
+                    try { await _dashboard.NotifyCallStateChangedAsync(ctx.TenantId, ctx.CampaignId, "secure_capture", ct); }
+                    catch (Exception ex) { _logger.LogDebug(ex, "Secure-capture dashboard push failed for {Uuid}", ctx.ChannelUuid); }
+                }
             }
 
             _logger.LogInformation(
