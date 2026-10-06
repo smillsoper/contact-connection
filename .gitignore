@@ -68,5 +68,6 @@ freeswitch/conf/tls/cafile.pem
 # Local SFTP test server data (S181) — uploads, host keys, test public keys
 sftp-test/*
 !sftp-test/init/
+!sftp-test/keys/
 sftp-test/keys/*
 !sftp-test/keys/README.pub

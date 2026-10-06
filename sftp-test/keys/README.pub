@@ -1,0 +1,1 @@
+# Put vendor SSH public keys (one .pub file each) in this folder, then: docker compose restart sftp-test

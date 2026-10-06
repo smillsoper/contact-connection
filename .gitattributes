@@ -1,0 +1,2 @@
+# Shell scripts run inside Linux containers must keep LF endings
+sftp-test/init/*.sh text eol=lf
