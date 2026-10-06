@@ -23,6 +23,7 @@ import ServiceLevelThresholdWidget from '../components/dashboard/widgets/Service
 import QueuedCallsWidget from '../components/dashboard/widgets/QueuedCallsWidget'
 import ActiveCallsWidget from '../components/dashboard/widgets/ActiveCallsWidget'
 import KpiWidget from '../components/dashboard/widgets/KpiWidget'
+import RecordsWidget from '../components/dashboard/widgets/RecordsWidget'
 import {
   DashboardLiveContext, DashboardCallStateLiveContext, DashboardRegistrationLiveContext,
   DashboardScheduledCallbackLiveContext, DashboardQueueOfferLiveContext, DashboardAgentSessionsLiveContext,
@@ -42,6 +43,7 @@ function renderWidget(type: DashboardWidgetType, config: WidgetFilterConfig) {
     case 'queued_calls':              return <QueuedCallsWidget config={config} />
     case 'active_calls':              return <ActiveCallsWidget config={config} />
     case 'kpi':                       return <KpiWidget config={config} />
+    case 'records':                   return <RecordsWidget config={config} />
   }
 }
 

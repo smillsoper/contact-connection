@@ -30,7 +30,7 @@ public class Dashboard
     public List<Guid> ScopeCampaignIds { get; private set; } = [];
 
     /// <summary>Report-type widgets only — no supervisor tools (agent lists, live calls with caller numbers, callbacks).</summary>
-    public static readonly IReadOnlySet<string> ClientWidgetTypes = new HashSet<string> { "kpi", "service_level_threshold", "call_state_by_campaign" };
+    public static readonly IReadOnlySet<string> ClientWidgetTypes = new HashSet<string> { "kpi", "service_level_threshold", "call_state_by_campaign", "records" };
 
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }

@@ -89,7 +89,49 @@ function buildQuery(params: WidgetFilterConfig): string {
   return parts.length ? `?${parts.join('&')}` : ''
 }
 
+// ── Records widget (S181) ──────────────────────────────────────────────────
+
+export interface RecordColumn { key: string; label: string; group: string }
+export interface RecordsPage {
+  total: number; page: number; pageSize: number; truncated: boolean
+  columns: RecordColumn[]
+  rows: { id: string; values: Record<string, string | null> }[]
+}
+export interface RecordInteraction {
+  number: number; campaign: string | null; agent: string | null; disposition: string | null
+  orderNumber: string | null; orderTotal: number | null; startedAt: string | null
+}
+export interface RecordDetail {
+  id: string; columns: RecordColumn[]; values: Record<string, string | null>
+  interactions: RecordInteraction[]; recordingStatus: 'available' | 'purged' | 'none' | string
+}
+/** Paging, search, sort and per-column filters for one request. */
+export interface RecordsParams { page: number; pageSize: number; search?: string; sort?: string; desc?: boolean; filters?: Record<string, string> }
+
+export function recordsQuery(p: RecordsParams): string {
+  const q = new URLSearchParams({ page: String(p.page), pageSize: String(p.pageSize) })
+  if (p.search) q.set('search', p.search)
+  if (p.sort) { q.set('sort', p.sort); q.set('desc', String(p.desc ?? true)) }
+  for (const [k, v] of Object.entries(p.filters ?? {})) if (v.trim()) q.set(`f.${k}`, v)
+  return q.toString()
+}
+
 export const dashboardWidgetsApi = {
+  records: (config: WidgetFilterConfig, p: RecordsParams) => {
+    const base = buildQuery(config)
+    const cols = (config.columns ?? []).join(',')
+    return api.get<RecordsPage>(`/api/v1/dashboard-widgets/records${base || '?'}${base ? '&' : ''}${recordsQuery(p)}${cols ? `&columns=${encodeURIComponent(cols)}` : ''}`)
+  },
+  recordDetail: (config: WidgetFilterConfig, id: string) => {
+    const q = new URLSearchParams()
+    if (config.campaignId) q.set('campaignId', config.campaignId)
+    else if (config.clientId) q.set('clientId', config.clientId)
+    const cols = (config.detailColumns?.length ? config.detailColumns : config.columns ?? []).join(',')
+    if (cols) q.set('columns', cols)
+    return api.get<RecordDetail>(`/api/v1/dashboard-widgets/records/${id}?${q}`)
+  },
+  recordColumns: () => api.get<RecordColumn[]>('/api/v1/dashboard-widgets/records/columns'),
+
   agentStateCounter: (params: WidgetFilterConfig) =>
     api.get<AgentStateCounterData>(`/api/v1/dashboard-widgets/agent-state-counter${buildQuery(params)}`),
 

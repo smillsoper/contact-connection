@@ -4,6 +4,8 @@ import { listClients, listCampaigns, listAgentGroups } from '../../api/telephony
 import type { KpiWidgetConfig, TimeWindowConfig, WidgetFilterConfig, WidgetFilterFields } from '../../types/dashboard'
 import { KPI_CATALOG, DEFAULT_KPIS, KPI_DIMENSIONS, customFormat, type Format } from './widgets/KpiWidget'
 import KpiTargetInput from './KpiTargetInput'
+import RecordsColumnsEditor from './RecordsColumnsEditor'
+import { dashboardWidgetsApi, type RecordColumn } from '../../api/dashboardWidgets'
 import { customFieldsApi } from '../../api/customFields'
 import type { KpiTarget } from '../../types/dashboard'
 import { customKpisApi, type CustomKpi } from '../../api/dashboardWidgets'
@@ -45,7 +47,13 @@ export default function WidgetConfigModal({ title, fields: rawFields, initial, i
   const [revenueBasis, setRevenueBasis] = useState<NonNullable<KpiWidgetConfig['revenueBasis']>>(initial.revenueBasis ?? 'exclTax')
   const [netRevenue, setNetRevenue] = useState(initial.netRevenue ?? false)
   const [customKpis, setCustomKpis] = useState<CustomKpi[]>([])
-  const [tab, setTab] = useState<'data' | 'layout' | 'kpis'>('data')
+  const [tab, setTab] = useState<'data' | 'layout' | 'kpis' | 'columns'>('data')
+  const [recordColumns, setRecordColumns] = useState<RecordColumn[]>([])
+  const [columns, setColumns] = useState<string[]>(initial.columns ?? [])
+  const [detailColumns, setDetailColumns] = useState<string[] | null>(initial.detailColumns ?? null)
+  const [pageSize, setPageSize] = useState(initial.pageSize ?? 25)
+  const [allowRecordings, setAllowRecordings] = useState(initial.allowRecordings !== false)
+  const tabbed = !!(fields.kpi || fields.records)
   const [timeWindowValue, setTimeWindowValue] = useState(
     initial.timeWindow?.value ?? (initial.timeWindow?.mode === 'minutes' ? DEFAULT_MINUTES : DEFAULT_HOURS),
   )
@@ -57,11 +65,12 @@ export default function WidgetConfigModal({ title, fields: rawFields, initial, i
       .catch(() => {})
     listAgentGroups().then(setGroups).catch(() => {})
     if (fields.kpi) customKpisApi.list().then((k) => setCustomKpis(k.filter((x) => x.isActive))).catch(() => {})
-    if (fields.kpi) customFieldsApi.listDefinitions()
+    if (fields.records) dashboardWidgetsApi.recordColumns().then(setRecordColumns).catch(() => {})
+    if (fields.kpi || fields.records) customFieldsApi.listDefinitions()
       .then((d) => setFieldNames([...new Map(d.filter((x) => x.isActive).map((x) => [x.fieldName, { name: x.fieldName, label: x.displayLabel }])).values()]))
       .catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fields.kpi])
+  }, [fields.kpi, fields.records])
 
   function handleSave() {
     onSave({
@@ -76,6 +85,12 @@ export default function WidgetConfigModal({ title, fields: rawFields, initial, i
         groupBy, groupBy2: groupBy !== 'none' && groupBy2 && groupBy2 !== groupBy ? groupBy2 : undefined, kpis, revenueBasis, netRevenue,
         percentOfTotal: percentOfTotal || undefined,
         targets: Object.fromEntries(Object.entries(targets).filter(([k, t]) => kpis.includes(k) && (t.good != null || t.warn != null))),
+      } : {}),
+      ...(fields.records ? {
+        columns: columns.length ? columns : undefined,
+        detailColumns: detailColumns ?? undefined,
+        pageSize,
+        allowRecordings,
       } : {}),
     }, widgetTitle.trim() || undefined)
     onClose()
@@ -158,9 +173,9 @@ export default function WidgetConfigModal({ title, fields: rawFields, initial, i
               className="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-sky-500"
             >
               <option value="today">Today</option>
-              {fields.kpi && <option value="yesterday">Yesterday</option>}
-              {fields.kpi && <option value="week">This week (from Monday)</option>}
-              {fields.kpi && <option value="month">This month</option>}
+              {(fields.kpi || fields.records) && <option value="yesterday">Yesterday</option>}
+              {(fields.kpi || fields.records) && <option value="week">This week (from Monday)</option>}
+              {(fields.kpi || fields.records) && <option value="month">This month</option>}
               <option value="hours">Last N hours</option>
               <option value="minutes">Last N minutes</option>
             </select>
@@ -284,22 +299,37 @@ export default function WidgetConfigModal({ title, fields: rawFields, initial, i
     </div>
   )
 
-  const TABS = [
-    { key: 'data' as const, label: 'Data' },
-    { key: 'layout' as const, label: 'Layout' },
-    { key: 'kpis' as const, label: `KPIs & targets (${kpis.length})` },
-  ]
+  const TABS = fields.records
+    ? [{ key: 'data' as const, label: 'Data' }, { key: 'columns' as const, label: `Columns (${columns.length || 'default'})` }]
+    : [
+      { key: 'data' as const, label: 'Data' },
+      { key: 'layout' as const, label: 'Layout' },
+      { key: 'kpis' as const, label: `KPIs & targets (${kpis.length})` },
+    ]
+
+  const columnsSection = (
+    <RecordsColumnsEditor
+      available={[...recordColumns, ...fieldNames.map((f) => ({ key: `cf:${f.name}`, label: f.label, group: 'Custom fields' }))]}
+      columns={columns} detailColumns={detailColumns} pageSize={pageSize} allowRecordings={allowRecordings}
+      onChange={(p) => {
+        if (p.columns) setColumns(p.columns)
+        if (p.detailColumns !== undefined) setDetailColumns(p.detailColumns)
+        if (p.pageSize) setPageSize(p.pageSize)
+        if (p.allowRecordings !== undefined) setAllowRecordings(p.allowRecordings)
+      }}
+    />
+  )
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div
-        className={`bg-gray-900 border border-gray-800 rounded-xl p-5 shadow-xl flex flex-col max-h-[90vh] w-full ${fields.kpi ? 'max-w-4xl' : 'max-w-sm'}`}
+        className={`bg-gray-900 border border-gray-800 rounded-xl p-5 shadow-xl flex flex-col max-h-[90vh] w-full ${tabbed ? 'max-w-4xl' : 'max-w-sm'}`}
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-sm font-semibold text-white mb-1">{title}</h3>
         <p className="text-xs text-gray-500 mb-3">Filter which data this widget shows. Pick one — the most specific wins.</p>
 
-        {fields.kpi && (
+        {tabbed && (
           <div className="flex gap-1 border-b border-gray-800 mb-4">
             {TABS.map((t) => (
               <button key={t.key} onClick={() => setTab(t.key)}
@@ -311,8 +341,9 @@ export default function WidgetConfigModal({ title, fields: rawFields, initial, i
         )}
 
         <div className="overflow-y-auto min-h-0 flex-1 pr-1">
-          {!fields.kpi && dataSection}
-          {fields.kpi && tab === 'data' && <div className="max-w-xl">{dataSection}</div>}
+          {!tabbed && dataSection}
+          {tabbed && tab === 'data' && <div className="max-w-xl">{dataSection}</div>}
+          {fields.records && tab === 'columns' && columnsSection}
           {fields.kpi && tab === 'layout' && layoutSection}
           {fields.kpi && tab === 'kpis' && kpisSection}
         </div>

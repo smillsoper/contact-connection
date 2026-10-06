@@ -346,6 +346,7 @@ public static class ServiceCollectionExtensions
         // Disposition catalog (S181) — categories, scoped dispositions, interaction <-> catalog linking.
         services.AddScoped<IDispositionService, ContactConnection.Infrastructure.Dispositions.DispositionService>();
         services.AddScoped<ContactConnection.Infrastructure.Kpis.KpiService>();
+        services.AddScoped<ContactConnection.Infrastructure.Reports.CallRecordsReport>();
         // Email is resolved only when an email target sends: the Resend client refuses to construct without its key, and
         // that mustn't stop SFTP / FTPS deliveries (or a Worker without email configured).
         services.AddScoped<IExportDeliveryService>(sp => new ContactConnection.Infrastructure.Exports.ExportDeliveryService(

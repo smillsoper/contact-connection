@@ -75,5 +75,15 @@ export const clientPortalApi = {
   mfaEnable: (code: string) => post<ClientProfile>('/me/mfa/enable', { code }),
   mfaDisable: (code: string) => post<ClientProfile>('/me/mfa/disable', { code }),
   dashboard: (id: string) => clientFetch<{ id: string; name: string; layout: string }>(`/dashboards/${id}`),
-  widgetData: <T>(dashboardId: string, widgetId: string) => clientFetch<T>(`/dashboards/${dashboardId}/widgets/${encodeURIComponent(widgetId)}/data`),
+  widgetData: <T>(dashboardId: string, widgetId: string, query = '') =>
+    clientFetch<T>(`/dashboards/${dashboardId}/widgets/${encodeURIComponent(widgetId)}/data${query ? `?${query}` : ''}`),
+  recordDetail: <T>(dashboardId: string, widgetId: string, callId: string) =>
+    clientFetch<T>(`/dashboards/${dashboardId}/widgets/${encodeURIComponent(widgetId)}/records/${callId}`),
+  /** Raw recording response (bytes or a status JSON) — fetched with the client token, played from a blob URL. */
+  recording: (dashboardId: string, widgetId: string, callId: string) => {
+    const headers: Record<string, string> = { Authorization: `Bearer ${useClientAuthStore.getState().token ?? ''}` }
+    const sub = clientSubdomain()
+    if (sub) headers['X-Tenant-Subdomain'] = sub
+    return fetch(`/api/v1/client-portal/dashboards/${dashboardId}/widgets/${encodeURIComponent(widgetId)}/records/${callId}/recording`, { headers })
+  },
 }

@@ -1,5 +1,5 @@
 export type DashboardWidgetType =
-  'agent_state_counter' | 'agent_list' | 'call_state_by_campaign' | 'callbacks' | 'service_level_threshold' | 'queued_calls' | 'active_calls' | 'kpi'
+  'agent_state_counter' | 'agent_list' | 'call_state_by_campaign' | 'callbacks' | 'service_level_threshold' | 'queued_calls' | 'active_calls' | 'kpi' | 'records'
 
 export interface TimeWindowConfig {
   /** yesterday / week / month: the KPI widget only (S181). */
@@ -29,7 +29,18 @@ export interface KpiWidgetConfig {
   netRevenue?: boolean
 }
 
-export interface WidgetFilterConfig extends KpiWidgetConfig {
+/** Records widget settings (S181, docs/client-dashboards-plan.md §C). */
+export interface RecordsWidgetConfig {
+  /** Column keys in display order (RECORD columns from the server, or "cf:<custom field name>"). */
+  columns?: string[]
+  /** What the detail drawer shows — defaults to the columns. */
+  detailColumns?: string[]
+  pageSize?: number
+  /** Recording playback in the detail drawer (client users still need their own permission). Default on. */
+  allowRecordings?: boolean
+}
+
+export interface WidgetFilterConfig extends KpiWidgetConfig, RecordsWidgetConfig {
   campaignId?: string
   clientId?: string
   groupId?: string
@@ -101,6 +112,12 @@ export const WIDGET_META: Record<DashboardWidgetType, WidgetMeta> = {
     defaultSize: { w: 7, h: 8 },
     minSize: { w: 4, h: 5 },
   },
+  records: {
+    type: 'records',
+    label: 'Call Records',
+    defaultSize: { w: 12, h: 10 },
+    minSize: { w: 5, h: 6 },
+  },
   queued_calls: {
     type: 'queued_calls',
     label: 'Queued Calls',
@@ -110,10 +127,10 @@ export const WIDGET_META: Record<DashboardWidgetType, WidgetMeta> = {
 }
 
 /** Report widgets only — what a client dashboard (S181) may hold. Mirrors Dashboard.ClientWidgetTypes on the server. */
-export const CLIENT_WIDGET_TYPES: DashboardWidgetType[] = ['kpi', 'service_level_threshold', 'call_state_by_campaign']
+export const CLIENT_WIDGET_TYPES: DashboardWidgetType[] = ['kpi', 'service_level_threshold', 'call_state_by_campaign', 'records']
 
 export const WIDGET_TYPES: DashboardWidgetType[] =
-  ['agent_state_counter', 'agent_list', 'call_state_by_campaign', 'callbacks', 'service_level_threshold', 'queued_calls', 'active_calls', 'kpi']
+  ['agent_state_counter', 'agent_list', 'call_state_by_campaign', 'callbacks', 'service_level_threshold', 'queued_calls', 'active_calls', 'kpi', 'records']
 
 // Which filter fields each widget's config modal should show — agent-scoped widgets support
 // Client/Campaign/Agent Group + Logged-in-only; call-scoped widgets only support Client/Campaign
@@ -127,6 +144,8 @@ export interface WidgetFilterFields {
   timeWindow: boolean
   /** KPI widget: group by, KPI picker, revenue basis (S181). */
   kpi?: boolean
+  /** Records widget: columns, detail columns, page size, recordings (S181). */
+  records?: boolean
 }
 
 export const WIDGET_FILTER_FIELDS: Record<DashboardWidgetType, WidgetFilterFields> = {
@@ -138,6 +157,7 @@ export const WIDGET_FILTER_FIELDS: Record<DashboardWidgetType, WidgetFilterField
   queued_calls: { client: true, campaign: true, group: false, loggedInOnly: false, timeWindow: false },
   active_calls: { client: true, campaign: true, group: false, loggedInOnly: false, timeWindow: false },
   kpi: { client: true, campaign: true, group: false, loggedInOnly: false, timeWindow: true, kpi: true },
+  records: { client: true, campaign: true, group: false, loggedInOnly: false, timeWindow: true, records: true },
 }
 
 export function newWidgetId(): string {

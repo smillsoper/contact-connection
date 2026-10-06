@@ -30,7 +30,14 @@ public static class CallRecordingsEndpoints
         CancellationToken ct)
     {
         if (tenantContext.Current is null) return Results.Unauthorized();
+        return await StreamAsync(id, callRecords, mergeJobs, blobs, ct);
+    }
 
+    /// <summary>The merged recording's bytes (or its status) — shared with the client portal's records widget (S181),
+    /// which checks the client user's recording permission and the dashboard scope first.</summary>
+    internal static async Task<IResult> StreamAsync(
+        Guid id, ICallRecordRepository callRecords, IRecordingMergeJobRepository mergeJobs, IBlobStorage blobs, CancellationToken ct)
+    {
         var record = await callRecords.GetByIdAsync(id, ct);
         if (record is null) return Results.NotFound();
 

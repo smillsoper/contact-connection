@@ -31,6 +31,18 @@ public class ClientPortalTests
     }
 
     [Fact]
+    public void Records_widget_is_a_client_widget_and_keeps_its_columns()
+    {
+        var result = ClientPortalEndpoints.ClientLayout("""[{"id":"r","widgetType":"records","config":{"columns":["started","phone"],"campaignId":"x","allowRecordings":false}}]""");
+        var config = Assert.Single(result)!["config"]!.AsObject();
+        Assert.Equal(2, config["columns"]!.AsArray().Count);
+        Assert.False(config.ContainsKey("campaignId"));
+        Assert.False(config["allowRecordings"]!.GetValue<bool>());
+        Assert.True(Infrastructure.Reports.RecordColumns.IsValid("cf:disposition"));
+        Assert.False(Infrastructure.Reports.RecordColumns.IsValid("sensitive_data"));
+    }
+
+    [Fact]
     public void Bad_layout_json_serves_nothing()
     {
         Assert.Empty(ClientPortalEndpoints.ClientLayout("not json"));

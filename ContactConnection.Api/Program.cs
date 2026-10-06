@@ -311,6 +311,7 @@ app.MapExportsEndpoints();
 app.MapExportKeysEndpoints();
 app.MapDispositionsEndpoints();
 app.MapKpiEndpoints();
+app.MapRecordsWidgetEndpoints();
 app.MapClientPortalAuthEndpoints();
 app.MapClientPortalEndpoints();
 app.MapAdminClientUsersEndpoints();

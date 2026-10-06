@@ -224,7 +224,7 @@ public sealed class KpiService(ScopedTenantDbContextFactory dbFactory)
     }
 
     /// <summary>A custom field's value from a call's / interaction's custom-field snapshot, as text.</summary>
-    private static string? FieldValue(string? json, string field)
+    internal static string? FieldValue(string? json, string field)
     {
         if (string.IsNullOrWhiteSpace(json)) return null;
         try

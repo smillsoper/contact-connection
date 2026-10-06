@@ -151,7 +151,7 @@ public static class DashboardsEndpoints
         {
             var widgets = System.Text.Json.Nodes.JsonNode.Parse(layout) as System.Text.Json.Nodes.JsonArray ?? [];
             var bad = widgets.Select(w => w?["widgetType"]?.GetValue<string>()).Where(t => t is null || !Dashboard.ClientWidgetTypes.Contains(t)).Distinct().ToList();
-            if (bad.Count > 0) return $"A client dashboard can only hold report widgets (KPIs, Service Level, Call State by Campaign). Remove: {string.Join(", ", bad)}.";
+            if (bad.Count > 0) return $"A client dashboard can only hold report widgets (KPIs, Service Level, Call State by Campaign, Call Records). Remove: {string.Join(", ", bad)}.";
         }
         catch (System.Text.Json.JsonException) { return "The layout isn't valid."; }
         return null;

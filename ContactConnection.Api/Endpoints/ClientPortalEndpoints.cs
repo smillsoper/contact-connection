@@ -6,6 +6,7 @@ using ContactConnection.Application.Services;
 using ContactConnection.Domain.Entities;
 using ContactConnection.Infrastructure.Data;
 using ContactConnection.Infrastructure.Kpis;
+using ContactConnection.Infrastructure.Reports;
 using Microsoft.EntityFrameworkCore;
 
 namespace ContactConnection.Api.Endpoints;
@@ -27,6 +28,8 @@ public static class ClientPortalEndpoints
         g.MapPost("me/mfa/disable", MfaDisable);
         g.MapGet("dashboards/{id:guid}", Dashboard);
         g.MapGet("dashboards/{id:guid}/widgets/{widgetId}/data", WidgetData);
+        g.MapGet("dashboards/{id:guid}/widgets/{widgetId}/records/{callId:guid}", RecordDetail);
+        g.MapGet("dashboards/{id:guid}/widgets/{widgetId}/records/{callId:guid}/recording", Recording);
         return app;
     }
 
@@ -153,17 +156,25 @@ public static class ClientPortalEndpoints
         catch (JsonException) { return []; }
     }
 
-    private static async Task<IResult> WidgetData(Guid id, string widgetId, ClaimsPrincipal principal, ScopedTenantDbContextFactory dbf,
-        TenantContext tc, KpiService kpis, ICallStateHistoryRepository callStates, CancellationToken ct)
+    /// <summary>A client-dashboard widget the signed-in client user may see, with its saved config resolved inside the
+    /// dashboard's locked scope. Null when the user, dashboard or widget isn't theirs (or isn't a client widget).</summary>
+    private sealed record ClientWidget(ClientUser User, Dashboard Dashboard, string Type, JsonObject Config, IReadOnlyList<Guid> Campaigns,
+        string Zone, string? Mode, int? Value)
     {
-        if (tc.Current is not { } tenant) return Results.Unauthorized();
-        await using var db = dbf.Create();
-        if (await LoadAsync(db, principal, ct) is not { } loaded) return Results.Unauthorized();
+        public string? Str(string key) => Config[key] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+        public List<string> Strings(string key) => Config[key] is JsonArray a ? a.OfType<JsonValue>().Select(v => v.TryGetValue<string>(out var s) ? s : null).OfType<string>().ToList() : [];
+        public bool Flag(string key, bool fallback) => Config[key] is JsonValue v && v.TryGetValue<bool>(out var b) ? b : fallback;
+    }
+
+    private static async Task<ClientWidget?> ResolveWidgetAsync(TenantDbContext db, ClaimsPrincipal principal, Tenant tenant, Guid id,
+        string widgetId, CancellationToken ct)
+    {
+        if (await LoadAsync(db, principal, ct) is not { } loaded) return null;
         var (user, dashboards) = loaded;
         var dashboard = dashboards.FirstOrDefault(d => d.Id == id);
         var widget = dashboard is null ? null : ParseLayout(dashboard.Layout).FirstOrDefault(w => w["id"]?.GetValue<string>() == widgetId);
         var type = widget?["widgetType"]?.GetValue<string>();
-        if (dashboard is null || widget is null || type is null || !Domain.Entities.Dashboard.ClientWidgetTypes.Contains(type)) return Results.NotFound();
+        if (dashboard is null || widget is null || type is null || !Domain.Entities.Dashboard.ClientWidgetTypes.Contains(type)) return null;
 
         var config = widget["config"] as JsonObject ?? new JsonObject();
         string? Str(JsonNode? n) => n is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
@@ -173,11 +184,32 @@ public static class ClientPortalEndpoints
 
         var zone = user.TimeZone is { } z && IsZone(z) ? z : tenant.Timezone;
         var window = config["timeWindow"] as JsonObject;
-        var mode = Str(window?["mode"]);
         int? value = window?["value"] is JsonValue wv && wv.TryGetValue<int>(out var n) ? n : null;
+        return new ClientWidget(user, dashboard, type, config, campaigns, zone, Str(window?["mode"]), value);
+    }
+
+    private static async Task<IResult> WidgetData(Guid id, string widgetId, ClaimsPrincipal principal, ScopedTenantDbContextFactory dbf,
+        TenantContext tc, KpiService kpis, ICallStateHistoryRepository callStates, CallRecordsReport records, HttpRequest request,
+        CancellationToken ct)
+    {
+        if (tc.Current is not { } tenant) return Results.Unauthorized();
+        await using var db = dbf.Create();
+        if (await ResolveWidgetAsync(db, principal, tenant, id, widgetId, ct) is not { } w) return Results.NotFound();
+        var (dashboard, type, config, campaigns, zone, mode, value) = (w.Dashboard, w.Type, w.Config, w.Campaigns, w.Zone, w.Mode, w.Value);
+        string? Str(JsonNode? n) => n is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
 
         switch (type)
         {
+            case "records":
+            {
+                // The client user may page, search, sort and filter — all narrowing, never outside the scope or the columns.
+                var (since, until) = KpiEndpoints.Window(zone, mode, value, DateTimeOffset.UtcNow);
+                var p = RecordsWidgetEndpoints.Paging(request, w.Config["pageSize"] is JsonValue ps && ps.TryGetValue<int>(out var size) ? size : 25);
+                var columns = w.Strings("columns");
+                var filters = p.Filters.Where(f => columns.Contains(f.Key)).ToDictionary();
+                return Results.Ok(await records.QueryAsync(new RecordsQuery(since, until, dashboard.ScopeClientId, null, campaigns.ToHashSet(),
+                    columns, p.Search, filters, p.Sort is { } so && columns.Contains(so) ? so : null, p.Desc, p.Page, p.PageSize, zone), ct));
+            }
             case "kpi":
             {
                 var (since, until) = KpiEndpoints.Window(zone, mode, value, DateTimeOffset.UtcNow);
@@ -214,6 +246,43 @@ public static class ClientPortalEndpoints
             default:
                 return Results.NotFound();
         }
+    }
+
+    /// <summary>One call's detail — only the widget's detail columns (or its columns), only inside the dashboard's scope.</summary>
+    private static async Task<IResult> RecordDetail(Guid id, string widgetId, Guid callId, ClaimsPrincipal principal, ScopedTenantDbContextFactory dbf,
+        TenantContext tc, CallRecordsReport records, CancellationToken ct)
+    {
+        if (tc.Current is not { } tenant) return Results.Unauthorized();
+        await using var db = dbf.Create();
+        if (await ResolveWidgetAsync(db, principal, tenant, id, widgetId, ct) is not { Type: "records" } w) return Results.NotFound();
+        var columns = w.Strings("detailColumns") is { Count: > 0 } dc ? dc : w.Strings("columns");
+        var detail = await records.DetailAsync(callId, w.Dashboard.ScopeClientId, w.Campaigns.ToHashSet(), columns, w.Zone, ct);
+        if (detail is null) return Results.NotFound();
+        var canPlay = w.User.CanPlayRecordings && w.Flag("allowRecordings", true);
+        return Results.Ok(new { detail, canPlayRecording = canPlay && detail.RecordingStatus == "available" });
+    }
+
+    /// <summary>Recording playback (S181): only for client users the tenant allowed, on a records widget that allows it, for a
+    /// call inside the dashboard's scope. Every play is audited.</summary>
+    private static async Task<IResult> Recording(Guid id, string widgetId, Guid callId, ClaimsPrincipal principal, ScopedTenantDbContextFactory dbf,
+        TenantContext tc, CallRecordsReport records, ICallRecordRepository callRecords, IRecordingMergeJobRepository mergeJobs,
+        Application.Interfaces.Services.IBlobStorage blobs, HttpContext http, CancellationToken ct)
+    {
+        if (tc.Current is not { } tenant) return Results.Unauthorized();
+        await using var db = dbf.Create();
+        if (await ResolveWidgetAsync(db, principal, tenant, id, widgetId, ct) is not { Type: "records" } w) return Results.NotFound();
+        if (!w.User.CanPlayRecordings || !w.Flag("allowRecordings", true)) return Results.Forbid();
+        if (!await records.InScopeAsync(callId, w.Dashboard.ScopeClientId, w.Campaigns.ToHashSet(), ct)) return Results.NotFound();
+
+        // Audit once per play, not per range request the player makes while seeking.
+        var range = http.Request.Headers.Range.ToString();
+        if (string.IsNullOrEmpty(range) || range.StartsWith("bytes=0-"))
+        {
+            db.ClientUserAudit.Add(ClientUserAuditEntry.Create(w.User.Id, ClientUserAuditAction.RecordingPlayed, $"call {callId}",
+                ClientPortalAuthEndpoints.Ip(http)));
+            await db.SaveChangesAsync(ct);
+        }
+        return await CallRecordingsEndpoints.StreamAsync(callId, callRecords, mergeJobs, blobs, ct);
     }
 
     private static bool IsZone(string id)

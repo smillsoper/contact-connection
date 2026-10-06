@@ -11,6 +11,9 @@ import WidgetShell from '../../components/dashboard/WidgetShell'
 import KpiWidget from '../../components/dashboard/widgets/KpiWidget'
 import ServiceLevelThresholdWidget from '../../components/dashboard/widgets/ServiceLevelThresholdWidget'
 import CallStateByCampaignWidget from '../../components/dashboard/widgets/CallStateByCampaignWidget'
+import RecordsWidget from '../../components/dashboard/widgets/RecordsWidget'
+import { RecordsSourceContext, type RecordsSource } from '../../components/dashboard/RecordsSource'
+import { recordsQuery, type RecordDetail, type RecordsPage } from '../../api/dashboardWidgets'
 import { WidgetDataSourceContext } from '../../components/dashboard/WidgetDataSource'
 import {
   DashboardCallStateLiveContext, DashboardAgentSessionsLiveContext, type CallStateEvent, type AgentSessionsEvent,
@@ -24,11 +27,17 @@ const GridLayoutWithWidth = WidthProvider(GridLayout)
 
 function ClientWidget({ dashboardId, widget }: { dashboardId: string; widget: DashboardWidgetInstance }) {
   const fetchData = useMemo(() => () => clientPortalApi.widgetData(dashboardId, widget.id), [dashboardId, widget.id])
+  const records = useMemo<RecordsSource>(() => ({
+    query: (p) => clientPortalApi.widgetData<RecordsPage>(dashboardId, widget.id, recordsQuery(p)),
+    detail: (callId) => clientPortalApi.recordDetail<{ detail: RecordDetail; canPlayRecording: boolean }>(dashboardId, widget.id, callId),
+    recording: (callId) => clientPortalApi.recording(dashboardId, widget.id, callId),
+  }), [dashboardId, widget.id])
   const body = (() => {
     switch (widget.widgetType) {
       case 'kpi': return <KpiWidget config={widget.config} />
       case 'service_level_threshold': return <ServiceLevelThresholdWidget config={widget.config} />
       case 'call_state_by_campaign': return <CallStateByCampaignWidget config={widget.config} />
+      case 'records': return <RecordsSourceContext.Provider value={records}><RecordsWidget config={widget.config} /></RecordsSourceContext.Provider>
       default: return null
     }
   })()
