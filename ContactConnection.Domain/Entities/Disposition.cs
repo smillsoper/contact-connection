@@ -26,6 +26,20 @@ public class DispositionCategory
 
     public bool IsSystem => Key is not null;
 
+    // ── Recording retention rule (S181) — campaigns on "Always record, retain by disposition" only ──
+    /// <summary><see cref="RecordingKeep"/>: keep / conversation / discard. Null = inherit (a disposition from its
+    /// category; a category: keep).</summary>
+    public string? RecordingAction { get; private set; }
+    /// <summary>Keep this many days, overriding the campaign's retention. Null = inherit / the campaign's.</summary>
+    public int? RecordingRetentionDays { get; private set; }
+
+    public void SetRecordingRule(string? action, int? retentionDays)
+    {
+        if (action is not null && !RecordingKeep.IsValid(action)) throw new ArgumentException($"Unknown recording action '{action}'.");
+        RecordingAction = action;
+        RecordingRetentionDays = retentionDays is { } d ? Math.Clamp(d, 1, 3650) : null;
+    }
+
     private DispositionCategory() { }
 
     public static DispositionCategory Create(Guid tenantId, string name, string? description, bool salesOpportunity,
@@ -96,6 +110,20 @@ public class Disposition
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
+    // ── Recording retention rule (S181) — campaigns on "Always record, retain by disposition" only ──
+    /// <summary><see cref="RecordingKeep"/>: keep / conversation / discard. Null = inherit (a disposition from its
+    /// category; a category: keep).</summary>
+    public string? RecordingAction { get; private set; }
+    /// <summary>Keep this many days, overriding the campaign's retention. Null = inherit / the campaign's.</summary>
+    public int? RecordingRetentionDays { get; private set; }
+
+    public void SetRecordingRule(string? action, int? retentionDays)
+    {
+        if (action is not null && !RecordingKeep.IsValid(action)) throw new ArgumentException($"Unknown recording action '{action}'.");
+        RecordingAction = action;
+        RecordingRetentionDays = retentionDays is { } d ? Math.Clamp(d, 1, 3650) : null;
+    }
+
     /// <summary>0 = campaign, 1 = client, 2 = tenant — lower wins.</summary>
     public int ScopeRank => CampaignId is not null ? 0 : ClientId is not null ? 1 : 2;
 
@@ -164,4 +192,55 @@ public class Disposition
             .DistinctBy(Normalize).ToList();
 
     private static string? Blank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+}
+
+/// <summary>What happens to a call's recording on a "retain by disposition" campaign (S181).</summary>
+public static class RecordingKeep
+{
+    public const string Keep = "keep";
+    /// <summary>Keep only from the moment the caller reached an agent.</summary>
+    public const string Conversation = "conversation";
+    public const string Discard = "discard";
+    public static bool IsValid(string? v) => v is Keep or Conversation or Discard;
+}
+
+/// <summary>One interaction's resolved rule: the disposition's own setting, else its category's.</summary>
+/// <param name="Mapped">The interaction has a catalog disposition (false = none recorded, or unmapped text).</param>
+public sealed record InteractionRecordingRule(bool Mapped, string? Action, int? RetentionDays);
+
+/// <param name="Days">How long to keep it (ignored for discard).</param>
+public sealed record RecordingDecision(string Action, int Days);
+
+/// <summary>
+/// Which recording rule a call gets (S181, Stephen's rules) — pure, for "Always record, retain by disposition" campaigns:
+/// <list type="number">
+/// <item>Each interaction: its disposition's rule, else its category's (the caller resolves that); a mapped disposition
+/// with no rule anywhere keeps the recording for the campaign's normal period.</item>
+/// <item>No disposition, or unmapped text: keep for the campaign's "missing / unmapped" period.</item>
+/// <item>Several interactions: keep the recording if ANY says keep (whole call beats conversation-only beats discard) —
+/// one recording covers the whole call — for the LONGEST period among those that keep.</item>
+/// </list>
+/// </summary>
+public static class RecordingRetentionPolicy
+{
+    public static RecordingDecision Decide(int campaignDays, int? unmappedDays, IReadOnlyCollection<InteractionRecordingRule> interactions)
+    {
+        var resolved = (interactions.Count == 0 ? [new InteractionRecordingRule(false, null, null)] : interactions)
+            .Select(i => i.Mapped
+                ? (Action: i.Action ?? RecordingKeep.Keep, Days: i.RetentionDays ?? campaignDays)
+                : (Action: RecordingKeep.Keep, Days: unmappedDays ?? campaignDays))
+            .ToList();
+        var kept = resolved.Where(r => r.Action != RecordingKeep.Discard).ToList();
+        if (kept.Count == 0) return new RecordingDecision(RecordingKeep.Discard, 0);
+        var action = kept.Any(r => r.Action == RecordingKeep.Keep) ? RecordingKeep.Keep : RecordingKeep.Conversation;
+        return new RecordingDecision(action, kept.Max(r => r.Days));
+    }
+
+    /// <summary>The rule an interaction's disposition gives: its own, falling back to its category's, field by field.</summary>
+    public static InteractionRecordingRule ForDisposition(Disposition? disposition, DispositionCategory? category) =>
+        disposition is null
+            ? new InteractionRecordingRule(false, null, null)
+            : new InteractionRecordingRule(true,
+                disposition.RecordingAction ?? category?.RecordingAction,
+                disposition.RecordingRetentionDays ?? category?.RecordingRetentionDays);
 }

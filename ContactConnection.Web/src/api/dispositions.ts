@@ -12,7 +12,12 @@ export interface DispositionCategory {
   displayOrder: number
   isActive: boolean
   isSystem: boolean
+  /** S181, retain-by-disposition campaigns: keep / conversation / discard; null = keep. */
+  recordingAction: RecordingAction | null
+  recordingRetentionDays: number | null
 }
+
+export type RecordingAction = 'keep' | 'conversation' | 'discard'
 
 export interface Disposition {
   id: string
@@ -25,6 +30,9 @@ export interface Disposition {
   displayOrder: number
   isActive: boolean
   interactions: number
+  /** Null = its category's rule. */
+  recordingAction: RecordingAction | null
+  recordingRetentionDays: number | null
 }
 
 export interface UnmappedDisposition {
@@ -35,8 +43,26 @@ export interface UnmappedDisposition {
   campaigns: { id: string; name: string }[]
 }
 
-export interface CategoryInput { name: string; description: string | null; salesOpportunity: boolean; excludedFromKpis: boolean; displayOrder?: number }
-export interface DispositionInput { name: string; code: string | null; categoryId: string; clientId: string | null; campaignId: string | null; aliases: string[]; displayOrder?: number }
+export interface CategoryInput {
+  name: string; description: string | null; salesOpportunity: boolean; excludedFromKpis: boolean; displayOrder?: number
+  recordingAction?: RecordingAction | null; recordingRetentionDays?: number | null
+}
+export interface DispositionInput {
+  name: string; code: string | null; categoryId: string; clientId: string | null; campaignId: string | null; aliases: string[]; displayOrder?: number
+  recordingAction?: RecordingAction | null; recordingRetentionDays?: number | null
+}
+
+export const RECORDING_ACTION_LABEL: Record<RecordingAction, string> = {
+  keep: 'Keep whole call', conversation: 'Keep conversation only', discard: 'Discard',
+}
+
+/** "Discard", "Keep 365 days", "Conversation only, campaign period"… — for the lists. */
+export function describeRecordingRule(action: RecordingAction | null, days: number | null, inherit: string) {
+  if (!action && !days) return inherit
+  if (action === 'discard') return 'Discard'
+  const what = action === 'conversation' ? 'Conversation only' : 'Keep'
+  return days ? `${what}, ${days} days` : `${what}, campaign period`
+}
 
 export const dispositionsApi = {
   categories: () => api.get<DispositionCategory[]>('/api/v1/disposition-categories'),

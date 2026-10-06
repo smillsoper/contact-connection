@@ -84,6 +84,15 @@ public class Campaign
 
     // Retention window for finished recordings; drives the purge job (job itself is separate).
     public int RecordingRetentionDays { get; private set; } = 90;
+    /// <summary>"Always record, retain by disposition" only (S181): how long to keep a call whose disposition is missing
+    /// or not in the catalog. Null = <see cref="RecordingRetentionDays"/>.</summary>
+    public int? UnmappedRecordingRetentionDays { get; private set; }
+
+    public void SetUnmappedRecordingRetention(int? days)
+    {
+        UnmappedRecordingRetentionDays = days is { } d ? Math.Clamp(d, 1, 3650) : null;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
 
     // Retention window for the PCI SensitiveData blob (captured card/CVV/SSN — see
     // ARCHITECTURE.md §24), drives the Worker's SensitiveDataRetentionService safety-net wipe.

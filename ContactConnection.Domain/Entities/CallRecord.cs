@@ -539,6 +539,18 @@ public class CallRecord
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    /// <summary>"Keep conversation only" (S181): when the recording was cut to start at agent connect, and how many seconds
+    /// before that were removed.</summary>
+    public DateTimeOffset? RecordingTrimmedAt { get; private set; }
+    public int? RecordingTrimmedSeconds { get; private set; }
+
+    public void MarkRecordingTrimmed(int removedSeconds)
+    {
+        RecordingTrimmedAt = DateTimeOffset.UtcNow;
+        RecordingTrimmedSeconds = Math.Max(0, removedSeconds);
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
     /// <summary>Marks the recording as no longer retained (retention purge or disposition discard).</summary>
     public void MarkRecordingPurged(string reason)
     {

@@ -38,6 +38,13 @@ public sealed class FfmpegRunner : IFfmpegRunner
         _ffmpegPath  = config["Recording:Ffmpeg:Path"]
                        ?? config["FreeSWITCH:FfmpegPath"]
                        ?? "ffmpeg";
+        // A configured full path that no longer exists (a package manager upgraded ffmpeg into a new versioned folder —
+        // happened S181) would fail every merge / trim silently: fall back to ffmpeg on PATH, loudly.
+        if (Path.IsPathRooted(_ffmpegPath) && !File.Exists(_ffmpegPath))
+        {
+            logger.LogWarning("Configured ffmpeg not found at {Path} — falling back to ffmpeg on PATH. Update Recording:Ffmpeg:Path.", _ffmpegPath);
+            _ffmpegPath = "ffmpeg";
+        }
         _ffprobePath = config["Recording:Ffmpeg:ProbePath"] ?? DeriveProbePath(_ffmpegPath);
         _timeoutSeconds = int.TryParse(config["Recording:Ffmpeg:TimeoutSeconds"], out var v) && v > 0 ? v : 300;
         _logger      = logger;

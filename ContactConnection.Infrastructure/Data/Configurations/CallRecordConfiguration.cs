@@ -88,6 +88,8 @@ public class CallRecordConfiguration : IEntityTypeConfiguration<CallRecord>
         builder.Property(r => r.RecordingRetained).HasColumnName("recording_retained").HasDefaultValue(true);
         builder.Property(r => r.RecordingDeletedAt).HasColumnName("recording_deleted_at");
         builder.Property(r => r.RecordingDeleteReason).HasColumnName("recording_delete_reason").HasMaxLength(200);
+        builder.Property(r => r.RecordingTrimmedAt).HasColumnName("recording_trimmed_at");
+        builder.Property(r => r.RecordingTrimmedSeconds).HasColumnName("recording_trimmed_seconds");
 
         // JSONB — typed
         builder.Property(r => r.MediaAttribution)

@@ -467,7 +467,7 @@ const RECORDING_MODES: { value: string; label: string; hint: string }[] = [
   { value: 'disabled', label: 'Disabled', hint: 'No recording on this campaign. A tf_record(start) node is a no-op.' },
   { value: 'full', label: 'Full / IVR', hint: 'Recording may run from call arrival (IVR, hold, queue) through the agent conversation to disconnect.' },
   { value: 'conversation', label: 'Conversation only', hint: 'Recording may only run once the caller is bridged to an agent.' },
-  { value: 'record_always_retain_by_disposition', label: 'Always record, retain by disposition', hint: 'Record every call; the end-of-call disposition decides whether the file is kept.' },
+  { value: 'record_always_retain_by_disposition', label: 'Always record, retain by disposition', hint: 'Record every call; each disposition (or its category) decides whether the file is kept, cut to the conversation, or discarded, and for how long — set in Admin → Dispositions.' },
 ]
 
 const CONSENT_MODELS: { value: string; label: string; hint: string }[] = [
@@ -489,6 +489,7 @@ function RecordingSettingsForm({ campaign, onSaved }: RecordingSettingsFormProps
   const [recordingBeepEnabled, setRecordingBeepEnabled] = useState(campaign.recordingBeepEnabled ?? false)
   const [autoMaskOnHold, setAutoMaskOnHold] = useState(campaign.autoMaskOnHold ?? false)
   const [retentionDays, setRetentionDays] = useState(campaign.recordingRetentionDays ?? 90)
+  const [unmappedDays, setUnmappedDays] = useState<string>(campaign.unmappedRecordingRetentionDays?.toString() ?? '')
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
@@ -520,6 +521,7 @@ function RecordingSettingsForm({ campaign, onSaved }: RecordingSettingsFormProps
         recordingMode, consentModel, recordingRequired, recordStereo,
         recordingBeepEnabled, autoMaskOnHold,
         recordingRetentionDays: retentionDays,
+        unmappedRecordingRetentionDays: unmappedDays.trim() ? Number(unmappedDays) : null,
       })
       onSaved({ ...campaign, ...updated })
       setSaved(true)
@@ -575,6 +577,21 @@ function RecordingSettingsForm({ campaign, onSaved }: RecordingSettingsFormProps
           />
           <p className="text-xs text-gray-500 mt-1 leading-snug">How long finished recordings are kept before the purge job removes them.</p>
         </div>
+
+        {recordingMode === 'record_always_retain_by_disposition' && (
+          <div>
+            <label className={labelCls}>Missing or unmapped disposition — keep (days)</label>
+            <input
+              type="number" min={1} max={3650} value={unmappedDays} placeholder={`${retentionDays} (the retention above)`}
+              onChange={(e) => setUnmappedDays(e.target.value)}
+              className={inputCls}
+            />
+            <p className="text-xs text-gray-500 mt-1 leading-snug">
+              Calls whose disposition isn't recorded or isn't in the catalog. A call with several interactions keeps its recording if any of
+              them keeps it, for the longest period. Discards and conversation-only cuts wait 24 hours so a wrong disposition can be fixed.
+            </p>
+          </div>
+        )}
 
         <div className={`space-y-4 md:col-span-2 ${enabled ? '' : 'opacity-50 pointer-events-none'}`}>
           <Toggle on={recordStereo} set={setRecordStereo}

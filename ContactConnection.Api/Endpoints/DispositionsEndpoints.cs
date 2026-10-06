@@ -50,6 +50,8 @@ public static class DispositionsEndpoints
         await using var db = dbf.Create();
         var c = DispositionCategory.Create(tenant.Id, req.Name, req.Description, req.SalesOpportunity, req.ExcludedFromKpis,
             req.DisplayOrder ?? (existing.Count == 0 ? 100 : existing.Max(x => x.DisplayOrder) + 10));
+        try { c.SetRecordingRule(Blank(req.RecordingAction), req.RecordingRetentionDays); }
+        catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
         db.DispositionCategories.Add(c);
         await db.SaveChangesAsync(ct);
         return Results.Created($"/api/v1/disposition-categories/{c.Id}", CategoryResponse(c));
@@ -65,6 +67,8 @@ public static class DispositionsEndpoints
         if (await db.DispositionCategories.AnyAsync(x => x.Id != id && x.Name.ToLower() == req.Name.Trim().ToLower(), ct))
             return Results.Conflict(new { error = $"There's already a category named '{req.Name.Trim()}'." });
         c.Update(req.Name, req.Description, req.SalesOpportunity, req.ExcludedFromKpis, req.DisplayOrder ?? c.DisplayOrder);
+        try { c.SetRecordingRule(Blank(req.RecordingAction), req.RecordingRetentionDays); }
+        catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
         await db.SaveChangesAsync(ct);
         return Results.Ok(CategoryResponse(c));
     }
@@ -107,6 +111,8 @@ public static class DispositionsEndpoints
         var scope = await ScopeAsync(db, req.ClientId, req.CampaignId, ct);
         if (scope.Error is { } scopeError) return Results.BadRequest(new { error = scopeError });
         var d = Disposition.Create(tenant.Id, req.Name, req.Code, req.CategoryId, scope.ClientId, req.CampaignId, req.Aliases, req.DisplayOrder ?? 0);
+        try { d.SetRecordingRule(Blank(req.RecordingAction), req.RecordingRetentionDays); }
+        catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
         db.Dispositions.Add(d);
         await db.SaveChangesAsync(ct);
         var relinked = await svc.RelinkAllAsync(ct);
@@ -122,6 +128,8 @@ public static class DispositionsEndpoints
         if (d is null) return Results.NotFound();
         if (await ValidateAsync(db, req with { ClientId = d.ClientId, CampaignId = d.CampaignId }, id, ct) is { } error) return error;
         d.Update(req.Name, req.Code, req.CategoryId, req.Aliases ?? [], req.DisplayOrder ?? d.DisplayOrder);
+        try { d.SetRecordingRule(Blank(req.RecordingAction), req.RecordingRetentionDays); }
+        catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
         await db.SaveChangesAsync(ct);
         var relinked = await svc.RelinkAllAsync(ct);
         return Results.Ok(new { disposition = Response(d, 0), relinked });
@@ -190,7 +198,10 @@ public static class DispositionsEndpoints
             var scope = await ScopeAsync(db, newReq.ClientId, newReq.CampaignId, ct);
             if (scope.Error is { } scopeError) return Results.BadRequest(new { error = scopeError });
             var aliases = Disposition.Normalize(newReq.Name) == Disposition.Normalize(req.Text) ? newReq.Aliases : [.. newReq.Aliases!, req.Text];
-            db.Dispositions.Add(Disposition.Create(tenant.Id, newReq.Name, newReq.Code, newReq.CategoryId, scope.ClientId, newReq.CampaignId, aliases));
+            var created = Disposition.Create(tenant.Id, newReq.Name, newReq.Code, newReq.CategoryId, scope.ClientId, newReq.CampaignId, aliases);
+            try { created.SetRecordingRule(Blank(newReq.RecordingAction), newReq.RecordingRetentionDays); }
+            catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+            db.Dispositions.Add(created);
         }
         else return Results.BadRequest(new { error = "Choose an existing disposition or create one." });
         await db.SaveChangesAsync(ct);
@@ -228,16 +239,22 @@ public static class DispositionsEndpoints
     private static object CategoryResponse(DispositionCategory c) => new
     {
         c.Id, c.Key, c.Name, c.Description, c.SalesOpportunity, c.ExcludedFromKpis, c.DisplayOrder, c.IsActive, c.IsSystem,
+        c.RecordingAction, c.RecordingRetentionDays,
     };
 
     private static object Response(Disposition d, int interactions) => new
     {
         d.Id, d.Name, d.Code, d.CategoryId, d.ClientId, d.CampaignId, d.Aliases, d.DisplayOrder, d.IsActive, Interactions = interactions,
+        d.RecordingAction, d.RecordingRetentionDays,
     };
 
-    public sealed record CategoryRequest(string Name, string? Description, bool SalesOpportunity, bool ExcludedFromKpis, int? DisplayOrder);
+    /// <param name="RecordingAction">keep / conversation / discard; blank = inherit (S181, retain-by-disposition campaigns).</param>
+    public sealed record CategoryRequest(string Name, string? Description, bool SalesOpportunity, bool ExcludedFromKpis, int? DisplayOrder,
+        string? RecordingAction = null, int? RecordingRetentionDays = null);
     public sealed record ActiveRequest(bool Active);
     public sealed record DispositionRequest(string Name, string? Code, Guid CategoryId, Guid? ClientId, Guid? CampaignId,
-        List<string>? Aliases, int? DisplayOrder);
+        List<string>? Aliases, int? DisplayOrder, string? RecordingAction = null, int? RecordingRetentionDays = null);
+
+    private static string? Blank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
     public sealed record ResolveRequest(string Text, Guid? DispositionId, DispositionRequest? Create);
 }

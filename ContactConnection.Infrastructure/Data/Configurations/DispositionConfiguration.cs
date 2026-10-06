@@ -17,6 +17,8 @@ public class DispositionCategoryConfiguration : IEntityTypeConfiguration<Disposi
         b.Property(c => c.Description).HasColumnName("description").HasMaxLength(500);
         b.Property(c => c.SalesOpportunity).HasColumnName("sales_opportunity");
         b.Property(c => c.ExcludedFromKpis).HasColumnName("excluded_from_kpis");
+        b.Property(c => c.RecordingAction).HasColumnName("recording_action").HasMaxLength(20);
+        b.Property(c => c.RecordingRetentionDays).HasColumnName("recording_retention_days");
         b.Property(c => c.DisplayOrder).HasColumnName("display_order");
         b.Property(c => c.IsActive).HasColumnName("is_active");
         b.Property(c => c.CreatedAt).HasColumnName("created_at");
@@ -54,6 +56,8 @@ public class DispositionConfiguration : IEntityTypeConfiguration<Disposition>
         b.Property(d => d.TenantId).HasColumnName("tenant_id");
         b.Property(d => d.Name).HasColumnName("name").HasMaxLength(200).IsRequired();
         b.Property(d => d.Code).HasColumnName("code").HasMaxLength(50);
+        b.Property(d => d.RecordingAction).HasColumnName("recording_action").HasMaxLength(20);
+        b.Property(d => d.RecordingRetentionDays).HasColumnName("recording_retention_days");
         b.Property(d => d.CategoryId).HasColumnName("category_id");
         b.Property(d => d.ClientId).HasColumnName("client_id");
         b.Property(d => d.CampaignId).HasColumnName("campaign_id");

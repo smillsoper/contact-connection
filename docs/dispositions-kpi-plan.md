@@ -149,9 +149,14 @@ reporting meaning, and the KPIs are built on them.
   designer picker + catalog question options, AI catalog, Call Records filters / badges, commissions per disposition /
   category, KPI widget (close rates, revenue in every basis + net, per call / opportunity / order / agent hour / talk
   hour, upsell, units, call handling, AHT, data quality) and tenant-defined custom KPIs.
+- **Done (S181):** recording retention by disposition — per category and per disposition (disposition overrides its
+  category): keep whole call / keep conversation only / discard, plus keep-for-N-days overriding the campaign; a campaign
+  setting for missing / unmapped dispositions; several interactions → keep if any keeps, for the longest period; discard
+  and conversation-only cuts wait 24 h (Recording:Retention:DispositionGraceHours) so a wrong disposition can be fixed;
+  "conversation only" trims the raw WAV and the merged file to the call's first "active" state (never connected =
+  discard). The purge now walks every retained recording, not the 50 oldest.
 - **Not yet:** hold time (no hold state is recorded yet), cancellations after the fact in net orders (needs client
-  fulfillment / cancellation data), recording retention by disposition (Campaign "record_always_retain_by_disposition" is
-  offered but never implemented — needs Stephen's rules).
+  fulfillment / cancellation data).
 
 ## Build order
 

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import AdminShell from '../../components/admin/AdminShell'
 import {
-  dispositionsApi, type Disposition, type DispositionCategory, type DispositionInput, type UnmappedDisposition,
+  dispositionsApi, describeRecordingRule, RECORDING_ACTION_LABEL,
+  type Disposition, type DispositionCategory, type DispositionInput, type RecordingAction, type UnmappedDisposition,
 } from '../../api/dispositions'
 import { listCampaigns, listClients, type Campaign, type Client } from '../../api/telephony'
 import { customKpisApi, type CustomKpi } from '../../api/dashboardWidgets'
@@ -104,6 +105,31 @@ function CustomKpisTab({ categories }: { categories: DispositionCategory[] }) {
   )
 }
 
+/** Recording rule for "Always record, retain by disposition" campaigns (S181). Blank = inherit. */
+function RecordingRuleFields({ action, days, inheritLabel, onChange }: {
+  action: RecordingAction | null | undefined; days: number | null | undefined; inheritLabel: string
+  onChange: (action: RecordingAction | null, days: number | null) => void
+}) {
+  return (
+    <>
+      <div>
+        <label className={label}>Recording (retain-by-disposition campaigns)</label>
+        <select className={input} value={action ?? ''} onChange={(e) => onChange((e.target.value || null) as RecordingAction | null, e.target.value === 'discard' ? null : days ?? null)}>
+          <option value="">{inheritLabel}</option>
+          {(Object.keys(RECORDING_ACTION_LABEL) as RecordingAction[]).map((a) => <option key={a} value={a}>{RECORDING_ACTION_LABEL[a]}</option>)}
+        </select>
+      </div>
+      {action !== 'discard' && (
+        <div>
+          <label className={label}>Keep for (days)</label>
+          <input type="number" min={1} max={3650} className={input} value={days ?? ''} placeholder="Campaign's retention"
+            onChange={(e) => onChange(action ?? null, e.target.value ? Number(e.target.value) : null)} />
+        </div>
+      )}
+    </>
+  )
+}
+
 const emptyInput = (categoryId: string): DispositionInput =>
   ({ name: '', code: null, categoryId, clientId: null, campaignId: null, aliases: [] })
 
@@ -161,6 +187,8 @@ function DispositionForm({ value, onChange, categories, clients, campaigns, scop
         <input className={input} value={value.aliases.join(', ')}
           onChange={(e) => set({ aliases: e.target.value.split(',').map((x) => x.trim()).filter(Boolean) })} />
       </div>
+      <RecordingRuleFields action={value.recordingAction} days={value.recordingRetentionDays} inheritLabel="Same as its category"
+        onChange={(a, d) => set({ recordingAction: a, recordingRetentionDays: d })} />
     </div>
   )
 }
@@ -175,7 +203,8 @@ export default function AdminDispositionsPage() {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [editing, setEditing] = useState<{ id: string | null; value: DispositionInput } | null>(null)
-  const [catEdit, setCatEdit] = useState<{ id: string | null; name: string; description: string; salesOpportunity: boolean; excludedFromKpis: boolean } | null>(null)
+  const [catEdit, setCatEdit] = useState<{ id: string | null; name: string; description: string; salesOpportunity: boolean; excludedFromKpis: boolean
+    recordingAction: RecordingAction | null; recordingRetentionDays: number | null } | null>(null)
   const [resolving, setResolving] = useState<{ text: string; mode: 'existing' | 'new'; dispositionId: string; value: DispositionInput } | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -257,6 +286,7 @@ export default function AdminDispositionsPage() {
                       <th className="py-2 pr-3 font-medium">Disposition</th>
                       <th className="py-2 pr-3 font-medium">Category</th>
                       <th className="py-2 pr-3 font-medium">Applies to</th>
+                      <th className="py-2 pr-3 font-medium">Recording</th>
                       <th className="py-2 pr-3 font-medium">Calls</th>
                       <th />
                     </tr>
@@ -272,15 +302,17 @@ export default function AdminDispositionsPage() {
                         <td className="py-2 pr-3 text-gray-300">
                           <select className="bg-gray-900 border border-gray-700 rounded px-1.5 py-1 text-xs text-gray-100" value={d.categoryId}
                             onChange={(e) => run(async () => relinkedMsg((await dispositionsApi.update(d.id,
-                              { name: d.name, code: d.code, categoryId: e.target.value, clientId: d.clientId, campaignId: d.campaignId, aliases: d.aliases, displayOrder: d.displayOrder })).relinked))}>
+                              { name: d.name, code: d.code, categoryId: e.target.value, clientId: d.clientId, campaignId: d.campaignId, aliases: d.aliases, displayOrder: d.displayOrder, recordingAction: d.recordingAction, recordingRetentionDays: d.recordingRetentionDays })).relinked))}>
                             {categories.filter((c) => c.isActive || c.id === d.categoryId).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                           </select>
                         </td>
                         <td className="py-2 pr-3 text-gray-400 text-xs">{scopeName(d)}</td>
+                        <td className="py-2 pr-3 text-gray-400 text-xs">{describeRecordingRule(d.recordingAction, d.recordingRetentionDays,
+                          `Category: ${describeRecordingRule(catName[d.categoryId]?.recordingAction ?? null, catName[d.categoryId]?.recordingRetentionDays ?? null, 'keep')}`)}</td>
                         <td className="py-2 pr-3 text-gray-400">{d.interactions}</td>
                         <td className="py-2 whitespace-nowrap text-right text-sm">
                           <button className="text-indigo-400 hover:text-indigo-300 mr-3"
-                            onClick={() => setEditing({ id: d.id, value: { name: d.name, code: d.code, categoryId: d.categoryId, clientId: d.clientId, campaignId: d.campaignId, aliases: d.aliases, displayOrder: d.displayOrder } })}>Edit</button>
+                            onClick={() => setEditing({ id: d.id, value: { name: d.name, code: d.code, categoryId: d.categoryId, clientId: d.clientId, campaignId: d.campaignId, aliases: d.aliases, displayOrder: d.displayOrder, recordingAction: d.recordingAction, recordingRetentionDays: d.recordingRetentionDays } })}>Edit</button>
                           {d.interactions === 0
                             ? <button className="text-red-400 hover:text-red-300" onClick={() => run(async () => { await dispositionsApi.remove(d.id); return 'Deleted.' })}>Delete</button>
                             : <button className="text-gray-400 hover:text-white" onClick={() => run(async () => { await dispositionsApi.setActive(d.id, !d.isActive); return d.isActive ? 'Retired — past calls keep it.' : 'Restored.' })}>{d.isActive ? 'Retire' : 'Restore'}</button>}
@@ -311,10 +343,15 @@ export default function AdminDispositionsPage() {
                   <label className="flex items-center gap-2"><input type="checkbox" checked={catEdit.salesOpportunity} onChange={(e) => setCatEdit({ ...catEdit, salesOpportunity: e.target.checked })} /> Sales opportunity</label>
                   <label className="flex items-center gap-2"><input type="checkbox" checked={catEdit.excludedFromKpis} onChange={(e) => setCatEdit({ ...catEdit, excludedFromKpis: e.target.checked })} /> Excluded from KPIs</label>
                 </div>
+                <div className="grid sm:grid-cols-2 gap-3 mt-3">
+                  <RecordingRuleFields action={catEdit.recordingAction} days={catEdit.recordingRetentionDays} inheritLabel="Keep whole call (default)"
+                    onChange={(a, d) => setCatEdit({ ...catEdit, recordingAction: a, recordingRetentionDays: d })} />
+                </div>
                 <div className="flex gap-2 mt-3">
                   <button className={`${btn} bg-indigo-600 hover:bg-indigo-500 text-white`} disabled={busy || !catEdit.name.trim()}
                     onClick={() => run(async () => {
-                      const body = { name: catEdit.name, description: catEdit.description || null, salesOpportunity: catEdit.salesOpportunity, excludedFromKpis: catEdit.excludedFromKpis }
+                      const body = { name: catEdit.name, description: catEdit.description || null, salesOpportunity: catEdit.salesOpportunity, excludedFromKpis: catEdit.excludedFromKpis,
+                        recordingAction: catEdit.recordingAction, recordingRetentionDays: catEdit.recordingRetentionDays }
                       if (catEdit.id) await dispositionsApi.updateCategory(catEdit.id, body); else await dispositionsApi.createCategory(body)
                       setCatEdit(null); return 'Saved.'
                     })}>Save</button>
@@ -323,7 +360,7 @@ export default function AdminDispositionsPage() {
               </div>
             ) : (
               <button className={`${btn} bg-indigo-600 hover:bg-indigo-500 text-white mb-4`}
-                onClick={() => setCatEdit({ id: null, name: '', description: '', salesOpportunity: false, excludedFromKpis: false })}>New category</button>
+                onClick={() => setCatEdit({ id: null, name: '', description: '', salesOpportunity: false, excludedFromKpis: false, recordingAction: null, recordingRetentionDays: null })}>New category</button>
             )}
             <table className="w-full text-sm">
               <thead>
@@ -331,6 +368,7 @@ export default function AdminDispositionsPage() {
                   <th className="py-2 pr-3 font-medium">Category</th>
                   <th className="py-2 pr-3 font-medium">Sales opportunity</th>
                   <th className="py-2 pr-3 font-medium">Excluded from KPIs</th>
+                  <th className="py-2 pr-3 font-medium">Recording</th>
                   <th className="py-2 pr-3 font-medium">Dispositions</th>
                   <th />
                 </tr>
@@ -342,10 +380,11 @@ export default function AdminDispositionsPage() {
                       {c.description && <span className="block text-xs text-gray-500">{c.description}</span>}</td>
                     <td className="py-2 pr-3 text-gray-300">{c.salesOpportunity ? 'Yes' : '—'}</td>
                     <td className="py-2 pr-3 text-gray-300">{c.excludedFromKpis ? 'Yes' : '—'}</td>
+                    <td className="py-2 pr-3 text-gray-400 text-xs">{describeRecordingRule(c.recordingAction, c.recordingRetentionDays, 'Keep, campaign period')}</td>
                     <td className="py-2 pr-3 text-gray-400">{dispositions.filter((d) => d.categoryId === c.id).length}</td>
                     <td className="py-2 text-right whitespace-nowrap text-sm">
                       <button className="text-indigo-400 hover:text-indigo-300 mr-3"
-                        onClick={() => setCatEdit({ id: c.id, name: c.name, description: c.description ?? '', salesOpportunity: c.salesOpportunity, excludedFromKpis: c.excludedFromKpis })}>Edit</button>
+                        onClick={() => setCatEdit({ id: c.id, name: c.name, description: c.description ?? '', salesOpportunity: c.salesOpportunity, excludedFromKpis: c.excludedFromKpis, recordingAction: c.recordingAction, recordingRetentionDays: c.recordingRetentionDays })}>Edit</button>
                       {!c.isSystem && <button className="text-gray-400 hover:text-white" onClick={() => run(async () => { await dispositionsApi.setCategoryActive(c.id, !c.isActive); return 'Saved.' })}>{c.isActive ? 'Retire' : 'Restore'}</button>}
                     </td>
                   </tr>

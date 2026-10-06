@@ -19,11 +19,12 @@ namespace ContactConnection.Worker;
 /// <c>.wav</c> on disk — then stamps <see cref="CallRecord.MarkRecordingPurged"/>. The recording
 /// event trail (JSONB audit) and the call record itself stay; only the media goes.
 ///
-/// Retention is per-campaign, so the batch is ordered oldest-call-first and each record's window
-/// is evaluated in memory (a campaign with a short window shouldn't wait behind older calls on a
-/// long one). Records with no resolvable campaign fall back to
-/// <c>Recording:Retention:DefaultDays</c>. Single-instance assumption, same as
-/// <see cref="RecordingMergeService"/>.
+/// Retention is per-campaign — and on "Always record, retain by disposition" campaigns per CALL (S181,
+/// <see cref="RecordingRetentionPolicy"/>: each interaction's disposition / category rule; keep if any keeps, for the
+/// longest period; missing / unmapped dispositions use the campaign's own period; discard and "conversation only" wait
+/// <c>Recording:Retention:DispositionGraceHours</c> so a wrong disposition can be fixed first). So every retained
+/// recording is walked a page at a time, oldest first. Records with no resolvable campaign fall back to
+/// <c>Recording:Retention:DefaultDays</c>. Single-instance assumption, same as <see cref="RecordingMergeService"/>.
 /// </summary>
 public sealed class RecordingRetentionService : BackgroundService
 {
@@ -37,13 +38,20 @@ public sealed class RecordingRetentionService : BackgroundService
     private readonly int _defaultDays;
     private readonly string _audioSourceDir;
     private readonly string _outputPrefix;
+    private readonly TimeSpan _dispositionGrace;
+    private readonly ContactConnection.Infrastructure.Telephony.Recording.RecordingTrimmer _trimmer;
 
     public RecordingRetentionService(
         IServiceScopeFactory scopeFactory,
         IBlobStorage blob,
         IConfiguration config,
-        ILogger<RecordingRetentionService> logger)
+        ILogger<RecordingRetentionService> logger,
+        ContactConnection.Infrastructure.Telephony.Recording.RecordingTrimmer trimmer)
     {
+        _trimmer = trimmer;
+        // "Retain by disposition" waits this long after the call before discarding or trimming, so a disposition can be
+        // corrected first (Call Records edit, AI summary confirm).
+        _dispositionGrace = TimeSpan.FromHours(ConfigInt(config, "Recording:Retention:DispositionGraceHours", 24));
         _scopeFactory = scopeFactory;
         _blob         = blob;
         _logger       = logger;
@@ -114,55 +122,123 @@ public sealed class RecordingRetentionService : BackgroundService
     {
         using var scope = _scopeFactory.CreateScope();
         scope.ServiceProvider.GetRequiredService<TenantContext>().Current = tenant;
+        await using var db = scope.ServiceProvider.GetRequiredService<ScopedTenantDbContextFactory>().Create();
 
-        var callRepo = scope.ServiceProvider.GetRequiredService<ICallRecordRepository>();
-        var db       = scope.ServiceProvider.GetRequiredService<ScopedTenantDbContextFactory>().Create();
-
-        var ids = await callRepo.FindRetainedRecordingIdsOldestFirstAsync(_batchSize, ct);
-        if (ids.Count == 0) return;
-
-        // One lookup of the campaigns referenced by this batch, not one per record.
-        var idList = ids.ToList();
-        var campaignIds = await db.CallRecords
-            .Where(r => idList.Contains(r.Id))
-            .Select(r => r.CampaignId)
-            .Distinct()
-            .ToListAsync(ct);
-        var retentionByCampaign = await db.Campaigns
-            .Where(c => campaignIds.Contains(c.Id))
-            .ToDictionaryAsync(c => c.Id, c => c.RecordingRetentionDays, ct);
+        var campaigns = await db.Campaigns.AsNoTracking()
+            .ToDictionaryAsync(c => c.Id, c => (c.RecordingMode, c.RecordingRetentionDays, c.UnmappedRecordingRetentionDays), ct);
+        var categories = await db.DispositionCategories.AsNoTracking().ToDictionaryAsync(c => c.Id, ct);
+        var dispositions = await db.Dispositions.AsNoTracking().ToDictionaryAsync(d => d.Id, ct);
 
         var now = DateTimeOffset.UtcNow;
         var purged = 0;
+        var trimmed = 0;
+        var scanned = 0;
+        // Every retained recording (S181): retention now varies per call, so a newer call due for discard must not wait
+        // behind older ones kept for a year. Ids first, then a page of records at a time.
+        var allIds = await db.CallRecords.AsNoTracking()
+            .Where(r => r.RecordingRetained && r.RecordingStartedAt != null)
+            .OrderBy(r => r.CallEndAt ?? r.CreatedAt).Select(r => r.Id).ToListAsync(ct);
 
-        foreach (var id in ids)
+        foreach (var chunk in allIds.Chunk(_batchSize))
         {
             if (ct.IsCancellationRequested) return;
+            var page = await db.CallRecords.Include(r => r.Interactions).Where(r => chunk.Contains(r.Id)).AsSplitQuery().ToListAsync(ct);
+            foreach (var record in page)
+            {
+                if (ct.IsCancellationRequested) return;
+                scanned++;
+                var anchor = record.CallEndAt ?? record.RecordingStoppedAt ?? record.CreatedAt;
+                var campaign = campaigns.TryGetValue(record.CampaignId, out var c) ? c : (RecordingMode: "", RecordingRetentionDays: _defaultDays, UnmappedRecordingRetentionDays: (int?)null);
 
-            var record = await callRepo.GetByIdAsync(id, ct);
-            if (record is null || !record.RecordingRetained) continue;
+                if (campaign.RecordingMode != RecordingMode.RecordAlwaysRetainByDisposition)
+                {
+                    if (anchor.AddDays(campaign.RecordingRetentionDays) <= now)
+                    {
+                        await PurgeAsync(record, "retention_expired", ct);
+                        purged++;
+                    }
+                    continue;
+                }
 
-            var days   = retentionByCampaign.GetValueOrDefault(record.CampaignId, _defaultDays);
-            var anchor = record.CallEndAt ?? record.RecordingStoppedAt ?? record.CreatedAt;
-            if (anchor.AddDays(days) > now) continue;   // not due yet — campaigns vary, so keep scanning the batch
+                // ── Retain by disposition (S181) ──
+                var rules = record.Interactions.Select(i =>
+                {
+                    var d = i.DispositionId is { } id ? dispositions.GetValueOrDefault(id) : null;
+                    return RecordingRetentionPolicy.ForDisposition(d, d is null ? null : categories.GetValueOrDefault(d.CategoryId));
+                }).ToList();
+                var decision = RecordingRetentionPolicy.Decide(campaign.RecordingRetentionDays, campaign.UnmappedRecordingRetentionDays, rules);
+                var settled = anchor + _dispositionGrace <= now;   // time to correct a mistaken disposition first
 
-            await _blob.DeletePrefixAsync($"{_outputPrefix}/{id}", ct);   // merged output ({prefix}/{id}/merged.*)
-            await _blob.DeletePrefixAsync($"screen/{id}", ct);            // screen-capture chunks
-            TryDeleteFile(Path.Combine(_audioSourceDir, $"{id}.wav"));    // raw stereo call audio
+                if (decision.Action == RecordingKeep.Discard)
+                {
+                    if (!settled) continue;
+                    await PurgeAsync(record, "discarded_by_disposition", ct);
+                    purged++;
+                    continue;
+                }
 
-            record.MarkRecordingPurged("retention_expired");
-            await callRepo.SaveChangesAsync(ct);
-            purged++;
+                if (anchor.AddDays(decision.Days) <= now)
+                {
+                    await PurgeAsync(record, "retention_expired", ct);
+                    purged++;
+                    continue;
+                }
 
-            _logger.LogInformation(
-                "Purged recording for call {CallId} (tenant {Subdomain}) — {Days}d window, call ended {Anchor:o}.",
-                id, tenant.Subdomain, days, anchor);
+                if (decision.Action == RecordingKeep.Conversation && record.RecordingTrimmedAt is null && settled)
+                {
+                    switch (await TrimToConversationAsync(db, record, ct))
+                    {
+                        case TrimOutcome.Trimmed: trimmed++; break;
+                        case TrimOutcome.NoConversation:
+                            await PurgeAsync(record, "discarded_no_conversation", ct);
+                            purged++;
+                            break;
+                    }
+                }
+            }
         }
 
-        if (purged > 0)
+        if (purged + trimmed > 0)
             _logger.LogInformation(
-                "Recording retention: purged {Purged}/{Scanned} recording(s) for tenant {Subdomain}.",
-                purged, ids.Count, tenant.Subdomain);
+                "Recording retention for {Subdomain}: purged {Purged}, trimmed to conversation {Trimmed} (of {Scanned} retained).",
+                tenant.Subdomain, purged, trimmed, scanned);
+
+        async Task PurgeAsync(CallRecord record, string reason, CancellationToken token)
+        {
+            await _blob.DeletePrefixAsync($"{_outputPrefix}/{record.Id}", token);   // merged output ({prefix}/{id}/merged.*)
+            await _blob.DeletePrefixAsync($"screen/{record.Id}", token);            // screen-capture chunks
+            TryDeleteFile(Path.Combine(_audioSourceDir, $"{record.Id}.wav"));       // raw stereo call audio
+            record.MarkRecordingPurged(reason);
+            await db.SaveChangesAsync(token);
+            _logger.LogInformation("Purged recording for call {CallId} (tenant {Subdomain}) — {Reason}.", record.Id, tenant.Subdomain, reason);
+        }
+    }
+
+    private enum TrimOutcome { Trimmed, NoConversation, NotYet, Failed }
+
+    /// <summary>Cuts the recording to start where the caller reached an agent (the call's first "active" state). Waits for
+    /// the merge job to finish so the playback file exists to cut; a call that never reached an agent has no conversation.</summary>
+    private async Task<TrimOutcome> TrimToConversationAsync(TenantDbContext db, CallRecord record, CancellationToken ct)
+    {
+        var job = await db.RecordingMergeJobs.AsNoTracking().FirstOrDefaultAsync(j => j.CallRecordId == record.Id, ct);
+        if (job is { Status: RecordingMergeJobStatus.Pending or RecordingMergeJobStatus.Processing }) return TrimOutcome.NotYet;
+
+        var connectedAt = await db.CallStateHistory.AsNoTracking()
+            .Where(s => s.CallRecordId == record.Id && s.State == "active")
+            .OrderBy(s => s.Sequence).Select(s => (DateTimeOffset?)s.EnteredAt).FirstOrDefaultAsync(ct);
+        if (connectedAt is null) return TrimOutcome.NoConversation;
+
+        var offset = (connectedAt.Value - record.RecordingStartedAt!.Value).TotalSeconds;
+        var error = await _trimmer.TrimAsync(Path.Combine(_audioSourceDir, $"{record.Id}.wav"),
+            job?.Status == RecordingMergeJobStatus.Complete ? job.OutputBlobKey : null, offset, ct);
+        if (error is not null)
+        {
+            _logger.LogWarning("Trim to conversation failed for call {CallId}: {Error} — will retry next pass.", record.Id, error);
+            return TrimOutcome.Failed;
+        }
+        record.MarkRecordingTrimmed((int)Math.Round(Math.Max(0, offset)));
+        await db.SaveChangesAsync(ct);
+        return TrimOutcome.Trimmed;
     }
 
     private void TryDeleteFile(string path)

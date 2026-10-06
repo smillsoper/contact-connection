@@ -354,6 +354,7 @@ public static class ServiceCollectionExtensions
         // around it; the job repository is tenant-scoped like the screen-recording one.
         services.AddSingleton<IFfmpegRunner, FfmpegRunner>();
         services.AddSingleton<IRecordingMerger, FfmpegRecordingMerger>();
+        services.AddSingleton<RecordingTrimmer>();
         services.AddScoped<IRecordingMergeJobRepository, RecordingMergeJobRepository>();
 
         // Voicemail — tf_voicemail node captures a caller message; the ESL background path

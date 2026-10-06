@@ -104,7 +104,8 @@ public static class KpiCalculator
             orders.Count > 0 ? Math.Round(orders.Sum(o => o.Units) / (double)orders.Count, 2) : null,
             calls.Count, handled.Count, calls.Count(c => c.Abandoned), Rate(calls.Count(c => c.Abandoned), calls.Count),
             Rate(slCalls.Count(c => c.MetServiceLevel == true), slCalls.Count),
-            Seconds(avgTalk), Seconds(avgAcw), avgTalk is null && avgAcw is null ? null : Seconds((avgTalk ?? 0) + (avgAcw ?? 0)),
+            // AHT needs handled calls — after-call work alone (agents who only worked transfers here) isn't a handle time.
+            Seconds(avgTalk), Seconds(avgAcw), avgTalk is null ? null : Seconds(avgTalk.Value + (avgAcw ?? 0)),
             Math.Round(loggedInHours, 2), Math.Round(talkHours, 2),
             ix.Count(i => i.CategoryKey == "sale" && !i.HasOrder), ix.Count(i => i.Unmapped),
             customValues);

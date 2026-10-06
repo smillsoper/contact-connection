@@ -50,6 +50,7 @@ public class CampaignConfiguration : IEntityTypeConfiguration<Campaign>
         builder.Property(c => c.RecordingBeepEnabled).HasColumnName("recording_beep_enabled").HasDefaultValue(false);
         builder.Property(c => c.AutoMaskOnHold).HasColumnName("auto_mask_on_hold").HasDefaultValue(false);
         builder.Property(c => c.RecordingRetentionDays).HasColumnName("recording_retention_days").HasDefaultValue(90);
+        builder.Property(c => c.UnmappedRecordingRetentionDays).HasColumnName("unmapped_recording_retention_days");
         builder.Property(c => c.SensitiveDataRetentionMinutes).HasColumnName("sensitive_data_retention_minutes");
         builder.Property(c => c.CardDataRetention).HasColumnName("card_data_retention").HasMaxLength(30).HasDefaultValue(CardDataRetentionMode.UntilScriptEnds);
         builder.Property(c => c.AiSummaryEnabled).HasColumnName("ai_summary_enabled");

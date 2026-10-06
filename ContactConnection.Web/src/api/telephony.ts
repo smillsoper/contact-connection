@@ -53,6 +53,7 @@ export interface Campaign {
   recordingBeepEnabled: boolean
   autoMaskOnHold: boolean
   recordingRetentionDays: number
+  unmappedRecordingRetentionDays?: number | null
   // PCI SensitiveData (captured card/CVV/SSN) retention override in minutes — null falls back to
   // the platform default (SensitiveData:Retention:TtlMinutes on the Worker). A campaign running a
   // daily/weekly secure export needs this longer than the default safety-net window.
@@ -276,6 +277,8 @@ export const updateCampaignRecording = (id: string, data: {
   recordingBeepEnabled: boolean
   autoMaskOnHold: boolean
   recordingRetentionDays: number
+  /** Retain-by-disposition (S181): days to keep calls with a missing / unmapped disposition; null = the normal retention. */
+  unmappedRecordingRetentionDays?: number | null
 }) => api.put<Campaign>(`/api/v1/campaigns/${id}/recording`, data)
 
 // ── Campaign sales tax ───────────────────────────────────────────────────────
