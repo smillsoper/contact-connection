@@ -64,7 +64,9 @@ doesn't fit. Business blockers (LLC reinstatement, letter of intent, Clint's fig
 3. **Internal KPI widgets** (campaign KPIs) on the existing dashboards. (1)
    **S181 plan:** `docs/dispositions-kpi-plan.md`. Dispositions become a tenant-managed catalog mapped to reporting
    categories (built-in + tenant-created → custom KPIs). KPIs count interactions; a call has a compound disposition.
-   Phase 1 = dispositions, phase 2 = KPI widget.
+   Phase 1 = dispositions, phase 2 = KPI widget. **BUILT S181**: disposition catalog + categories + Unmapped, designer
+   picker, AI catalog, Call Records filters, commissions per disposition, KPI widget + custom KPIs. Left: recording
+   retention by disposition (rules from Stephen), hold time.
 
 **Sprint 3: client-facing (week of Oct 19)**
 1. **Client dashboards + client invite**: clients log in to see their assigned dashboards (TMS View as reference). (2)

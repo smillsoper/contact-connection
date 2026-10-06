@@ -81,6 +81,7 @@ public class TenantDbContext : DbContext
     public DbSet<ExportKey> ExportKeys => Set<ExportKey>();
     public DbSet<DispositionCategory> DispositionCategories => Set<DispositionCategory>();
     public DbSet<Disposition> Dispositions => Set<Disposition>();
+    public DbSet<CustomKpi> CustomKpis => Set<CustomKpi>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -150,6 +151,7 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new ExportKeyConfiguration());
         modelBuilder.ApplyConfiguration(new DispositionCategoryConfiguration());
         modelBuilder.ApplyConfiguration(new DispositionConfiguration());
+        modelBuilder.ApplyConfiguration(new CustomKpiConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 

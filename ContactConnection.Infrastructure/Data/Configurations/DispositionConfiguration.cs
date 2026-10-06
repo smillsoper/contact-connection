@@ -25,6 +25,25 @@ public class DispositionCategoryConfiguration : IEntityTypeConfiguration<Disposi
     }
 }
 
+public class CustomKpiConfiguration : IEntityTypeConfiguration<CustomKpi>
+{
+    public void Configure(EntityTypeBuilder<CustomKpi> b)
+    {
+        b.ToTable("custom_kpis");
+        b.HasKey(k => k.Id);
+        b.Property(k => k.Id).HasColumnName("id");
+        b.Property(k => k.TenantId).HasColumnName("tenant_id");
+        b.Property(k => k.Name).HasColumnName("name").HasMaxLength(100).IsRequired();
+        b.Property(k => k.Description).HasColumnName("description").HasMaxLength(500);
+        b.Property(k => k.NumeratorCategoryIds).MapJson("numerator_category_ids", () => new List<Guid>()).HasDefaultValueSql("'[]'::jsonb").IsRequired();
+        b.Property(k => k.DenominatorCategoryIds).MapJson("denominator_category_ids", () => new List<Guid>()).HasDefaultValueSql("'[]'::jsonb").IsRequired();
+        b.Property(k => k.DisplayOrder).HasColumnName("display_order");
+        b.Property(k => k.IsActive).HasColumnName("is_active");
+        b.Property(k => k.CreatedAt).HasColumnName("created_at");
+        b.Property(k => k.UpdatedAt).HasColumnName("updated_at");
+    }
+}
+
 public class DispositionConfiguration : IEntityTypeConfiguration<Disposition>
 {
     public void Configure(EntityTypeBuilder<Disposition> b)

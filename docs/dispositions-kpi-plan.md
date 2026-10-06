@@ -143,6 +143,16 @@ reporting meaning, and the KPIs are built on them.
 - **Example:** Lead capture rate = Lead captured ÷ (Lead captured + Lead opportunity, not captured).
 - **Display:** shown in the widget's KPI picker beside the built-in KPIs.
 
+## Status (S181)
+
+- **Done:** phase 1 (catalog, categories, aliases, scope, Unmapped + backfill, sync on every write, compound disposition),
+  designer picker + catalog question options, AI catalog, Call Records filters / badges, commissions per disposition /
+  category, KPI widget (close rates, revenue in every basis + net, per call / opportunity / order / agent hour / talk
+  hour, upsell, units, call handling, AHT, data quality) and tenant-defined custom KPIs.
+- **Not yet:** hold time (no hold state is recorded yet), cancellations after the fact in net orders (needs client
+  fulfillment / cancellation data), recording retention by disposition (Campaign "record_always_retain_by_disposition" is
+  offered but never implemented — needs Stephen's rules).
+
 ## Build order
 
 1. Phase 1 model + migration + seeding built-in categories, name/alias matching on completion, Admin → Dispositions

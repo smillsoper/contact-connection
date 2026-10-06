@@ -47,6 +47,14 @@ export default function WidgetIcon({ type }: { type: DashboardWidgetType }) {
           <rect x="3" y="16" width="18" height="4" rx="1" fill="#6b7280" />
         </svg>
       )
+    case 'kpi':
+      return (
+        <svg viewBox="0 0 24 24" className="w-7 h-7" fill="none" strokeWidth="1.8" strokeLinecap="round">
+          <path d="M4 19h16" stroke="#6b7280" />
+          <path d="M6 15l4-4 3 3 5-6" stroke="#38bdf8" />
+          <path d="M15 8h3v3" stroke="#38bdf8" />
+        </svg>
+      )
     case 'active_calls':
       return (
         <svg viewBox="0 0 24 24" className="w-7 h-7" fill="none" strokeWidth="1.5">

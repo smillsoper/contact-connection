@@ -248,6 +248,7 @@ app.MapActiveCallsWidget();
 app.MapExportsEndpoints();
 app.MapExportKeysEndpoints();
 app.MapDispositionsEndpoints();
+app.MapKpiEndpoints();
 
 // Tenant admin portal
 app.MapAdminAgentsEndpoints();

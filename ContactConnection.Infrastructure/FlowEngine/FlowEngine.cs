@@ -1030,6 +1030,9 @@ public class FlowEngine : IFlowEngine
             try { await _dispositions.SyncCallAsync(ctx.CallRecordId, ct); }
             catch (Exception ex) { _logger.LogWarning(ex, "Disposition sync failed for call {CallRecordId}", ctx.CallRecordId); }
         }
+        // The interaction, its disposition and order are saved now — dashboards (KPI widget) refresh on this push. The
+        // earlier push in this method fires before they're written.
+        await NotifyAgentSessionsChangedAsync(ctx, ct);
 
         // Commissions (S171): the script's flags (custom fields) are final now. Never fails the flow.
         if (_commissions is not null)

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import SearchableSelect from '../SearchableSelect'
 import { listClients, listCampaigns, listAgentGroups } from '../../api/telephony'
-import type { TimeWindowConfig, WidgetFilterConfig, WidgetFilterFields } from '../../types/dashboard'
+import type { KpiWidgetConfig, TimeWindowConfig, WidgetFilterConfig, WidgetFilterFields } from '../../types/dashboard'
+import { KPI_CATALOG, DEFAULT_KPIS } from './widgets/KpiWidget'
+import { customKpisApi, type CustomKpi } from '../../api/dashboardWidgets'
 
 interface Props {
   title: string
@@ -27,6 +29,11 @@ export default function WidgetConfigModal({ title, fields, initial, initialWidge
   const [groupId, setGroupId] = useState(initial.groupId ?? '')
   const [loggedInOnly, setLoggedInOnly] = useState(initial.loggedInOnly ?? false)
   const [timeWindowMode, setTimeWindowMode] = useState<TimeWindowConfig['mode']>(initial.timeWindow?.mode ?? 'today')
+  const [groupBy, setGroupBy] = useState<NonNullable<KpiWidgetConfig['groupBy']>>(initial.groupBy ?? 'none')
+  const [kpis, setKpis] = useState<string[]>(initial.kpis ?? DEFAULT_KPIS)
+  const [revenueBasis, setRevenueBasis] = useState<NonNullable<KpiWidgetConfig['revenueBasis']>>(initial.revenueBasis ?? 'exclTax')
+  const [netRevenue, setNetRevenue] = useState(initial.netRevenue ?? false)
+  const [customKpis, setCustomKpis] = useState<CustomKpi[]>([])
   const [timeWindowValue, setTimeWindowValue] = useState(
     initial.timeWindow?.value ?? (initial.timeWindow?.mode === 'minutes' ? DEFAULT_MINUTES : DEFAULT_HOURS),
   )
@@ -35,7 +42,8 @@ export default function WidgetConfigModal({ title, fields, initial, initialWidge
     listClients().then(setClients).catch(() => {})
     listCampaigns().then(setCampaigns).catch(() => {})
     listAgentGroups().then(setGroups).catch(() => {})
-  }, [])
+    if (fields.kpi) customKpisApi.list().then((k) => setCustomKpis(k.filter((x) => x.isActive))).catch(() => {})
+  }, [fields.kpi])
 
   function handleSave() {
     onSave({
@@ -44,8 +52,9 @@ export default function WidgetConfigModal({ title, fields, initial, initialWidge
       groupId: groupId || undefined,
       loggedInOnly: loggedInOnly || undefined,
       timeWindow: fields.timeWindow
-        ? (timeWindowMode === 'today' ? { mode: 'today' } : { mode: timeWindowMode, value: timeWindowValue })
+        ? (timeWindowMode === 'hours' || timeWindowMode === 'minutes' ? { mode: timeWindowMode, value: timeWindowValue } : { mode: timeWindowMode })
         : undefined,
+      ...(fields.kpi ? { groupBy, kpis, revenueBasis, netRevenue } : {}),
     }, widgetTitle.trim() || undefined)
     onClose()
   }
@@ -133,10 +142,13 @@ export default function WidgetConfigModal({ title, fields, initial, initialWidge
                   className="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-sky-500"
                 >
                   <option value="today">Today</option>
+                  {fields.kpi && <option value="yesterday">Yesterday</option>}
+                  {fields.kpi && <option value="week">This week (from Monday)</option>}
+                  {fields.kpi && <option value="month">This month</option>}
                   <option value="hours">Last N hours</option>
                   <option value="minutes">Last N minutes</option>
                 </select>
-                {timeWindowMode !== 'today' && (
+                {(timeWindowMode === 'hours' || timeWindowMode === 'minutes') && (
                   <input
                     type="number"
                     min={1}
@@ -147,11 +159,52 @@ export default function WidgetConfigModal({ title, fields, initial, initialWidge
                 )}
               </div>
               <p className="text-[11px] text-gray-500 mt-1">
-                {timeWindowMode === 'today'
-                  ? "Resets at midnight in the tenant's timezone — the usual meaning of a daily service level."
-                  : 'A moving window ending now — never resets.'}
+                {timeWindowMode === 'hours' || timeWindowMode === 'minutes'
+                  ? 'A moving window ending now — never resets.'
+                  : "Calendar days in the tenant's timezone."}
               </p>
             </div>
+          )}
+          {fields.kpi && (
+            <>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Break down by</label>
+                  <select value={groupBy} onChange={(e) => setGroupBy(e.target.value as typeof groupBy)}
+                    className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white">
+                    <option value="none">Totals only</option>
+                    <option value="campaign">Campaign</option>
+                    <option value="client">Client</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Revenue</label>
+                  <select value={revenueBasis} onChange={(e) => setRevenueBasis(e.target.value as typeof revenueBasis)}
+                    className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white">
+                    <option value="gross">Gross (incl. tax)</option>
+                    <option value="exclTax">Excluding tax</option>
+                    <option value="merch">Merchandise only</option>
+                  </select>
+                </div>
+              </div>
+              <label className="flex items-center gap-2 text-sm text-gray-300">
+                <input type="checkbox" checked={netRevenue} onChange={(e) => setNetRevenue(e.target.checked)} />
+                Net revenue (only orders whose payment went through)
+              </label>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">KPIs to show</label>
+                <div className="max-h-48 overflow-y-auto border border-gray-800 rounded p-2 space-y-1">
+                  {[...KPI_CATALOG.map((k) => ({ key: k.key, label: k.label, group: k.group })),
+                    ...customKpis.map((k) => ({ key: `custom:${k.id}`, label: k.name, group: 'Your KPIs' }))].map((k) => (
+                    <label key={k.key} className="flex items-center gap-2 text-xs text-gray-300">
+                      <input type="checkbox" checked={kpis.includes(k.key)}
+                        onChange={(e) => setKpis(e.target.checked ? [...kpis, k.key] : kpis.filter((x) => x !== k.key))} />
+                      {k.label} <span className="text-gray-600">{k.group}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </>
           )}
         </div>
 

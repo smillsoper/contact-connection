@@ -1,13 +1,24 @@
 export type DashboardWidgetType =
-  'agent_state_counter' | 'agent_list' | 'call_state_by_campaign' | 'callbacks' | 'service_level_threshold' | 'queued_calls' | 'active_calls'
+  'agent_state_counter' | 'agent_list' | 'call_state_by_campaign' | 'callbacks' | 'service_level_threshold' | 'queued_calls' | 'active_calls' | 'kpi'
 
 export interface TimeWindowConfig {
-  mode: 'today' | 'hours' | 'minutes'
+  /** yesterday / week / month: the KPI widget only (S181). */
+  mode: 'today' | 'hours' | 'minutes' | 'yesterday' | 'week' | 'month'
   /** Ignored for mode 'today'. Required for 'hours'/'minutes'. */
   value?: number
 }
 
-export interface WidgetFilterConfig {
+/** KPI widget settings (S181, docs/dispositions-kpi-plan.md). */
+export interface KpiWidgetConfig {
+  groupBy?: 'none' | 'campaign' | 'client'
+  /** Which KPIs to show, in order — keys from KPI_CATALOG, or "custom:<id>". */
+  kpis?: string[]
+  revenueBasis?: 'gross' | 'exclTax' | 'merch'
+  /** Revenue from net orders only (payment went through). */
+  netRevenue?: boolean
+}
+
+export interface WidgetFilterConfig extends KpiWidgetConfig {
   campaignId?: string
   clientId?: string
   groupId?: string
@@ -67,6 +78,12 @@ export const WIDGET_META: Record<DashboardWidgetType, WidgetMeta> = {
     defaultSize: { w: 4, h: 8 },
     minSize: { w: 3, h: 6 },
   },
+  kpi: {
+    type: 'kpi',
+    label: 'KPIs',
+    defaultSize: { w: 8, h: 7 },
+    minSize: { w: 4, h: 4 },
+  },
   active_calls: {
     type: 'active_calls',
     label: 'Active Calls',
@@ -82,7 +99,7 @@ export const WIDGET_META: Record<DashboardWidgetType, WidgetMeta> = {
 }
 
 export const WIDGET_TYPES: DashboardWidgetType[] =
-  ['agent_state_counter', 'agent_list', 'call_state_by_campaign', 'callbacks', 'service_level_threshold', 'queued_calls', 'active_calls']
+  ['agent_state_counter', 'agent_list', 'call_state_by_campaign', 'callbacks', 'service_level_threshold', 'queued_calls', 'active_calls', 'kpi']
 
 // Which filter fields each widget's config modal should show — agent-scoped widgets support
 // Client/Campaign/Agent Group + Logged-in-only; call-scoped widgets only support Client/Campaign
@@ -94,6 +111,8 @@ export interface WidgetFilterFields {
   group: boolean
   loggedInOnly: boolean
   timeWindow: boolean
+  /** KPI widget: group by, KPI picker, revenue basis (S181). */
+  kpi?: boolean
 }
 
 export const WIDGET_FILTER_FIELDS: Record<DashboardWidgetType, WidgetFilterFields> = {
@@ -104,6 +123,7 @@ export const WIDGET_FILTER_FIELDS: Record<DashboardWidgetType, WidgetFilterField
   service_level_threshold: { client: true, campaign: true, group: false, loggedInOnly: false, timeWindow: true },
   queued_calls: { client: true, campaign: true, group: false, loggedInOnly: false, timeWindow: false },
   active_calls: { client: true, campaign: true, group: false, loggedInOnly: false, timeWindow: false },
+  kpi: { client: true, campaign: true, group: false, loggedInOnly: false, timeWindow: true, kpi: true },
 }
 
 export function newWidgetId(): string {

@@ -110,6 +110,43 @@ export const dashboardWidgetsApi = {
 
   serviceLevelThreshold: (params: WidgetFilterConfig) =>
     api.get<ServiceLevelThresholdData>(`/api/v1/dashboard-widgets/service-level-threshold${buildQuery(params)}`),
+
+  kpi: (params: WidgetFilterConfig) => {
+    const q = buildQuery(params)
+    const extra = `groupBy=${params.groupBy ?? 'none'}`
+    return api.get<KpiResult>(`/api/v1/dashboard-widgets/kpi${q ? `${q}&${extra}` : `?${extra}`}`)
+  },
+}
+
+/** KPI widget (S181) — see KpiCalculator.cs for every formula. */
+export interface KpiRevenue {
+  total: number; net: number; perCall: number | null; perOpportunity: number | null; averageOrder: number | null
+  perAgentHour: number | null; perTalkHour: number | null
+}
+export interface KpiMetrics {
+  interactions: number; opportunities: number; orders: number; netOrders: number; declines: number
+  rawCloseRate: number | null; grossCloseRate: number | null; netCloseRate: number | null
+  gross: KpiRevenue; exclTax: KpiRevenue; merch: KpiRevenue
+  upsellTakeRate: number | null; unitsPerOrder: number | null
+  callsOffered: number; callsHandled: number; callsAbandoned: number; abandonRate: number | null; serviceLevel: number | null
+  avgTalkSeconds: number | null; avgAcwSeconds: number | null; ahtSeconds: number | null
+  loggedInHours: number; talkHours: number
+  saleWithoutOrder: number; unmapped: number
+  custom: { id: string; name: string; numerator: number; denominator: number; percent: number | null }[]
+}
+export interface KpiResult { total: KpiMetrics; rows: { key: string; label: string; metrics: KpiMetrics }[]; since: string; until: string }
+
+export interface CustomKpi {
+  id: string; name: string; description: string | null; numeratorCategoryIds: string[]; denominatorCategoryIds: string[]
+  displayOrder: number; isActive: boolean
+}
+export const customKpisApi = {
+  list: () => api.get<CustomKpi[]>('/api/v1/custom-kpis'),
+  create: (k: { name: string; description: string | null; numeratorCategoryIds: string[]; denominatorCategoryIds: string[] }) =>
+    api.post<CustomKpi>('/api/v1/custom-kpis', k),
+  update: (id: string, k: { name: string; description: string | null; numeratorCategoryIds: string[]; denominatorCategoryIds: string[]; isActive?: boolean }) =>
+    api.put<CustomKpi>(`/api/v1/custom-kpis/${id}`, k),
+  remove: (id: string) => api.delete<void>(`/api/v1/custom-kpis/${id}`),
 }
 
 /** Active Calls widget (S180): one call an agent is on right now. */
