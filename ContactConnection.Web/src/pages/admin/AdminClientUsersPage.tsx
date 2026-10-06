@@ -184,7 +184,7 @@ export default function AdminClientUsersPage() {
                       {!u.isActive ? <span className="text-red-400">Deactivated</span>
                         : !u.hasPassword ? <span className="text-sky-300">Invited{u.linkPending ? '' : ' — link expired'}</span>
                         : <span className="text-emerald-400">Active</span>}
-                      {u.mfaEnabled && <span className="block text-gray-500">Two-step on</span>}
+                      <span className={`block ${u.mfaEnabled ? 'text-gray-300' : 'text-gray-500'}`}>Two-step {u.mfaEnabled ? 'on' : 'off'}</span>
                     </td>
                     <td className="px-3 py-2 text-xs text-gray-400">{fmt(u.lastLoginAt)}</td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
@@ -199,12 +199,14 @@ export default function AdminClientUsersPage() {
                         }, u.hasPassword ? `Password link sent to ${u.email}.` : `Invitation re-sent to ${u.email}.`)}>
                         {u.hasPassword ? 'Send password link' : 'Resend invite'}
                       </button>
-                      {u.mfaEnabled && (
+                      {u.mfaEnabled ? (
                         <button className="text-xs text-indigo-300 hover:text-indigo-200 mr-3" disabled={busy}
                           title="Lost phone or authenticator? They'll set two-step up again at their next sign-in (or can leave it off unless required)."
                           onClick={() => run(() => clientUsersApi.resetMfa(u.id), `Two-step sign-in reset for ${u.email}.`)}>
                           Reset two-step
                         </button>
+                      ) : (
+                        <span className="text-xs text-gray-600 mr-3 cursor-default" title="Two-step sign-in is off for this user — nothing to reset.">Reset two-step</span>
                       )}
                       <button className="text-xs text-indigo-300 hover:text-indigo-200" onClick={() => showAudit(u.id)}>Activity</button>
                     </td>
