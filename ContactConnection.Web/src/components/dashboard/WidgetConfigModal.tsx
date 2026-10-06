@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import SearchableSelect from '../SearchableSelect'
 import { listClients, listCampaigns, listAgentGroups } from '../../api/telephony'
 import type { KpiWidgetConfig, TimeWindowConfig, WidgetFilterConfig, WidgetFilterFields } from '../../types/dashboard'
-import { KPI_CATALOG, DEFAULT_KPIS, KPI_DIMENSIONS } from './widgets/KpiWidget'
+import { KPI_CATALOG, DEFAULT_KPIS, KPI_DIMENSIONS, customFormat, type Format } from './widgets/KpiWidget'
+import KpiTargetInput from './KpiTargetInput'
 import { customFieldsApi } from '../../api/customFields'
 import type { KpiTarget } from '../../types/dashboard'
 import { customKpisApi, type CustomKpi } from '../../api/dashboardWidgets'
@@ -40,6 +41,7 @@ export default function WidgetConfigModal({ title, fields, initial, initialWidge
   const [revenueBasis, setRevenueBasis] = useState<NonNullable<KpiWidgetConfig['revenueBasis']>>(initial.revenueBasis ?? 'exclTax')
   const [netRevenue, setNetRevenue] = useState(initial.netRevenue ?? false)
   const [customKpis, setCustomKpis] = useState<CustomKpi[]>([])
+  const [tab, setTab] = useState<'data' | 'layout' | 'kpis'>('data')
   const [timeWindowValue, setTimeWindowValue] = useState(
     initial.timeWindow?.value ?? (initial.timeWindow?.mode === 'minutes' ? DEFAULT_MINUTES : DEFAULT_HOURS),
   )
@@ -72,206 +74,243 @@ export default function WidgetConfigModal({ title, fields, initial, initialWidge
     onClose()
   }
 
+  const input = 'w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-sky-500'
+
+  const dataSection = (
+    <div className="space-y-3">
+      <div>
+        <label className="block text-xs text-gray-400 mb-1">Widget Title</label>
+        <input
+          type="text"
+          value={widgetTitle}
+          onChange={(e) => setWidgetTitle(e.target.value)}
+          placeholder="Leave blank to use the default name"
+          className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-sky-500"
+        />
+        <p className="text-[11px] text-gray-500 mt-1">Handy once a filter below narrows this to one client or campaign — rename it so the tile says what it's actually showing.</p>
+      </div>
+      {fields.client && (
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Client</label>
+          <SearchableSelect
+            options={clients.map((c) => ({ value: c.id, label: c.name }))}
+            value={clientId}
+            onChange={(v) => { setClientId(v); if (v) { setCampaignId(''); setGroupId('') } }}
+            allLabel="All clients"
+            className="w-full"
+          />
+        </div>
+      )}
+      {fields.campaign && (
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Campaign</label>
+          <SearchableSelect
+            options={campaigns.map((c) => ({ value: c.id, label: c.name }))}
+            value={campaignId}
+            onChange={(v) => { setCampaignId(v); if (v) { setClientId(''); setGroupId('') } }}
+            allLabel="All campaigns"
+            className="w-full"
+          />
+        </div>
+      )}
+      {fields.group && (
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Agent Group</label>
+          <SearchableSelect
+            options={groups.map((g) => ({ value: g.id, label: g.name }))}
+            value={groupId}
+            onChange={(v) => { setGroupId(v); if (v) { setClientId(''); setCampaignId('') } }}
+            allLabel="All groups"
+            className="w-full"
+          />
+        </div>
+      )}
+      {fields.loggedInOnly && (
+        <label className="flex items-center gap-2 text-sm text-gray-300 pt-1">
+          <input
+            type="checkbox"
+            checked={loggedInOnly}
+            onChange={(e) => setLoggedInOnly(e.target.checked)}
+            className="rounded"
+          />
+          Logged in only
+        </label>
+      )}
+      {fields.timeWindow && (
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Time Window</label>
+          <div className="flex items-center gap-2">
+            <select
+              value={timeWindowMode}
+              onChange={(e) => {
+                const mode = e.target.value as TimeWindowConfig['mode']
+                setTimeWindowMode(mode)
+                if (mode === 'hours') setTimeWindowValue(DEFAULT_HOURS)
+                else if (mode === 'minutes') setTimeWindowValue(DEFAULT_MINUTES)
+              }}
+              className="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-sky-500"
+            >
+              <option value="today">Today</option>
+              {fields.kpi && <option value="yesterday">Yesterday</option>}
+              {fields.kpi && <option value="week">This week (from Monday)</option>}
+              {fields.kpi && <option value="month">This month</option>}
+              <option value="hours">Last N hours</option>
+              <option value="minutes">Last N minutes</option>
+            </select>
+            {(timeWindowMode === 'hours' || timeWindowMode === 'minutes') && (
+              <input
+                type="number"
+                min={1}
+                value={timeWindowValue}
+                onChange={(e) => setTimeWindowValue(Math.max(1, Number(e.target.value)))}
+                className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-sky-500"
+              />
+            )}
+          </div>
+          <p className="text-[11px] text-gray-500 mt-1">
+            {timeWindowMode === 'hours' || timeWindowMode === 'minutes'
+              ? 'A moving window ending now — never resets.'
+              : "Calendar days in the tenant's timezone."}
+          </p>
+        </div>
+      )}
+    </div>
+  )
+
+  const dimensionOptions = (exclude?: string) => (
+    <>
+      {KPI_DIMENSIONS.filter((d) => d.value !== exclude).map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+      {fieldNames.length > 0 && <optgroup label="Custom field">
+        {fieldNames.filter((f) => `cf:${f.name}` !== exclude).map((f) => <option key={f.name} value={`cf:${f.name}`}>{f.label}</option>)}
+      </optgroup>}
+    </>
+  )
+
+  const layoutSection = (
+    <div className="space-y-4 max-w-xl">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Break down by</label>
+          <select value={groupBy} onChange={(e) => setGroupBy(e.target.value)} className={input}>
+            <option value="none">Totals only (tiles)</option>
+            {dimensionOptions()}
+          </select>
+          <p className="text-[11px] text-gray-500 mt-1">Totals only shows one tile per KPI; anything else shows a table.</p>
+        </div>
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Then by (optional)</label>
+          <select value={groupBy2} onChange={(e) => setGroupBy2(e.target.value)} className={input} disabled={groupBy === 'none'}>
+            <option value="">—</option>
+            {dimensionOptions(groupBy)}
+          </select>
+          <p className="text-[11px] text-gray-500 mt-1">A second level under each row, with a subtotal.</p>
+        </div>
+      </div>
+      <label className={`flex items-center gap-2 text-sm text-gray-300 ${groupBy === 'none' ? 'opacity-40' : ''}`}>
+        <input type="checkbox" checked={percentOfTotal} disabled={groupBy === 'none'} onChange={(e) => setPercentOfTotal(e.target.checked)} />
+        Show each row's % of the total next to counts
+      </label>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Revenue</label>
+          <select value={revenueBasis} onChange={(e) => setRevenueBasis(e.target.value as typeof revenueBasis)} className={input}>
+            <option value="gross">Gross (incl. tax)</option>
+            <option value="exclTax">Excluding tax</option>
+            <option value="merch">Merchandise only</option>
+          </select>
+        </div>
+      </div>
+      <label className="flex items-center gap-2 text-sm text-gray-300">
+        <input type="checkbox" checked={netRevenue} onChange={(e) => setNetRevenue(e.target.checked)} />
+        Net revenue (only orders whose payment went through)
+      </label>
+    </div>
+  )
+
+  const kpiRows: { key: string; label: string; group: string; format: Format }[] = [
+    ...KPI_CATALOG.map((k) => ({ key: k.key, label: k.label, group: k.group, format: k.format })),
+    ...customKpis.map((k) => ({ key: `custom:${k.id}`, label: k.name, group: 'Your KPIs', format: customFormat(k.format) })),
+  ]
+  const kpiGroups = [...new Set(kpiRows.map((k) => k.group))]
+  // Sensible default direction for a new target — times, abandons and data-quality counts are better when lower.
+  const lowerIsBetter = /abandon|aht|avgTalk|avgAcw|declines|unmapped|saleWithoutOrder/i
+  const cols = 'grid grid-cols-[1.25rem_minmax(8rem,1fr)_6.5rem_6.5rem_5.5rem] gap-2'
+
+  const kpisSection = (
+    <div>
+      <p className="text-[11px] text-gray-500 mb-2">
+        Tick the KPIs to show. Targets are optional: a value that meets <span className="text-emerald-400">good</span> shows green,
+        one that meets <span className="text-amber-300">warn</span> shows amber, anything else red.
+        Enter targets in the KPI's own units — times as minutes:seconds (2:30), or a plain number of minutes (2.5).
+      </p>
+      <div className="border border-gray-800 rounded overflow-x-auto">
+        <div className="min-w-[34rem]">
+          <div className={`${cols} px-2 py-1.5 text-[10px] uppercase tracking-wide text-gray-500 border-b border-gray-800`}>
+            <span /><span>KPI</span><span>Good</span><span>Warn</span><span>Better when</span>
+          </div>
+          {kpiGroups.map((g) => (
+            <div key={g}>
+              <div className="px-2 pt-2 pb-1 text-[10px] uppercase tracking-wide text-gray-600">{g}</div>
+              {kpiRows.filter((k) => k.group === g).map((k) => {
+                const on = kpis.includes(k.key)
+                const t = targets[k.key] ?? { higherIsBetter: !lowerIsBetter.test(k.key) }
+                const set = (p: Partial<KpiTarget>) => setTargets({ ...targets, [k.key]: { ...t, ...p } })
+                return (
+                  <div key={k.key} className={`${cols} items-center px-2 py-0.5 hover:bg-gray-800/40`}>
+                    <input type="checkbox" checked={on}
+                      onChange={(e) => setKpis(e.target.checked ? [...kpis, k.key] : kpis.filter((x) => x !== k.key))} />
+                    <span className={`text-xs truncate ${on ? 'text-gray-200' : 'text-gray-500'}`} title={k.label}>{k.label}</span>
+                    <KpiTargetInput value={t.good} format={k.format} placeholder="e.g." disabled={!on} onChange={(v) => set({ good: v })} />
+                    <KpiTargetInput value={t.warn} format={k.format} placeholder="e.g." disabled={!on} onChange={(v) => set({ warn: v })} />
+                    <select value={t.higherIsBetter ? 'up' : 'down'} disabled={!on} onChange={(e) => set({ higherIsBetter: e.target.value === 'up' })}
+                      className={`bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[11px] text-white ${on ? '' : 'opacity-40'}`}>
+                      <option value="up">Higher</option>
+                      <option value="down">Lower</option>
+                    </select>
+                  </div>
+                )
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+
+  const TABS = [
+    { key: 'data' as const, label: 'Data' },
+    { key: 'layout' as const, label: 'Layout' },
+    { key: 'kpis' as const, label: `KPIs & targets (${kpis.length})` },
+  ]
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div
-        className="bg-gray-900 border border-gray-800 rounded-xl p-5 w-96 shadow-xl"
+        className={`bg-gray-900 border border-gray-800 rounded-xl p-5 shadow-xl flex flex-col max-h-[90vh] w-full ${fields.kpi ? 'max-w-4xl' : 'max-w-sm'}`}
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-sm font-semibold text-white mb-1">{title}</h3>
-        <p className="text-xs text-gray-500 mb-4">Filter which data this widget shows. Pick one — the most specific wins.</p>
+        <p className="text-xs text-gray-500 mb-3">Filter which data this widget shows. Pick one — the most specific wins.</p>
 
-        <div className="space-y-3">
-          <div>
-            <label className="block text-xs text-gray-400 mb-1">Widget Title</label>
-            <input
-              type="text"
-              value={widgetTitle}
-              onChange={(e) => setWidgetTitle(e.target.value)}
-              placeholder="Leave blank to use the default name"
-              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-sky-500"
-            />
-            <p className="text-[11px] text-gray-500 mt-1">Handy once a filter below narrows this to one client or campaign — rename it so the tile says what it's actually showing.</p>
+        {fields.kpi && (
+          <div className="flex gap-1 border-b border-gray-800 mb-4">
+            {TABS.map((t) => (
+              <button key={t.key} onClick={() => setTab(t.key)}
+                className={`text-xs px-3 py-1.5 -mb-px border-b-2 transition-colors ${tab === t.key ? 'border-sky-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-200'}`}>
+                {t.label}
+              </button>
+            ))}
           </div>
-          {fields.client && (
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Client</label>
-              <SearchableSelect
-                options={clients.map((c) => ({ value: c.id, label: c.name }))}
-                value={clientId}
-                onChange={(v) => { setClientId(v); if (v) { setCampaignId(''); setGroupId('') } }}
-                allLabel="All clients"
-                className="w-full"
-              />
-            </div>
-          )}
-          {fields.campaign && (
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Campaign</label>
-              <SearchableSelect
-                options={campaigns.map((c) => ({ value: c.id, label: c.name }))}
-                value={campaignId}
-                onChange={(v) => { setCampaignId(v); if (v) { setClientId(''); setGroupId('') } }}
-                allLabel="All campaigns"
-                className="w-full"
-              />
-            </div>
-          )}
-          {fields.group && (
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Agent Group</label>
-              <SearchableSelect
-                options={groups.map((g) => ({ value: g.id, label: g.name }))}
-                value={groupId}
-                onChange={(v) => { setGroupId(v); if (v) { setClientId(''); setCampaignId('') } }}
-                allLabel="All groups"
-                className="w-full"
-              />
-            </div>
-          )}
-          {fields.loggedInOnly && (
-            <label className="flex items-center gap-2 text-sm text-gray-300 pt-1">
-              <input
-                type="checkbox"
-                checked={loggedInOnly}
-                onChange={(e) => setLoggedInOnly(e.target.checked)}
-                className="rounded"
-              />
-              Logged in only
-            </label>
-          )}
-          {fields.timeWindow && (
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Time Window</label>
-              <div className="flex items-center gap-2">
-                <select
-                  value={timeWindowMode}
-                  onChange={(e) => {
-                    const mode = e.target.value as TimeWindowConfig['mode']
-                    setTimeWindowMode(mode)
-                    if (mode === 'hours') setTimeWindowValue(DEFAULT_HOURS)
-                    else if (mode === 'minutes') setTimeWindowValue(DEFAULT_MINUTES)
-                  }}
-                  className="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-sky-500"
-                >
-                  <option value="today">Today</option>
-                  {fields.kpi && <option value="yesterday">Yesterday</option>}
-                  {fields.kpi && <option value="week">This week (from Monday)</option>}
-                  {fields.kpi && <option value="month">This month</option>}
-                  <option value="hours">Last N hours</option>
-                  <option value="minutes">Last N minutes</option>
-                </select>
-                {(timeWindowMode === 'hours' || timeWindowMode === 'minutes') && (
-                  <input
-                    type="number"
-                    min={1}
-                    value={timeWindowValue}
-                    onChange={(e) => setTimeWindowValue(Math.max(1, Number(e.target.value)))}
-                    className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-sky-500"
-                  />
-                )}
-              </div>
-              <p className="text-[11px] text-gray-500 mt-1">
-                {timeWindowMode === 'hours' || timeWindowMode === 'minutes'
-                  ? 'A moving window ending now — never resets.'
-                  : "Calendar days in the tenant's timezone."}
-              </p>
-            </div>
-          )}
-          {fields.kpi && (
-            <>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">Break down by</label>
-                  <select value={groupBy} onChange={(e) => setGroupBy(e.target.value)}
-                    className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white">
-                    <option value="none">Totals only (tiles)</option>
-                    {KPI_DIMENSIONS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
-                    {fieldNames.length > 0 && <optgroup label="Custom field">
-                      {fieldNames.map((f) => <option key={f.name} value={`cf:${f.name}`}>{f.label}</option>)}
-                    </optgroup>}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">Revenue</label>
-                  <select value={revenueBasis} onChange={(e) => setRevenueBasis(e.target.value as typeof revenueBasis)}
-                    className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white">
-                    <option value="gross">Gross (incl. tax)</option>
-                    <option value="exclTax">Excluding tax</option>
-                    <option value="merch">Merchandise only</option>
-                  </select>
-                </div>
-              </div>
-              {groupBy !== 'none' && (
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-xs text-gray-400 mb-1">Then by (optional)</label>
-                    <select value={groupBy2} onChange={(e) => setGroupBy2(e.target.value)}
-                      className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white">
-                      <option value="">—</option>
-                      {KPI_DIMENSIONS.filter((d) => d.value !== groupBy).map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
-                      {fieldNames.length > 0 && <optgroup label="Custom field">
-                        {fieldNames.filter((f) => `cf:${f.name}` !== groupBy).map((f) => <option key={f.name} value={`cf:${f.name}`}>{f.label}</option>)}
-                      </optgroup>}
-                    </select>
-                  </div>
-                  <label className="flex items-end gap-2 text-sm text-gray-300 pb-1.5">
-                    <input type="checkbox" checked={percentOfTotal} onChange={(e) => setPercentOfTotal(e.target.checked)} />
-                    % of total for counts
-                  </label>
-                </div>
-              )}
-              <label className="flex items-center gap-2 text-sm text-gray-300">
-                <input type="checkbox" checked={netRevenue} onChange={(e) => setNetRevenue(e.target.checked)} />
-                Net revenue (only orders whose payment went through)
-              </label>
-              <div>
-                <label className="block text-xs text-gray-400 mb-1">KPIs to show</label>
-                <div className="max-h-48 overflow-y-auto border border-gray-800 rounded p-2 space-y-1">
-                  {[...KPI_CATALOG.map((k) => ({ key: k.key, label: k.label, group: k.group })),
-                    ...customKpis.map((k) => ({ key: `custom:${k.id}`, label: k.name, group: 'Your KPIs' }))].map((k) => (
-                    <label key={k.key} className="flex items-center gap-2 text-xs text-gray-300">
-                      <input type="checkbox" checked={kpis.includes(k.key)}
-                        onChange={(e) => setKpis(e.target.checked ? [...kpis, k.key] : kpis.filter((x) => x !== k.key))} />
-                      {k.label} <span className="text-gray-600">{k.group}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-              {kpis.length > 0 && (
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">Targets (optional) — colours the value green / amber / red</label>
-                  <div className="max-h-40 overflow-y-auto border border-gray-800 rounded p-2 space-y-1">
-                    {kpis.map((key) => {
-                      const def = KPI_CATALOG.find((k) => k.key === key)
-                      const name = def?.label ?? customKpis.find((c) => `custom:${c.id}` === key)?.name ?? key
-                      const t = targets[key] ?? { higherIsBetter: true }
-                      const set = (p: Partial<KpiTarget>) => setTargets({ ...targets, [key]: { ...t, ...p } })
-                      const num = (v: string) => v.trim() === '' ? null : Number(v)
-                      return (
-                        <div key={key} className="flex items-center gap-1.5 text-[11px] text-gray-300">
-                          <span className="flex-1 truncate" title={name}>{name}</span>
-                          <input type="number" placeholder="good" value={t.good ?? ''} onChange={(e) => set({ good: num(e.target.value) })}
-                            className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-white" />
-                          <input type="number" placeholder="warn" value={t.warn ?? ''} onChange={(e) => set({ warn: num(e.target.value) })}
-                            className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-white" />
-                          <select value={t.higherIsBetter ? 'up' : 'down'} onChange={(e) => set({ higherIsBetter: e.target.value === 'up' })}
-                            className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-white">
-                            <option value="up">higher better</option>
-                            <option value="down">lower better</option>
-                          </select>
-                        </div>
-                      )
-                    })}
-                  </div>
-                  <p className="text-[10px] text-gray-500 mt-1">In the KPI's own units: 25 = 25%, 4.50 = $4.50, 180 = 3:00 for times.</p>
-                </div>
-              )}
-            </>
-          )}
+        )}
+
+        <div className="overflow-y-auto min-h-0 flex-1 pr-1">
+          {!fields.kpi && dataSection}
+          {fields.kpi && tab === 'data' && <div className="max-w-xl">{dataSection}</div>}
+          {fields.kpi && tab === 'layout' && layoutSection}
+          {fields.kpi && tab === 'kpis' && kpisSection}
         </div>
 
-        <div className="flex justify-end gap-2 mt-5">
+        <div className="flex justify-end gap-2 pt-4">
           <button
             onClick={onClose}
             className="text-sm text-gray-300 border border-gray-700 hover:border-gray-500 px-4 py-1.5 rounded-lg transition-colors"

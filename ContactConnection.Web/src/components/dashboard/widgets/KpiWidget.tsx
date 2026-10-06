@@ -7,7 +7,12 @@ import { useDashboardLiveAgentSessions, useDashboardLiveAgentState, useDashboard
 // catalog, revenue from orders, handling from call / agent state history. Production calls only; interactions counted by
 // their own campaign. Refreshes on dashboard pushes (script finished, call state, agent state) — never polls.
 
-type Format = 'pct' | 'int' | 'money' | 'num' | 'secs' | 'hours'
+export type Format = 'pct' | 'int' | 'money' | 'num' | 'secs' | 'hours'
+
+/** A custom KPI's stored format → the display format the widget uses. */
+export function customFormat(f: string | undefined): Format {
+  return f === 'currency' ? 'money' : f === 'duration' ? 'secs' : f === 'integer' ? 'int' : f === 'number' ? 'num' : 'pct'
+}
 
 interface KpiDef {
   key: string
@@ -126,8 +131,7 @@ export default function KpiWidget({ config }: { config: WidgetFilterConfig }) {
     if (key.startsWith('custom:')) {
       const id = key.slice(7)
       const k = custom.find((c) => c.id === id)
-      const format: Format = !k ? 'pct' : k.format === 'currency' ? 'money' : k.format === 'duration' ? 'secs'
-        : k.format === 'integer' ? 'int' : k.format === 'number' ? 'num' : 'pct'
+      const format = customFormat(k?.format)
       return k ? [{ key, label: k.name, group: 'Your KPIs', format,
         value: (m: KpiMetrics) => m.custom.find((c) => c.id === id)?.value ?? null }] : []
     }
