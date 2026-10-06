@@ -71,7 +71,8 @@ public static class CommissionsEndpoints
             var tz = Zone(tenant);
             var rule = CommissionRule.Create(tenant.Current!.Id, req.CampaignId is null ? req.ClientId : null, req.CampaignId);
             rule.Set(req.Name ?? "", req.Kind ?? "", req.Amount, req.ProductId, await ProductLabelAsync(db, req.ProductId, ct),
-                req.FieldName, req.FieldValue, req.TierLabel, req.IsActive ?? true, Local(req.EffectiveFrom, tz), Local(req.EffectiveUntil, tz));
+                req.FieldName, req.FieldValue, req.TierLabel, req.IsActive ?? true, Local(req.EffectiveFrom, tz), Local(req.EffectiveUntil, tz),
+                req.DispositionId, req.DispositionCategoryId, await DispositionLabelAsync(db, req.DispositionId, req.DispositionCategoryId, ct));
             db.CommissionRules.Add(rule);
             await db.SaveChangesAsync(ct);
             return Results.Created($"/api/v1/commission-rules/{rule.Id}", RuleJson(rule, tz));
@@ -89,7 +90,8 @@ public static class CommissionsEndpoints
         {
             var tz = Zone(tenant);
             rule.Set(req.Name ?? "", req.Kind ?? "", req.Amount, req.ProductId, await ProductLabelAsync(db, req.ProductId, ct),
-                req.FieldName, req.FieldValue, req.TierLabel, req.IsActive ?? rule.IsActive, Local(req.EffectiveFrom, tz), Local(req.EffectiveUntil, tz));
+                req.FieldName, req.FieldValue, req.TierLabel, req.IsActive ?? rule.IsActive, Local(req.EffectiveFrom, tz), Local(req.EffectiveUntil, tz),
+                req.DispositionId, req.DispositionCategoryId, await DispositionLabelAsync(db, req.DispositionId, req.DispositionCategoryId, ct));
             await db.SaveChangesAsync(ct);
             return Results.Ok(RuleJson(rule, tz));
         }
@@ -108,10 +110,17 @@ public static class CommissionsEndpoints
         return Results.NoContent();
     }
 
+    /// <summary>The disposition's or category's name, kept on the rule for display.</summary>
+    private static async Task<string?> DispositionLabelAsync(TenantDbContext db, Guid? dispositionId, Guid? categoryId, CancellationToken ct) =>
+        dispositionId is { } d ? await db.Dispositions.AsNoTracking().Where(x => x.Id == d).Select(x => x.Name).FirstOrDefaultAsync(ct)
+        : categoryId is { } c ? await db.DispositionCategories.AsNoTracking().Where(x => x.Id == c).Select(x => "Any " + x.Name).FirstOrDefaultAsync(ct)
+        : null;
+
     /// <summary>A rule with its effective window as tenant-local "yyyy-MM-ddTHH:mm" (what the form edits).</summary>
     private static object RuleJson(CommissionRule r, TimeZoneInfo tz) => new
     {
         r.Id, r.ClientId, r.CampaignId, r.Name, r.Kind, r.Amount, r.ProductId, r.ProductLabel, r.FieldName, r.FieldValue,
+        r.DispositionId, r.DispositionCategoryId, r.DispositionLabel,
         r.TierLabel, r.IsActive, effectiveFrom = LocalText(r.EffectiveFrom, tz), effectiveUntil = LocalText(r.EffectiveUntil, tz),
     };
 
@@ -453,7 +462,8 @@ public static class CommissionsEndpoints
 public record RuleRequest(
     Guid? ClientId, Guid? CampaignId, string? Name, string? Kind, decimal Amount, Guid? ProductId,
     string? FieldName, string? FieldValue, string? TierLabel, bool? IsActive,
-    string? EffectiveFrom = null, string? EffectiveUntil = null);
+    string? EffectiveFrom = null, string? EffectiveUntil = null,
+    Guid? DispositionId = null, Guid? DispositionCategoryId = null);
 
 /// <summary>From / To are tenant-local "yyyy-MM-ddTHH:mm"; calls that STARTED in [From, To).
 /// PostTo = current | call_date.</summary>

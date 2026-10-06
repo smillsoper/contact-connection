@@ -12,7 +12,10 @@ public record CommissionCallFacts(
     CartDocument? Cart,
     string? TierLabel,
     IReadOnlyDictionary<string, string> CustomFields,
-    DateTimeOffset? CallStart = null);
+    DateTimeOffset? CallStart = null,
+    // The interaction's catalog disposition and its CURRENT reporting category (S181).
+    Guid? DispositionId = null,
+    Guid? DispositionCategoryId = null);
 
 /// <summary>
 /// Pure commission math (S171). Rules are grouped by what they pay on — the kind plus its target
@@ -57,6 +60,7 @@ public static class CommissionCalculator
     {
         CommissionKind.FlatPerProduct => $"{r.Kind}:{r.ProductId}",
         CommissionKind.FlatPerField   => $"{r.Kind}:{r.FieldName?.ToLowerInvariant()}={r.FieldValue?.ToLowerInvariant()}",
+        CommissionKind.FlatPerDisposition => $"{r.Kind}:{r.DispositionId}:{r.DispositionCategoryId}",
         _                             => r.Kind,
     };
 
@@ -87,6 +91,12 @@ public static class CommissionCalculator
                 var matches = f.CustomFields.TryGetValue(r.FieldName!, out var value)
                     && string.Equals(value?.Trim(), r.FieldValue, StringComparison.OrdinalIgnoreCase);
                 return matches ? Line(r, 1, r.Amount, $"{r.FieldName} = {r.FieldValue}{tier}") : null;
+            }
+            case CommissionKind.FlatPerDisposition:
+            {
+                var matches = (r.DispositionId is { } d && f.DispositionId == d)
+                    || (r.DispositionCategoryId is { } c && f.DispositionCategoryId == c);
+                return matches ? Line(r, 1, r.Amount, $"{r.DispositionLabel ?? "Disposition"}{tier}") : null;
             }
             default:
                 return null;

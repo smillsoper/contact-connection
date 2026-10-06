@@ -54,8 +54,12 @@ public class CommissionService(ScopedTenantDbContextFactory dbFactory) : ICommis
 public static class CommissionLedger
 {
     /// <summary>A tenant's commission rules indexed by campaign and client.</summary>
-    public sealed class RuleBook(List<CommissionRule> rules)
+    /// <param name="dispositionCategories">Disposition → its current reporting category (S181).</param>
+    public sealed class RuleBook(List<CommissionRule> rules, IReadOnlyDictionary<Guid, Guid>? dispositionCategories = null)
     {
+        public Guid? CategoryOf(Guid? dispositionId) =>
+            dispositionId is { } id && dispositionCategories?.TryGetValue(id, out var c) == true ? c : null;
+
         private readonly ILookup<Guid, CommissionRule> _byCampaign = rules.Where(r => r.CampaignId is not null).ToLookup(r => r.CampaignId!.Value);
         private readonly ILookup<Guid, CommissionRule> _byClient = rules.Where(r => r.ClientId is not null).ToLookup(r => r.ClientId!.Value);
 
@@ -66,7 +70,8 @@ public static class CommissionLedger
     }
 
     public static async Task<RuleBook> LoadRulesAsync(TenantDbContext db, CancellationToken ct) =>
-        new(await db.CommissionRules.AsNoTracking().ToListAsync(ct));
+        new(await db.CommissionRules.AsNoTracking().ToListAsync(ct),
+            await db.Dispositions.AsNoTracking().ToDictionaryAsync(d => d.Id, d => d.CategoryId, ct));
 
     /// <summary>One commission line for one agent, under the campaign it was earned for.</summary>
     public record EarnedLine(Guid AgentId, Guid CampaignId, CommissionLine Line);
@@ -100,7 +105,8 @@ public static class CommissionLedger
                 first?.OrderSubmittedAt is not null,
                 first?.Cart,
                 first?.RoutedTierLabel,
-                CustomFieldValues(record.CustomFields), record.CreatedAt);
+                CustomFieldValues(record.CustomFields), record.CreatedAt,
+                first?.DispositionId, rules.CategoryOf(first?.DispositionId));
             lines.AddRange(CommissionCalculator.Calculate(facts, rules.For(record))
                 .Select(l => new EarnedLine(agentId, record.CampaignId, l)));
         }
@@ -110,7 +116,8 @@ public static class CommissionLedger
             if (ix.AgentId is not { } ixAgent || ix.CampaignId is not { } ixCampaign || ixCampaign == record.CampaignId)
                 continue;
             var facts = new CommissionCallFacts(
-                ix.OrderSubmittedAt is not null, ix.Cart, ix.RoutedTierLabel, CustomFieldValues(ix.CustomFields), record.CreatedAt);
+                ix.OrderSubmittedAt is not null, ix.Cart, ix.RoutedTierLabel, CustomFieldValues(ix.CustomFields), record.CreatedAt,
+                ix.DispositionId, rules.CategoryOf(ix.DispositionId));
             lines.AddRange(CommissionCalculator.Calculate(facts, rules.For(ixCampaign, record.ClientId, record.CreatedAt))
                 .Select(l => new EarnedLine(ixAgent, ixCampaign, l)));
         }

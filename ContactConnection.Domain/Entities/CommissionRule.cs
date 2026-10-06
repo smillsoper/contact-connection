@@ -12,6 +12,10 @@ namespace ContactConnection.Domain.Entities;
 /// <item><b>flat_per_field</b> — $<see cref="Amount"/> when the call's custom field <see cref="FieldName"/>
 /// equals <see cref="FieldValue"/> (script-set flags, e.g. a retention call's save method). Applies
 /// with or without an order.</item>
+/// <item><b>flat_per_disposition</b> — $<see cref="Amount"/> per interaction whose disposition is
+/// <see cref="DispositionId"/>, or any disposition in the reporting category <see cref="DispositionCategoryId"/>
+/// (S181 — follows the disposition catalog: aliases count, and recategorizing a disposition changes what earns).
+/// Applies with or without an order; paid to the agent who handled that interaction.</item>
 /// </list>
 ///
 /// <see cref="TierLabel"/> limits a rule to calls won through that routing tier ("Alpha"). A matching
@@ -37,6 +41,12 @@ public class CommissionRule
     public string? ProductLabel { get; private set; }
     public string? FieldName { get; private set; }
     public string? FieldValue { get; private set; }
+    /// <summary>flat_per_disposition: this disposition…</summary>
+    public Guid? DispositionId { get; private set; }
+    /// <summary>…or any disposition in this reporting category (exactly one of the two).</summary>
+    public Guid? DispositionCategoryId { get; private set; }
+    /// <summary>The disposition / category name when the rule was saved — for display only.</summary>
+    public string? DispositionLabel { get; private set; }
     public string? TierLabel { get; private set; }
     /// <summary>Applies to calls started at or after this instant; null = always.</summary>
     public DateTimeOffset? EffectiveFrom { get; private set; }
@@ -63,7 +73,8 @@ public class CommissionRule
     public void Set(
         string name, string kind, decimal amount, Guid? productId, string? productLabel,
         string? fieldName, string? fieldValue, string? tierLabel, bool isActive,
-        DateTimeOffset? effectiveFrom = null, DateTimeOffset? effectiveUntil = null)
+        DateTimeOffset? effectiveFrom = null, DateTimeOffset? effectiveUntil = null,
+        Guid? dispositionId = null, Guid? dispositionCategoryId = null, string? dispositionLabel = null)
     {
         if (effectiveFrom is { } f && effectiveUntil is { } u && u <= f)
             throw new ArgumentException("A rule has to end after it starts.");
@@ -74,6 +85,8 @@ public class CommissionRule
         if (kind == CommissionKind.FlatPerProduct && productId is null) throw new ArgumentException("Choose a product.");
         if (kind == CommissionKind.FlatPerField && (string.IsNullOrWhiteSpace(fieldName) || string.IsNullOrWhiteSpace(fieldValue)))
             throw new ArgumentException("Choose a custom field and the value that earns the commission.");
+        if (kind == CommissionKind.FlatPerDisposition && (dispositionId is null) == (dispositionCategoryId is null))
+            throw new ArgumentException("Choose a disposition or a reporting category (one of them).");
 
         Name = name.Trim();
         Kind = kind;
@@ -82,6 +95,9 @@ public class CommissionRule
         ProductLabel = kind == CommissionKind.FlatPerProduct ? Blank(productLabel) : null;
         FieldName = kind == CommissionKind.FlatPerField ? fieldName!.Trim() : null;
         FieldValue = kind == CommissionKind.FlatPerField ? fieldValue!.Trim() : null;
+        DispositionId = kind == CommissionKind.FlatPerDisposition ? dispositionId : null;
+        DispositionCategoryId = kind == CommissionKind.FlatPerDisposition ? dispositionCategoryId : null;
+        DispositionLabel = kind == CommissionKind.FlatPerDisposition ? Blank(dispositionLabel) : null;
         TierLabel = Blank(tierLabel);
         IsActive = isActive;
         EffectiveFrom = effectiveFrom;
@@ -102,9 +118,10 @@ public static class CommissionKind
     public const string FlatPerOrder   = "flat_per_order";
     public const string FlatPerProduct = "flat_per_product";
     public const string FlatPerField   = "flat_per_field";
+    public const string FlatPerDisposition = "flat_per_disposition";
 
-    public static bool IsValid(string? v) => v is PercentOfOrder or FlatPerOrder or FlatPerProduct or FlatPerField;
-    public static bool NeedsOrder(string v) => v != FlatPerField;
+    public static bool IsValid(string? v) => v is PercentOfOrder or FlatPerOrder or FlatPerProduct or FlatPerField or FlatPerDisposition;
+    public static bool NeedsOrder(string v) => v is not (FlatPerField or FlatPerDisposition);
 }
 
 /// <summary>

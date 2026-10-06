@@ -21,6 +21,9 @@ public class CommissionRuleConfiguration : IEntityTypeConfiguration<CommissionRu
         b.Property(r => r.ProductLabel).HasColumnName("product_label").HasMaxLength(300);
         b.Property(r => r.FieldName).HasColumnName("field_name").HasMaxLength(100);
         b.Property(r => r.FieldValue).HasColumnName("field_value").HasMaxLength(300);
+        b.Property(r => r.DispositionId).HasColumnName("disposition_id");
+        b.Property(r => r.DispositionCategoryId).HasColumnName("disposition_category_id");
+        b.Property(r => r.DispositionLabel).HasColumnName("disposition_label").HasMaxLength(200);
         b.Property(r => r.TierLabel).HasColumnName("tier_label").HasMaxLength(50);
         b.Property(r => r.EffectiveFrom).HasColumnName("effective_from");
         b.Property(r => r.EffectiveUntil).HasColumnName("effective_until");

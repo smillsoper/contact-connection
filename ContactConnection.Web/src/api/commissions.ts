@@ -4,13 +4,14 @@ import { getSubdomainFromHostname } from '../utils/subdomain'
 
 // Commissions (S171): rules per campaign (client = default), pay periods, reports, an agent's own earnings.
 
-export type CommissionKind = 'percent_of_order' | 'flat_per_order' | 'flat_per_product' | 'flat_per_field'
+export type CommissionKind = 'percent_of_order' | 'flat_per_order' | 'flat_per_product' | 'flat_per_field' | 'flat_per_disposition'
 
 export const KIND_LABELS: Record<CommissionKind, string> = {
   percent_of_order: '% of order',
   flat_per_order: '$ per order',
   flat_per_product: '$ per unit of a product',
   flat_per_field: '$ when a custom field has a value',
+  flat_per_disposition: '$ per call with a disposition / category',
 }
 
 export interface CommissionRule {
@@ -24,6 +25,10 @@ export interface CommissionRule {
   productLabel: string | null
   fieldName: string | null
   fieldValue: string | null
+  /** flat_per_disposition (S181): this disposition, or any disposition in this reporting category. */
+  dispositionId: string | null
+  dispositionCategoryId: string | null
+  dispositionLabel: string | null
   tierLabel: string | null
   isActive: boolean
   /** Tenant-local "yyyy-MM-ddTHH:mm"; null = open. */
@@ -40,6 +45,8 @@ export interface RuleInput {
   productId?: string | null
   fieldName?: string | null
   fieldValue?: string | null
+  dispositionId?: string | null
+  dispositionCategoryId?: string | null
   tierLabel?: string | null
   isActive: boolean
   effectiveFrom?: string | null

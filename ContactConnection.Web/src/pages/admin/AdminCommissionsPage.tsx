@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { dispositionsApi, type Disposition, type DispositionCategory } from '../../api/dispositions'
 import { Link } from 'react-router-dom'
 import AdminShell from '../../components/admin/AdminShell'
 import {
@@ -20,6 +21,7 @@ function describe(r: CommissionRule) {
   const what = r.kind === 'percent_of_order' ? 'of the order (less shipping, tax and fees)'
     : r.kind === 'flat_per_order' ? 'per order'
     : r.kind === 'flat_per_product' ? `per unit of ${r.productLabel ?? 'the product'}`
+    : r.kind === 'flat_per_disposition' ? `per call dispositioned ${r.dispositionLabel ?? '(disposition)'}`
     : `when ${r.fieldName} = "${r.fieldValue}"`
   return `${amount} ${what}${r.tierLabel ? ` · ${r.tierLabel} calls only` : ''}`
 }
@@ -32,17 +34,19 @@ function effective(r: CommissionRule) {
   return r.effectiveFrom ? `Calls from ${when(r.effectiveFrom)}` : `Calls before ${when(r.effectiveUntil!)}`
 }
 
-function RuleEditor({ rule, scope, products, fields, onSave, onClose }: {
+function RuleEditor({ rule, scope, products, fields, catalog, onSave, onClose }: {
   rule: CommissionRule | null
   scope: { clientId?: string; campaignId?: string }
   products: ProductSearchResult[]
   fields: CustomFieldDefinition[]
+  catalog: { categories: DispositionCategory[]; dispositions: Disposition[] }
   onSave: (input: RuleInput) => Promise<void>
   onClose: () => void
 }) {
   const [f, setF] = useState<RuleInput>(rule ? {
     name: rule.name, kind: rule.kind, amount: rule.amount, productId: rule.productId, fieldName: rule.fieldName,
-    fieldValue: rule.fieldValue, tierLabel: rule.tierLabel, isActive: rule.isActive,
+    fieldValue: rule.fieldValue, dispositionId: rule.dispositionId, dispositionCategoryId: rule.dispositionCategoryId,
+    tierLabel: rule.tierLabel, isActive: rule.isActive,
     effectiveFrom: rule.effectiveFrom ?? '', effectiveUntil: rule.effectiveUntil ?? '',
   } : { ...scope, name: '', kind: 'percent_of_order', amount: 0, tierLabel: '', isActive: true, effectiveFrom: '', effectiveUntil: '' })
   const [error, setError] = useState<string | null>(null)
@@ -111,6 +115,35 @@ function RuleEditor({ rule, scope, products, fields, onSave, onClose }: {
           )}
           {f.kind === 'flat_per_field' && (
             <p className="text-xs text-gray-500">Earned whether or not the call placed an order — for script flags like a retention call's save method.</p>
+          )}
+          {f.kind === 'flat_per_disposition' && (
+            <>
+              <label className="block">
+                <span className="block text-sm font-medium text-gray-300 mb-1">Disposition or reporting category</span>
+                <select className={inputCls}
+                  value={f.dispositionId ? `d:${f.dispositionId}` : f.dispositionCategoryId ? `c:${f.dispositionCategoryId}` : ''}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    set({ dispositionId: v.startsWith('d:') ? v.slice(2) : null, dispositionCategoryId: v.startsWith('c:') ? v.slice(2) : null })
+                  }}>
+                  <option value="">Choose…</option>
+                  {catalog.categories.length > 0 && (
+                    <optgroup label="Any disposition in the category">
+                      {catalog.categories.filter((c) => c.isActive).map((c) => <option key={c.id} value={`c:${c.id}`}>{c.name}</option>)}
+                    </optgroup>
+                  )}
+                  {catalog.dispositions.length > 0 && (
+                    <optgroup label="One disposition">
+                      {catalog.dispositions.filter((d) => d.isActive).map((d) => <option key={d.id} value={`d:${d.id}`}>{d.name}</option>)}
+                    </optgroup>
+                  )}
+                </select>
+              </label>
+              <p className="text-xs text-gray-500">
+                Paid per interaction to the agent who recorded it, with or without an order. Follows the disposition catalog — aliases
+                count, and moving a disposition to another category changes what earns (recalculate past calls to apply it to them).
+              </p>
+            </>
           )}
           <label className="block">
             <span className="block text-sm font-medium text-gray-300 mb-1">Only for calls routed to tier (optional)</span>
@@ -353,6 +386,7 @@ export default function AdminCommissionsPage() {
   const [allRules, setAllRules] = useState<CommissionRule[]>([])
   const [products, setProducts] = useState<ProductSearchResult[]>([])
   const [fields, setFields] = useState<CustomFieldDefinition[]>([])
+  const [catalog, setCatalog] = useState<{ categories: DispositionCategory[]; dispositions: Disposition[] }>({ categories: [], dispositions: [] })
   const [editing, setEditing] = useState<CommissionRule | 'new' | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -360,6 +394,8 @@ export default function AdminCommissionsPage() {
     listClients().then((c) => { setClients(c); if (c.length > 0) setClientId(c[0].id) }).catch(() => setError('Failed to load clients.'))
     productsApi.search('', 1, 200, true).then(setProducts).catch(() => {})
     customFieldsApi.listDefinitions().then((d) => setFields(d.filter((x) => x.isActive))).catch(() => {})
+    Promise.all([dispositionsApi.categories(), dispositionsApi.list()])
+      .then(([categories, dispositions]) => setCatalog({ categories, dispositions })).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -476,6 +512,7 @@ export default function AdminCommissionsPage() {
           scope={scope}
           products={products}
           fields={fields}
+          catalog={catalog}
           onSave={async (input) => {
             if (editing === 'new') await commissionsApi.createRule(input)
             else await commissionsApi.updateRule(editing.id, input)
