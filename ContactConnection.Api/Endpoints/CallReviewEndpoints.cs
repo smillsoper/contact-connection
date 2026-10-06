@@ -284,10 +284,11 @@ public static class CallReviewEndpoints
             },
             // Each interaction = one agent's work on the call, with its own campaign (S178: a call transferred
             // sales → CS has two). Numbered by start order, which also tidies calls saved before the numbering fix.
+            compoundDisposition = r.CompoundDisposition,
             dispositions = r.Interactions.OrderBy(i => i.StartedAt).ThenBy(i => i.InteractionNumber)
                 .Select((i, n) => new
                 {
-                    interactionNumber = n + 1, i.Type, i.Disposition, i.Status, i.StartedAt, i.CompletedAt,
+                    interactionNumber = n + 1, i.Type, i.Disposition, i.DispositionId, i.Status, i.StartedAt, i.CompletedAt,
                     i.AgentId, agentName = i.AgentId is { } ia ? ixNames.Agents.GetValueOrDefault(ia) : null,
                     i.CampaignId, campaignName = i.CampaignId is { } ic ? ixNames.Campaigns.GetValueOrDefault(ic) : null,
                     // A transferred interaction's own script-written fields (S178); null otherwise.

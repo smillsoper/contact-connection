@@ -56,6 +56,7 @@ public class FlowEngine : IFlowEngine
 
     private readonly ICommissionService? _commissions;
     private readonly ContactConnection.Infrastructure.Ai.AiSummaryQueue? _aiSummaries;
+    private readonly IDispositionService? _dispositions;
 
     public FlowEngine(
         IFlowRepository flows,
@@ -71,8 +72,10 @@ public class FlowEngine : IFlowEngine
         ILogger<FlowEngine> logger,
         ICardDataRetentionService cardRetention,
         ICommissionService? commissions = null,
-        ContactConnection.Infrastructure.Ai.AiSummaryQueue? aiSummaries = null)
+        ContactConnection.Infrastructure.Ai.AiSummaryQueue? aiSummaries = null,
+        IDispositionService? dispositions = null)
     {
+        _dispositions = dispositions;
         _aiSummaries = aiSummaries;
         _cardRetention = cardRetention;
         _commissions   = commissions;
@@ -1020,6 +1023,13 @@ public class FlowEngine : IFlowEngine
             record.RefreshOverallStatus();
         }
         await _callRecords.SaveChangesAsync(ct);
+
+        // Link the disposition to the catalog (S181) — KPIs read its category. Never fails the flow.
+        if (_dispositions is not null)
+        {
+            try { await _dispositions.SyncCallAsync(ctx.CallRecordId, ct); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Disposition sync failed for call {CallRecordId}", ctx.CallRecordId); }
+        }
 
         // Commissions (S171): the script's flags (custom fields) are final now. Never fails the flow.
         if (_commissions is not null)

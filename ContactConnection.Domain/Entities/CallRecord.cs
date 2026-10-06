@@ -280,6 +280,18 @@ public class CallRecord
     public CallInteraction? FirstInteraction =>
         _interactions.OrderBy(i => i.StartedAt).ThenBy(i => i.InteractionNumber).FirstOrDefault();
 
+    /// <summary>Every interaction's disposition in the order they happened, e.g. "Transferred to CS + Cancelled
+    /// Subscription" (S181). Null when none recorded one. KPIs count interactions; this is the call as a whole.</summary>
+    public string? CompoundDisposition
+    {
+        get
+        {
+            var parts = _interactions.OrderBy(i => i.StartedAt).ThenBy(i => i.InteractionNumber)
+                .Select(i => i.Disposition?.Trim()).Where(d => !string.IsNullOrEmpty(d)).ToList();
+            return parts.Count == 0 ? null : string.Join(" + ", parts);
+        }
+    }
+
     public CallInteraction AddInteraction(string type, Guid? id = null)
     {
         var interaction = CallInteraction.Create(Id, _interactions.Count + 1, type, id);

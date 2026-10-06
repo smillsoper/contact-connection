@@ -79,6 +79,8 @@ public class TenantDbContext : DbContext
     public DbSet<ExportDelivery> ExportDeliveries => Set<ExportDelivery>();
     public DbSet<ExportAuditEntry> ExportAuditEntries => Set<ExportAuditEntry>();
     public DbSet<ExportKey> ExportKeys => Set<ExportKey>();
+    public DbSet<DispositionCategory> DispositionCategories => Set<DispositionCategory>();
+    public DbSet<Disposition> Dispositions => Set<Disposition>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -146,6 +148,8 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new ExportDeliveryConfiguration());
         modelBuilder.ApplyConfiguration(new ExportAuditEntryConfiguration());
         modelBuilder.ApplyConfiguration(new ExportKeyConfiguration());
+        modelBuilder.ApplyConfiguration(new DispositionCategoryConfiguration());
+        modelBuilder.ApplyConfiguration(new DispositionConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 

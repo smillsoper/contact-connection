@@ -17,6 +17,8 @@ public class CallInteraction
     public Guid? FlowId { get; private set; }
     public int? FlowVersion { get; private set; }
     public string? Disposition { get; private set; }
+    /// <summary>The catalog disposition the recorded text matched (S181); null = none recorded, or unmapped text.</summary>
+    public Guid? DispositionId { get; private set; }
     public string? FlowExecutionState { get; private set; }  // JSONB — owned by flow engine
     public List<CommitmentEvent> CommitmentEvents { get; private set; } = [];
     public string? CustomFields { get; private set; }        // JSONB — denormalized snapshot
@@ -106,6 +108,14 @@ public class CallInteraction
     {
         FlowId = flowId;
         FlowVersion = flowVersion;
+    }
+
+    /// <summary>The disposition as it stands now — re-synced whenever the disposition field is written after completion
+    /// (Call Records edit, AI summary confirm) so the interaction never keeps a stale copy (S181).</summary>
+    public void SetDisposition(string? text, Guid? dispositionId)
+    {
+        Disposition = string.IsNullOrWhiteSpace(text) ? Disposition : text.Trim();
+        DispositionId = dispositionId;
     }
 
     public void Complete(string disposition)

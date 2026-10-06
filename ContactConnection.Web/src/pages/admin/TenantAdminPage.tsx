@@ -44,6 +44,7 @@ const NAV_SECTIONS: NavSection[] = [
       { title: 'Agent Portal', desc: 'Open the agent workspace — softphone, live flow, and chat.', path: '/agent', live: true },
       { title: 'Call Trace', desc: 'Watch calls flow through telephony and script nodes in real time.', onClick: () => openCallTrace(), live: true },
       { title: 'Custom Fields', desc: 'Define fields flows can save call-record data into for reporting.', path: '/admin/custom-field-definitions', live: true },
+      { title: 'Dispositions', desc: 'Call outcomes and what each means for reporting — sales, customer service, junk, test, your own categories.', path: '/admin/dispositions', live: true },
     ],
   },
   {

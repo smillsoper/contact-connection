@@ -51,7 +51,9 @@ public class CallInteractionConfiguration : IEntityTypeConfiguration<CallInterac
         builder.Property(i => i.FlowId).HasColumnName("flow_id");
         builder.Property(i => i.FlowVersion).HasColumnName("flow_version");
         builder.Property(i => i.Disposition)
-            .HasColumnName("disposition").HasMaxLength(50);
+            .HasColumnName("disposition").HasMaxLength(200);
+        builder.Property(i => i.DispositionId).HasColumnName("disposition_id");
+        builder.HasIndex(i => i.DispositionId).HasDatabaseName("idx_call_interactions_disposition");
         builder.Property(i => i.Status)
             .HasColumnName("status").IsRequired().HasMaxLength(20);
         builder.Property(i => i.CartId).HasColumnName("cart_id");

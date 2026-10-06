@@ -27,6 +27,7 @@ import AdminCommissionsPage from './pages/admin/AdminCommissionsPage'
 import BillingPage from './pages/admin/BillingPage'
 import CommissionReportPage from './pages/CommissionReportPage'
 import AdminExportsPage from './pages/admin/AdminExportsPage'
+import AdminDispositionsPage from './pages/admin/AdminDispositionsPage'
 import AdminExportEditorPage from './pages/admin/AdminExportEditorPage'
 import AdminProductOffersPage from './pages/admin/AdminProductOffersPage'
 import AdminApiDefinitionsPage from './pages/admin/AdminApiDefinitionsPage'
@@ -260,6 +261,14 @@ export default function App() {
           element={
             <RequireAdminAuth>
               <AdminRolesPage />
+            </RequireAdminAuth>
+          }
+        />
+        <Route
+          path="/admin/dispositions"
+          element={
+            <RequireAdminAuth>
+              <AdminDispositionsPage />
             </RequireAdminAuth>
           }
         />

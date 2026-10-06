@@ -451,6 +451,7 @@ public static class CallRecordsEndpoints
         r.Addresses,
         r.CommitmentEvents,
         r.RecordingUrl,
+        r.CompoundDisposition,
         Interactions = r.Interactions.Select(i => new
         {
             i.Cart,
@@ -467,6 +468,7 @@ public static class CallRecordsEndpoints
             i.FlowId,
             i.FlowVersion,
             i.Disposition,
+            i.DispositionId,
             i.Status,
             i.CommitmentEvents,
             i.CartId,

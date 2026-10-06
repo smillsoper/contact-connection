@@ -12,13 +12,16 @@ public class CustomFieldService : ICustomFieldService
     private readonly ICustomFieldValueRepository _values;
     private readonly ICallRecordRepository _callRecords;
     private readonly ICampaignRepository _campaigns;
+    private readonly IDispositionService? _dispositions;
 
     public CustomFieldService(
         ICustomFieldDefinitionRepository definitions,
         ICustomFieldValueRepository values,
         ICallRecordRepository callRecords,
-        ICampaignRepository campaigns)
+        ICampaignRepository campaigns,
+        IDispositionService? dispositions = null)
     {
+        _dispositions = dispositions;
         _definitions = definitions;
         _values = values;
         _callRecords = callRecords;
@@ -51,6 +54,15 @@ public class CustomFieldService : ICustomFieldService
         ApplyTypedValue(probe, def.DataTypeName, rawValue);
         interaction.SetCustomField(def.FieldName, probe.GetTypedValue());
         await _callRecords.SaveChangesAsync(ct);
+        await SyncDispositionAsync(callRecordId, def.FieldName, ct);
+    }
+
+    /// <summary>A write to the disposition field after the interaction finished (Call Records edit, AI summary confirm)
+    /// must reach the interaction and its catalog link (S181) — the interaction only copied it once, at completion.</summary>
+    private async Task SyncDispositionAsync(Guid callRecordId, string fieldName, CancellationToken ct)
+    {
+        if (_dispositions is not null && string.Equals(fieldName, "disposition", StringComparison.Ordinal))
+            await _dispositions.SyncCallAsync(callRecordId, ct);
     }
 
     public async Task<List<ResolvedCustomField>> GetFieldsForCallAsync(Guid callRecordId, CancellationToken ct = default)
@@ -94,6 +106,7 @@ public class CustomFieldService : ICustomFieldService
 
         await _values.SaveChangesAsync(ct);
         await RefreshSnapshotAsync(callRecordId, ct);
+        await SyncDispositionAsync(callRecordId, def.FieldName, ct);
     }
 
     public async Task DeleteValueAsync(Guid callRecordId, Guid definitionId, CancellationToken ct = default)

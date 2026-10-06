@@ -85,7 +85,8 @@ public sealed class ExportGenerator(ScopedTenantDbContextFactory dbFactory) : IE
             await db.Campaigns.AsNoTracking().ToDictionaryAsync(c => c.Id, c => c.Name, ct),
             await db.Agents.AsNoTracking().ToDictionaryAsync(a => a.Id, a => a.FullName, ct),
             (await db.Offers.AsNoTracking().Select(o => new { o.Id, o.Flags }).ToListAsync(ct))
-                .ToDictionary(o => o.Id, o => (IReadOnlyList<ContactConnection.Domain.ValueObjects.Commerce.ProductFlag>)o.Flags));
+                .ToDictionary(o => o.Id, o => (IReadOnlyList<ContactConnection.Domain.ValueObjects.Commerce.ProductFlag>)o.Flags),
+            await DispositionLookupAsync(db, ct));
 
         var calls = 0;
         var rows = 0;
@@ -147,6 +148,13 @@ public sealed class ExportGenerator(ScopedTenantDbContextFactory dbFactory) : IE
     }
 
     // ── Data ───────────────────────────────────────────────────────────────────
+
+    private static async Task<IReadOnlyDictionary<Guid, (Disposition, DispositionCategory?)>> DispositionLookupAsync(TenantDbContext db, CancellationToken ct)
+    {
+        var categories = await db.DispositionCategories.AsNoTracking().ToDictionaryAsync(c => c.Id, ct);
+        return (await db.Dispositions.AsNoTracking().ToListAsync(ct))
+            .ToDictionary(d => d.Id, d => (d, categories.GetValueOrDefault(d.CategoryId)));
+    }
 
     private static async IAsyncEnumerable<Dictionary<string, object?>> Calls(
         TenantDbContext db, ExportGenerationRequest request, ExportCallModel.Lookups lookups,

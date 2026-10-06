@@ -29,7 +29,8 @@ public static class ExportCallModel
         IReadOnlyDictionary<Guid, string> Clients,
         IReadOnlyDictionary<Guid, string> Campaigns,
         IReadOnlyDictionary<Guid, string> Agents,
-        IReadOnlyDictionary<Guid, IReadOnlyList<ProductFlag>>? OfferFlags = null);
+        IReadOnlyDictionary<Guid, IReadOnlyList<ProductFlag>>? OfferFlags = null,
+        IReadOnlyDictionary<Guid, (Disposition Disposition, DispositionCategory? Category)>? Dispositions = null);
 
     public static JsonObject Build(CallRecord r, Lookups lk, IReadOnlyList<PaymentTransaction> payments)
     {
@@ -71,6 +72,8 @@ public static class ExportCallModel
             ["media"] = r.MediaAttribution is { } m ? MediaAttributionJson.ToJson(m) : new JsonObject(),
             ["custom_fields"] = ParseObject(r.CustomFields),
             ["disposition"] = ordered.LastOrDefault(i => !string.IsNullOrEmpty(i.Disposition))?.Disposition ?? "",
+            // Every interaction's disposition in order, e.g. "Transferred to CS + Cancelled Subscription" (S181).
+            ["compound_disposition"] = r.CompoundDisposition ?? "",
             ["has_order"] = orders.Count > 0,
             ["order_count"] = orders.Count,
             ["order_number"] = ordered.FirstOrDefault(i => !string.IsNullOrEmpty(i.OrderNumber))?.OrderNumber ?? "",
@@ -81,6 +84,9 @@ public static class ExportCallModel
     }
 
     private static bool HasOrder(CallInteraction i) => i.OrderSubmittedAt is not null;
+
+    private static (Disposition Disposition, DispositionCategory? Category)? DispositionOf(CallInteraction i, Lookups lk) =>
+        i.DispositionId is { } id && lk.Dispositions?.TryGetValue(id, out var d) == true ? d : null;
 
     private static JsonObject Interaction(CallRecord r, CallInteraction i, Lookups lk, IReadOnlyList<PaymentTransaction> payments)
     {
@@ -94,6 +100,11 @@ public static class ExportCallModel
             ["type"] = i.Type,
             ["status"] = i.Status,
             ["disposition"] = i.Disposition ?? "",
+            ["disposition_code"] = DispositionOf(i, lk)?.Disposition.Code ?? "",
+            // The reporting category it maps to now (S181) — key is "" when unmapped or for tenant-made categories.
+            ["disposition_category"] = DispositionOf(i, lk) is { Category: { } cat }
+                ? new JsonObject { ["key"] = cat.Key ?? "", ["name"] = cat.Name, ["sales_opportunity"] = cat.SalesOpportunity, ["excluded_from_kpis"] = cat.ExcludedFromKpis }
+                : new JsonObject { ["key"] = "", ["name"] = "", ["sales_opportunity"] = false, ["excluded_from_kpis"] = false },
             ["started_at"] = Time(i.StartedAt),
             ["completed_at"] = Time(i.CompletedAt),
             ["agent"] = Named(i.AgentId ?? r.AgentId, lk.Agents),

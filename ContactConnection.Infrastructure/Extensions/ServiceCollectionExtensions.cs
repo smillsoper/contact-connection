@@ -341,6 +341,8 @@ public static class ServiceCollectionExtensions
 
         // Export Worker (S180) — the file engine, shared by the API's Preview and the Worker's runs.
         services.AddScoped<IExportGenerator, ContactConnection.Infrastructure.Exports.ExportGenerator>();
+        // Disposition catalog (S181) — categories, scoped dispositions, interaction <-> catalog linking.
+        services.AddScoped<IDispositionService, ContactConnection.Infrastructure.Dispositions.DispositionService>();
         // Email is resolved only when an email target sends: the Resend client refuses to construct without its key, and
         // that mustn't stop SFTP / FTPS deliveries (or a Worker without email configured).
         services.AddScoped<IExportDeliveryService>(sp => new ContactConnection.Infrastructure.Exports.ExportDeliveryService(
