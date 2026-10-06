@@ -62,6 +62,9 @@ doesn't fit. Business blockers (LLC reinstatement, letter of intent, Clint's fig
    definitions, vendor test-file approval lifecycle, Liquid layouts, schedules + windows, SFTP/FTPS/email + PGP/zip,
    retention, audit, Cannella LF + SF templates). Left: key management, real Cannella creds from Clint, live send.
 3. **Internal KPI widgets** (campaign KPIs) on the existing dashboards. (1)
+   **S181 plan:** `docs/dispositions-kpi-plan.md`. Dispositions become a tenant-managed catalog mapped to reporting
+   categories (built-in + tenant-created → custom KPIs). KPIs count interactions; a call has a compound disposition.
+   Phase 1 = dispositions, phase 2 = KPI widget.
 
 **Sprint 3: client-facing (week of Oct 19)**
 1. **Client dashboards + client invite**: clients log in to see their assigned dashboards (TMS View as reference). (2)
