@@ -22,7 +22,10 @@ disposition → reporting category.
   "Make client dashboard…" in the builder, client portal at `/client`. Allowed client widgets: KPIs, Service Level, Call
   State by Campaign. Scope = client + optional campaigns; **DNIS narrowing not built yet**. Also closed a pre-existing
   hole: the API now rejects a token whose tenant differs from the request's tenant header.
-- **C — next.**
+- **B — browser-verified by Stephen** (+ fixes `9a1b1d0`, `cf6af9d`, `ad699d6`: logo, deactivation sign-out, self-service
+  two-step, service level counted once per call, Reset two-step on the row).
+- **C — built (`141a5e0`), awaiting Stephen's browser test:** Call Records widget on internal + client dashboards; 25 columns
+  + custom fields, search / filters / sort / paging, detail drawer, recording playback gated by client user + widget, audited.
 
 ## A. KPI builder upgrade (internal + client dashboards)
 
