@@ -20,11 +20,18 @@
 - **Delivery** (pluggable): SFTP (SSH.NET; password or key — we generate the pair), FTPS (FluentFTP), email, download; later
   S3 / Box / Drive / SharePoint. Encryption: PGP (PgpCore) to the recipient's public key, AES zip. Credentials in the tenant
   store. (WinSCP is Windows-only — not used; hosting is Linux containers.)
+- **Lifecycle + test files (Stephen, S180)**: Draft → Testing → Approved → Live. Vendors (Cannella and others) approve a
+  test file before go-live, sometimes before they release their delivery method. **Generate test file** at any stage:
+  from a chosen date range of production calls, or from practice runs (training / sandbox) when there's no production data
+  yet; download, or deliver to a target once one exists. Marked as test (optional `_TEST` filename suffix; `export.is_test`
+  in templates); never counts as a run (no effect on "since last successful run"). Vendor approval recorded (who, when,
+  note) in the definition history; the schedule only runs when Live.
 - **Guards**: no card data in the model; production calls only; definitions versioned; runs and downloads audited.
 
 ## Build order
 
-1. Definitions, Columns + Document modes, CSV / fixed width / Excel, Preview, Run now, run history + download, the queue.
+1. Definitions + lifecycle, Columns + Document modes, CSV / fixed width / Excel, Preview, **test files**, Run now, run history
+   + download, the queue.
 2. Schedules + windows UI, SFTP / FTPS / email, PGP / zip, Cannella LF + SF as the first real exports.
 
 ## CRMPro reference: Life Seasons' Cannella exports (from the CRMPro dump, layout only — no credentials read)
@@ -68,8 +75,8 @@ Sorted by call date. Per call, several rows sharing these columns (`[x]` = varie
 Rows per call: **CALL** always; for orders: **ORDER**, then **UPSELL** per cart line with a Cannella SKU (from the offer
 flags "Cannella Order SKU" / "Cannella Upsell SKU", else a SKU → Cannella-code map), then **REVENUE**.
 
-**Bug to flag to Stephen:** the LF script adds +3 h to the call date and then +3 h again when writing date and time
-(= Pacific + 6 h). Decide with Life Seasons / Cannella whether to reproduce it or send true Eastern.
+**CRMPro bug, not reproduced:** the LF script adds +3 h to the call date and then +3 h again when writing date and time
+(= Pacific + 6 h). **Decision (Stephen, S180): LF goes out in true Eastern time, like SF.**
 
 ### SF — `NERQ_TMS_<MMddyy>.txt` (fixed width, CORE)
 
