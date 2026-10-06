@@ -64,3 +64,6 @@ Original Application/
 # FreeSWITCH external-profile TLS (S169) — generated locally, never committed (agent.pem holds a private key)
 freeswitch/conf/tls/agent.pem
 freeswitch/conf/tls/cafile.pem
+
+# Local SFTP test server data (S181) — uploads, host keys, test public keys
+sftp-test/

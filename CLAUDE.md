@@ -409,6 +409,7 @@ dotnet ef database update --context ContactConnectionDbContext --project Contact
 
 pgAdmin: http://localhost:5050
 MailHog: http://localhost:8025
+Local SFTP test server (export deliveries, S181): `sftp-test` service — host 127.0.0.1, port 2222, user `tester`, password `SFTP_TEST_PASSWORD` in `.env`, remote folder `/upload` → files land in `./sftp-test/upload` (git-ignored). Host keys persist in `./sftp-test/host-keys`; vendor public keys for key sign-in go in `./sftp-test/keys/*.pub` + `docker compose restart sftp-test`.
 
 ---
 

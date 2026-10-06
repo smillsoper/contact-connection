@@ -144,6 +144,23 @@ services:
       - "3478:3478/udp"
       - "3478:3478/tcp"
 
+  # Local SFTP server for testing export deliveries (S181). Bound to 127.0.0.1 only — never reachable from outside.
+  # User "tester", password SFTP_TEST_PASSWORD from .env. Uploaded files appear in ./sftp-test/upload. Host keys are kept
+  # in ./sftp-test/host-keys so the fingerprint you pin survives container restarts. To test key sign-in, put a vendor
+  # SSH public key (Data Exports → Vendor keys) in ./sftp-test/keys/<name>.pub and restart: docker compose restart sftp-test
+  sftp-test:
+    image: atmoz/sftp
+    container_name: cc_sftp_test
+    command: ["tester:${SFTP_TEST_PASSWORD}:1001::upload"]
+    ports:
+      - "127.0.0.1:2222:22"
+    volumes:
+      - ./sftp-test/upload:/home/tester/upload
+      - ./sftp-test/keys:/home/tester/.ssh/keys:ro
+      # Host keys are staged, then installed 0600 by the init script (sshd rejects Windows bind mounts' 0777).
+      - ./sftp-test/host-keys:/tmp/host-keys:ro
+      - ./sftp-test/init/host-keys.sh:/etc/sftp.d/host-keys.sh:ro
+
 volumes:
   cc_pgdata:
   cc_redisdata:
