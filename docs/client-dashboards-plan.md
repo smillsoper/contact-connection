@@ -15,6 +15,15 @@ disposition → reporting category.
    dashboards but no recordings).
 4. **Order:** A → B → C, all before Life Seasons goes live.
 
+## Status (S181)
+
+- **A — done:** formula KPIs (`fa4b185`), targets + report dimensions (`d96cb22`), tabbed settings modal (`a165cab`).
+- **B — built (`b42a080` backend, `c81cd89` web), awaiting Stephen's browser test:** client users (Admin → Client users),
+  "Make client dashboard…" in the builder, client portal at `/client`. Allowed client widgets: KPIs, Service Level, Call
+  State by Campaign. Scope = client + optional campaigns; **DNIS narrowing not built yet**. Also closed a pre-existing
+  hole: the API now rejects a token whose tenant differs from the request's tenant header.
+- **C — next.**
+
 ## A. KPI builder upgrade (internal + client dashboards)
 
 - **Formula KPIs.** A custom KPI becomes either a category ratio (today's) or an **NCalc formula** over named variables,
