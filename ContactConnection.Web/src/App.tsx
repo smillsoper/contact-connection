@@ -26,6 +26,8 @@ import AdminMediaAgenciesPage from './pages/admin/AdminMediaAgenciesPage'
 import AdminCommissionsPage from './pages/admin/AdminCommissionsPage'
 import BillingPage from './pages/admin/BillingPage'
 import CommissionReportPage from './pages/CommissionReportPage'
+import AdminExportsPage from './pages/admin/AdminExportsPage'
+import AdminExportEditorPage from './pages/admin/AdminExportEditorPage'
 import AdminProductOffersPage from './pages/admin/AdminProductOffersPage'
 import AdminApiDefinitionsPage from './pages/admin/AdminApiDefinitionsPage'
 import AdminApiDefinitionDetailPage from './pages/admin/AdminApiDefinitionDetailPage'
@@ -418,6 +420,10 @@ export default function App() {
             reports.view permission (not just RequireAdminAuth's "any admin permission" check) —
             mutating actions (create/edit/delete a dashboard) are further gated by reports.manage
             inside the pages themselves, same convention as AdminBlockListPage's canManage. */}
+        {/* Data Exports (S180) — reports.manage: export files carry customer details. */}
+        <Route path="/admin/exports" element={<RequirePermission permission="reports.manage"><AdminExportsPage /></RequirePermission>} />
+        <Route path="/admin/exports/new" element={<RequirePermission permission="reports.manage"><AdminExportEditorPage /></RequirePermission>} />
+        <Route path="/admin/exports/:id" element={<RequirePermission permission="reports.manage"><AdminExportEditorPage /></RequirePermission>} />
         <Route
           path="/dashboards"
           element={

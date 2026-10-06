@@ -245,6 +245,7 @@ app.MapCallTracesEndpoints();
 app.MapDashboardsEndpoints();
 app.MapDashboardWidgetsEndpoints();
 app.MapActiveCallsWidget();
+app.MapExportsEndpoints();
 
 // Tenant admin portal
 app.MapAdminAgentsEndpoints();

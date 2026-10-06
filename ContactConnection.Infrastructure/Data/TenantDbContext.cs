@@ -74,6 +74,8 @@ public class TenantDbContext : DbContext
     public DbSet<CallSummary> CallSummaries => Set<CallSummary>();
     public DbSet<CallRecordAuditEntry> CallRecordAuditEntries => Set<CallRecordAuditEntry>();
     public DbSet<OutboundDialAttempt> OutboundDialAttempts => Set<OutboundDialAttempt>();
+    public DbSet<ExportDefinition> ExportDefinitions => Set<ExportDefinition>();
+    public DbSet<ExportRun> ExportRuns => Set<ExportRun>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -136,6 +138,8 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new MediaReplayBatchConfiguration());
         modelBuilder.ApplyConfiguration(new CallSummaryConfiguration());
         modelBuilder.ApplyConfiguration(new OutboundDialAttemptConfiguration());
+        modelBuilder.ApplyConfiguration(new ExportDefinitionConfiguration());
+        modelBuilder.ApplyConfiguration(new ExportRunConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 

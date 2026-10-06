@@ -8,6 +8,7 @@ public static class VersionedEntityType
     public const string TenantApiEndpoint = "tenant_api_endpoint";
     public const string PortalApiDefinition = "portal_api_definition";
     public const string PortalApiEndpoint = "portal_api_endpoint";
+    public const string ExportDefinition = "export_definition";
 }
 
 /// <summary>

@@ -339,6 +339,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IBlobStorage, LocalFileBlobStorage>();
         services.AddScoped<IScreenRecordingRepository, ScreenRecordingRepository>();
 
+        // Export Worker (S180) — the file engine, shared by the API's Preview and the Worker's runs.
+        services.AddScoped<IExportGenerator, ContactConnection.Infrastructure.Exports.ExportGenerator>();
+
         // Recording transcode / A/V merge — the RecordingMergeService worker drives these.
         // FfmpegRunner is a stateless CLI seam (singleton); the merger orchestrates blob I/O
         // around it; the job repository is tenant-scoped like the screen-recording one.

@@ -123,7 +123,7 @@ public class ApiTemplateModelBuilder(
         return JsonValue.Create(value);
     }
 
-    private static JsonObject Cart(CartDocument? cart)
+    internal static JsonObject Cart(CartDocument? cart)
     {
         cart ??= CartDocument.Empty();
         var items = new JsonArray();

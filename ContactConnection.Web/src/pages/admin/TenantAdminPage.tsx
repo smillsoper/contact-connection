@@ -79,6 +79,7 @@ const NAV_SECTIONS: NavSection[] = [
     heading: 'Reporting',
     cards: [
       { title: 'Supervisor Dashboards', desc: 'Build and view live/historical widget dashboards — calls handled, AHT, conversion, and more.', path: '/dashboards', live: true, requiredPermission: 'reports.view' },
+      { title: 'Data Exports', desc: 'Files for clients and vendors (media agencies, fulfillment) — layouts, test files for vendor approval, run history.', path: '/admin/exports', live: true, requiredPermission: 'reports.manage' },
     ],
   },
   {
