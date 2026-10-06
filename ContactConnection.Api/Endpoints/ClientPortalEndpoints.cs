@@ -22,6 +22,9 @@ public static class ClientPortalEndpoints
         var g = app.MapGroup("/api/v1/client-portal").RequireAuthorization("ClientUser");
         g.MapGet("me", Me);
         g.MapPut("me/preferences", SetPreferences);
+        g.MapPost("me/mfa/setup", MfaSetup);
+        g.MapPost("me/mfa/enable", MfaEnable);
+        g.MapPost("me/mfa/disable", MfaDisable);
         g.MapGet("dashboards/{id:guid}", Dashboard);
         g.MapGet("dashboards/{id:guid}/widgets/{widgetId}/data", WidgetData);
         return app;
@@ -62,6 +65,54 @@ public static class ClientPortalEndpoints
         if (await LoadAsync(db, principal, ct) is not { } loaded) return Results.Unauthorized();
         var (user, _) = loaded;
         user.SetPreferences(req.TimeZone, req.DefaultDashboardId);
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(ClientPortalAuthEndpoints.Profile(user, tenant));
+    }
+
+    // ── Self-service two-step sign-in (S181) — always offered to client users; can't be turned off when the tenant requires it. ──
+
+    private static async Task<IResult> MfaSetup(ClaimsPrincipal principal, ScopedTenantDbContextFactory dbf, TenantContext tc,
+        Application.Interfaces.Services.IMfaService mfa, IConfiguration config, CancellationToken ct)
+    {
+        if (tc.Current is not { } tenant) return Results.Unauthorized();
+        await using var db = dbf.Create();
+        if (await LoadAsync(db, principal, ct) is not { } loaded) return Results.Unauthorized();
+        var (user, _) = loaded;
+        if (user.MfaEnabled) return Results.Conflict(new { error = "Two-step sign-in is already on." });
+        var secret = mfa.GenerateSecret();
+        user.StoreMfaSecret(secret);
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(new MfaSetupResponse(secret, mfa.GetOtpAuthUri(secret, user.Email, config["App:IssuerName"] ?? "ContactConnection")));
+    }
+
+    private static async Task<IResult> MfaEnable(MfaCodeRequest req, ClaimsPrincipal principal, ScopedTenantDbContextFactory dbf, TenantContext tc,
+        Application.Interfaces.Services.IMfaService mfa, HttpContext http, CancellationToken ct)
+    {
+        if (tc.Current is not { } tenant) return Results.Unauthorized();
+        await using var db = dbf.Create();
+        if (await LoadAsync(db, principal, ct) is not { } loaded) return Results.Unauthorized();
+        var (user, _) = loaded;
+        if (user.MfaEnabled) return Results.Ok(ClientPortalAuthEndpoints.Profile(user, tenant));
+        if (user.MfaSecret is null) return Results.BadRequest(new { error = "Start the setup again." });
+        if (!mfa.Verify(user.MfaSecret, req.Code)) return Results.UnprocessableEntity(new { error = "Invalid code." });
+        user.EnableMfa();
+        db.ClientUserAudit.Add(ClientUserAuditEntry.Create(user.Id, ClientUserAuditAction.MfaEnabled, null, ClientPortalAuthEndpoints.Ip(http)));
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(ClientPortalAuthEndpoints.Profile(user, tenant));
+    }
+
+    private static async Task<IResult> MfaDisable(MfaCodeRequest req, ClaimsPrincipal principal, ScopedTenantDbContextFactory dbf, TenantContext tc,
+        Application.Interfaces.Services.IMfaService mfa, HttpContext http, CancellationToken ct)
+    {
+        if (tc.Current is not { } tenant) return Results.Unauthorized();
+        if (tenant.Settings.MfaRequirement == "on") return Results.BadRequest(new { error = "Two-step sign-in is required by your account contact." });
+        await using var db = dbf.Create();
+        if (await LoadAsync(db, principal, ct) is not { } loaded) return Results.Unauthorized();
+        var (user, _) = loaded;
+        if (!user.MfaEnabled || user.MfaSecret is null) return Results.Ok(ClientPortalAuthEndpoints.Profile(user, tenant));
+        if (!mfa.Verify(user.MfaSecret, req.Code)) return Results.UnprocessableEntity(new { error = "Invalid code." });
+        user.ResetMfa();
+        db.ClientUserAudit.Add(ClientUserAuditEntry.Create(user.Id, ClientUserAuditAction.MfaDisabled, null, ClientPortalAuthEndpoints.Ip(http)));
         await db.SaveChangesAsync(ct);
         return Results.Ok(ClientPortalAuthEndpoints.Profile(user, tenant));
     }

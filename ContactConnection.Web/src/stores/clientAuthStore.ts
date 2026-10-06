@@ -14,6 +14,8 @@ export interface ClientProfile {
   tenantName: string
   tenantSubdomain: string
   mfaEnabled: boolean
+  /** The tenant's MFA setting — 'on' means required for client users; otherwise two-step is their choice. */
+  mfaRequirement: 'on' | 'optional' | 'off' | string
 }
 
 interface ClientAuthState {

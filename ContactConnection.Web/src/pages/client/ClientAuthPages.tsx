@@ -14,7 +14,7 @@ function Card({ title, subtitle, children }: { title: string; subtitle?: string;
   return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4 py-10">
       <div className="w-full max-w-sm bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-xl">
-        <img src="/hubion-favicon.svg" alt="" className="w-10 h-10 mx-auto mb-3" />
+        <img src="/cc-logo-dark.svg" alt="Contact Connection" className="h-14 mx-auto mb-3" />
         <h1 className="text-lg font-semibold text-white text-center">{title}</h1>
         {subtitle && <p className="text-xs text-gray-400 text-center mt-1">{subtitle}</p>}
         <div className="mt-5">{children}</div>
@@ -29,12 +29,12 @@ interface MfaState { preAuthToken: string; setupRequired: boolean; subdomain: st
 function useFinish() {
   const navigate = useNavigate()
   const setAuth = useClientAuthStore((s) => s.setAuth)
-  return (res: ClientAuthResponse, subdomain: string) => {
+  return (res: ClientAuthResponse, subdomain: string, twoStep = false) => {
     if (res.mfaPending && res.preAuthToken) {
       navigate('/client/mfa', { state: { preAuthToken: res.preAuthToken, setupRequired: !!res.mfaSetupRequired, subdomain } satisfies MfaState })
     } else if (res.token && res.user) {
       setAuth(res.token, subdomain, res.user)
-      navigate('/client', { replace: true })
+      navigate(twoStep && !res.user.mfaEnabled ? '/client?twoStep=1' : '/client', { replace: true })
     }
   }
 }
@@ -48,6 +48,7 @@ export function ClientLoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const finish = useFinish()
+  const ended = new URLSearchParams(useLocation().search).get('ended') === '1'
 
   async function submit(e: FormEvent) {
     e.preventDefault()
@@ -64,6 +65,7 @@ export function ClientLoginPage() {
   return (
     <Card title="Client dashboards" subtitle="Sign in to see your reporting">
       <form onSubmit={submit} className="space-y-3">
+        {ended && <p className="text-xs text-amber-300 text-center">You've been signed out. If this keeps happening, contact your account contact.</p>}
         {!urlSubdomain && (
           <input className={input} placeholder="Organization (subdomain)" value={subdomain} onChange={(e) => setSubdomain(e.target.value.trim())} />
         )}
@@ -86,6 +88,7 @@ export function ClientInvitePage() {
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [busy, setBusy] = useState(false)
+  const [twoStep, setTwoStep] = useState(true)
   const finish = useFinish()
 
   useEffect(() => {
@@ -102,7 +105,7 @@ export function ClientInvitePage() {
     try {
       const sub = clientSubdomain() ?? ''
       useClientAuthStore.setState({ subdomain: sub })
-      finish(await clientPortalApi.acceptInvite(token, { firstName, lastName, password }), sub)
+      finish(await clientPortalApi.acceptInvite(token, { firstName, lastName, password }), sub, info.mfaRequirement !== 'on' && twoStep)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not set your password')
     } finally { setBusy(false) }
@@ -130,6 +133,15 @@ export function ClientInvitePage() {
         <input className={input} type="password" autoComplete="new-password" placeholder={`Password (at least ${info.minPasswordLength} characters)`}
           value={password} onChange={(e) => setPassword(e.target.value)} />
         <input className={input} type="password" autoComplete="new-password" placeholder="Confirm password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+        {info.mfaRequirement !== 'on' && (
+          <label className="flex items-start gap-2 text-xs text-gray-300">
+            <input type="checkbox" className="mt-0.5" checked={twoStep} onChange={(e) => setTwoStep(e.target.checked)} />
+            <span>Set up two-step sign-in next (recommended) — a code from an authenticator app as well as your password.</span>
+          </label>
+        )}
+        {info.mfaRequirement === 'on' && (
+          <p className="text-[11px] text-gray-500">Next you'll set up two-step sign-in with an authenticator app — it's required for this account.</p>
+        )}
         {error && <p className="text-xs text-red-400">{error}</p>}
         <button className={button} disabled={busy || password.length < info.minPasswordLength || !confirm}>
           {busy ? 'Saving…' : 'Save and sign in'}

@@ -14,7 +14,7 @@ const btn = 'px-3 py-1.5 rounded text-sm disabled:opacity-50'
 
 const ACTION_LABEL: Record<string, string> = {
   invited: 'Link sent', invite_accepted: 'Set password', sign_in: 'Signed in', sign_in_failed: 'Sign-in failed',
-  updated: 'Changed', mfa_reset: 'Two-step reset', mfa_enabled: 'Two-step set up', dashboard_viewed: 'Opened dashboard',
+  updated: 'Changed', mfa_reset: 'Two-step reset', mfa_enabled: 'Two-step set up', mfa_disabled: 'Two-step turned off', dashboard_viewed: 'Opened dashboard',
   recording_played: 'Played recording', exported: 'Exported',
 }
 

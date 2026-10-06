@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import ClientTwoStep from './ClientTwoStep'
 import GridLayout, { WidthProvider } from 'react-grid-layout/legacy'
 import * as signalR from '@microsoft/signalr'
 import 'react-grid-layout/css/styles.css'
@@ -52,9 +53,11 @@ export default function ClientPortalPage() {
   const [dashboards, setDashboards] = useState<ClientDashboardRef[] | null>(null)
   const [dashboard, setDashboard] = useState<{ id: string; name: string; widgets: DashboardWidgetInstance[] } | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [prefsOpen, setPrefsOpen] = useState(false)
-  const [tz, setTz] = useState('')
-  const [defaultDash, setDefaultDash] = useState('')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const wantsTwoStep = searchParams.get('twoStep') === '1'
+  const [prefsOpen, setPrefsOpen] = useState(wantsTwoStep)
+  const [tz, setTz] = useState(() => useClientAuthStore.getState().profile?.timeZone ?? '')
+  const [defaultDash, setDefaultDash] = useState(() => useClientAuthStore.getState().profile?.defaultDashboardId ?? '')
   const [live, setLive] = useState<{ call: CallStateEvent | null; sessions: AgentSessionsEvent | null }>({ call: null, sessions: null })
   const nudge = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
@@ -126,7 +129,7 @@ export default function ClientPortalPage() {
     <div className="min-h-screen bg-gray-950 flex flex-col">
       <div className="flex items-center justify-between gap-3 bg-gray-900 border-b border-gray-800 px-4 py-2 flex-wrap">
         <div className="flex items-center gap-3 min-w-0">
-          <img src="/hubion-favicon.svg" alt="" className="w-6 h-6 shrink-0" />
+          <img src="/cc-favicon.svg" alt="" className="w-6 h-6 shrink-0" />
           <span className="text-sm font-semibold text-white truncate">{profile?.tenantName ?? 'Dashboards'}</span>
           {dashboards && dashboards.length > 1 && (
             <select value={selectedId ?? ''} onChange={(e) => navigate(`/client/d/${e.target.value}`)}
@@ -167,7 +170,7 @@ export default function ClientPortalPage() {
 
       {prefsOpen && profile && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setPrefsOpen(false)}>
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 w-full max-w-sm max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-sm font-semibold text-white mb-4">Preferences</h3>
             <label className="block text-xs text-gray-400 mb-1">Time zone (for "today", days and hours)</label>
             <select value={tz} onChange={(e) => setTz(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white mb-3">
@@ -179,9 +182,10 @@ export default function ClientPortalPage() {
               <option value="">The first dashboard</option>
               {(dashboards ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
+            <ClientTwoStep profile={profile} onChange={setProfile} startOpen={wantsTwoStep} />
             <div className="flex justify-end gap-2 mt-5">
-              <button className="text-sm text-gray-300 border border-gray-700 px-4 py-1.5 rounded-lg" onClick={() => setPrefsOpen(false)}>Cancel</button>
-              <button className="text-sm bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded-lg" onClick={savePrefs}>Save</button>
+              <button className="text-sm text-gray-300 border border-gray-700 px-4 py-1.5 rounded-lg" onClick={() => { setPrefsOpen(false); if (wantsTwoStep) setSearchParams({}) }}>Close</button>
+              <button className="text-sm bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded-lg" onClick={savePrefs}>Save preferences</button>
             </div>
           </div>
         </div>

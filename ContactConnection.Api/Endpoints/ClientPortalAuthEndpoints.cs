@@ -46,6 +46,7 @@ public static class ClientPortalAuthEndpoints
             email = user.Email, firstName = user.FirstName, lastName = user.LastName, hasPassword = user.HasPassword,
             tenantName = tenant.DisplayName ?? tenant.Name, tenantLogoUrl = tenant.LogoUrl,
             minPasswordLength = MinPasswordLength,
+            mfaRequirement = tenant.Settings.MfaRequirement,
         });
     }
 
@@ -99,7 +100,8 @@ public static class ClientPortalAuthEndpoints
     {
         var requirement = tenant.Settings.MfaRequirement;
         var needsSetup = requirement == "on" && !user.MfaEnabled;
-        var needsChallenge = user.MfaEnabled && requirement != "off";
+        // A client user who turned two-step on is always challenged — the tenant setting only decides whether it's required.
+        var needsChallenge = user.MfaEnabled;
         if (needsSetup || needsChallenge)
             return new ClientAuthResponse(true, needsSetup, tokens.GenerateClientUserToken(user, tenant, mfaPending: true), null, null);
         return await CompleteAsync(db, user, tenant, tokens, http, ct);
@@ -172,12 +174,15 @@ public static class ClientPortalAuthEndpoints
     internal static string? Ip(HttpContext http) => http.Connection.RemoteIpAddress?.ToString();
 
     internal static ClientUserProfile Profile(ClientUser u, Tenant tenant) => new(u.Id, u.Email, u.FirstName, u.LastName, u.CanPlayRecordings,
-        u.TimeZone, tenant.Timezone, u.DefaultDashboardId, tenant.DisplayName ?? tenant.Name, tenant.Subdomain, u.MfaEnabled);
+        u.TimeZone, tenant.Timezone, u.DefaultDashboardId, tenant.DisplayName ?? tenant.Name, tenant.Subdomain, u.MfaEnabled,
+        tenant.Settings.MfaRequirement);
 }
 
 public record AcceptClientInviteRequest(string? FirstName, string? LastName, string Password);
 public record ClientLoginRequest(string? Email, string? Password);
 public record ClientUserProfile(Guid Id, string Email, string FirstName, string LastName, bool CanPlayRecordings, string? TimeZone,
-    string TenantTimeZone, Guid? DefaultDashboardId, string TenantName, string TenantSubdomain, bool MfaEnabled);
+    string TenantTimeZone, Guid? DefaultDashboardId, string TenantName, string TenantSubdomain, bool MfaEnabled,
+    /// <summary>The tenant's MFA setting. For client users "on" = required; otherwise it's their choice (always offered).</summary>
+    string MfaRequirement);
 /// <param name="PreAuthToken">MFA step only — good for 5 minutes and only the MFA endpoints.</param>
 public record ClientAuthResponse(bool MfaPending, bool? MfaSetupRequired, string? PreAuthToken, string? Token, ClientUserProfile? User);

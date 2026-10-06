@@ -151,6 +151,7 @@ public static class ClientUserAuditAction
     public const string Updated = "updated";
     public const string MfaReset = "mfa_reset";
     public const string MfaEnabled = "mfa_enabled";
+    public const string MfaDisabled = "mfa_disabled";
     public const string DashboardViewed = "dashboard_viewed";
     public const string RecordingPlayed = "recording_played";
     public const string Exported = "exported";

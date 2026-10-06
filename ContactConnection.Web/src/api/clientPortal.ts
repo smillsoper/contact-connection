@@ -6,6 +6,12 @@ export function clientSubdomain(): string | null {
   return getSubdomainFromHostname() ?? useClientAuthStore.getState().subdomain
 }
 
+/** The account was deactivated / deleted, or the session ran out — back to sign-in. */
+function endSession() {
+  useClientAuthStore.getState().clear()
+  window.location.assign('/client/login?ended=1')
+}
+
 async function clientFetch<T>(path: string, init: RequestInit = {}, token?: string | null): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(init.headers as Record<string, string>) }
   const bearer = token === undefined ? useClientAuthStore.getState().token : token
@@ -13,12 +19,20 @@ async function clientFetch<T>(path: string, init: RequestInit = {}, token?: stri
   const sub = clientSubdomain()
   if (sub) headers['X-Tenant-Subdomain'] = sub
 
-  const res = await fetch(`/api/v1/client-portal${path}`, { ...init, headers })
-  if (!res.ok) {
-    if (res.status === 401 && token === undefined && useClientAuthStore.getState().token) {
-      useClientAuthStore.getState().clear()
-      window.location.assign('/client/login')
+  let res: Response
+  try {
+    res = await fetch(`/api/v1/client-portal${path}`, { ...init, headers })
+  } catch (err) {
+    // A request with a body that the API refuses before reading it (e.g. a deactivated account) can arrive as a network
+    // error rather than a 401 — check the session with a body-less request before calling it a network problem.
+    if (token === undefined && useClientAuthStore.getState().token && init.body) {
+      const probe = await fetch('/api/v1/client-portal/me', { headers: { ...headers, 'Content-Type': 'application/json' } }).catch(() => null)
+      if (probe?.status === 401) endSession()
     }
+    throw err instanceof Error && err.message === 'Failed to fetch' ? new Error("Can't reach the server — check your connection.") : err
+  }
+  if (!res.ok) {
+    if (res.status === 401 && token === undefined && useClientAuthStore.getState().token) endSession()
     const body = await res.text()
     let message = res.status === 429 ? 'Too many attempts — wait a minute and try again.' : res.status === 401 ? 'Incorrect email or password.' : `Error ${res.status}`
     try { const p = JSON.parse(body); message = p.error ?? p.detail ?? p.title ?? message } catch { /* keep */ }
@@ -38,7 +52,7 @@ export interface ClientAuthResponse {
 
 export interface ClientInviteInfo {
   email: string; firstName: string; lastName: string; hasPassword: boolean
-  tenantName: string; tenantLogoUrl: string | null; minPasswordLength: number
+  tenantName: string; tenantLogoUrl: string | null; minPasswordLength: number; mfaRequirement: string
 }
 
 export interface ClientDashboardRef { id: string; name: string }
@@ -57,6 +71,9 @@ export const clientPortalApi = {
   me: () => clientFetch<{ profile: ClientProfile; dashboards: ClientDashboardRef[] }>('/me'),
   setPreferences: (timeZone: string | null, defaultDashboardId: string | null) =>
     clientFetch<ClientProfile>('/me/preferences', { method: 'PUT', body: JSON.stringify({ timeZone, defaultDashboardId }) }),
+  mfaStart: () => clientFetch<{ secret: string; otpAuthUri: string }>('/me/mfa/setup', { method: 'POST' }),
+  mfaEnable: (code: string) => post<ClientProfile>('/me/mfa/enable', { code }),
+  mfaDisable: (code: string) => post<ClientProfile>('/me/mfa/disable', { code }),
   dashboard: (id: string) => clientFetch<{ id: string; name: string; layout: string }>(`/dashboards/${id}`),
   widgetData: <T>(dashboardId: string, widgetId: string) => clientFetch<T>(`/dashboards/${dashboardId}/widgets/${encodeURIComponent(widgetId)}/data`),
 }
