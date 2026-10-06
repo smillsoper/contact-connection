@@ -43,12 +43,14 @@ public static class RecordsWidgetEndpoints
             Columns(columns), p.Search, p.Filters, p.Sort, p.Desc, p.Page, p.PageSize, tenant.Timezone), ct));
     }
 
-    private static async Task<IResult> Detail(Guid id, Guid? clientId, Guid? campaignId, string? columns, CallRecordsReport report,
-        TenantContext tc, CancellationToken ct)
+    private static async Task<IResult> Detail(Guid id, Guid? clientId, Guid? campaignId, bool? allowRecordings, CallRecordsReport report,
+        [AsParameters] CallDetailView.Deps deps, TenantContext tc, CancellationToken ct)
     {
         if (tc.Current is not { } tenant) return Results.Unauthorized();
-        var detail = await report.DetailAsync(id, campaignId is null ? clientId : null, campaignId is { } c ? new HashSet<Guid> { c } : null,
-            Columns(columns), tenant.Timezone, ct);
-        return detail is null ? Results.NotFound() : Results.Ok(detail);
+        if (!await report.InScopeAsync(id, campaignId is null ? clientId : null, campaignId is { } c ? new HashSet<Guid> { c } : null, ct))
+            return Results.NotFound();
+        var built = await CallDetailView.BuildAsync(id, deps, tenant.Timezone, ct);
+        if (built is not { } b) return Results.NotFound();
+        return Results.Ok(new { detail = b.Detail, canPlayRecording = b.RecordingStatus == "available" && allowRecordings != false });
     }
 }

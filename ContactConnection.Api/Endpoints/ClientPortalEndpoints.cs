@@ -250,16 +250,15 @@ public static class ClientPortalEndpoints
 
     /// <summary>One call's detail — only the widget's detail columns (or its columns), only inside the dashboard's scope.</summary>
     private static async Task<IResult> RecordDetail(Guid id, string widgetId, Guid callId, ClaimsPrincipal principal, ScopedTenantDbContextFactory dbf,
-        TenantContext tc, CallRecordsReport records, CancellationToken ct)
+        TenantContext tc, CallRecordsReport records, [AsParameters] CallDetailView.Deps deps, CancellationToken ct)
     {
         if (tc.Current is not { } tenant) return Results.Unauthorized();
         await using var db = dbf.Create();
         if (await ResolveWidgetAsync(db, principal, tenant, id, widgetId, ct) is not { Type: "records" } w) return Results.NotFound();
-        var columns = w.Strings("detailColumns") is { Count: > 0 } dc ? dc : w.Strings("columns");
-        var detail = await records.DetailAsync(callId, w.Dashboard.ScopeClientId, w.Campaigns.ToHashSet(), columns, w.Zone, ct);
-        if (detail is null) return Results.NotFound();
-        var canPlay = w.User.CanPlayRecordings && w.Flag("allowRecordings", true);
-        return Results.Ok(new { detail, canPlayRecording = canPlay && detail.RecordingStatus == "available" });
+        if (!await records.InScopeAsync(callId, w.Dashboard.ScopeClientId, w.Campaigns.ToHashSet(), ct)) return Results.NotFound();
+        var built = await CallDetailView.BuildAsync(callId, deps, w.Zone, ct);
+        if (built is not { } b) return Results.NotFound();
+        return Results.Ok(new { detail = b.Detail, canPlayRecording = b.RecordingStatus == "available" && w.User.CanPlayRecordings && w.Flag("allowRecordings", true) });
     }
 
     /// <summary>Recording playback (S181): only for client users the tenant allowed, on a records widget that allows it, for a

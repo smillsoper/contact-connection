@@ -502,7 +502,7 @@ public static class CallReviewEndpoints
     /// whose field no longer applies (deactivated, or the call's campaign changed), shown
     /// read-only so nothing captured on the call is hidden.
     /// </summary>
-    private static async Task<List<object>> CustomFieldViewsAsync(
+    internal static async Task<List<object>> CustomFieldViewsAsync(
         Guid callRecordId, ICustomFieldService customFields, ICustomFieldValueRepository values,
         ICustomFieldDefinitionRepository definitions, CancellationToken ct)
     {

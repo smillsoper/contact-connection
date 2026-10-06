@@ -1,3 +1,4 @@
+import type { CallDetailData } from '../components/dashboard/CallDetailModal'
 import { api } from './client'
 import type { WidgetFilterConfig } from '../types/dashboard'
 
@@ -97,14 +98,9 @@ export interface RecordsPage {
   columns: RecordColumn[]
   rows: { id: string; values: Record<string, string | null> }[]
 }
-export interface RecordInteraction {
-  number: number; campaign: string | null; agent: string | null; disposition: string | null
-  orderNumber: string | null; orderTotal: number | null; startedAt: string | null
-}
-export interface RecordDetail {
-  id: string; columns: RecordColumn[]; values: Record<string, string | null>
-  interactions: RecordInteraction[]; recordingStatus: 'available' | 'purged' | 'none' | string
-}
+/** The records widget's detail view (S181): the call's full read-only details, and whether this viewer may play it. */
+export interface RecordDetailResponse { detail: CallDetailData; canPlayRecording: boolean }
+
 /** Paging, search, sort and per-column filters for one request. */
 export interface RecordsParams { page: number; pageSize: number; search?: string; sort?: string; desc?: boolean; filters?: Record<string, string> }
 
@@ -126,9 +122,8 @@ export const dashboardWidgetsApi = {
     const q = new URLSearchParams()
     if (config.campaignId) q.set('campaignId', config.campaignId)
     else if (config.clientId) q.set('clientId', config.clientId)
-    const cols = (config.detailColumns?.length ? config.detailColumns : config.columns ?? []).join(',')
-    if (cols) q.set('columns', cols)
-    return api.get<RecordDetail>(`/api/v1/dashboard-widgets/records/${id}?${q}`)
+    if (config.allowRecordings === false) q.set('allowRecordings', 'false')
+    return api.get<RecordDetailResponse>(`/api/v1/dashboard-widgets/records/${id}?${q}`)
   },
   recordColumns: () => api.get<RecordColumn[]>('/api/v1/dashboard-widgets/records/columns'),
 

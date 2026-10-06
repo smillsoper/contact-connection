@@ -50,7 +50,6 @@ export default function WidgetConfigModal({ title, fields: rawFields, initial, i
   const [tab, setTab] = useState<'data' | 'layout' | 'kpis' | 'columns'>('data')
   const [recordColumns, setRecordColumns] = useState<RecordColumn[]>([])
   const [columns, setColumns] = useState<string[]>(initial.columns ?? [])
-  const [detailColumns, setDetailColumns] = useState<string[] | null>(initial.detailColumns ?? null)
   const [pageSize, setPageSize] = useState(initial.pageSize ?? 25)
   const [allowRecordings, setAllowRecordings] = useState(initial.allowRecordings !== false)
   const tabbed = !!(fields.kpi || fields.records)
@@ -88,7 +87,6 @@ export default function WidgetConfigModal({ title, fields: rawFields, initial, i
       } : {}),
       ...(fields.records ? {
         columns: columns.length ? columns : undefined,
-        detailColumns: detailColumns ?? undefined,
         pageSize,
         allowRecordings,
       } : {}),
@@ -310,10 +308,9 @@ export default function WidgetConfigModal({ title, fields: rawFields, initial, i
   const columnsSection = (
     <RecordsColumnsEditor
       available={[...recordColumns, ...fieldNames.map((f) => ({ key: `cf:${f.name}`, label: f.label, group: 'Custom fields' }))]}
-      columns={columns} detailColumns={detailColumns} pageSize={pageSize} allowRecordings={allowRecordings}
+      columns={columns} pageSize={pageSize} allowRecordings={allowRecordings}
       onChange={(p) => {
         if (p.columns) setColumns(p.columns)
-        if (p.detailColumns !== undefined) setDetailColumns(p.detailColumns)
         if (p.pageSize) setPageSize(p.pageSize)
         if (p.allowRecordings !== undefined) setAllowRecordings(p.allowRecordings)
       }}

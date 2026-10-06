@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { dashboardWidgetsApi, type RecordDetail, type RecordsPage, type RecordsParams } from '../../../api/dashboardWidgets'
+import { dashboardWidgetsApi, type RecordDetailResponse, type RecordsPage, type RecordsParams } from '../../../api/dashboardWidgets'
 import type { WidgetFilterConfig } from '../../../types/dashboard'
 import { useDashboardLiveAgentSessions, useDashboardLiveCallState } from '../DashboardLiveContext'
 import { useRecordsSource } from '../RecordsSource'
-import RecordingPlayer from '../RecordingPlayer'
+import CallDetailModal from '../CallDetailModal'
 import { useAuthStore } from '../../../stores/authStore'
 import { getSubdomainFromHostname } from '../../../utils/subdomain'
 
@@ -32,7 +32,7 @@ export default function RecordsWidget({ config }: { config: WidgetFilterConfig }
   const [data, setData] = useState<RecordsPage | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
-  const [detail, setDetail] = useState<{ detail: RecordDetail; canPlayRecording: boolean } | null>(null)
+  const [detail, setDetail] = useState<RecordDetailResponse | null>(null)
   const [detailError, setDetailError] = useState<string | null>(null)
   const sessions = useDashboardLiveAgentSessions()
   const callState = useDashboardLiveCallState()
@@ -71,8 +71,7 @@ export default function RecordsWidget({ config }: { config: WidgetFilterConfig }
   useEffect(() => {
     if (!openId) { setDetail(null); return }
     setDetail(null); setDetailError(null)
-    ;(source ? source.detail(openId)
-      : dashboardWidgetsApi.recordDetail(config, openId).then((d) => ({ detail: d, canPlayRecording: d.recordingStatus === 'available' && config.allowRecordings !== false })))
+    ;(source ? source.detail(openId) : dashboardWidgetsApi.recordDetail(config, openId))
       .then(setDetail)
       .catch((e) => setDetailError(e instanceof Error ? e.message : 'Failed to load'))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -142,52 +141,14 @@ export default function RecordsWidget({ config }: { config: WidgetFilterConfig }
         <button disabled={page >= pages} onClick={() => setPage(page + 1)} className="px-2 py-0.5 border border-gray-700 rounded disabled:opacity-40">Next ›</button>
       </div>
 
-      {openId && (
-        <div className="fixed inset-0 z-40 flex justify-end bg-black/40" onClick={() => setOpenId(null)}>
-          <div className="h-full w-full max-w-md bg-gray-900 border-l border-gray-800 p-5 overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold text-white">Call details</h3>
-              <button className="text-gray-400 hover:text-white text-sm" onClick={() => setOpenId(null)}>✕</button>
-            </div>
-            {detailError && <p className="text-red-400">{detailError}</p>}
-            {!detail && !detailError && <p className="text-gray-500">Loading…</p>}
-            {detail && (
-              <>
-                {[...new Set(detail.detail.columns.map((c) => c.group))].map((g) => (
-                  <div key={g} className="mb-4">
-                    <div className="text-[10px] uppercase tracking-wide text-gray-500 mb-1">{g}</div>
-                    <dl className="grid grid-cols-[9rem_1fr] gap-x-3 gap-y-1">
-                      {detail.detail.columns.filter((c) => c.group === g).map((c) => (
-                        <div key={c.key} className="contents">
-                          <dt className="text-gray-400">{c.label}</dt>
-                          <dd className="text-gray-100 break-words">{detail.detail.values[c.key] ?? <span className="text-gray-600">—</span>}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  </div>
-                ))}
-                {detail.detail.interactions.length > 1 && (
-                  <div className="mb-4">
-                    <div className="text-[10px] uppercase tracking-wide text-gray-500 mb-1">Interactions on this call</div>
-                    {detail.detail.interactions.map((i) => (
-                      <div key={i.number} className="border border-gray-800 rounded p-2 mb-1 text-gray-300">
-                        <div className="text-gray-100">{i.number}. {i.campaign ?? 'Campaign'}{i.agent ? ` · ${i.agent}` : ''}</div>
-                        <div className="text-gray-400">{[i.startedAt, i.disposition, i.orderNumber && `Order ${i.orderNumber}`,
-                          i.orderTotal != null && `$${i.orderTotal.toFixed(2)}`].filter(Boolean).join(' · ')}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <div className="text-[10px] uppercase tracking-wide text-gray-500 mb-1">Recording</div>
-                {detail.canPlayRecording
-                  ? <RecordingPlayer key={openId} load={() => (source ? source.recording(openId) : internalRecording(openId))} />
-                  : <p className="text-gray-500">{detail.detail.recordingStatus === 'purged' ? 'Deleted under the retention policy.'
-                      : detail.detail.recordingStatus === 'none' ? 'No recording for this call.' : 'Not available to you.'}</p>}
-              </>
-            )}
-          </div>
+      {openId && (detailError ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setOpenId(null)}>
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 text-sm text-red-400">{detailError}</div>
         </div>
-      )}
+      ) : (
+        <CallDetailModal data={detail?.detail ?? null} canPlayRecording={detail?.canPlayRecording ?? false}
+          loadRecording={() => (source ? source.recording(openId) : internalRecording(openId))} onClose={() => setOpenId(null)} />
+      ))}
     </div>
   )
 }

@@ -57,10 +57,6 @@ public sealed record RecordsQuery(DateTimeOffset Since, DateTimeOffset Until, Gu
 public sealed record RecordsRow(Guid Id, IReadOnlyDictionary<string, string?> Values);
 public sealed record RecordsPage(int Total, int Page, int PageSize, bool Truncated, IReadOnlyList<RecordColumn> Columns, IReadOnlyList<RecordsRow> Rows);
 
-public sealed record RecordInteractionView(int Number, string? Campaign, string? Agent, string? Disposition, string? OrderNumber,
-    decimal? OrderTotal, string? StartedAt);
-public sealed record RecordDetail(Guid Id, IReadOnlyList<RecordColumn> Columns, IReadOnlyDictionary<string, string?> Values,
-    IReadOnlyList<RecordInteractionView> Interactions, string RecordingStatus);
 
 /// <summary>
 /// Call records for the records widget (S181). Production inbound + outbound calls created in the window, inside the
@@ -148,7 +144,12 @@ public sealed class CallRecordsReport(ScopedTenantDbContextFactory dbFactory)
             var term = $"%{q.Search.Trim().Replace("%", "").Replace("_", "")}%";
             var digits = new string(q.Search.Where(char.IsDigit).ToArray());
             var phoneTerm = digits.Length >= 3 ? $"%{digits}%" : term;
-            query = query.Where(c => EF.Functions.ILike(c.FirstName ?? "", term) || EF.Functions.ILike(c.LastName ?? "", term)
+            // Campaign names match too ("LF" finds "NeuroQ - LF TV"), as do dispositions.
+            var plain = q.Search.Trim();
+            var campaignMatches = names.Campaigns.Where(kv => kv.Value.Contains(plain, StringComparison.OrdinalIgnoreCase)).Select(kv => kv.Key).ToList();
+            query = query.Where(c => campaignMatches.Contains(c.CampaignId)
+                || db.CallInteractions.Any(i => i.CallRecordId == c.Id && EF.Functions.ILike(i.Disposition ?? "", term))
+                || EF.Functions.ILike(c.FirstName ?? "", term) || EF.Functions.ILike(c.LastName ?? "", term)
                 || EF.Functions.ILike(c.Email ?? "", term) || EF.Functions.ILike(c.CallerId ?? "", phoneTerm)
                 || EF.Functions.ILike(c.Phone ?? "", phoneTerm) || EF.Functions.ILike(c.BillingPhone ?? "", phoneTerm)
                 || db.CallInteractions.Any(i => i.CallRecordId == c.Id && EF.Functions.ILike(i.OrderNumber ?? "", term)));
@@ -186,30 +187,7 @@ public sealed class CallRecordsReport(ScopedTenantDbContextFactory dbFactory)
                 .Select(r => new RecordsRow(r.Call.Id, shown.ToDictionary(k => k, k => r.Values[k]))).ToList());
     }
 
-    /// <summary>One call, if it's inside the scope — the widget's columns (or detail columns) and its interactions.</summary>
-    public async Task<RecordDetail?> DetailAsync(Guid id, Guid? clientId, IReadOnlySet<Guid>? campaignIds, IReadOnlyList<string> columns,
-        string timeZone, CancellationToken ct = default)
-    {
-        await using var db = dbFactory.Create();
-        var call = await Project(Production(db).Where(c => c.Id == id)).FirstOrDefaultAsync(ct);
-        if (call is null) return null;
-        var names = await NamesAsync(db, ct);
-        if (!InScope(call, clientId, campaignIds, names)) return null;
-
-        var zone = ResolveZone(timeZone);
-        var ix = (await InteractionsAsync(db, [id], ct)).GetValueOrDefault(id) ?? [];
-        var cols = Resolve(columns);
-        var showAgent = cols.Any(c => c.Key == "agent");
-        var views = ix.Select(i => new RecordInteractionView(i.Number,
-            i.CampaignId is { } c ? names.Campaigns.GetValueOrDefault(c) : null,
-            showAgent && i.AgentId is { } a ? names.Agents.GetValueOrDefault(a) : null,
-            i.Disposition, i.OrderNumber, i.OrderSubmittedAt is null ? null : i.TotalAmount ?? i.CartTotal,
-            i.StartedAt is { } at ? Format(at, zone) : null)).ToList();
-        return new RecordDetail(id, cols, cols.ToDictionary(c => c.Key, c => Value(c.Key, call, ix, names, zone)), views,
-            RecordingState(call));
-    }
-
-    /// <summary>Whether this call is inside a client dashboard's scope (for recording playback).</summary>
+    /// <summary>Whether this call is inside a dashboard's scope (detail view and recording playback).</summary>
     public async Task<bool> InScopeAsync(Guid id, Guid? clientId, IReadOnlySet<Guid>? campaignIds, CancellationToken ct = default)
     {
         await using var db = dbFactory.Create();

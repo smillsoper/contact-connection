@@ -42,6 +42,21 @@ public class ClientPortalTests
         Assert.False(Infrastructure.Reports.RecordColumns.IsValid("sensitive_data"));
     }
 
+    [Theory]
+    [InlineData("input.first_name", "Pat", true)]
+    [InlineData("flow.disposition", "Order", true)]
+    [InlineData("_queued", "true", false)]                    // plumbing
+    [InlineData("order_api._raw", "x", false)]
+    public void Captured_values_leave_out_plumbing(string key, string value, bool shown) =>
+        Assert.Equal(shown, CallDetailView.IsCapturedValue(key, value));
+
+    [Fact]
+    public void Captured_values_leave_out_large_api_payloads()
+    {
+        Assert.False(CallDetailView.IsCapturedValue("order_response", "{" + new string('x', 400) + "}"));
+        Assert.True(CallDetailView.IsCapturedValue("notes", new string('x', 400)));
+    }
+
     [Fact]
     public void Bad_layout_json_serves_nothing()
     {

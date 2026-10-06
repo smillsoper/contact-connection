@@ -43,31 +43,18 @@ function ColumnPicker({ available, value, onChange }: { available: RecordColumn[
   )
 }
 
-export default function RecordsColumnsEditor({ available, columns, detailColumns, pageSize, allowRecordings, onChange }: {
+export default function RecordsColumnsEditor({ available, columns, pageSize, allowRecordings, onChange }: {
   available: RecordColumn[]
   columns: string[]
-  detailColumns: string[] | null
   pageSize: number
   allowRecordings: boolean
-  onChange: (p: { columns?: string[]; detailColumns?: string[] | null; pageSize?: number; allowRecordings?: boolean }) => void
+  onChange: (p: { columns?: string[]; pageSize?: number; allowRecordings?: boolean }) => void
 }) {
   return (
     <div className="space-y-4">
       <div>
         <label className="block text-xs text-gray-400 mb-1">Table columns</label>
         <ColumnPicker available={available} value={columns} onChange={(v) => onChange({ columns: v })} />
-      </div>
-      <div>
-        <label className="flex items-center gap-2 text-xs text-gray-300 mb-2">
-          <input type="checkbox" checked={detailColumns === null} onChange={(e) => onChange({ detailColumns: e.target.checked ? null : [...columns] })} />
-          The detail panel shows the same fields as the table
-        </label>
-        {detailColumns !== null && (
-          <>
-            <label className="block text-xs text-gray-400 mb-1">Detail panel fields (shown when someone clicks a call)</label>
-            <ColumnPicker available={available} value={detailColumns} onChange={(v) => onChange({ detailColumns: v })} />
-          </>
-        )}
       </div>
       <div className="flex flex-wrap items-center gap-6">
         <label className="flex items-center gap-2 text-xs text-gray-300">
@@ -79,12 +66,13 @@ export default function RecordsColumnsEditor({ available, columns, detailColumns
         </label>
         <label className="flex items-center gap-2 text-xs text-gray-300">
           <input type="checkbox" checked={allowRecordings} onChange={(e) => onChange({ allowRecordings: e.target.checked })} />
-          Recording playback in the detail panel
+          Recording playback in call details
         </label>
       </div>
       <p className="text-[11px] text-gray-500">
-        On a client dashboard, client users only hear recordings if you've also allowed it for them under Admin → Client users. Card
-        data is never shown.
+        Clicking a call opens its full details — call, customer, addresses, each interaction's order, cart, payments and summary,
+        and the values the script captured. On a client dashboard, client users only hear recordings if you've also allowed it for
+        them under Admin → Client users. Card data is never shown.
       </p>
     </div>
   )

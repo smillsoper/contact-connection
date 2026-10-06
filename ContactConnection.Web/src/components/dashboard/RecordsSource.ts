@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import type { RecordDetail, RecordsPage, RecordsParams } from '../../api/dashboardWidgets'
+import type { RecordDetailResponse, RecordsPage, RecordsParams } from '../../api/dashboardWidgets'
 
 /**
  * Where the records widget gets its rows, details and recordings (S181). Unset on internal dashboards (the widget uses the
@@ -7,7 +7,7 @@ import type { RecordDetail, RecordsPage, RecordsParams } from '../../api/dashboa
  */
 export interface RecordsSource {
   query: (p: RecordsParams) => Promise<RecordsPage>
-  detail: (callId: string) => Promise<{ detail: RecordDetail; canPlayRecording: boolean }>
+  detail: (callId: string) => Promise<RecordDetailResponse>
   recording: (callId: string) => Promise<Response>
 }
 

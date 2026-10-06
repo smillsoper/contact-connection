@@ -33,10 +33,8 @@ export interface KpiWidgetConfig {
 export interface RecordsWidgetConfig {
   /** Column keys in display order (RECORD columns from the server, or "cf:<custom field name>"). */
   columns?: string[]
-  /** What the detail drawer shows — defaults to the columns. */
-  detailColumns?: string[]
   pageSize?: number
-  /** Recording playback in the detail drawer (client users still need their own permission). Default on. */
+  /** Recording playback in call details (client users still need their own permission). Default on. */
   allowRecordings?: boolean
 }
 

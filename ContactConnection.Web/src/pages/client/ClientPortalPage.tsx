@@ -13,7 +13,7 @@ import ServiceLevelThresholdWidget from '../../components/dashboard/widgets/Serv
 import CallStateByCampaignWidget from '../../components/dashboard/widgets/CallStateByCampaignWidget'
 import RecordsWidget from '../../components/dashboard/widgets/RecordsWidget'
 import { RecordsSourceContext, type RecordsSource } from '../../components/dashboard/RecordsSource'
-import { recordsQuery, type RecordDetail, type RecordsPage } from '../../api/dashboardWidgets'
+import { recordsQuery, type RecordDetailResponse, type RecordsPage } from '../../api/dashboardWidgets'
 import { WidgetDataSourceContext } from '../../components/dashboard/WidgetDataSource'
 import {
   DashboardCallStateLiveContext, DashboardAgentSessionsLiveContext, type CallStateEvent, type AgentSessionsEvent,
@@ -29,7 +29,7 @@ function ClientWidget({ dashboardId, widget }: { dashboardId: string; widget: Da
   const fetchData = useMemo(() => () => clientPortalApi.widgetData(dashboardId, widget.id), [dashboardId, widget.id])
   const records = useMemo<RecordsSource>(() => ({
     query: (p) => clientPortalApi.widgetData<RecordsPage>(dashboardId, widget.id, recordsQuery(p)),
-    detail: (callId) => clientPortalApi.recordDetail<{ detail: RecordDetail; canPlayRecording: boolean }>(dashboardId, widget.id, callId),
+    detail: (callId) => clientPortalApi.recordDetail<RecordDetailResponse>(dashboardId, widget.id, callId),
     recording: (callId) => clientPortalApi.recording(dashboardId, widget.id, callId),
   }), [dashboardId, widget.id])
   const body = (() => {
