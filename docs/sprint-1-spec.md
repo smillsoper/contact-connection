@@ -82,6 +82,8 @@ responses on tenant API endpoints, practice runs filtered out of Call Records / 
 
 ## 1b. Manual outbound: Place Call picker, campaign caller ID, keypad (Slice A, ≈1–2 sessions)
 
+**Status (S179):** built (`bb78b06`, `aa71928`, `2e396da`, `a0459cf`); Stephen chose **server-placed calls** (API originates: agent softphone auto-answer leg → bridge to the customer with the server-chosen caller ID). Live: caller ID, auto-answer, status restore. `#` DTMF (SIP INFO) retest waits on SignalWire vetting.
+
 Stephen's design (S179, 2026-10-05), refining the S169 manual-outbound decisions (memory: project_manual_outbound_dialing).
 Go-live need: Life Seasons makes about 800 outbound calls a month (callbacks), and the wrong caller ID is a carrier-compliance problem.
 
@@ -127,6 +129,8 @@ area-code/ZIP time zones (zip-codes.com monthly DB via Worker SFTP), per-state h
 
 ## 2. Invoices (≈1–2 sessions)
 
+**Status (S179):** built + live-verified (`15df290`…`557b2bf`).
+
 ### Decisions
 
 - **Draft, then issue.** On the 1st (tenant time zone) the Worker builds a **draft** invoice for the previous month from the usage meter
@@ -153,6 +157,8 @@ area-code/ZIP time zones (zip-codes.com monthly DB via Worker SFTP), per-state h
 
 ## 3. Telephony handler null guards + live check (≈½ session)
 
+**Status (S179):** done (`5c29e7a`, 0 warnings); inbound live check matched the SignalWire CDR. Outbound half waits on vetting.
+
 - Add the existing `if (ctx.Esl is null) { log; follow default }` guard to `AnswerNodeHandler`, `HangupNodeHandler`,
   `RejectNodeHandler`, `RouteToQueueNodeHandler`, `SetCallerIdNodeHandler`, `SetSipHeaderNodeHandler`. This clears the last 6
   build warnings.
@@ -162,6 +168,8 @@ area-code/ZIP time zones (zip-codes.com monthly DB via Worker SFTP), per-state h
 ---
 
 ## 4. Stripe, tenant side (≈1–2 sessions, Stripe **test mode**)
+
+**Status (S179):** built + live-verified (`9d1b0a1`, `6699bd1`, `109dd97`, `06f1dba` — incl. refund / carry-forward for credits on paid invoices).
 
 - Platform Stripe keys in User Secrets / Key Vault (`Stripe:SecretKey`, `Stripe:WebhookSecret`, publishable key in web config).
 - `Billing` permission; a tenant **Billing** page: payment methods through Stripe's hosted Payment Element (ACH via Financial

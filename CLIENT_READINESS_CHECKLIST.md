@@ -40,21 +40,21 @@ helpdesk CMS, and team chat. This is a multi-month roadmap, not a single session
 Sized to roughly one week of Claude usage per sprint (the limit resets Monday nights). Work top to bottom; carry over what
 doesn't fit. Business blockers (LLC reinstatement, letter of intent, Clint's figures) run alongside.
 
-**Sprint 1: go-live foundations (week of Oct 5)**, full spec with decisions: `docs/sprint-1-spec.md`
+**Sprint 1: go-live foundations (week of Oct 5)** — **ALL DONE S179 (2026-10-05)**, live-verified except the outbound keypad `#` retest (waits on SignalWire vetting → LLC reinstatement), full spec with decisions: `docs/sprint-1-spec.md`
 0. ~~**Mid-call transfer sales → CS queue**~~ **DONE + live-verified S178**: enters through the CS campaign's
    own call flow; same call record, new interaction with its own agent, campaign and custom fields.
 0b. ~~**Interaction-scoped commerce**~~ **DONE + live-verified S178** (all 5 phases). cart, order, payments, routing tier, commissions and AI summaries move
    onto the interaction; call detail becomes one collapsible section per interaction. Plan: `docs/interaction-scoped-commerce.md`
    (5 phases). Needed before Clint tests and before the CS scripts (NeuroQ / My Best Heart CS, which order free-form). (3–4)
-1. **Script launch modes**: production (active call required), training (sandbox credentials for APIs, tax and
+1. ~~**Script launch modes**~~ **DONE + live-verified S179** (plus API sandbox environments, `&&`/`||` branch conditions, practice-run test DNIS): production (active call required), training (sandbox credentials for APIs, tax and
    payment gateways), designer sandbox (choose sandbox or production credentials). Every later test depends on it. (2 sessions)
-1b. **Manual outbound, Slice A** (S179, Stephen): Place Call → Internal (role switch + presence) / External (client →
+1b. ~~**Manual outbound, Slice A**~~ **DONE S179** (server-placed calls; live: caller ID, auto-answer, status restore; `#` DTMF retest pending vetting) (S179, Stephen): Place Call → Internal (role switch + presence) / External (client →
    assigned manual outbound campaign → number + keypad; role-gated direct dial with tenant default caller ID). Caller ID set
    server-side from the campaign; outbound records get client + campaign; calling-hours check now (DNC with Slice B). (1–2)
-2. **Billing, metering side:** reconcile against the SignalWire CDR, then **invoice generation** (numbering, month close,
+2. ~~**Billing, metering side:**~~ **DONE + live-verified S179** (CDR match exact; invoices drafted by the Worker, issued + emailed, credit notes): reconcile against the SignalWire CDR, then **invoice generation** (numbering, month close,
    adjustments, printable view). (1–2)
-3. **Telephony handler null guards** plus one live test call that also checks `disconnected_at` is stamped. (½)
-4. **Billing, Stripe side** in Stripe test mode: payment methods (hosted, tokenized), Pay now, webhooks. (1–2)
+3. ~~**Telephony handler null guards**~~ **DONE S179** (0 warnings; inbound live check matched the CDR; outbound half waits on vetting) plus one live test call that also checks `disconnected_at` is stamped. (½)
+4. ~~**Billing, Stripe side**~~ **DONE + live-verified S179** (card + ACH, autopay, webhooks, failure email, refund / carry-forward credits) in Stripe test mode: payment methods (hosted, tokenized), Pay now, webhooks. (1–2)
 
 **Sprint 2: supervisors and reporting (week of Oct 12; SupportTier meeting Oct 14)**
 1. **Active Calls widget**: list + drill-down modal reusing the supervisor tools from the agent-state widget. (1–2)

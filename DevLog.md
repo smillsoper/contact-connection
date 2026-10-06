@@ -188,6 +188,7 @@
 | 176 | 2026-10-04 | 12:30 PM PDT | 1:13 PM PDT | 43 min | ~21451 min |
 | 177 | 2026-10-04 | 3:30 PM PDT | 3:55 PM PDT | 25 min | ~21476 min |
 | 178 | 2026-10-04 | 5:07 PM PDT | 8:03 PM PDT | 176 min | ~21652 min |
+| 179 | 2026-10-05 | 7:38 AM PDT | 7:38 PM PDT | 720 min | ~22372 min |
 
 ---
 
@@ -11466,3 +11467,73 @@ of it was live-verified on transfer calls.
 - Run tenant migrations for other tenants (Portal).
 - Offers must be assigned to the CS campaign before CS agents can sell them (setup note for Clint).
 - Sprint 1 item 1: script launch modes; then invoices, null guards, Stripe test mode.
+
+## Session 179
+
+**Date:** 2026-10-05
+**Start:** 7:38 AM PDT
+**End:** 7:38 PM PDT
+**Duration:** 720 minutes (wall clock; includes a pause for Stephen's Avalara call, resumed 8:16 AM)
+**Total Duration:** ~22372 minutes
+
+### Focus
+
+**Sprint 1 finished in one day.** Script launch modes, manual outbound Slice A, invoices, telephony null guards and Stripe
+billing (test mode), each live-tested by Stephen. Plus Avalara verified against a real (trial) account.
+
+### Done
+
+- **Script launch modes** (`2582b10`…`7ddf2f8`, live-verified): training / sandbox runs never touch production providers.
+  - Practice runs skip telephony-event waits, and authorize with a test card when no card was captured.
+  - `{{call_record.practice_run}}` / `run_mode` variables.
+  - Sandbox credential tab on campaign cards: the sandbox set always hits the vendor's sandbox endpoint.
+  - Training responses for client APIs.
+  - Call Records separates practice runs; media replay ignores them.
+- **Branch conditions `&&` / `||`** (`833fa07`), CRM + telephony. Split on the typed condition before tags resolve.
+- **API sandbox environments** (`9ec9cf8`, `37cf7e7`, live-verified):
+  - sandbox base URL, endpoint sandbox path, and `{key}.sandbox` credentials (never a production fallback);
+  - separate "sandbox mode / training mode calls the sandbox" checkboxes (Stephen);
+  - own circuit breaker / rate-limit id.
+- **Practice-run test DNIS** (`2c976cb`): set_variable `{{call_record.dnis}}` on training / sandbox runs only. Stephen moved the
+  LS order body to `{{flow.ls_dnis}}` (falls back to the call's DNIS) so CS scripts can send per-brand DNISes.
+- **Manual outbound Slice A** (`bb78b06`, `aa71928`, `2e396da`, `a0459cf`), Stephen chose server-placed calls:
+  - Place call → Internal (presence) / External (client → campaign → number + keypad; role-gated direct dial).
+  - Caller ID is decided server-side, shown as a "Calling as …" preview before the dial.
+  - Callee-local calling hours (TCPA default 8–21; split states use the strictest zone).
+  - `outbound_dial_attempts` audit; agent On Call from the dial, previous status restored after (never forced Available).
+  - **Live:** correct caller ID on the cell, auto-answer, status restore, digits.
+  - **Fixed live:**
+    - auto-answer armed by a SignalWire push (the X-CC-Leg header doesn't arrive);
+    - **the ESL hangup tenant scan crashed on an unmigrated tenant and dropped the whole ESL connection** (now per-tenant try/catch);
+    - `#` repeating on the far end → keypad DTMF as SIP INFO (retest pending).
+- **Outbound calls get carrier-blocked** ("may be robocall/spam") after the first call to a number: unvetted account / C
+  attestation. **SignalWire vetting now waits on the LLC reinstatement** (proof of reinstatement + EIN letter + RMD check).
+- **Invoices** (`15df290`, `bfbade0`, `3fc1746`, `557b2bf`, live-verified):
+  - Worker drafts last month on the 1st.
+  - Portal review (setup fee / adjustment / credit lines, notes) → Issue (`INV-YYYY-NNNN`, frozen, emailed with Reply-To
+    billing@contactconnection.io).
+  - Paid / void, credit notes (`CN-`), printable view.
+  - Per-line rounding fix in UsageCharges; one shared `IUsageMeter`.
+  - **Test-data fix:** the `disconnected_at` backfill treated manual cleanup rows and pre-S169 swept softphone records as
+    hang-ups (79k phantom minutes). Migration fixed; 88 test-tenant records reset.
+- **Null guards** (`5c29e7a`): six telephony handlers handle a missing ESL. **0 warnings, 0 errors.** Live inbound check:
+  billed minutes match the SignalWire CDR exactly (1 and 2 min; hang-up within 0.03 s).
+- **Stripe billing, test mode** (`9d1b0a1`, `6699bd1`, `109dd97`, live-verified):
+  - Tenant Billing page (`billing.manage`): Payment Element card + ACH, autopay, Pay now.
+  - Webhooks (signature-verified): payment succeeded / processing / failed, disputes, `setup_intent.succeeded` for micro-deposit
+    bank accounts.
+  - Failure emails.
+  - Stephen tested: card, autopay, decline, ACH processing → paid, manual bank + SM11AA, ACH decline + email.
+- **Credits on paid invoices** (`06f1dba`, live-verified): Stripe refund, refund outside Stripe (reference), or carry forward
+  onto the next drafts (oldest first, never below zero).
+- **Avalara** production trial set up (nexus UT / CA / TX / CO). A Denver cart came back with tax + Retail Delivery Fee $0.31.
+  Life Seasons setup details to collect after the LOI are listed in memory.
+- Tests: **1,588 passing** (Domain 296, Application 20, Infrastructure 1,147, Api 125).
+
+### Next
+
+- **Business:** reinstate the LLC → send SignalWire proof + EIN letter → A attestation unblocks outbound; Stripe activation;
+  Clint's figures next week.
+- **Carried:** keypad `#` (SIP INFO) retest and the outbound half of the item 3 live check, once vetting clears.
+  `test_contact_center` tenant migrations (Portal).
+- **Sprint 2:** Active Calls widget → Export Worker + Cannella report → KPI widgets (production calls only).
