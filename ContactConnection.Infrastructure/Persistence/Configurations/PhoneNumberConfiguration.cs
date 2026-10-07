@@ -13,7 +13,12 @@ public class PhoneNumberConfiguration : IEntityTypeConfiguration<PhoneNumber>
 
         builder.Property(p => p.Id).HasColumnName("id");
         builder.Property(p => p.TenantId).HasColumnName("tenant_id").IsRequired();
-        builder.Property(p => p.CampaignId).HasColumnName("campaign_id").IsRequired();
+        builder.Property(p => p.CampaignId).HasColumnName("campaign_id");   // null = Reserve (S182)
+        builder.Property(p => p.ReservedAt).HasColumnName("reserved_at");
+        builder.Ignore(p => p.InReserve);
+        builder.Ignore(p => p.IsReleased);
+        builder.Ignore(p => p.TakesCalls);
+        builder.HasIndex(p => new { p.CampaignId, p.ReservedAt });
         builder.Property(p => p.Number).HasColumnName("number").HasMaxLength(20).IsRequired();
         builder.Property(p => p.Label).HasColumnName("label").HasMaxLength(100);
         builder.Property(p => p.IsActive).HasColumnName("is_active");

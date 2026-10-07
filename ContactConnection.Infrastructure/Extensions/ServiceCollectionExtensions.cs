@@ -89,7 +89,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IPhoneNumberRepository, PhoneNumberRepository>();
         services.AddScoped<INumberProviderRepository, NumberProviderRepository>();
         services.AddScoped<IAgentGroupRepository, AgentGroupRepository>();
-        services.AddScoped<IPhoneNumberRoutingRepository, PhoneNumberRoutingRepository>();
+        services.AddScoped<ContactConnection.Infrastructure.Telephony.NumberOwnership>();
 
         // Platform auth
         services.AddScoped<IPlatformTokenService, PlatformJwtTokenService>();

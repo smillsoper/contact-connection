@@ -1,6 +1,7 @@
 using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Services;
 using ContactConnection.Domain.Entities;
+using Microsoft.EntityFrameworkCore;
 
 namespace ContactConnection.Api.Endpoints;
 
@@ -10,16 +11,17 @@ public static class PhoneNumbersEndpoints
     {
         var group = app.MapGroup("/api/v1/phone-numbers").RequireAuthorization();
 
-        group.MapPost("",                        Create);
+        // Changes need a tenant admin (S182 — they decide which account a number routes to); reading needs a sign-in.
+        group.MapPost("",                        Create).RequireAuthorization("TenantAdmin");
         group.MapGet("",                         GetByCampaign);
         group.MapGet("{id:guid}",                GetById);
-        group.MapPatch("{id:guid}",              Update);
-        group.MapPut("{id:guid}/flow",              SetFlow);
-        group.MapDelete("{id:guid}/flow",           RemoveFlow);
-        group.MapPut("{id:guid}/telephony-flow",    SetTelephonyFlow);
-        group.MapDelete("{id:guid}/telephony-flow", RemoveTelephonyFlow);
-        group.MapPost("{id:guid}/activate",         Activate);
-        group.MapPost("{id:guid}/deactivate",    Deactivate);
+        group.MapPatch("{id:guid}",              Update).RequireAuthorization("TenantAdmin");
+        group.MapPut("{id:guid}/flow",              SetFlow).RequireAuthorization("TenantAdmin");
+        group.MapDelete("{id:guid}/flow",           RemoveFlow).RequireAuthorization("TenantAdmin");
+        group.MapPut("{id:guid}/telephony-flow",    SetTelephonyFlow).RequireAuthorization("TenantAdmin");
+        group.MapDelete("{id:guid}/telephony-flow", RemoveTelephonyFlow).RequireAuthorization("TenantAdmin");
+        group.MapPost("{id:guid}/activate",         Activate).RequireAuthorization("TenantAdmin");
+        group.MapPost("{id:guid}/deactivate",    Deactivate).RequireAuthorization("TenantAdmin");
 
         return app;
     }
@@ -30,25 +32,35 @@ public static class PhoneNumbersEndpoints
         CreatePhoneNumberRequest req,
         INumberProviderRepository providers,
         IPhoneNumberRepository repo,
-        IPhoneNumberRoutingRepository routing,
+        ContactConnection.Infrastructure.Telephony.NumberOwnership ownership,
         ICampaignRepository campaigns,
+        ContactConnection.Infrastructure.Data.ScopedTenantDbContextFactory dbf,
         TenantContext ctx,
         CancellationToken ct)
     {
         if (!ctx.HasTenant) return Results.Unauthorized();
 
-        if (await campaigns.GetByIdAsync(req.CampaignId, ct) is null)
+        // No campaign = straight into Reserve (S182).
+        if (req.CampaignId is { } cid && await campaigns.GetByIdAsync(cid, ct) is null)
             return Results.NotFound(new { error = "Campaign not found." });
 
         var pn = PhoneNumber.Create(ctx.Current!.Id, req.CampaignId, req.Number, req.Label);
+        await using (var db = dbf.Create())
+        {
+            var forms = PhoneNumber.Forms(pn.Number);
+            if (await db.PhoneNumbers.AsNoTracking().AnyAsync(p => forms.Contains(p.Number), ct))
+                return Results.Conflict(new { error = $"{pn.Number} is already in this account — move or reactivate it instead of adding it again." });
+        }
+        if (await ownership.ConflictAsync(pn.TenantId, pn.Number, pn.IsReleased, ct) is { } inUse)
+            return Results.Conflict(new { error = inUse });
         if (await ApplyProviderAsync(pn, req.ProviderId, req.Role, req.ClientNumber, providers, ct) is { } providerError)
             return Results.BadRequest(new { error = providerError });
         await repo.AddAsync(pn, ct);
         await repo.SaveChangesAsync(ct);
 
-        // Mirror to global routing table so DNIS resolution works for IP-routing carriers
-        await routing.UpsertAsync(pn.Number, ctx.Current.Id, pn.CampaignId, isActive: true, ct);
-        await routing.SaveChangesAsync(ct);
+        // Mirror to the global routing table so DNIS resolution works for IP-routing carriers
+        await ownership.ApplyAsync(pn, ct);
+        await ownership.SaveAsync(ct);
 
         return Results.Created($"/api/v1/phone-numbers/{pn.Id}", ToResponse(pn));
     }
@@ -86,7 +98,7 @@ public static class PhoneNumbersEndpoints
         UpdatePhoneNumberRequest req,
         INumberProviderRepository providers,
         IPhoneNumberRepository repo,
-        IPhoneNumberRoutingRepository routing,
+        ContactConnection.Infrastructure.Telephony.NumberOwnership ownership,
         ICampaignRepository campaigns,
         TenantContext ctx,
         CancellationToken ct)
@@ -110,16 +122,22 @@ public static class PhoneNumbersEndpoints
         {
             if (await campaigns.GetByIdAsync(req.CampaignId.Value, ct) is null)
                 return Results.NotFound(new { error = "Campaign not found." });
+            if (await ownership.ConflictAsync(pn.TenantId, pn.Number, releasedHere: false, ct) is { } inUse)
+                return Results.Conflict(new { error = inUse });
             pn.Reassign(req.CampaignId.Value);
+        }
+        else if (req.MoveToReserve == true)
+        {
+            pn.MoveToReserve();
         }
 
         await repo.SaveChangesAsync(ct);
 
         // Sync campaign reassignment to global routing table
-        if (req.CampaignId.HasValue)
+        if (req.CampaignId.HasValue || req.MoveToReserve == true)
         {
-            await routing.UpsertAsync(pn.Number, ctx.Current!.Id, pn.CampaignId, pn.IsActive, ct);
-            await routing.SaveChangesAsync(ct);
+            await ownership.ApplyAsync(pn, ct);
+            await ownership.SaveAsync(ct);
         }
 
         return Results.Ok(ToResponse(pn));
@@ -184,18 +202,21 @@ public static class PhoneNumbersEndpoints
     private static async Task<IResult> Activate(
         Guid id,
         IPhoneNumberRepository repo,
-        IPhoneNumberRoutingRepository routing,
+        ContactConnection.Infrastructure.Telephony.NumberOwnership ownership,
         TenantContext ctx,
         CancellationToken ct)
     {
         if (!ctx.HasTenant) return Results.Unauthorized();
         var pn = await repo.GetByIdAsync(id, ct);
         if (pn is null) return Results.NotFound();
+        // A number released from Reserve may meanwhile belong to another account (S182).
+        if (await ownership.ConflictAsync(pn.TenantId, pn.Number, releasedHere: false, ct) is { } inUse)
+            return Results.Conflict(new { error = inUse });
         pn.Activate();
         await repo.SaveChangesAsync(ct);
 
-        await routing.SetActiveAsync(pn.Number, isActive: true, ct);
-        await routing.SaveChangesAsync(ct);
+        await ownership.ApplyAsync(pn, ct);
+        await ownership.SaveAsync(ct);
 
         return Results.Ok(ToResponse(pn));
     }
@@ -205,7 +226,7 @@ public static class PhoneNumbersEndpoints
     private static async Task<IResult> Deactivate(
         Guid id,
         IPhoneNumberRepository repo,
-        IPhoneNumberRoutingRepository routing,
+        ContactConnection.Infrastructure.Telephony.NumberOwnership ownership,
         TenantContext ctx,
         CancellationToken ct)
     {
@@ -215,14 +236,14 @@ public static class PhoneNumbersEndpoints
         pn.Deactivate();
         await repo.SaveChangesAsync(ct);
 
-        await routing.SetActiveAsync(pn.Number, isActive: false, ct);
-        await routing.SaveChangesAsync(ct);
+        await ownership.ApplyAsync(pn, ct);
+        await ownership.SaveAsync(ct);
 
         return Results.Ok(ToResponse(pn));
     }
 
     /// <summary>Validates and applies provider / role / client number. Null when OK, else the error.</summary>
-    private static async Task<string?> ApplyProviderAsync(
+    internal static async Task<string?> ApplyProviderAsync(
         PhoneNumber pn, Guid? providerId, string? role, string? clientNumber,
         INumberProviderRepository providers, CancellationToken ct)
     {
@@ -248,14 +269,15 @@ public static class PhoneNumbersEndpoints
     internal static object ToResponse(PhoneNumber pn) => new
     {
         pn.Id, pn.TenantId, pn.CampaignId, pn.Number, pn.Label, pn.IsActive, pn.FlowId, pn.TelephonyFlowId,
+        pn.ReservedAt, pn.InReserve, pn.IsReleased,
         pn.ProviderId, pn.Role, pn.ClientNumber,
         Campaign = pn.Campaign is null ? null : new { pn.Campaign.Id, pn.Campaign.Name },
         pn.CreatedAt, pn.UpdatedAt
     };
 }
 
-public record CreatePhoneNumberRequest(Guid CampaignId, string Number, string? Label = null,
+public record CreatePhoneNumberRequest(Guid? CampaignId, string Number, string? Label = null,
     Guid? ProviderId = null, string? Role = null, string? ClientNumber = null);
 public record UpdatePhoneNumberRequest(string? Label = null, Guid? CampaignId = null,
-    Guid? ProviderId = null, string? Role = null, string? ClientNumber = null, bool? ClearProvider = null);
+    Guid? ProviderId = null, string? Role = null, string? ClientNumber = null, bool? ClearProvider = null, bool? MoveToReserve = null);
 public record SetPhoneNumberFlowRequest(Guid FlowId);

@@ -336,14 +336,33 @@ public sealed class EslBackgroundService : BackgroundService
             destination, digits, "+" + digits,
             last10, "1" + last10, "+1" + last10,
         };
+        // S182: the row is found whatever its state — only an active number on a campaign takes calls.
         var routing = await platformDb.PhoneNumberRoutings
-            .FirstOrDefaultAsync(r => r.IsActive && didForms.Contains(r.Number), ct);
+            .Where(r => didForms.Contains(r.Number))
+            .OrderByDescending(r => r.IsActive && r.CampaignId != null)
+            .FirstOrDefaultAsync(ct);
+        // Legs we placed ourselves (a fired callback) are the customer we called — route them even if
+        // the number was paused meanwhile, as long as it still has a campaign.
+        var placedByUs = vars.GetValueOrDefault("Call-Direction") == "outbound";
 
-        if (routing is not null)
+        if (routing is { CampaignId: not null } && (routing.TakesCalls || placedByUs))
         {
             await HandleDidCallAsync(
                 routing, callerNumber, callerName, channelUuid, destination, vars,
                 esl, telephonyEngine, platformDb, dbFactory, callStateRecorder, callbackConn, ct);
+            return;
+        }
+
+        // S182: a carrier call to a number in Reserve, switched off, released, or unknown to the platform
+        // is refused as "not in service" (SIP 404 via Q.850 1 UNALLOCATED_NUMBER) — the caller hears a
+        // clean rejection instead of dead air on a parked channel.
+        if (!placedByUs && (routing is not null || vars.GetValueOrDefault("variable_cc_inbound") == "true"))
+        {
+            _logger.LogInformation(
+                "CHANNEL_PARK {Uuid}: {Number} doesn't take calls ({State}) — rejected as not in service",
+                channelUuid, destination,
+                routing is null ? "unknown number" : routing.CampaignId is null ? (routing.IsActive ? "in Reserve" : "released") : "inactive");
+            await esl.KillChannelAsync(channelUuid, 1, ct);
             return;
         }
 
@@ -371,6 +390,7 @@ public sealed class EslBackgroundService : BackgroundService
         IScheduledCallbackConnectionService callbackConn,
         CancellationToken ct)
     {
+        var campaignId = routing.CampaignId!.Value;   // the caller only routes numbers on a campaign
         var tenant = await platformDb.Tenants.FirstOrDefaultAsync(t => t.Id == routing.TenantId, ct);
         if (tenant is null)
         {
@@ -412,21 +432,21 @@ public sealed class EslBackgroundService : BackgroundService
         Guid? targetFlowId =
             Guid.TryParse(eventVars.GetValueOrDefault("variable_cc_target_flow_id"), out var tf) ? tf : null;
 
-        var routedCampaign = await db.Campaigns.FirstOrDefaultAsync(c => c.Id == routing.CampaignId, ct);
+        var routedCampaign = await db.Campaigns.FirstOrDefaultAsync(c => c.Id == campaignId, ct);
         if (routedCampaign is null)
             _logger.LogWarning(
                 "CHANNEL_PARK DID {Uuid}: routed campaign {Campaign} not found — call record's ClientId will be left unresolved",
                 channelUuid, routing.CampaignId);
 
         var record = isCallbackLeg
-            ? CallRecord.CreateCallback(tenant.Id, routing.CampaignId, callerNumber)
+            ? CallRecord.CreateCallback(tenant.Id, campaignId, callerNumber)
             : CallRecord.CreateInbound(
                 tenantId: tenant.Id, callerId: callerNumber, agentId: null, contactIdExternal: channelUuid);
 
         record.SetContactIdExternal(channelUuid);
         // Stamp the campaign (and its owning client — see CallRecord.SetCampaign) and dialed number
         // so the CallRecord knows where it belongs.
-        record.SetCampaign(routing.CampaignId, routedCampaign?.ClientId ?? Guid.Empty);
+        record.SetCampaign(campaignId, routedCampaign?.ClientId ?? Guid.Empty);
         record.SetDnis(routing.Number);
 
         // Who delivered it: the number's provider, and — for a routing-platform delivery number
@@ -460,7 +480,7 @@ public sealed class EslBackgroundService : BackgroundService
 
         await callStateRecorder.RecordAsync(
             tenant.Id, tenant.SchemaName, record.Id,
-            CallHistoryState.PreQueue, routing.CampaignId, agentId: null, detail: null, ct: ct);
+            CallHistoryState.PreQueue, campaignId, agentId: null, detail: null, ct: ct);
 
         _logger.LogInformation(
             "CHANNEL_PARK DID {Uuid}: tenant={Tenant} campaign={Campaign} → CallRecord {RecordId}",
@@ -482,7 +502,7 @@ public sealed class EslBackgroundService : BackgroundService
             CallerNumber      = callerNumber,
             DestinationNumber = routing.Number,
             TenantId          = tenant.Id,
-            CampaignId        = routing.CampaignId,
+            CampaignId        = campaignId,
             CallRecordId      = record.Id,
             TenantSubdomain   = tenant.Subdomain,
             TenantSchemaName  = tenant.SchemaName,

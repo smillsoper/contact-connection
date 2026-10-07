@@ -100,7 +100,13 @@ export interface CampaignDetail extends Campaign {
 export interface PhoneNumber {
   id: string
   tenantId: string
-  campaignId: string
+  /** null = in Reserve (S182). */
+  campaignId: string | null
+  /** When it went into Reserve — Reserve is handed out oldest first. */
+  reservedAt?: string | null
+  inReserve?: boolean
+  /** Deactivated while in Reserve: no longer the account's, kept for history. */
+  isReleased?: boolean
   number: string
   label?: string
   isActive: boolean
@@ -401,7 +407,7 @@ export const listPhoneNumbers = (campaignId: string) =>
   api.get<PhoneNumber[]>(`/api/v1/phone-numbers?campaignId=${campaignId}`)
 
 export const createPhoneNumber = (
-  campaignId: string, number: string, label?: string,
+  campaignId: string | null, number: string, label?: string,
   provider?: { providerId?: string | null; role?: PhoneNumberRole; clientNumber?: string | null },
 ) => api.post<PhoneNumber>('/api/v1/phone-numbers', { campaignId, number, label, ...provider })
 
@@ -416,6 +422,67 @@ export const activatePhoneNumber = (id: string) =>
 
 export const deactivatePhoneNumber = (id: string) =>
   api.post<PhoneNumber>(`/api/v1/phone-numbers/${id}/deactivate`)
+
+// ── Bulk number management (S182) ────────────────────────────────────────────
+
+/** active · inactive (held on its campaign) · reserve · released (no longer the account's; kept for history). */
+export type NumberStatus = 'active' | 'inactive' | 'reserve' | 'released'
+
+export interface NumberRow {
+  id: string
+  number: string
+  label?: string | null
+  isActive: boolean
+  campaignId: string | null
+  campaignName: string | null
+  clientId: string | null
+  clientName: string | null
+  status: NumberStatus
+  reservedAt: string | null
+  /** Position in the Reserve hand-out order (1 = next out). */
+  reserveRank: number | null
+  providerId: string | null
+  providerName: string | null
+  role: PhoneNumberRole
+  clientNumber: string | null
+  flowId: string | null
+  telephonyFlowId: string | null
+  updatedAt: string
+}
+
+export interface NumberDirectory {
+  campaigns: { id: string; name: string; clientId: string; clientName: string | null; status: string }[]
+  numbers: NumberRow[]
+}
+
+export interface BulkNumberResult { input: string; number: string | null; outcome: 'added' | 'reacquired' | 'duplicate' | 'conflict' | 'invalid' | 'done' | 'kept'; detail: string | null }
+
+export const listAllPhoneNumbers = () => api.get<NumberDirectory>('/api/v1/phone-numbers/all')
+
+export const bulkAddPhoneNumbers = (body: { numbers: string[]; campaignId: string | null; label?: string | null; providerId?: string | null; role?: PhoneNumberRole | null }) =>
+  api.post<{ results: BulkNumberResult[]; added: number }>('/api/v1/phone-numbers/bulk-add', body)
+
+export type BulkNumberAction = 'move' | 'reserve' | 'activate' | 'deactivate' | 'label' | 'delete'
+export const bulkPhoneNumberAction = (body: { ids: string[]; action: BulkNumberAction; campaignId?: string | null; label?: string | null }) =>
+  api.post<{ results: BulkNumberResult[]; done: number }>('/api/v1/phone-numbers/bulk', body)
+
+export const assignFromReserve = (campaignId: string, count: number, label?: string | null) =>
+  api.post<{ assigned: string[]; shortBy: number }>('/api/v1/phone-numbers/assign-from-reserve', { campaignId, count, label })
+
+// ── Assignment grid (S182) ────────────────────────────────────────────────────
+
+export interface AssignmentMatrix {
+  clients: { id: string; name: string }[]
+  campaigns: { id: string; name: string; clientId: string; clientName: string | null; status: string }[]
+  agents: { id: string; name: string; email: string; role: string; cells: Record<string, number> }[]
+  groups: { id: string; name: string; cells: Record<string, { proficiency: number; routingTier: number; tierLabel: string | null }> }[]
+}
+
+export const getAssignmentMatrix = (clientId?: string) =>
+  api.get<AssignmentMatrix>(`/api/v1/assignments/matrix${clientId ? `?clientId=${clientId}` : ''}`)
+
+export const bulkAssign = (body: { campaignIds: string[]; agentIds: string[]; groupIds: string[]; action: 'assign' | 'set' | 'remove'; proficiency?: number | null }) =>
+  api.post<{ added: number; updated: number; removed: number }>('/api/v1/assignments/bulk', body)
 
 // ── Agent Groups ──────────────────────────────────────────────────────────────
 

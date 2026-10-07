@@ -4,11 +4,14 @@ import AdminShell from '../../components/admin/AdminShell'
 import SearchableSelect from '../../components/SearchableSelect'
 import GroupRoutingPanel from '../../components/admin/GroupRoutingPanel'
 import MediaAssignmentsModal from '../../components/admin/MediaAssignmentsModal'
+import AssignmentGrid from '../../components/admin/AssignmentGrid'
 import {
   listClients, createClient, activateClient, deactivateClient,
   getOrderNumberSequence, putOrderNumberSequence, deleteOrderNumberSequence,
   listCampaigns, createCampaign, activateCampaign, pauseCampaign, deactivateCampaign,
-  listPhoneNumbers, createPhoneNumber, activatePhoneNumber, deactivatePhoneNumber, updatePhoneNumberProvider,
+  createPhoneNumber, updatePhoneNumberProvider,
+  listAllPhoneNumbers, bulkAddPhoneNumbers, bulkPhoneNumberAction, assignFromReserve,
+  type NumberDirectory, type NumberRow, type NumberStatus, type BulkNumberResult, type BulkNumberAction,
   listNumberProviders, createNumberProvider, updateNumberProvider, activateNumberProvider, deactivateNumberProvider,
   issueNumberProviderApiKey, revokeNumberProviderApiKey,
   type NumberProvider, type NumberProviderType, type PhoneNumberRole,
@@ -22,7 +25,7 @@ import { flowsApi, type FlowSummary } from '../../api/flows'
 import { api } from '../../api/client'
 import { openCallTrace } from '../../components/calltrace/openCallTrace'
 
-type Tab = 'clients' | 'campaigns' | 'phone-numbers' | 'providers' | 'agent-groups' | 'test-call'
+type Tab = 'clients' | 'campaigns' | 'phone-numbers' | 'providers' | 'agent-groups' | 'assignments' | 'test-call'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'clients',       label: 'Clients' },
@@ -30,6 +33,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'phone-numbers', label: 'Phone Numbers' },
   { id: 'providers',     label: 'Number Providers' },
   { id: 'agent-groups',  label: 'Agent Groups' },
+  { id: 'assignments',   label: 'Assignments' },
   { id: 'test-call',     label: 'Test Call' },
 ]
 
@@ -564,7 +568,7 @@ function CampaignsTab() {
 // ── Phone Numbers Tab ─────────────────────────────────────────────────────────
 
 /** Tenant default outbound caller ID (S179) — direct dials, and manual outbound campaigns with no caller ID of their own. */
-function DefaultOutboundCallerId({ numbers }: { numbers: PhoneNumber[] }) {
+function DefaultOutboundCallerId({ numbers }: { numbers: { id: string; number: string; label?: string | null }[] }) {
   const [value, setValue] = useState('')
   const [saved, setSaved] = useState('')
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
@@ -601,103 +605,123 @@ function DefaultOutboundCallerId({ numbers }: { numbers: PhoneNumber[] }) {
   )
 }
 
+const NUMBER_STATUS: Record<NumberStatus, { label: string; cls: string; hint: string }> = {
+  active:   { label: 'active',   cls: 'bg-emerald-900/50 text-emerald-400', hint: 'Takes calls for its campaign.' },
+  inactive: { label: 'inactive', cls: 'bg-gray-700/60 text-gray-400',       hint: 'Held for its campaign — calls are rejected.' },
+  reserve:  { label: 'reserve',  cls: 'bg-sky-900/50 text-sky-300',         hint: 'Waiting to be assigned — calls are rejected.' },
+  released: { label: 'released', cls: 'bg-red-950/60 text-red-300',         hint: 'No longer your number — kept for its call history.' },
+}
+
+const VIEW_ALL = '__all', VIEW_RESERVE = '__reserve', VIEW_RELEASED = '__released'
+
+function sinceText(iso: string | null) {
+  if (!iso) return ''
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000)
+  return days <= 0 ? 'today' : days === 1 ? '1 day' : `${days} days`
+}
+
 function PhoneNumbersTab() {
-  const [campaigns, setCampaigns] = useState<Campaign[]>([])
-  const [numbers, setNumbers] = useState<PhoneNumber[]>([])
-  const [mediaFor, setMediaFor] = useState<PhoneNumber | null>(null)
+  const [dir, setDir] = useState<NumberDirectory | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const [scriptFlows, setScriptFlows] = useState<FlowSummary[]>([])
   const [inboundFlows, setInboundFlows] = useState<FlowSummary[]>([])
-  const [selectedCampaignId, setSelectedCampaignId] = useState('')
-  const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [numLoading, setNumLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const [showCreate, setShowCreate] = useState(false)
-  const [newCampaignId, setNewCampaignId] = useState('')
-  const [newNumber, setNewNumber] = useState('')
-  const [newLabel, setNewLabel] = useState('')
-  const [newProvider, setNewProvider] = useState<ProviderSelection>(EMPTY_PROVIDER)
-  const [creating, setCreating] = useState(false)
-  const [createError, setCreateError] = useState<string | null>(null)
   const [providers, setProviders] = useState<NumberProvider[]>([])
+  const [mediaFor, setMediaFor] = useState<NumberRow | null>(null)
   const [editingProviderFor, setEditingProviderFor] = useState<string | null>(null)
 
+  const [view, setView] = useState(VIEW_ALL)
+  const [search, setSearch] = useState('')
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [panel, setPanel] = useState<'add' | 'reserve' | null>(null)
+  const [notice, setNotice] = useState<{ ok: boolean; text: string; results?: BulkNumberResult[] } | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  // Bulk bar inputs
+  const [moveTo, setMoveTo] = useState('')
+  const [bulkLabel, setBulkLabel] = useState('')
+  const [confirmRelease, setConfirmRelease] = useState<string[] | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<string[] | null>(null)
+
+  function reload() {
+    return listAllPhoneNumbers().then(setDir).catch((e: Error) => setError(e.message))
+  }
+
   useEffect(() => {
-    Promise.all([
-      listCampaigns(),
-      flowsApi.listAll(),
-      listNumberProviders().catch(() => [] as NumberProvider[]),
-    ])
-      .then(([c, allFlows, provs]) => {
-        setCampaigns(c)
-        setProviders(provs)
-        setScriptFlows(allFlows.filter((f) => f.flow_type === 'crm'))
-        setInboundFlows(allFlows.filter((f) => f.flow_type === 'telephony' && f.flow_direction === 'inbound'))
-      })
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false))
+    void reload()
+    flowsApi.listAll().then((all) => {
+      setScriptFlows(all.filter((f) => f.flow_type === 'crm'))
+      setInboundFlows(all.filter((f) => f.flow_type === 'telephony' && f.flow_direction === 'inbound'))
+    }).catch(() => {})
+    listNumberProviders().then(setProviders).catch(() => {})
   }, [])
 
-  useEffect(() => {
-    if (!selectedCampaignId) { setNumbers([]); return }
-    setNumLoading(true)
-    listPhoneNumbers(selectedCampaignId)
-      .then(setNumbers)
-      .catch(() => {})
-      .finally(() => setNumLoading(false))
-  }, [selectedCampaignId])
+  const numbers = dir?.numbers ?? []
+  const campaigns = dir?.campaigns ?? []
+  const campaignLabel = (c: { name: string; clientName: string | null }) => c.clientName ? `${c.clientName} — ${c.name}` : c.name
+  const counts = (['active', 'inactive', 'reserve', 'released'] as NumberStatus[])
+    .map((s) => [s, numbers.filter((n) => n.status === s).length] as const)
 
-  async function handleCreate() {
-    if (!newCampaignId || !newNumber.trim()) return
-    setCreating(true)
-    setCreateError(null)
-    try {
-      const pn = await createPhoneNumber(newCampaignId, newNumber.trim(), newLabel.trim() || undefined,
-        newProvider.providerId
-          ? { providerId: newProvider.providerId, role: newProvider.role, clientNumber: newProvider.clientNumber.trim() || null }
-          : undefined)
-      if (pn.campaignId === selectedCampaignId) setNumbers((prev) => [...prev, pn])
-      setNewNumber(''); setNewLabel(''); setNewProvider(EMPTY_PROVIDER); setShowCreate(false)
-    } catch (e) {
-      setCreateError(e instanceof Error ? e.message : 'Create failed.')
-    } finally {
-      setCreating(false)
-    }
+  const q = search.trim().toLowerCase()
+  const qDigits = q.replace(/\D/g, '')
+  const visible = numbers
+    .filter((n) => view === VIEW_ALL ? n.status !== 'released'
+      : view === VIEW_RESERVE ? n.status === 'reserve'
+      : view === VIEW_RELEASED ? n.status === 'released'
+      : n.campaignId === view)
+    .filter((n) => !q
+      || (qDigits.length > 0 && n.number.replace(/\D/g, '').includes(qDigits))
+      || (n.label ?? '').toLowerCase().includes(q)
+      || (n.campaignName ?? '').toLowerCase().includes(q)
+      || (n.clientName ?? '').toLowerCase().includes(q))
+    .sort((a, b) => view === VIEW_RESERVE ? (a.reserveRank ?? 0) - (b.reserveRank ?? 0) : a.number.localeCompare(b.number))
+
+  const selectedRows = numbers.filter((n) => selected.has(n.id))
+  const allVisibleSelected = visible.length > 0 && visible.every((n) => selected.has(n.id))
+  function toggle(id: string) {
+    setSelected((prev) => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next })
+  }
+  function toggleAllVisible() {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (allVisibleSelected) visible.forEach((n) => next.delete(n.id)); else visible.forEach((n) => next.add(n.id))
+      return next
+    })
   }
 
-  async function handleToggle(pn: PhoneNumber) {
+  async function runBulk(action: BulkNumberAction, ids: string[], extra: { campaignId?: string; label?: string | null } = {}) {
+    setBusy(true); setNotice(null)
     try {
-      const updated = pn.isActive
-        ? await deactivatePhoneNumber(pn.id)
-        : await activatePhoneNumber(pn.id)
-      setNumbers((prev) => prev.map((n) => n.id === pn.id ? updated : n))
-    } catch {}
+      const r = await bulkPhoneNumberAction({ ids, action, ...extra })
+      const problems = r.results.filter((x) => x.outcome !== 'done')
+      setNotice({ ok: problems.length === 0, text: `${r.done} number${r.done === 1 ? '' : 's'} updated.`, results: problems.length ? problems : undefined })
+      setSelected(new Set())
+      await reload()
+    } catch (e) { setNotice({ ok: false, text: e instanceof Error ? e.message : 'Update failed.' }) }
+    finally { setBusy(false); setConfirmRelease(null); setConfirmDelete(null) }
   }
 
-  async function handleFlowChange(pn: PhoneNumber, flowId: string) {
-    try {
-      const updated = flowId
-        ? await setPhoneNumberFlow(pn.id, flowId)
-        : await removePhoneNumberFlow(pn.id)
-      setNumbers((prev) => prev.map((n) => n.id === pn.id ? updated : n))
-    } catch {}
+  /** Deactivating a Reserve number releases it — ask first. */
+  function deactivate(ids: string[]) {
+    const releasing = numbers.filter((n) => ids.includes(n.id) && n.status === 'reserve')
+    if (releasing.length > 0) setConfirmRelease(ids)
+    else void runBulk('deactivate', ids)
   }
 
-  async function handleTelephonyFlowChange(pn: PhoneNumber, flowId: string) {
+  async function rowFlow(n: NumberRow, kind: 'script' | 'telephony', flowId: string) {
     try {
-      const updated = flowId
-        ? await setPhoneNumberTelephonyFlow(pn.id, flowId)
-        : await removePhoneNumberTelephonyFlow(pn.id)
-      setNumbers((prev) => prev.map((n) => n.id === pn.id ? updated : n))
-    } catch {}
+      if (kind === 'script') await (flowId ? setPhoneNumberFlow(n.id, flowId) : removePhoneNumberFlow(n.id))
+      else await (flowId ? setPhoneNumberTelephonyFlow(n.id, flowId) : removePhoneNumberTelephonyFlow(n.id))
+      await reload()
+    } catch (e) { setNotice({ ok: false, text: e instanceof Error ? e.message : 'Update failed.' }) }
   }
 
-  const pq = search.toLowerCase()
-  const visibleNumbers = numbers.filter((n) =>
-    n.number.toLowerCase().includes(pq) ||
-    (n.label ?? '').toLowerCase().includes(pq)
-  )
+  const viewOptions = [
+    { value: VIEW_ALL, label: 'All numbers' },
+    { value: VIEW_RESERVE, label: 'Reserve' },
+    { value: VIEW_RELEASED, label: 'Released' },
+    ...campaigns.map((c) => ({ value: c.id, label: campaignLabel(c) })),
+  ]
+  const btn = 'rounded-lg px-3 py-1.5 text-xs font-medium disabled:opacity-40'
 
   return (
     <div>
@@ -705,190 +729,212 @@ function PhoneNumbersTab() {
         <MediaAssignmentsModal phoneNumberId={mediaFor.id} number={mediaFor.number}
           clientNumber={mediaFor.clientNumber} onClose={() => setMediaFor(null)} />
       )}
-      <DefaultOutboundCallerId numbers={numbers} />
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <p className="text-gray-500 text-sm">DIDs assigned to campaigns.</p>
-          <SearchableSelect
-            options={campaigns.map((c) => ({ value: c.id, label: c.name }))}
-            value={selectedCampaignId}
-            onChange={(v) => { setSelectedCampaignId(v); setSearch('') }}
-            placeholder="Select a campaign…"
-            className="w-56"
-          />
-          {selectedCampaignId && (
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search…"
-              className="bg-gray-800 text-white rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 w-48"
-            />
-          )}
-        </div>
-        <button
-          onClick={() => {
-            setShowCreate((v) => !v)
-            setNewCampaignId(selectedCampaignId)
-            setCreateError(null)
-          }}
-          className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
-        >
-          Add DID
-        </button>
+      <DefaultOutboundCallerId numbers={numbers.filter((n) => n.status !== 'released')} />
+
+      {/* Status counts double as quick views */}
+      <div className="flex flex-wrap items-center gap-2 mb-3 text-xs">
+        {counts.map(([s, c]) => (
+          <button key={s} type="button" title={NUMBER_STATUS[s].hint}
+            onClick={() => { setView(s === 'reserve' ? VIEW_RESERVE : s === 'released' ? VIEW_RELEASED : VIEW_ALL); setSearch('') }}
+            className={`px-2 py-0.5 rounded ${NUMBER_STATUS[s].cls}`}>
+            {c} {NUMBER_STATUS[s].label}
+          </button>
+        ))}
+        <span className="text-gray-600">Reserve, inactive and released numbers reject calls (not in service).</span>
       </div>
 
-      {showCreate && (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4">
-          <p className="text-gray-300 text-sm font-medium mb-3">Add phone number</p>
-          <div className="flex items-center gap-3 flex-wrap">
-            <select
-              value={newCampaignId}
-              onChange={(e) => setNewCampaignId(e.target.value)}
-              className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-            >
-              <option value="">Select campaign *</option>
-              {campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-            <input
-              autoFocus
-              value={newNumber}
-              onChange={(e) => setNewNumber(e.target.value)}
-              placeholder="+15035551234 (E.164) *"
-              className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 w-48"
-            />
-            <input
-              value={newLabel}
-              onChange={(e) => setNewLabel(e.target.value)}
-              placeholder="Label (optional)"
-              className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 w-44"
-            />
-            <ProviderFields providers={providers} value={newProvider} onChange={setNewProvider} />
-            <button
-              onClick={handleCreate}
-              disabled={creating || !newCampaignId || !newNumber.trim() || !providerSelectionValid(newProvider)}
-              className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
-            >
-              {creating ? 'Adding…' : 'Add'}
-            </button>
-            <button onClick={() => setShowCreate(false)} className="text-gray-500 hover:text-white text-sm">
-              Cancel
-            </button>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <SearchableSelect options={viewOptions} value={view} onChange={(v) => { setView(v || VIEW_ALL); setSelected(new Set()) }}
+            placeholder="All numbers" className="w-72" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search number, label, campaign…"
+            className="bg-gray-800 text-white rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 w-60" />
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => setPanel((p) => p === 'reserve' ? null : 'reserve')}
+            className="bg-gray-800 hover:bg-gray-700 text-gray-200 rounded-lg px-4 py-2 text-sm font-medium">Assign from Reserve</button>
+          <button onClick={() => setPanel((p) => p === 'add' ? null : 'add')}
+            className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg px-4 py-2 text-sm font-medium">Add numbers</button>
+        </div>
+      </div>
+
+      {panel === 'add' && (
+        <BulkAddNumbersPanel campaigns={campaigns} campaignLabel={campaignLabel} providers={providers}
+          defaultCampaignId={view.startsWith('__') ? '' : view}
+          onDone={async (n) => { setNotice(n); await reload() }} onClose={() => setPanel(null)} />
+      )}
+      {panel === 'reserve' && (
+        <AssignFromReservePanel campaigns={campaigns} campaignLabel={campaignLabel}
+          reserve={numbers.filter((n) => n.status === 'reserve').sort((a, b) => (a.reserveRank ?? 0) - (b.reserveRank ?? 0))}
+          defaultCampaignId={view.startsWith('__') ? '' : view}
+          onDone={async (n) => { setNotice(n); await reload() }} onClose={() => setPanel(null)} />
+      )}
+
+      {notice && (
+        <div className={`mb-4 rounded-lg border px-4 py-2 text-sm ${notice.ok ? 'border-emerald-800 text-emerald-300' : 'border-amber-800 text-amber-300'}`}>
+          <div className="flex items-start justify-between gap-3">
+            <span>{notice.text}</span>
+            <button onClick={() => setNotice(null)} className="text-gray-500 hover:text-white text-xs">Dismiss</button>
           </div>
-          {createError && <p className="text-red-400 text-xs mt-2">{createError}</p>}
+          {notice.results && (
+            <ul className="mt-1 text-xs text-gray-300 space-y-0.5">
+              {notice.results.map((r, i) => (
+                <li key={i}><span className="font-mono">{r.number ?? r.input}</span> — <span className="text-amber-300">{r.outcome}</span>{r.detail ? `: ${r.detail}` : ''}</li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 
-      {loading && <p className="text-gray-400 text-sm">Loading campaigns…</p>}
-      {error && <p className="text-red-400 text-sm">{error}</p>}
-      {!loading && !selectedCampaignId && (
-        <p className="text-gray-500 text-sm">Select a campaign to view its phone numbers.</p>
-      )}
-      {numLoading && <p className="text-gray-400 text-sm">Loading…</p>}
-      {!numLoading && selectedCampaignId && numbers.length === 0 && (
-        <p className="text-gray-500 text-sm">No phone numbers assigned to this campaign yet.</p>
-      )}
-      {!numLoading && selectedCampaignId && numbers.length > 0 && visibleNumbers.length === 0 && (
-        <p className="text-gray-500 text-sm">No numbers match "{search}".</p>
+      {/* Bulk bar */}
+      {selected.size > 0 && (
+        <div className="sticky top-0 z-10 mb-3 rounded-lg border border-indigo-800 bg-gray-950/95 px-4 py-2 flex flex-wrap items-center gap-2">
+          <span className="text-sm text-white font-medium mr-1">{selected.size} selected</span>
+          <select value={moveTo} onChange={(e) => setMoveTo(e.target.value)}
+            className="bg-gray-800 text-white rounded-lg px-2 py-1.5 text-xs outline-none">
+            <option value="">Move to campaign…</option>
+            {campaigns.map((c) => <option key={c.id} value={c.id}>{campaignLabel(c)}</option>)}
+          </select>
+          <button disabled={busy || !moveTo} onClick={() => void runBulk('move', [...selected], { campaignId: moveTo })}
+            className={`${btn} bg-indigo-600 hover:bg-indigo-500 text-white`}>Move</button>
+          <button disabled={busy} onClick={() => void runBulk('reserve', [...selected])}
+            className={`${btn} bg-sky-900/60 hover:bg-sky-800/60 text-sky-200`}>Move to Reserve</button>
+          <button disabled={busy} onClick={() => void runBulk('activate', [...selected])}
+            className={`${btn} bg-emerald-900/60 hover:bg-emerald-800/60 text-emerald-200`}>Activate</button>
+          <button disabled={busy} onClick={() => deactivate([...selected])}
+            className={`${btn} bg-gray-800 hover:bg-gray-700 text-gray-200`}>Deactivate</button>
+          <input value={bulkLabel} onChange={(e) => setBulkLabel(e.target.value)} placeholder="Label"
+            className="bg-gray-800 text-white rounded-lg px-2 py-1.5 text-xs outline-none w-36" />
+          <button disabled={busy} onClick={() => void runBulk('label', [...selected], { label: bulkLabel.trim() || null })}
+            className={`${btn} bg-gray-800 hover:bg-gray-700 text-gray-200`}>{bulkLabel.trim() ? 'Set label' : 'Clear label'}</button>
+          <button disabled={busy} onClick={() => setConfirmDelete([...selected])}
+            className={`${btn} text-red-300 hover:text-red-200`} title="Only numbers that never took a call">Delete…</button>
+          <button onClick={() => setSelected(new Set())} className="text-gray-500 hover:text-white text-xs ml-auto">Clear selection</button>
+          {selectedRows.some((n) => n.status === 'released') && (
+            <p className="basis-full text-[11px] text-gray-500">Released numbers come back only if no other account has taken them since.</p>
+          )}
+        </div>
       )}
 
-      {visibleNumbers.length > 0 && (
-        <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+      {confirmRelease && (
+        <div className="mb-3 rounded-lg border border-red-800 bg-red-950/40 px-4 py-3 text-sm">
+          <p className="text-red-200">
+            Deactivating {numbers.filter((n) => confirmRelease.includes(n.id) && n.status === 'reserve').length} Reserve
+            number(s) <strong>releases</strong> them: they no longer belong to your account and another account may take them.
+            Their call history stays. Numbers on a campaign are just held inactive for that campaign.
+          </p>
+          <div className="mt-2 flex gap-2">
+            <button disabled={busy} onClick={() => void runBulk('deactivate', confirmRelease)}
+              className={`${btn} bg-red-700 hover:bg-red-600 text-white`}>Release and deactivate</button>
+            <button onClick={() => setConfirmRelease(null)} className="text-gray-400 hover:text-white text-xs">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {confirmDelete && (
+        <div className="mb-3 rounded-lg border border-red-800 bg-red-950/40 px-4 py-3 text-sm">
+          <p className="text-red-200">
+            Delete {confirmDelete.length} number(s) permanently? Only numbers that never took a call (a typo, a number never pointed
+            here) are deleted — any with call or media history are kept; release those instead so their history stays.
+          </p>
+          <div className="mt-2 flex gap-2">
+            <button disabled={busy} onClick={() => void runBulk('delete', confirmDelete)}
+              className={`${btn} bg-red-700 hover:bg-red-600 text-white`}>Delete never-used numbers</button>
+            <button onClick={() => setConfirmDelete(null)} className="text-gray-400 hover:text-white text-xs">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {error && <p className="text-red-400 text-sm">{error}</p>}
+      {!dir && !error && <p className="text-gray-400 text-sm">Loading…</p>}
+      {dir && visible.length === 0 && (
+        <p className="text-gray-500 text-sm">
+          {q ? `No numbers match "${search}".` : view === VIEW_RESERVE ? 'Reserve is empty.' : view === VIEW_RELEASED ? 'No released numbers.' : 'No numbers here yet.'}
+        </p>
+      )}
+
+      {visible.length > 0 && (
+        <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-800 text-gray-400 text-left">
-                <th className="px-4 py-3 font-medium">Number</th>
-                <th className="px-4 py-3 font-medium">Label</th>
-                <th className="px-4 py-3 font-medium">Provider</th>
-                <th className="px-4 py-3 font-medium">Script Flow Override</th>
-                <th className="px-4 py-3 font-medium">Telephony Flow Override</th>
-                <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 font-medium"></th>
+                <th className="pl-4 py-3 w-8"><input type="checkbox" checked={allVisibleSelected} onChange={toggleAllVisible} /></th>
+                <th className="px-3 py-3 font-medium">Number</th>
+                <th className="px-3 py-3 font-medium">Label</th>
+                <th className="px-3 py-3 font-medium">Campaign</th>
+                <th className="px-3 py-3 font-medium">Provider</th>
+                <th className="px-3 py-3 font-medium">Script Flow Override</th>
+                <th className="px-3 py-3 font-medium">Telephony Flow Override</th>
+                <th className="px-3 py-3 font-medium">Status</th>
+                <th className="px-3 py-3 font-medium"></th>
               </tr>
             </thead>
             <tbody>
-              {visibleNumbers.map((n) => (
+              {visible.map((n) => (
                 <Fragment key={n.id}>
-                <tr className="border-b border-gray-800 last:border-0 hover:bg-gray-800/30">
-                  <td className="px-4 py-3 text-white font-mono">{n.number}</td>
-                  <td className="px-4 py-3 text-gray-400">{n.label ?? <span className="text-gray-600">—</span>}</td>
-                  <td className="px-4 py-3 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => setEditingProviderFor((cur) => cur === n.id ? null : n.id)}
-                      className="text-left hover:text-white"
-                      title="Edit provider"
-                    >
+                <tr className={`border-b border-gray-800 last:border-0 hover:bg-gray-800/30 ${selected.has(n.id) ? 'bg-indigo-950/30' : ''}`}>
+                  <td className="pl-4 py-3"><input type="checkbox" checked={selected.has(n.id)} onChange={() => toggle(n.id)} /></td>
+                  <td className="px-3 py-3 text-white font-mono whitespace-nowrap">{n.number}</td>
+                  <td className="px-3 py-3 text-gray-400">{n.label ?? <span className="text-gray-600">—</span>}</td>
+                  <td className="px-3 py-3 text-xs">
+                    {n.campaignName ? (
+                      <><span className="text-gray-200">{n.campaignName}</span>{n.clientName && <span className="block text-gray-500">{n.clientName}</span>}</>
+                    ) : n.status === 'reserve' ? (
+                      <span className="text-sky-300" title="Reserve is handed out oldest first">
+                        Reserve · #{n.reserveRank} in line<span className="block text-gray-500">waiting {sinceText(n.reservedAt)}</span>
+                      </span>
+                    ) : <span className="text-gray-500">—</span>}
+                  </td>
+                  <td className="px-3 py-3 text-xs">
+                    <button type="button" onClick={() => setEditingProviderFor((cur) => cur === n.id ? null : n.id)}
+                      className="text-left hover:text-white" title="Edit provider">
                       {n.providerId ? (
                         <>
-                          <span className="text-gray-300">{providers.find((p) => p.id === n.providerId)?.name ?? 'Unknown provider'}</span>
+                          <span className="text-gray-300">{n.providerName ?? 'Unknown provider'}</span>
                           {n.role === 'routing_delivery' && (
-                            <span className="block text-amber-400/90">
-                              delivery for <span className="font-mono">{n.clientNumber}</span>
-                            </span>
+                            <span className="block text-amber-400/90">delivery for <span className="font-mono">{n.clientNumber}</span></span>
                           )}
                         </>
-                      ) : (
-                        <span className="text-gray-600">— set provider</span>
-                      )}
+                      ) : <span className="text-gray-600">— set provider</span>}
                     </button>
                   </td>
-                  <td className="px-4 py-3 w-56">
-                    <SearchableSelect
-                      options={scriptFlows.map((f) => ({ value: f.id, label: f.name }))}
-                      value={n.flowId ?? ''}
-                      onChange={(v) => handleFlowChange(n, v)}
-                      allLabel="Campaign default"
-                      className="w-full"
-                    />
+                  <td className="px-3 py-3 w-52">
+                    {n.campaignId ? (
+                      <SearchableSelect options={scriptFlows.map((f) => ({ value: f.id, label: f.name }))} value={n.flowId ?? ''}
+                        onChange={(v) => void rowFlow(n, 'script', v)} allLabel="Campaign default" className="w-full" />
+                    ) : <span className="text-gray-600 text-xs">—</span>}
                   </td>
-                  <td className="px-4 py-3 w-56">
-                    <SearchableSelect
-                      options={inboundFlows.map((f) => ({ value: f.id, label: f.name }))}
-                      value={n.telephonyFlowId ?? ''}
-                      onChange={(v) => handleTelephonyFlowChange(n, v)}
-                      allLabel="Campaign default"
-                      className="w-full"
-                    />
+                  <td className="px-3 py-3 w-52">
+                    {n.campaignId ? (
+                      <SearchableSelect options={inboundFlows.map((f) => ({ value: f.id, label: f.name }))} value={n.telephonyFlowId ?? ''}
+                        onChange={(v) => void rowFlow(n, 'telephony', v)} allLabel="Campaign default" className="w-full" />
+                    ) : <span className="text-gray-600 text-xs">—</span>}
                   </td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${n.isActive ? STATUS_COLORS.active : STATUS_COLORS.inactive}`}>
-                      {n.isActive ? 'active' : 'inactive'}
+                  <td className="px-3 py-3">
+                    <span title={NUMBER_STATUS[n.status].hint} className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${NUMBER_STATUS[n.status].cls}`}>
+                      {NUMBER_STATUS[n.status].label}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex items-center justify-end gap-3">
-                      <button
-                        onClick={() => setMediaFor(n)}
-                        className="text-sky-400 hover:text-sky-300 text-xs font-medium"
-                        title="Media agency attribution for calls on this number"
-                      >
-                        Media
-                      </button>
-                      <button
-                        onClick={() => openCallTrace({ dnis: n.number })}
-                        className="text-gray-400 hover:text-gray-200 text-xs font-medium"
-                      >
-                        Trace
-                      </button>
-                      <button
-                        onClick={() => handleToggle(n)}
-                        className="text-indigo-400 hover:text-indigo-300 text-xs font-medium"
-                      >
-                        {n.isActive ? 'Deactivate' : 'Activate'}
+                  <td className="px-3 py-3 text-right">
+                    <div className="flex items-center justify-end gap-3 whitespace-nowrap">
+                      <button onClick={() => setMediaFor(n)} className="text-sky-400 hover:text-sky-300 text-xs font-medium"
+                        title="Media agency attribution for calls on this number">Media</button>
+                      <button onClick={() => openCallTrace({ dnis: n.number })} className="text-gray-400 hover:text-gray-200 text-xs font-medium">Trace</button>
+                      <button disabled={busy}
+                        onClick={() => n.isActive ? deactivate([n.id]) : void runBulk('activate', [n.id])}
+                        className="text-indigo-400 hover:text-indigo-300 text-xs font-medium">
+                        {n.status === 'released' ? 'Reclaim' : n.status === 'reserve' ? 'Release' : n.isActive ? 'Deactivate' : 'Activate'}
                       </button>
                     </div>
                   </td>
                 </tr>
                 {editingProviderFor === n.id && (
                   <tr className="border-b border-gray-800 bg-gray-950/40">
-                    <td colSpan={8} className="px-4 py-3">
+                    <td colSpan={9} className="px-4 py-3">
                       <PhoneNumberProviderEditor
-                        number={n}
+                        number={{ ...n, label: n.label ?? undefined } as unknown as PhoneNumber}
                         providers={providers}
-                        onSaved={(updated) => {
-                          setNumbers((prev) => prev.map((x) => x.id === updated.id ? updated : x))
-                          setEditingProviderFor(null)
-                        }}
+                        onSaved={() => { setEditingProviderFor(null); void reload() }}
                         onCancel={() => setEditingProviderFor(null)}
                       />
                     </td>
@@ -900,6 +946,148 @@ function PhoneNumbersTab() {
           </table>
         </div>
       )}
+    </div>
+  )
+}
+
+type CampaignOption = NumberDirectory['campaigns'][number]
+type Notice = { ok: boolean; text: string; results?: BulkNumberResult[] }
+
+/** Paste any number of numbers (one per line, or comma-separated) into a campaign or Reserve. */
+function BulkAddNumbersPanel({ campaigns, campaignLabel, providers, defaultCampaignId, onDone, onClose }: {
+  campaigns: CampaignOption[]
+  campaignLabel: (c: CampaignOption) => string
+  providers: NumberProvider[]
+  defaultCampaignId: string
+  onDone: (n: Notice) => Promise<void>
+  onClose: () => void
+}) {
+  const [text, setText] = useState('')
+  const [campaignId, setCampaignId] = useState(defaultCampaignId)
+  const [label, setLabel] = useState('')
+  const [provider, setProvider] = useState<ProviderSelection>(EMPTY_PROVIDER)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const lines = text.split(/[\n,;\t]+/).map((s) => s.trim()).filter(Boolean)
+  const single = lines.length === 1
+  const routing = provider.role === 'routing_delivery'
+
+  async function add() {
+    setSaving(true); setError(null)
+    try {
+      if (single && routing) {
+        // A routing delivery number names its own client number — one at a time.
+        await createPhoneNumber(campaignId || null, lines[0], label.trim() || undefined,
+          { providerId: provider.providerId, role: provider.role, clientNumber: provider.clientNumber.trim() || null })
+        await onDone({ ok: true, text: `${lines[0]} added.` })
+      } else {
+        const r = await bulkAddPhoneNumbers({ numbers: lines, campaignId: campaignId || null, label: label.trim() || null,
+          providerId: provider.providerId || null, role: provider.providerId ? provider.role : null })
+        const problems = r.results.filter((x) => x.outcome !== 'added' && x.outcome !== 'reacquired')
+        await onDone({ ok: problems.length === 0,
+          text: `${r.added} of ${r.results.length} number${r.results.length === 1 ? '' : 's'} added${campaignId ? '' : ' to Reserve'}.`,
+          results: problems.length ? problems : undefined })
+      }
+      setText('')
+      onClose()
+    } catch (e) { setError(e instanceof Error ? e.message : 'Add failed.') }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4">
+      <p className="text-gray-300 text-sm font-medium mb-1">Add numbers</p>
+      <p className="text-gray-500 text-xs mb-3">One per line or comma-separated, any format (+1 503 555 1234, 5035551234…). Leave the campaign
+        blank to put them in Reserve.</p>
+      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={5} autoFocus
+        placeholder={'+15035551234\n+15035551235'}
+        className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm font-mono outline-none focus:ring-2 focus:ring-indigo-500 mb-3" />
+      <div className="flex items-center gap-3 flex-wrap">
+        <select value={campaignId} onChange={(e) => setCampaignId(e.target.value)}
+          className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500">
+          <option value="">Reserve (no campaign)</option>
+          {campaigns.map((c) => <option key={c.id} value={c.id}>{campaignLabel(c)}</option>)}
+        </select>
+        <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Label (optional)"
+          className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 w-44" />
+        <ProviderFields providers={providers} value={provider} onChange={setProvider} />
+        <button onClick={() => void add()}
+          disabled={saving || lines.length === 0 || (routing && (!single || !providerSelectionValid(provider)))}
+          className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg px-4 py-2 text-sm font-medium">
+          {saving ? 'Adding…' : `Add ${lines.length || ''}`.trim()}
+        </button>
+        <button onClick={onClose} className="text-gray-500 hover:text-white text-sm">Cancel</button>
+      </div>
+      {routing && !single && lines.length > 0 && (
+        <p className="text-amber-300 text-xs mt-2">Routing delivery numbers each stand for their own client number — add them one at a time.</p>
+      )}
+      {error && <p className="text-red-400 text-xs mt-2">{error}</p>}
+    </div>
+  )
+}
+
+/** Hands out the longest-waiting Reserve numbers to a campaign. */
+function AssignFromReservePanel({ campaigns, campaignLabel, reserve, defaultCampaignId, onDone, onClose }: {
+  campaigns: CampaignOption[]
+  campaignLabel: (c: CampaignOption) => string
+  reserve: NumberRow[]
+  defaultCampaignId: string
+  onDone: (n: Notice) => Promise<void>
+  onClose: () => void
+}) {
+  const [campaignId, setCampaignId] = useState(defaultCampaignId)
+  const [count, setCount] = useState(1)
+  const [label, setLabel] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const next = reserve.slice(0, Math.max(0, count))
+
+  async function assign() {
+    setSaving(true); setError(null)
+    try {
+      const r = await assignFromReserve(campaignId, count, label.trim() || null)
+      const name = campaigns.find((c) => c.id === campaignId)?.name ?? 'the campaign'
+      await onDone({ ok: r.shortBy === 0,
+        text: `${r.assigned.length} number${r.assigned.length === 1 ? '' : 's'} assigned to ${name}: ${r.assigned.join(', ')}` +
+          (r.shortBy > 0 ? ` — Reserve was ${r.shortBy} short.` : '') })
+      onClose()
+    } catch (e) { setError(e instanceof Error ? e.message : 'Assign failed.') }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4">
+      <p className="text-gray-300 text-sm font-medium mb-1">Assign from Reserve</p>
+      <p className="text-gray-500 text-xs mb-3">
+        {reserve.length} number{reserve.length === 1 ? '' : 's'} in Reserve. The longest-waiting go first, so drag calls from a recently
+        retired campaign have died down before a number is reused.
+      </p>
+      <div className="flex items-center gap-3 flex-wrap">
+        <select value={campaignId} onChange={(e) => setCampaignId(e.target.value)}
+          className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500">
+          <option value="">Select campaign *</option>
+          {campaigns.map((c) => <option key={c.id} value={c.id}>{campaignLabel(c)}</option>)}
+        </select>
+        <label className="text-xs text-gray-400 flex items-center gap-2">How many
+          <input type="number" min={1} max={Math.max(1, reserve.length)} value={count}
+            onChange={(e) => setCount(Math.max(1, Number(e.target.value) || 1))}
+            className="w-20 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+        </label>
+        <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Label (optional)"
+          className="bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 w-44" />
+        <button onClick={() => void assign()} disabled={saving || !campaignId || reserve.length === 0}
+          className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg px-4 py-2 text-sm font-medium">
+          {saving ? 'Assigning…' : 'Assign'}
+        </button>
+        <button onClick={onClose} className="text-gray-500 hover:text-white text-sm">Cancel</button>
+      </div>
+      {next.length > 0 && (
+        <p className="text-xs text-gray-500 mt-2">
+          Next out: {next.map((n) => <span key={n.id} className="font-mono text-gray-300 mr-2">{n.number} <span className="text-gray-500">({sinceText(n.reservedAt)})</span></span>)}
+          {count > reserve.length && <span className="text-amber-300">— only {reserve.length} available</span>}
+        </p>
+      )}
+      {error && <p className="text-red-400 text-xs mt-2">{error}</p>}
     </div>
   )
 }
@@ -1621,6 +1809,7 @@ export default function TelephonyPage() {
         {tab === 'phone-numbers' && <PhoneNumbersTab />}
         {tab === 'providers'     && <NumberProvidersTab />}
         {tab === 'agent-groups'  && <AgentGroupsTab />}
+        {tab === 'assignments'   && <AssignmentGrid />}
         {tab === 'test-call'     && <TestCallTab />}
       </div>
     </AdminShell>

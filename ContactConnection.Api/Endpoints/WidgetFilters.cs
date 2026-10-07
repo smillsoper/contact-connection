@@ -37,9 +37,9 @@ public static class WidgetFilters
                 .Where(c => (campaignId == null || c.Id == campaignId) && (clientId == null || c.ClientId == clientId))
                 .Select(c => new { c.Id, c.Name }).ToDictionaryAsync(c => c.Id, c => c.Name, ct);
             var ids = campaigns.Keys.ToList();
-            var numbers = await db.PhoneNumbers.AsNoTracking().Where(n => ids.Contains(n.CampaignId))
+            var numbers = await db.PhoneNumbers.AsNoTracking().Where(n => n.CampaignId != null && ids.Contains(n.CampaignId.Value))
                 .OrderBy(n => n.Number).Select(n => new { n.Number, n.Label, n.CampaignId, n.IsActive }).ToListAsync(ct);
-            return Results.Ok(numbers.Select(n => new { n.Number, n.Label, campaign = campaigns.GetValueOrDefault(n.CampaignId), n.IsActive }));
+            return Results.Ok(numbers.Select(n => new { n.Number, n.Label, campaign = campaigns.GetValueOrDefault(n.CampaignId!.Value), n.IsActive }));
         }).RequireAuthorization("ReportsView");
         return app;
     }

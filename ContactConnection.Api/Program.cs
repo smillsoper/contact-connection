@@ -294,6 +294,8 @@ app.MapClientsEndpoints();
 app.MapCampaignsEndpoints();
 app.MapCampaignExternalNumbersEndpoints();
 app.MapPhoneNumbersEndpoints();
+app.MapPhoneNumbersBulkEndpoints();
+app.MapAssignmentMatrixEndpoints();
 app.MapNumberProvidersEndpoints();
 app.MapExternalRoutingEndpoints();
 app.MapAgentGroupsEndpoints();

@@ -9,7 +9,12 @@ public class PhoneNumber
 {
     public Guid Id { get; private set; }
     public Guid TenantId { get; private set; }
-    public Guid CampaignId { get; private set; }
+    /// <summary>The campaign the number serves; null = in Reserve (S182) — owned by the tenant, waiting to be assigned,
+    /// and its calls are rejected.</summary>
+    public Guid? CampaignId { get; private set; }
+    /// <summary>When the number went into Reserve — numbers are taken from Reserve oldest first, so drag calls from a
+    /// recently retired campaign die down before the number is reused.</summary>
+    public DateTimeOffset? ReservedAt { get; private set; }
 
     public string Number { get; private set; } = string.Empty;   // E.164: +15035551234
     public string? Label { get; private set; }                    // human-readable name
@@ -36,7 +41,8 @@ public class PhoneNumber
 
     private PhoneNumber() { }
 
-    public static PhoneNumber Create(Guid tenantId, Guid campaignId, string number, string? label = null)
+    /// <param name="campaignId">null = straight into Reserve.</param>
+    public static PhoneNumber Create(Guid tenantId, Guid? campaignId, string number, string? label = null)
     {
         var now = DateTimeOffset.UtcNow;
         return new PhoneNumber
@@ -44,7 +50,8 @@ public class PhoneNumber
             Id         = Guid.NewGuid(),
             TenantId   = tenantId,
             CampaignId = campaignId,
-            Number     = number.Trim(),
+            ReservedAt = campaignId is null ? now : null,
+            Number     = Normalize(number),
             Label      = label?.Trim(),
             IsActive   = true,
             CreatedAt  = now,
@@ -52,10 +59,62 @@ public class PhoneNumber
         };
     }
 
+    /// <summary>Onto a campaign (from Reserve or another campaign). Active / inactive is kept as it is; flow overrides
+    /// chosen for the previous campaign are dropped so the number runs the new campaign's flows.</summary>
     public void Reassign(Guid campaignId)
     {
-        CampaignId = campaignId;
-        UpdatedAt  = DateTimeOffset.UtcNow;
+        if (CampaignId == campaignId) return;
+        CampaignId      = campaignId;
+        ReservedAt      = null;
+        FlowId          = null;
+        TelephonyFlowId = null;
+        UpdatedAt       = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>Back to Reserve: no campaign; the clock for "oldest first" starts now. The number stays the tenant's
+    /// (active) — only deactivating it while in Reserve releases it.</summary>
+    public void MoveToReserve()
+    {
+        if (CampaignId is null) return;
+        CampaignId      = null;
+        ReservedAt      = DateTimeOffset.UtcNow;
+        FlowId          = null;
+        TelephonyFlowId = null;
+        IsActive        = true;
+        UpdatedAt       = DateTimeOffset.UtcNow;
+    }
+
+    public bool InReserve => CampaignId is null;
+
+    /// <summary>
+    /// Released: deactivated while in Reserve — the number no longer belongs to the tenant (another account may take it), but
+    /// the row stays for its history. Inactive on a campaign is different: held for that campaign, still the tenant's.
+    /// </summary>
+    public bool IsReleased => CampaignId is null && !IsActive;
+
+    /// <summary>Receives calls: active and on a campaign. Reserve, inactive and released numbers are rejected.</summary>
+    public bool TakesCalls => IsActive && CampaignId is not null;
+
+    /// <summary>E.164 for North American numbers typed with or without +1 / punctuation; anything else trimmed, with a +.</summary>
+    public static string Normalize(string number)
+    {
+        var trimmed = number.Trim();
+        var digits = new string(trimmed.Where(char.IsDigit).ToArray());
+        return digits.Length switch
+        {
+            10 => "+1" + digits,
+            11 when digits[0] == '1' => "+" + digits,
+            > 0 => "+" + digits,
+            _ => trimmed,
+        };
+    }
+
+    /// <summary>The forms a carrier may present the same number in (with / without + and the leading 1).</summary>
+    public static string[] Forms(string number)
+    {
+        var digits = new string(number.Where(char.IsDigit).ToArray());
+        var last10 = digits.Length >= 10 ? digits[^10..] : digits;
+        return [number.Trim(), digits, "+" + digits, last10, "1" + last10, "+1" + last10];
     }
 
     public void UpdateLabel(string? label)

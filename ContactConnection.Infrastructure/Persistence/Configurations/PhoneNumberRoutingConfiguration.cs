@@ -13,7 +13,9 @@ public class PhoneNumberRoutingConfiguration : IEntityTypeConfiguration<PhoneNum
         builder.HasKey(p => p.Id);
         builder.Property(p => p.Number).IsRequired().HasMaxLength(20);
         builder.Property(p => p.TenantId).IsRequired();
-        builder.Property(p => p.CampaignId).IsRequired();
+        builder.Property(p => p.CampaignId);   // null = in the tenant's Reserve (S182)
+        builder.Ignore(p => p.IsReleased);
+        builder.Ignore(p => p.TakesCalls);
         builder.Property(p => p.IsActive).IsRequired();
         builder.Property(p => p.CreatedAt).IsRequired();
         builder.Property(p => p.UpdatedAt).IsRequired();
