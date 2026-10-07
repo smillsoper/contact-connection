@@ -313,6 +313,7 @@ app.MapDispositionsEndpoints();
 app.MapKpiEndpoints();
 app.MapRecordsWidgetEndpoints();
 app.MapScriptIntegrationsEndpoints();
+app.MapCallerHistoryEndpoints();
 app.MapClientPortalAuthEndpoints();
 app.MapClientPortalEndpoints();
 app.MapAdminClientUsersEndpoints();

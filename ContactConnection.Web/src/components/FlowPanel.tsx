@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
+import CallerHistoryButton from './CallerHistory'
 import * as signalR from '@microsoft/signalr'
 import { useAuthStore } from '../stores/authStore'
 import { useCallStore } from '../stores/callStore'
@@ -304,9 +305,11 @@ interface TabBarProps {
   sessions: FlowSessionEntry[]
   activeSessionId: string | null
   onSelect: (id: string) => void
+  /** Right-aligned tools for the active call (S181: caller history). */
+  right?: ReactNode
 }
 
-function TabBar({ sessions, activeSessionId, onSelect }: TabBarProps) {
+function TabBar({ sessions, activeSessionId, onSelect, right }: TabBarProps) {
   return (
     <div className="flex items-end gap-0 px-4 border-b border-gray-800 shrink-0 overflow-x-auto">
       {sessions.map((s) => {
@@ -325,6 +328,7 @@ function TabBar({ sessions, activeSessionId, onSelect }: TabBarProps) {
           </button>
         )
       })}
+      {right}
     </div>
   )
 }
@@ -703,6 +707,7 @@ export default function FlowPanel() {
           sessions={sessions}
           activeSessionId={activeSessionId}
           onSelect={setActiveSession}
+          right={<CallerHistoryButton callRecordId={sessions.find((s) => s.id === activeSessionId)?.callRecordId ?? null} />}
         />
       )}
 
