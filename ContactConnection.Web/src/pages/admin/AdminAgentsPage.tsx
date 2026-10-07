@@ -160,7 +160,7 @@ export default function AdminAgentsPage() {
 
   return (
     <AdminShell>
-      <div className="p-6 max-w-5xl">
+      <div className="p-6 max-w-7xl">
         <div className="flex items-start justify-between mb-6">
           <div>
             <h1 className="text-white text-xl font-semibold">Users</h1>
@@ -244,7 +244,7 @@ export default function AdminAgentsPage() {
         )}
 
         {agents.length > 0 && (
-          <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+          <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-800 text-gray-400 text-left">
