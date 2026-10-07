@@ -1,9 +1,9 @@
-// ContactConnection Agent — content script, in every frame of every page (S183).
+// ContactConnection Agent — content script, on ContactConnection pages only (S183; see manifest "matches").
 //
 // On the agent portal: bridges window.postMessage ⇄ the extension (the page says hello / focus / capture on|off; the
-// extension hands it the agent's input events).
-// On every page: while the portal is recording, reports clicks (with screen coordinates) and key labels. Typed
-// characters in password and card fields are reported as "•", never their value.
+// extension hands it the agent's click events).
+// On ContactConnection pages: while the portal is recording a call, reports where the agent clicks (screen
+// coordinates). Keystrokes are never captured — not on our pages, not anywhere.
 
 (() => {
   if (window.__ccAgentContent) return
@@ -48,7 +48,7 @@
   // A page opened mid-recording asks whether to report.
   send({ cc: 'capture-state' }).then((r) => { capturing = !!r?.capturing }).catch(() => {})
 
-  // ── Input capture ─────────────────────────────────────────────────────────
+  // ── Click capture ─────────────────────────────────────────────────────────
   const screenInfo = () => ({
     l: screen.availLeft ?? 0, t: screen.availTop ?? 0, w: screen.width, h: screen.height,
   })
@@ -60,26 +60,4 @@
     } })
   }, true)
 
-  const NAMED = {
-    Enter: 'Enter', Tab: 'Tab', Backspace: 'Bksp', Delete: 'Del', Escape: 'Esc', ' ': 'Space',
-    ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓', Home: 'Home', End: 'End', PageUp: 'PgUp', PageDown: 'PgDn',
-  }
-  const MODIFIER_ONLY = new Set(['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'AltGraph', 'Fn', 'OS'])
-
-  function isSecret(el) {
-    if (!el || el.tagName !== 'INPUT') return false
-    const type = (el.getAttribute('type') || '').toLowerCase()
-    const ac = (el.getAttribute('autocomplete') || '').toLowerCase()
-    return type === 'password' || ac.startsWith('cc-') || ac === 'current-password' || ac === 'new-password'
-  }
-
-  window.addEventListener('keydown', (e) => {
-    if (!capturing || e.repeat || MODIFIER_ONLY.has(e.key)) return
-    const mods = [e.ctrlKey && 'Ctrl', e.altKey && 'Alt', e.metaKey && 'Win'].filter(Boolean)
-    let label
-    if (e.key.length === 1 && mods.length === 0) label = isSecret(e.target) ? '•' : e.key
-    else label = [...mods, NAMED[e.key] ?? (e.key.length === 1 ? e.key.toUpperCase() : e.key)].join('+')
-    if (label === ' ') label = 'Space'
-    send({ cc: 'input', event: { kind: 'key', t: Date.now(), label } })
-  }, true)
 })()

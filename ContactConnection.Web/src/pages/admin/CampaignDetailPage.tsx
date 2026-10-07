@@ -612,7 +612,7 @@ function RecordingSettingsForm({ campaign, onSaved }: RecordingSettingsFormProps
             hint="Play an audible tone at intervals while recording (required in some jurisdictions)." />
           <Toggle on={screenRecording} set={setScreenRecording}
             label="Record agent screens"
-            hint="Agents share their screen once per shift; each call on this campaign records it, merged with the call audio, with the agent's clicks and keys marked (needs the ContactConnection Agent extension). Typing in password and card fields shows as •." />
+            hint="Agents share their screen once per shift; each call on this campaign records it, merged with the call audio, with the agent's clicks on ContactConnection pages marked (needs the ContactConnection Agent extension; keystrokes are never recorded)." />
         </div>
       </div>
 

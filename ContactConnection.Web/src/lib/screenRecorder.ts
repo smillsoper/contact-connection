@@ -10,7 +10,7 @@ import { onExtensionInput, setInputCapture, type ExtensionInputEvent } from './e
  * GET /screen-recordings/time a few times and keeps the fastest round trip: offset = server − (local send+receive)/2,
  * accurate to ±rtt/2. The segment's start (MediaRecorder "start", local clock) + that offset is its start on the server.
  *
- * Clicks and keys come from the browser extension (every page the agent uses) and are stored as cue points on the
+ * Clicks come from the browser extension (ContactConnection pages only; never keystrokes) and are stored as cue points on the
  * segment's own timeline; the server draws them onto the merged video.
  */
 
@@ -18,7 +18,7 @@ export type ShareStatus = 'none' | 'requesting' | 'sharing' | 'ended'
 
 interface ScreenShareState {
   status: ShareStatus
-  /** The share isn't the screen this portal window is on — click positions can't be placed (keys still are). */
+  /** The share isn't the screen this portal window is on — click positions can't be placed. */
   otherScreen: boolean
   error: string | null
   /** Campaigns that record screens (null until loaded). */

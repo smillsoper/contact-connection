@@ -2,15 +2,12 @@
   "manifest_version": 3,
   "name": "ContactConnection Agent",
   "short_name": "ContactConnection",
-  "version": "0.2.0",
-  "description": "Brings your ContactConnection agent portal forward when a call arrives, and marks your clicks and keys on recorded calls.",
+  "version": "0.3.0",
+  "description": "Brings your ContactConnection agent portal forward when a call arrives, and marks your clicks on ContactConnection pages in recorded calls. Never records keystrokes.",
   "minimum_chrome_version": "116",
   "permissions": [
     "tabs",
     "storage"
-  ],
-  "host_permissions": [
-    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js"
@@ -18,7 +15,13 @@
   "content_scripts": [
     {
       "matches": [
-        "<all_urls>"
+        "https://contactconnection.io/*",
+        "https://*.contactconnection.io/*",
+        "https://contactconnection.cc/*",
+        "https://*.contactconnection.cc/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*",
+        "http://*.hubion.local/*"
       ],
       "js": [
         "content.js"

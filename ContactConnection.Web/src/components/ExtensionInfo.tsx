@@ -50,9 +50,9 @@ export function ExtensionExplainer({ forAdmins = false }: { forAdmins?: boolean 
       <ul className="list-disc pl-5 space-y-1 text-gray-400">
         <li><b className="text-gray-200">Brings the agent portal forward</b> when a call is offered, auto-connects or a script pops, when a
           supervisor calls, and on a take over — so a call never waits in a background tab.</li>
-        <li><b className="text-gray-200">Marks clicks and keys on recorded calls</b> — only on campaigns that record agent screens, and only
-          while a call is being recorded (the extension shows a red <b>REC</b> badge then). Typing in password and card fields is never
-          recorded, only shown as •.</li>
+        <li><b className="text-gray-200">Marks your clicks on recorded calls</b> — only on ContactConnection pages, only on campaigns that
+          record agent screens, and only while a call is being recorded (the extension shows a red <b>REC</b> badge then). It never
+          records what you type, and it can't see other websites.</li>
       </ul>
       {forAdmins && (
         <div className="rounded-lg border border-gray-700 bg-gray-900/60 px-4 py-3 text-gray-400 space-y-1.5">

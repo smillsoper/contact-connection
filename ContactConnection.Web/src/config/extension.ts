@@ -12,7 +12,7 @@ export const EXTENSION = {
   /** The store-assigned ID — what admins use to force-install it for everyone (Google Admin / Intune / Group Policy). */
   extensionId: '',
   /** Oldest version the portal is happy with; older installs are asked to update. */
-  minimumVersion: '0.2.0',
+  minimumVersion: '0.3.0',   // 0.3.0: clicks on our pages only, no keystrokes
 }
 
 export const isEdge = () => typeof navigator !== 'undefined' && /Edg\//.test(navigator.userAgent)

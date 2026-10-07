@@ -3,8 +3,9 @@ import { create } from 'zustand'
 /**
  * Bridge to the ContactConnection Agent browser extension (S183, ContactConnection.Extension/). The page and the
  * extension's content script talk over window.postMessage:
- *   page → extension: hello (this is the portal) · focus (bring this tab forward) · capture on|off (report input)
- *   extension → page: ready (installed, version) · input (a click / key from any page the agent uses)
+ *   page → extension: hello (this is the portal) · focus (bring this tab forward) · capture on|off (report clicks)
+ *   extension → page: ready (installed, version) · input (a click on a ContactConnection page; extensions ≥ 0.3.0
+ *   never send keys — 'key' remains in the type only so older recordings' cues still render)
  * Without the extension everything here is a no-op and the portal works as before.
  */
 
@@ -63,7 +64,7 @@ export function requestPortalFocus(reason: string) {
   post({ type: 'focus', reason })
 }
 
-/** Ask every page the agent uses to report clicks and keys (only while a call is being screen recorded). */
+/** Ask ContactConnection pages to report the agent's clicks (only while a call is being screen recorded; never keystrokes). */
 export function setInputCapture(on: boolean) {
   post({ type: 'capture', on })
 }

@@ -3,12 +3,12 @@
 // Two jobs:
 //   1. Portal focus — web pages can't raise another tab; when the agent portal says "a call is here" (incoming call,
 //      auto-connect, script pop, supervisor call, take over), bring that tab and its window to the front.
-//   2. Input relay — while the portal is screen recording, every page's content script reports the agent's clicks and
-//      keys; forward them to the portal tab, which places them on the recording's timeline.
+//   2. Click relay — while the portal is screen recording, ContactConnection pages report where the agent clicks (never
+//      keystrokes); forward them to the portal tab, which places them on the recording's timeline.
 //
 // Only the real agent portal may act as one: a tab is accepted as a portal — and may ask for focus or switch input
 // capture on — only when its address (sender.url, set by the browser, not by the page) is a ContactConnection site.
-// Without that, any website could claim to be the portal and receive the agent's keystrokes from other tabs.
+// (Content scripts only run on ContactConnection pages anyway; this is the second lock.)
 //
 // MV3 workers sleep between events, so state lives in chrome.storage.session (survives the worker, not the browser).
 
@@ -41,11 +41,11 @@ async function setState(patch) {
   return next
 }
 
-/** A red REC on the toolbar icon whenever clicks and keys are being reported — the agent can always see it. */
+/** A red REC on the toolbar icon whenever clicks are being reported — the agent can always see it. */
 async function showBadge(capturing) {
   await chrome.action.setBadgeText({ text: capturing ? 'REC' : '' })
   if (capturing) await chrome.action.setBadgeBackgroundColor({ color: '#DC2626' })
-  await chrome.action.setTitle({ title: capturing ? 'ContactConnection Agent — recording this call (clicks and keys)' : 'ContactConnection Agent' })
+  await chrome.action.setTitle({ title: capturing ? 'ContactConnection Agent — recording this call (clicks on ContactConnection pages)' : 'ContactConnection Agent' })
 }
 
 async function focusTab(tab) {
