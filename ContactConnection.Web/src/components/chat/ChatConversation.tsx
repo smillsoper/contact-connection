@@ -242,6 +242,9 @@ function MessageItem({ m, users, meId, isManager, retired, grouped, onThread, ca
   const pinnedAll = !!m.pinnedAt && !m.deleted
   return (
     <div id={`chat-msg-${m.id}`}
+      // Moving off the message closes the quick-reaction strip and the pin menu; the full emoji library stays until
+      // a pick or a click outside (it can extend past the message while you browse it).
+      onMouseLeave={() => { setPinMenu(false); setPicker((p) => (p === 'quick' ? null : p)) }}
       className={`group relative rounded px-1 ${grouped ? 'mt-0.5' : 'mt-2'} ${pinnedAll ? 'bg-amber-500/10 border-l-2 border-amber-400 pl-2 py-1' : 'hover:bg-gray-800/40'}`}>
       {pinnedAll && (
         <p className="text-[10px] text-amber-300 font-medium mb-0.5">
