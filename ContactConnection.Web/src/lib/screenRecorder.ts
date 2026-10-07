@@ -66,8 +66,11 @@ export async function startScreenShare() {
     // availLeft / availTop are Chromium extensions to Screen — the same values the extension reports per click.
     const scr = screen as Screen & { availLeft?: number; availTop?: number }
     shareScreen = { l: scr.availLeft ?? 0, t: scr.availTop ?? 0, w: screen.width, h: screen.height, dpr }
-    const sameScreen = !!settings.width && Math.abs(settings.width - screen.width * dpr) <= 2
-      && !!settings.height && Math.abs(settings.height - screen.height * dpr) <= 2
+    // Which monitor was picked isn't exposed to the page. Compare shapes, never sizes: page zoom changes the pixel ratio
+    // and Chrome may scale the capture down, so a size check flagged the right screen as wrong (S183). Same aspect ratio
+    // = taken to be the screen this window is on.
+    const sameScreen = !!settings.width && !!settings.height
+      && Math.abs(settings.width / settings.height - screen.width / screen.height) < 0.02
     track.addEventListener('ended', () => {
       // "Stop sharing" in the browser bar, or the screen went away.
       stream = null
@@ -224,17 +227,27 @@ function addInputCue(seg: Segment, ev: ExtensionInputEvent) {
   if (atMs < 0) return
   if (ev.kind === 'key' && ev.label) {
     seg.cues.push({ atMs, kind: 'key', detail: ev.label.slice(0, 40) })
-  } else if (ev.kind === 'click' && shareScreen && ev.scr && ev.sx != null && ev.sy != null) {
-    // Only clicks on the shared screen can be placed: same screen as the portal had when sharing began.
+  } else if (ev.kind === 'click' && shareScreen && ev.scr && ev.sx != null && ev.sy != null && seg.width && seg.height) {
+    // Only clicks on the shared screen (the one the portal is on) can be placed.
+    if (useScreenShareStore.getState().otherScreen || !sameMonitor(ev.scr, ev.dpr ?? 1, shareScreen)) return
+    // Where across / down the screen, in that page's own units — page zoom and capture scaling cancel out — then
+    // into the video's pixels.
     const s = ev.scr
-    if (s.l !== shareScreen.l || s.t !== shareScreen.t || s.w !== shareScreen.w || s.h !== shareScreen.h) return
-    if (useScreenShareStore.getState().otherScreen) return
-    const dpr = ev.dpr ?? shareScreen.dpr
-    const x = Math.round((ev.sx - s.l) * dpr)
-    const y = Math.round((ev.sy - s.t) * dpr)
-    if (x < 0 || y < 0 || (seg.width && x > seg.width) || (seg.height && y > seg.height)) return
-    seg.cues.push({ atMs, kind: 'click', detail: `${x},${y}` })
+    const fx = (ev.sx - s.l) / s.w
+    const fy = (ev.sy - s.t) / s.h
+    if (fx < 0 || fy < 0 || fx > 1 || fy > 1) return
+    seg.cues.push({ atMs, kind: 'click', detail: `${Math.round(fx * seg.width)},${Math.round(fy * seg.height)}` })
   }
+}
+
+/** Same physical monitor? Pages at different zoom report screen geometry in different units, so compare either as
+ *  reported or scaled to device pixels. */
+function sameMonitor(s: { l: number; t: number; w: number; h: number }, dpr: number,
+  ref: { l: number; t: number; w: number; h: number; dpr: number }) {
+  const near = (a: number, b: number) => Math.abs(a - b) <= 2
+  if (near(s.l, ref.l) && near(s.t, ref.t) && near(s.w, ref.w) && near(s.h, ref.h)) return true
+  return near(s.l * dpr, ref.l * ref.dpr) && near(s.t * dpr, ref.t * ref.dpr)
+    && near(s.w * dpr, ref.w * ref.dpr) && near(s.h * dpr, ref.h * ref.dpr)
 }
 
 async function flushCues(seg: Segment) {
