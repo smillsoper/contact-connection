@@ -16,6 +16,13 @@ export const CHART_COLORS = ['#38bdf8', '#a78bfa', '#34d399', '#fbbf24', '#f8717
 export const DEFAULT_CHART_METRICS: ChartMetric[] = [{ key: 'callsOffered' }]
 export const DEFAULT_FUNNEL: ChartMetric[] = [{ key: 'callsOffered' }, { key: 'callsHandled' }, { key: 'opportunities' }, { key: 'orders' }]
 
+/** A colour blended toward the background — the previous period's own, muted shade (legend swatches show it too). */
+function muted(hex: string, amount = 0.55): string {
+  const c = parseInt(hex.slice(1), 16), bg = [0x1f, 0x29, 0x37]
+  const ch = [(c >> 16) & 255, (c >> 8) & 255, c & 255].map((v, i) => Math.round(v + (bg[i] - v) * amount))
+  return `#${ch.map((v) => v.toString(16).padStart(2, '0')).join('')}`
+}
+
 /** Rates and times read on the right axis by default, counts and money on the left. */
 export const defaultAxis = (f: Format): 'left' | 'right' => (f === 'pct' || f === 'secs' ? 'right' : 'left')
 
@@ -229,7 +236,7 @@ export default function ChartWidget({ config }: { config: WidgetFilterConfig }) 
       const prevTop = data.previous.rows.filter((r) => !r.subtotal && !r.label2)
       defs.forEach((d, i) => {
         const base = series[i]
-        series.push({ ...base, id: `p${i}`, name: `${d.label} (previous)`, previous: true, as: base.as === 'bar' ? 'bar' : 'line' })
+        series.push({ ...base, id: `p${i}`, name: `${d.label} (previous)`, previous: true, as: base.as === 'bar' ? 'bar' : 'line', color: muted(base.color) })
         prevTop.forEach((r, j) => { if (points[j]) points[j][`p${i}`] = val(d, r.metrics) })
       })
     }
@@ -279,13 +286,13 @@ export default function ChartWidget({ config }: { config: WidgetFilterConfig }) 
                 const axisProps = horizontal ? { xAxisId: s.axis } : { yAxisId: s.axis }
                 const common = { dataKey: s.id, name: s.name, isAnimationActive: false, ...axisProps }
                 if (s.as === 'bar')
-                  return <Bar key={s.id} {...common} fill={s.color} fillOpacity={s.previous ? 0.35 : 0.9} stackId={stacked ? 'stack' : undefined}
+                  return <Bar key={s.id} {...common} fill={s.color} fillOpacity={0.9} stackId={stacked ? 'stack' : undefined}
                     radius={stacked ? 0 : horizontal ? [0, 3, 3, 0] : [3, 3, 0, 0]} maxBarSize={48} />
                 if (s.as === 'area')
                   return <Area key={s.id} {...common} type={curve} stroke={s.color} fill={s.color} fillOpacity={0.18} strokeWidth={2}
                     strokeDasharray={s.previous ? '4 4' : undefined} connectNulls />
                 return <Line key={s.id} {...common} type={curve} stroke={s.color} strokeWidth={s.previous ? 1.5 : 2}
-                  strokeOpacity={s.previous ? 0.55 : 1} strokeDasharray={s.previous ? '4 4' : undefined} dot={points.length <= 31} connectNulls />
+                  strokeOpacity={1} strokeDasharray={s.previous ? '4 4' : undefined} dot={points.length <= 31} connectNulls />
               })}
               {targets.map((t, i) => horizontal
                 ? <ReferenceLine key={i} x={t.value} xAxisId={t.axis} stroke={t.color} strokeDasharray="6 3" label={{ value: t.label, fill: '#9ca3af', fontSize: 10 }} />
