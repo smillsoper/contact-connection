@@ -55,7 +55,8 @@ public static class ChatRichText
             else img.Remove();
         }
         foreach (var el in doc.QuerySelectorAll("[data-mention]").ToList())
-            if (el.LocalName != "span" || !Guid.TryParse(el.GetAttribute("data-mention"), out _)) el.RemoveAttribute("data-mention");
+            if (el.LocalName != "span" || !(Guid.TryParse(el.GetAttribute("data-mention"), out _) || el.GetAttribute("data-mention") == "channel"))
+                el.RemoveAttribute("data-mention");
         var body = doc.Body ?? (IElement)doc.DocumentElement;
         var sb = new System.Text.StringBuilder();
         Words(body, sb);

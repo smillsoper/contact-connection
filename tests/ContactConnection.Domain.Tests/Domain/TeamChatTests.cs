@@ -163,6 +163,31 @@ public class TeamChatTests
     }
 
     [Fact]
+    public void Channel_mention_and_attachments()
+    {
+        var file = new ChatAttachment { Id = Guid.NewGuid(), Name = "rates.pdf", Size = 1234, ContentType = "application/pdf" };
+        var m = ChatMessage.CreateRich(Guid.NewGuid(), Ann, "<p><span data-mention=\"channel\">@channel</span> new rates</p>", "@channel new rates",
+            false, null, [file]);
+        Assert.True(m.MentionsChannel);
+        Assert.Empty(m.MentionIds);
+        Assert.Equal([file.Id], m.AttachmentIds);
+        var onlyFile = ChatMessage.CreateRich(Guid.NewGuid(), Ann, "<p></p>", "", false, null, [file]);
+        Assert.Equal("[file]", onlyFile.BodyText);
+        onlyFile.Delete();
+        Assert.Empty(onlyFile.AttachmentIds);   // unreferenced — the cleanup job removes the file
+    }
+
+    [Theory]
+    [InlineData("..\\..\\secret\\report.pdf", "report.pdf")]
+    [InlineData("a<b>c\"d.txt", "abcd.txt")]
+    [InlineData("   ", "file")]
+    public void File_names_are_cleaned(string input, string expected) => Assert.Equal(expected, ChatFile.CleanName(input));
+
+    [Fact]
+    public void Programs_are_blocked() =>
+        Assert.Contains(".exe", ChatFile.BlockedExtensions);
+
+    [Fact]
     public void Nobody_supervises_themselves()
     {
         Assert.Throws<ArgumentException>(() => AgentSupervisor.Create(Ann, Ann));

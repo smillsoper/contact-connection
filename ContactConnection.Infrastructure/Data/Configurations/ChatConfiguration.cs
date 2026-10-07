@@ -1,4 +1,6 @@
+using System.Text.Json;
 using ContactConnection.Domain.Entities;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -60,6 +62,8 @@ public class ChatMemberConfiguration : IEntityTypeConfiguration<ChatMember>
 
 public class ChatMessageConfiguration : IEntityTypeConfiguration<ChatMessage>
 {
+    private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
+
     public void Configure(EntityTypeBuilder<ChatMessage> b)
     {
         b.ToTable("chat_messages");
@@ -71,6 +75,17 @@ public class ChatMessageConfiguration : IEntityTypeConfiguration<ChatMessage>
         b.Property(m => m.ParentId).HasColumnName("parent_id");
         b.Property(m => m.Body).HasColumnName("body").HasMaxLength(ChatMessage.MaxHtmlLength).IsRequired();
         b.Property(m => m.MentionIds).HasColumnName("mention_ids").HasColumnType("uuid[]");
+        b.Property(m => m.MentionsChannel).HasColumnName("mentions_channel").HasDefaultValue(false);
+        b.Property(m => m.AttachmentIds).HasColumnName("attachment_ids").HasColumnType("uuid[]");
+        b.Property(m => m.Attachments).HasColumnName("attachments").HasColumnType("jsonb")
+            .HasConversion(
+                v => JsonSerializer.Serialize(v, JsonOpts),
+                v => JsonSerializer.Deserialize<List<ChatAttachment>>(v, JsonOpts) ?? new())
+            .HasDefaultValueSql("'[]'::jsonb")
+            .Metadata.SetValueComparer(new ValueComparer<List<ChatAttachment>>(
+                (a, c) => JsonSerializer.Serialize(a, JsonOpts) == JsonSerializer.Serialize(c, JsonOpts),
+                v => JsonSerializer.Serialize(v, JsonOpts).GetHashCode(),
+                v => JsonSerializer.Deserialize<List<ChatAttachment>>(JsonSerializer.Serialize(v, JsonOpts), JsonOpts)!));
         b.Property(m => m.Format).HasColumnName("format").HasMaxLength(8).HasDefaultValue(ChatMessageFormat.Text).IsRequired();
         b.Property(m => m.BodyText).HasColumnName("body_text").HasMaxLength(ChatMessage.MaxLength + 20).HasDefaultValue("").IsRequired();
         b.Property(m => m.ReplyCount).HasColumnName("reply_count");
@@ -94,7 +109,10 @@ public class ChatFileConfiguration : IEntityTypeConfiguration<ChatFile>
         b.Property(f => f.Id).HasColumnName("id");
         b.Property(f => f.TenantId).HasColumnName("tenant_id");
         b.Property(f => f.AgentId).HasColumnName("agent_id");
-        b.Property(f => f.ContentType).HasColumnName("content_type").HasMaxLength(40).IsRequired();
+        b.Property(f => f.ContentType).HasColumnName("content_type").HasMaxLength(120).IsRequired();
+        b.Property(f => f.Kind).HasColumnName("kind").HasMaxLength(8).HasDefaultValue(ChatFileKind.Image).IsRequired();
+        b.Property(f => f.FileName).HasColumnName("file_name").HasMaxLength(160).HasDefaultValue("").IsRequired();
+        b.HasIndex(f => f.CreatedAt).HasDatabaseName("ix_chat_files_created");
         b.Property(f => f.SizeBytes).HasColumnName("size_bytes");
         b.Property(f => f.StorageKey).HasColumnName("storage_key").HasMaxLength(200).IsRequired();
         b.Property(f => f.CreatedAt).HasColumnName("created_at");

@@ -53,6 +53,7 @@ builder.Services.AddHostedService<BroadcastStationImportService>();
 builder.Services.AddHostedService<CommissionRecalcService>();
 builder.Services.AddHostedService<InvoiceDraftService>();
 builder.Services.AddHostedService<ExportRunService>();
+builder.Services.AddHostedService<ChatFileCleanupService>();
 
 // Historical note: a legacy FreeSwitchEslService (CHANNEL_PARK→create-CallRecord translator)
 // once lived here. It predated ContactConnection.Api's EslBackgroundService, which now owns the

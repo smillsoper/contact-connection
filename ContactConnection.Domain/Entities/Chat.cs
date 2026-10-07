@@ -204,6 +204,11 @@ public class ChatMessage
     /// <summary>The words alone — search, notifications, pinned previews.</summary>
     public string BodyText { get; private set; } = string.Empty;
     public List<Guid> MentionIds { get; private set; } = [];
+    /// <summary>@channel — everyone in the channel is notified.</summary>
+    public bool MentionsChannel { get; private set; }
+    /// <summary>Files attached to the message (not images, which sit in the body) — ids for queries, details for display.</summary>
+    public List<Guid> AttachmentIds { get; private set; } = [];
+    public List<ChatAttachment> Attachments { get; private set; } = [];
     public int ReplyCount { get; private set; }
     public DateTimeOffset? LastReplyAt { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
@@ -232,13 +237,22 @@ public class ChatMessage
     }
 
     /// <summary>A formatted message. <paramref name="html"/> must already be sanitized; <paramref name="text"/> is its words.</summary>
-    public static ChatMessage CreateRich(Guid channelId, Guid agentId, string html, string text, bool hasImages, Guid? parentId)
+    public const int MaxAttachments = 10;
+
+    public static ChatMessage CreateRich(Guid channelId, Guid agentId, string html, string text, bool hasImages, Guid? parentId,
+        IReadOnlyList<ChatAttachment>? attachments = null)
     {
         var m = new ChatMessage
         {
             Id = Guid.NewGuid(), ChannelId = channelId, AgentId = agentId, Kind = ChatMessageKind.User, ParentId = parentId,
             CreatedAt = DateTimeOffset.UtcNow,
         };
+        if (attachments is { Count: > 0 })
+        {
+            if (attachments.Count > MaxAttachments) throw new ArgumentException($"At most {MaxAttachments} files per message.");
+            m.Attachments = attachments.ToList();
+            m.AttachmentIds = attachments.Select(a => a.Id).Distinct().ToList();
+        }
         m.SetRich(html, text, hasImages);
         return m;
     }
@@ -246,13 +260,14 @@ public class ChatMessage
     private void SetRich(string html, string text, bool hasImages)
     {
         var words = (text ?? "").Trim();
-        if (words.Length == 0 && !hasImages) throw new ArgumentException("A message can't be empty.", nameof(text));
+        if (words.Length == 0 && !hasImages && Attachments.Count == 0) throw new ArgumentException("A message can't be empty.", nameof(text));
         if (words.Length > MaxLength) throw new ArgumentException($"A message is at most {MaxLength} characters.", nameof(text));
         if ((html ?? "").Length > MaxHtmlLength) throw new ArgumentException("That message has too much formatting — try splitting it up.", nameof(html));
         Format = ChatMessageFormat.Html;
         Body = html!;
-        BodyText = words.Length > 0 ? words : "[image]";
+        BodyText = words.Length > 0 ? words : hasImages ? "[image]" : "[file]";
         MentionIds = ParseHtmlMentions(html!);
+        MentionsChannel = html!.Contains("data-mention=\"channel\"", StringComparison.Ordinal);
     }
 
     public void Edit(string body)
@@ -289,7 +304,13 @@ public class ChatMessage
         return ids;
     }
 
-    public void Delete() { DeletedAt = DateTimeOffset.UtcNow; Body = string.Empty; BodyText = string.Empty; MentionIds = []; Unpin(); }
+    /// <summary>Clears the content; its images and files are then unreferenced and the cleanup job removes them.</summary>
+    public void Delete()
+    {
+        DeletedAt = DateTimeOffset.UtcNow; Body = string.Empty; BodyText = string.Empty; MentionIds = []; MentionsChannel = false;
+        Attachments = []; AttachmentIds = [];
+        Unpin();
+    }
 
     public void Pin(Guid byId)
     {
@@ -347,17 +368,40 @@ public class ChatFile
     public string StorageKey { get; private set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; private set; }
 
+    /// <summary>image (shown inline) or file (an attachment, always downloaded).</summary>
+    public string Kind { get; private set; } = ChatFileKind.Image;
+    public string FileName { get; private set; } = string.Empty;
+
     public const long MaxBytes = 5 * 1024 * 1024;
+    public const long MaxFileBytes = 25 * 1024 * 1024;
+    /// <summary>Unsent / no-longer-used uploads are removed after this.</summary>
+    public static readonly TimeSpan OrphanGrace = TimeSpan.FromHours(24);
+
+    /// <summary>Programs and scripts are never shared through chat.</summary>
+    public static readonly IReadOnlySet<string> BlockedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ".exe", ".msi", ".msp", ".bat", ".cmd", ".com", ".scr", ".pif", ".cpl", ".dll", ".sys", ".ps1", ".psm1", ".vbs", ".vbe",
+        ".js", ".jse", ".wsf", ".wsh", ".hta", ".lnk", ".jar", ".reg", ".app", ".sh", ".appx", ".msix", ".iso", ".img", ".vhd",
+    };
 
     private ChatFile() { }
-    public static ChatFile Create(Guid tenantId, Guid agentId, string contentType, long size)
+    public static ChatFile Create(Guid tenantId, Guid agentId, string contentType, long size, string kind = ChatFileKind.Image, string? fileName = null)
     {
         var id = Guid.NewGuid();
         return new ChatFile
         {
-            Id = id, TenantId = tenantId, AgentId = agentId, ContentType = contentType, SizeBytes = size,
-            StorageKey = $"chat/{tenantId:N}/{id:N}", CreatedAt = DateTimeOffset.UtcNow,
+            Id = id, TenantId = tenantId, AgentId = agentId, ContentType = contentType, SizeBytes = size, Kind = kind,
+            FileName = CleanName(fileName), StorageKey = $"chat/{tenantId:N}/{id:N}", CreatedAt = DateTimeOffset.UtcNow,
         };
+    }
+
+    /// <summary>A safe display / download name: no path, no control characters, at most 150 characters.</summary>
+    public static string CleanName(string? name)
+    {
+        var n = Path.GetFileName((name ?? "").Replace('\\', '/').Split('/').Last()).Trim();
+        n = new string(n.Where(c => !char.IsControl(c) && c is not ('"' or '<' or '>' or '|' or ':' or '*' or '?')).ToArray());
+        if (n.Length > 150) n = n[..100] + "…" + n[^40..];
+        return n.Length == 0 ? "file" : n;
     }
 
     /// <summary>The image type from the file's own first bytes — never trust the declared type (no SVG / HTML).</summary>
@@ -370,6 +414,21 @@ public class ChatFile
             && head[8] == 0x57 && head[9] == 0x45 && head[10] == 0x42 && head[11] == 0x50) return "image/webp";
         return null;
     }
+}
+
+public static class ChatFileKind
+{
+    public const string Image = "image";
+    public const string File  = "file";
+}
+
+/// <summary>A file attached to a message, as shown on its card.</summary>
+public class ChatAttachment
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public long Size { get; set; }
+    public string ContentType { get; set; } = string.Empty;
 }
 
 /// <summary>A message someone pinned for themselves only (S183).</summary>

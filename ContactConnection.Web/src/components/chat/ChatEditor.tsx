@@ -12,8 +12,8 @@ import {
   Btn, ColorPicker, Divider, FontSize, FONT_FAMILIES, FONT_SIZES, TEXT_COLORS, HIGHLIGHT_COLORS,
 } from '../designer/RichTextEditor'
 import { stateStyle, type ChatUser } from '../../api/chat'
-import { loadChatImage, uploadChatImage } from '../../lib/chatImages'
-import { AddImageIcon, FormattingIcon } from './ChatIcons'
+import { loadChatImage, uploadChatImage, uploadChatAttachment, formatBytes } from '../../lib/chatImages'
+import { AddImageIcon, FileIcon, FormattingIcon, PaperclipIcon } from './ChatIcons'
 
 /**
  * The chat composer (S183): the script editor's formatting (font, size, bold / italic / underline / strike, colour,
@@ -53,6 +53,9 @@ const ChatImage = Image.extend({
   },
 }).configure({ inline: false, allowBase64: false })
 
+/** The @channel suggestion (a pseudo-user). */
+const CHANNEL: ChatUser = { id: 'channel', name: 'channel', email: '', roleName: null, state: null }
+
 export interface ChatEditorHandle {
   clear: () => void
   focus: () => void
@@ -61,17 +64,26 @@ export interface ChatEditorHandle {
 interface Props {
   users: Record<string, ChatUser>
   meId?: string
+  /** Who @ suggests — the conversation's members (defaults to everyone). */
+  mentionable?: ChatUser[]
+  /** Offer @channel (notify everyone in the conversation). */
+  allowChannelMention?: boolean
+  /** Allow attaching files (the composer; not when editing). */
+  allowAttachments?: boolean
   initialHtml?: string
   placeholder: string
-  onSubmit: (html: string) => Promise<void> | void
+  onSubmit: (html: string, attachmentIds: string[]) => Promise<void> | void
   onTyping?: () => void
   onCancel?: () => void
   submitLabel?: string
 }
 
 const ChatEditor = forwardRef<ChatEditorHandle, Props>(function ChatEditor(
-  { users, meId, initialHtml, placeholder, onSubmit, onTyping, onCancel, submitLabel = 'Send' }, ref,
+  { users, meId, mentionable, allowChannelMention = false, allowAttachments = false, initialHtml, placeholder, onSubmit, onTyping, onCancel,
+    submitLabel = 'Send' }, ref,
 ) {
+  const attachRef = useRef<HTMLInputElement>(null)
+  const [files, setFiles] = useState<{ id: string; name: string; size: number }[]>([])
   const fileRef = useRef<HTMLInputElement>(null)
   const [mention, setMention] = useState<{ query: string; from: number } | null>(null)
   const [highlight, setHighlight] = useState(0)
@@ -84,9 +96,27 @@ const ChatEditor = forwardRef<ChatEditorHandle, Props>(function ChatEditor(
   // Latest values for the editor's (stable) key handler.
   const live = useRef({ mention, highlight, list: [] as ChatUser[], submit: () => {}, pick: (_u: ChatUser) => {} })
 
-  const list = useMemo(() => mention === null ? [] : Object.values(users)
-    .filter((u) => u.id !== meId && u.name.toLowerCase().includes(mention.query.toLowerCase())).slice(0, 6),
-  [mention, users, meId])
+  // @channel first when it matches, then the conversation's people.
+  const list = useMemo(() => {
+    if (mention === null) return []
+    const q = mention.query.toLowerCase()
+    const people = (mentionable ?? Object.values(users))
+      .filter((u) => u.id !== meId && u.name.toLowerCase().includes(q)).slice(0, 6)
+    return allowChannelMention && 'channel'.startsWith(q) ? [CHANNEL, ...people] : people
+  }, [mention, users, meId, mentionable, allowChannelMention])
+
+  async function addAttachments(chosen: File[]) {
+    for (const file of chosen.slice(0, 10)) {
+      setUploading((n) => n + 1); setError(null)
+      try {
+        const r = await uploadChatAttachment(file)
+        setFiles((cur) => (cur.length >= 10 ? cur : [...cur, { id: r.id, name: r.name, size: r.size }]))
+      } catch (e) { setError(e instanceof Error ? e.message : 'Upload failed.') }
+      finally { setUploading((n) => n - 1) }
+    }
+  }
+  const live2 = useRef({ allowAttachments, addAttachments })
+  live2.current = { allowAttachments, addAttachments }
 
   async function addImages(files: File[], editor: Editor) {
     for (const file of files.slice(0, 10)) {
@@ -110,20 +140,9 @@ const ChatEditor = forwardRef<ChatEditorHandle, Props>(function ChatEditor(
     onSelectionUpdate: ({ editor }) => detectMention(editor),
     editorProps: {
       attributes: { class: 'chat-editor-surface' },
-      handlePaste(_view, event) {
-        const files = Array.from(event.clipboardData?.files ?? []).filter((f) => f.type.startsWith('image/'))
-        if (files.length === 0 || !editorRef.current) return false
-        event.preventDefault()
-        void addImages(files, editorRef.current)
-        return true
-      },
-      handleDrop(_view, event) {
-        const files = Array.from((event as DragEvent).dataTransfer?.files ?? []).filter((f) => f.type.startsWith('image/'))
-        if (files.length === 0 || !editorRef.current) return false
-        event.preventDefault()
-        void addImages(files, editorRef.current)
-        return true
-      },
+      // Images go inline; other files become attachments (composer only).
+      handlePaste(_view, event) { return takeFiles(Array.from(event.clipboardData?.files ?? []), event) },
+      handleDrop(_view, event) { return takeFiles(Array.from((event as DragEvent).dataTransfer?.files ?? []), event) },
       handleKeyDown(_view, event) {
         const l = live.current
         if (l.mention && l.list.length > 0) {
@@ -141,6 +160,17 @@ const ChatEditor = forwardRef<ChatEditorHandle, Props>(function ChatEditor(
   const editorRef = useRef<Editor | null>(null)
   editorRef.current = editor
 
+  function takeFiles(all: File[], event: Event) {
+    if (all.length === 0 || !editorRef.current) return false
+    const images = all.filter((f) => /^image\/(png|jpeg|gif|webp)$/.test(f.type))
+    const others = all.filter((f) => !images.includes(f))
+    if (others.length > 0 && !live2.current.allowAttachments && images.length === 0) return false
+    event.preventDefault()
+    if (images.length) void addImages(images, editorRef.current)
+    if (others.length && live2.current.allowAttachments) void live2.current.addAttachments(others)
+    return true
+  }
+
   function detectMention(ed: Editor) {
     const { from, empty } = ed.state.selection
     if (!empty) { setMention(null); return }
@@ -154,21 +184,22 @@ const ChatEditor = forwardRef<ChatEditorHandle, Props>(function ChatEditor(
     if (!editor || !mention) return
     const to = editor.state.selection.from
     editor.chain().focus().deleteRange({ from: mention.from, to })
-      .insertContent([{ type: 'mention', attrs: { id: u.id, label: u.name } }, { type: 'text', text: ' ' }]).run()
+      .insertContent([{ type: 'mention', attrs: { id: u.id, label: u.id === CHANNEL.id ? 'channel' : u.name } }, { type: 'text', text: ' ' }]).run()
     setMention(null)
   }
 
   function hasContent(ed: Editor) {
     let images = false
     ed.state.doc.descendants((n) => { if (n.type.name === 'image' || n.type.name === 'mention') images = true })
-    return images || ed.getText().trim().length > 0
+    return images || files.length > 0 || ed.getText().trim().length > 0
   }
 
   async function submit() {
     if (!editor || busy || uploading > 0 || !hasContent(editor)) return
     setBusy(true); setError(null)
     try {
-      await onSubmit(editor.getHTML())
+      await onSubmit(editor.getHTML(), files.map((f) => f.id))
+      setFiles([])
     } catch (e) { setError(e instanceof Error ? e.message : 'Send failed.') }
     finally { setBusy(false) }
   }
@@ -207,7 +238,9 @@ const ChatEditor = forwardRef<ChatEditorHandle, Props>(function ChatEditor(
           {list.map((u, i) => (
             <button key={u.id} onMouseDown={(e) => { e.preventDefault(); pick(u) }}
               className={`w-full text-left px-2 py-1 text-xs flex items-center gap-2 ${i === highlight ? 'bg-indigo-900/50 text-white' : 'text-gray-300'}`}>
-              <span className={`inline-block w-2 h-2 rounded-full ${stateStyle(u.state).dot}`} />{u.name}
+              {u.id === CHANNEL.id
+                ? <><span className="text-amber-300 font-medium">@channel</span><span className="text-gray-500">notify everyone here</span></>
+                : <><span className={`inline-block w-2 h-2 rounded-full ${stateStyle(u.state).dot}`} />{u.name}</>}
             </button>
           ))}
         </div>
@@ -243,6 +276,17 @@ const ChatEditor = forwardRef<ChatEditorHandle, Props>(function ChatEditor(
             <Btn dark onClick={() => editor.chain().focus().clearNodes().unsetAllMarks().run()} title="Clear formatting">✕</Btn>
           </div>
         )}
+        {files.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 px-2 pt-1.5">
+            {files.map((f) => (
+              <span key={f.id} className="flex items-center gap-1.5 text-[11px] bg-gray-900 border border-gray-700 rounded px-1.5 py-0.5 text-gray-200 max-w-[220px]">
+                <FileIcon size={13} className="text-gray-400" /><span className="truncate">{f.name}</span>
+                <span className="text-gray-500 shrink-0">{formatBytes(f.size)}</span>
+                <button onClick={() => setFiles((cur) => cur.filter((x) => x.id !== f.id))} className="text-gray-500 hover:text-white" title="Remove">✕</button>
+              </span>
+            ))}
+          </div>
+        )}
         <div className="relative">
           {empty && <span className="absolute left-2 top-1.5 text-xs text-gray-500 pointer-events-none select-none">{placeholder}</span>}
           <EditorContent editor={editor} className="chat-editor px-2 py-1.5 text-xs text-white max-h-48 overflow-y-auto" />
@@ -252,6 +296,10 @@ const ChatEditor = forwardRef<ChatEditorHandle, Props>(function ChatEditor(
             className={`p-1 rounded ${toolbar ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}><FormattingIcon size={16} /></button>
           <button type="button" onClick={() => fileRef.current?.click()} title="Add an image (or paste one)"
             className="p-1 rounded text-gray-400 hover:text-white"><AddImageIcon size={16} /></button>
+          {allowAttachments && (
+            <button type="button" onClick={() => attachRef.current?.click()} title="Attach a file (or drop one here)"
+              className="p-1 rounded text-gray-400 hover:text-white"><PaperclipIcon size={16} /></button>
+          )}
           <span className="text-[10px] text-gray-600 truncate flex-1">
             {uploading > 0 ? 'Uploading image…' : 'Enter to send · Shift+Enter new line · @ to mention · paste images'}
           </span>
@@ -263,6 +311,8 @@ const ChatEditor = forwardRef<ChatEditorHandle, Props>(function ChatEditor(
       {error && <p className="text-[11px] text-red-400 mt-1">{error}</p>}
       <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple className="hidden"
         onChange={(e) => { const f = Array.from(e.target.files ?? []); e.target.value = ''; if (f.length) void addImages(f, editor) }} />
+      <input ref={attachRef} type="file" multiple className="hidden"
+        onChange={(e) => { const f = Array.from(e.target.files ?? []); e.target.value = ''; if (f.length) void addAttachments(f) }} />
     </div>
   )
 })

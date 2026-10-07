@@ -29,6 +29,10 @@ export const DeleteIcon = (p: IconProps) => <Icon {...p}><path d="M4 7h16" /><pa
 export const FormattingIcon = (p: IconProps) => <Icon {...p}><path d="M3 19L8 5l5 14M5 14.5h6" /><circle cx="17.5" cy="15.5" r="3.5" /><path d="M21 12v7" /></Icon>
 export const AddImageIcon = (p: IconProps) => <Icon {...p}><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8.5" cy="9.5" r="1.5" /><path d="M21 15l-5-5L5 20" /></Icon>
 
+// Not in the library — drawn to match it (same 24×24 grid, 2px round strokes):
+export const PaperclipIcon = (p: IconProps) => <Icon {...p}><path d="M20 11.5l-8.2 8.2a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8" /></Icon>
+export const FileIcon = (p: IconProps) => <Icon {...p}><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M9 13h6M9 17h4" /></Icon>
+
 /** Hover accents from the library's preview. */
 export const ACCENT = {
   react: 'hover:text-[#e3b341]',

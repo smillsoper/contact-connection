@@ -109,7 +109,7 @@ function alertForMessage(m: ChatMessage) {
   const viewing = s.visible && document.visibilityState === 'visible'
     && ((s.view.kind === 'channel' && s.view.channelId === m.channelId) || (s.view.kind === 'thread' && s.view.parentId === m.parentId))
   const direct = c.kind === 'dm'
-  const mentioned = m.mentionIds.includes(s.me.id)
+  const mentioned = m.mentionIds.includes(s.me.id) || !!m.mentionsChannel
   if (viewing || !(direct || mentioned)) return
   chime(false)
   const who = m.agentId ? s.users[m.agentId]?.name ?? 'Someone' : 'ContactConnection'

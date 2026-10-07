@@ -60,6 +60,9 @@ export interface ChatMessage {
   createdAt: string
   editedAt: string | null
   deleted: boolean
+  /** @channel — everyone in the channel was notified. */
+  mentionsChannel: boolean
+  attachments: ChatAttachment[]
   /** Pinned for everyone in the channel. */
   pinnedAt: string | null
   pinnedById: string | null
@@ -67,6 +70,8 @@ export interface ChatMessage {
 }
 
 export interface ChatPins { everyone: ChatMessage[]; mine: ChatMessage[] }
+
+export interface ChatAttachment { id: string; name: string; size: number; contentType: string }
 
 export interface HelpRequest {
   id: string
@@ -107,8 +112,8 @@ export const chatApi = {
   messages: (id: string, before?: string) =>
     api.get<{ messages: ChatMessage[]; hasMore: boolean }>(`/api/v1/chat/channels/${id}/messages${before ? `?before=${encodeURIComponent(before)}` : ''}`),
   thread: (messageId: string) => api.get<{ parent: ChatMessage; replies: ChatMessage[] }>(`/api/v1/chat/messages/${messageId}/thread`),
-  post: (channelId: string, body: string, parentId?: string | null, format: 'text' | 'html' = 'html') =>
-    api.post<ChatMessage>(`/api/v1/chat/channels/${channelId}/messages`, { body, parentId: parentId ?? null, format }),
+  post: (channelId: string, body: string, parentId?: string | null, format: 'text' | 'html' = 'html', attachmentIds: string[] = []) =>
+    api.post<ChatMessage>(`/api/v1/chat/channels/${channelId}/messages`, { body, parentId: parentId ?? null, format, attachmentIds }),
   edit: (messageId: string, body: string, format: 'text' | 'html' = 'html') =>
     api.patch<ChatMessage>(`/api/v1/chat/messages/${messageId}`, { body, format }),
   remove: (messageId: string) => api.delete<void>(`/api/v1/chat/messages/${messageId}`),

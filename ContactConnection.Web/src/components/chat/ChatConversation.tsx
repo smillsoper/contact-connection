@@ -3,9 +3,9 @@ import { chatApi, stateStyle, type ChatMessage, type ChatUser } from '../../api/
 import { useChatStore, channelTitle, canPost, canPinForEveryone, canDeleteOthers } from '../../stores/chatStore'
 import DOMPurify from 'dompurify'
 import { plainText, messagePreview } from '../../lib/chatConnection'
-import { loadChatImage } from '../../lib/chatImages'
+import { loadChatImage, downloadChatFile, formatBytes } from '../../lib/chatImages'
 import ChatEditor, { type ChatEditorHandle } from './ChatEditor'
-import { ACCENT, AddEmojiIcon, DeleteIcon, EditIcon, PinIcon, ReactIcon, ReplyThreadIcon } from './ChatIcons'
+import { ACCENT, AddEmojiIcon, DeleteIcon, EditIcon, FileIcon, PinIcon, ReactIcon, ReplyThreadIcon } from './ChatIcons'
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '🎉', '👀', '✅']
 
@@ -266,6 +266,8 @@ function MessageItem({ m, users, meId, isManager, retired, grouped, onThread, ca
           : <p className="text-xs text-gray-200 whitespace-pre-wrap break-words leading-relaxed"><Body text={m.body} users={users} meId={meId} />
               {m.editedAt && <span className="text-[10px] text-gray-500"> (edited)</span>}</p>}
 
+      {!m.deleted && (m.attachments?.length ?? 0) > 0 && <Attachments m={m} onError={setError} />}
+
       {m.reactions.length > 0 && !m.deleted && (
         <div className="flex flex-wrap gap-1 mt-1">
           {m.reactions.map((r) => {
@@ -431,7 +433,11 @@ function RichBody({ html, meId }: { html: string; meId?: string }) {
     const el = ref.current
     if (!el) return
     el.querySelectorAll('a[href]').forEach((a) => { a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noreferrer noopener') })
-    el.querySelectorAll('span[data-mention]').forEach((m) => m.classList.toggle('me', m.getAttribute('data-mention') === meId))
+    // You, or @channel (everyone here), stand out.
+    el.querySelectorAll('span[data-mention]').forEach((m) => {
+      const who = m.getAttribute('data-mention')
+      m.classList.toggle('me', who === meId || who === 'channel')
+    })
     el.querySelectorAll<HTMLImageElement>('img[data-chat-file]').forEach((img) => {
       const id = img.getAttribute('data-chat-file')!
       img.alt = 'Image'
@@ -459,17 +465,21 @@ export function Lightbox() {
 
 function Composer({ channelId, parentId, placeholder }: { channelId: string; parentId?: string; placeholder: string }) {
   const users = useChatStore((s) => s.users)
+  const channel = useChatStore((s) => s.channels[channelId])
   const meId = useChatStore((s) => s.me?.id)
   const ref = useRef<ChatEditorHandle>(null)
   const lastTyping = useRef(0)
   return (
     <div className="border-t border-gray-800 p-2 shrink-0">
       <ChatEditor ref={ref} key={`${channelId}:${parentId ?? ''}`} users={users} meId={meId} placeholder={placeholder}
+        mentionable={(channel?.memberIds ?? []).map((id) => users[id]).filter(Boolean)}
+        allowChannelMention={!!channel && (channel.kind === 'channel' || channel.memberIds.length > 2)}
+        allowAttachments
         onTyping={() => {
           if (Date.now() - lastTyping.current > 3000) { lastTyping.current = Date.now(); chatApi.typing(channelId).catch(() => {}) }
         }}
-        onSubmit={async (html) => {
-          await chatApi.post(channelId, html, parentId, 'html')
+        onSubmit={async (html, attachmentIds) => {
+          await chatApi.post(channelId, html, parentId, 'html', attachmentIds)
           ref.current?.clear()
           ref.current?.focus()
         }} />
@@ -487,6 +497,25 @@ function EditBox({ m, users, onDone }: { m: ChatMessage; users: Record<string, C
     <div className="mt-1">
       <ChatEditor users={users} meId={meId} initialHtml={initial} placeholder="Edit message" submitLabel="Save" onCancel={onDone}
         onSubmit={async (html) => { await chatApi.edit(m.id, html, 'html'); onDone() }} />
+    </div>
+  )
+}
+
+/** Attachment cards — click to download (fetched with the viewer's sign-in). */
+function Attachments({ m, onError }: { m: ChatMessage; onError: (e: string | null) => void }) {
+  return (
+    <div className="flex flex-wrap gap-1.5 mt-1">
+      {m.attachments.map((a) => (
+        <button key={a.id} onClick={() => { onError(null); downloadChatFile(a.id, a.name).catch((e: Error) => onError(e.message)) }}
+          title={`Download ${a.name}`}
+          className="flex items-center gap-2 text-left bg-gray-800/70 hover:bg-gray-800 border border-gray-700 rounded-md px-2 py-1.5 max-w-[260px]">
+          <FileIcon size={18} className="text-sky-300" />
+          <span className="min-w-0">
+            <span className="block text-xs text-gray-100 truncate">{a.name}</span>
+            <span className="block text-[10px] text-gray-500">{formatBytes(a.size)}</span>
+          </span>
+        </button>
+      ))}
     </div>
   )
 }

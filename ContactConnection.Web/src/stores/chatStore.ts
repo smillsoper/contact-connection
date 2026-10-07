@@ -110,7 +110,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         [c.id]: {
           ...c, lastMessageAt: m.createdAt,
           unread: mine || viewing || m.parentId ? c.unread : c.unread + 1,
-          mentions: !mine && !viewing && s.me && m.mentionIds.includes(s.me.id) ? c.mentions + 1 : c.mentions,
+          mentions: !mine && !viewing && s.me && (m.mentionIds.includes(s.me.id) || m.mentionsChannel) ? c.mentions + 1 : c.mentions,
           lastReadAt: mine ? m.createdAt : c.lastReadAt,
         },
       }

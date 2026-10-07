@@ -157,7 +157,7 @@ public static class ChatEndpoints
         var oldest = reads.Min(r => r.ReadAt);
         var recent = await db.ChatMessages.AsNoTracking()
             .Where(m => ids.Contains(m.ChannelId) && m.CreatedAt > oldest && m.DeletedAt == null && (m.AgentId == null || m.AgentId != me))
-            .Select(m => new { m.ChannelId, m.CreatedAt, m.ParentId, Mentioned = m.MentionIds.Contains(me) })
+            .Select(m => new { m.ChannelId, m.CreatedAt, m.ParentId, Mentioned = m.MentionIds.Contains(me) || m.MentionsChannel })
             .ToListAsync(ct);
         var readAt = reads.ToDictionary(r => r.ChannelId, r => r.ReadAt);
         return recent.Where(m => m.CreatedAt > readAt[m.ChannelId]).GroupBy(m => m.ChannelId)
@@ -169,6 +169,8 @@ public static class ChatEndpoints
         m.Id, m.ChannelId, m.AgentId, m.Kind, m.ParentId,
         body = m.DeletedAt is null ? m.Body : "", m.Format, bodyText = m.DeletedAt is null ? m.BodyText : "", m.MentionIds, m.ReplyCount, m.LastReplyAt, m.CreatedAt, m.EditedAt,
         deleted = m.DeletedAt is not null,
+        m.MentionsChannel,
+        attachments = m.DeletedAt is null ? m.Attachments : [],
         m.PinnedAt, m.PinnedById,
         reactions = reactions.GroupBy(r => r.Emoji).OrderBy(g => g.Min(r => r.CreatedAt))
             .Select(g => new { emoji = g.Key, agentIds = g.Select(r => r.AgentId).ToList() }),
@@ -386,7 +388,9 @@ public static class ChatEndpoints
             {
                 var rich = await CleanRichAsync(db, me, req.Body, ct);
                 if (rich.Error is not null) return Results.BadRequest(new { error = rich.Error });
-                msg = ChatMessage.CreateRich(id, me.Id, rich.Html!, rich.Text!, rich.HasImages, req.ParentId);
+                var files = await AttachmentsAsync(db, me, req.AttachmentIds, ct);
+                if (files.Error is not null) return Results.BadRequest(new { error = files.Error });
+                msg = ChatMessage.CreateRich(id, me.Id, rich.Html!, rich.Text!, rich.HasImages, req.ParentId, files.List);
             }
             else msg = ChatMessage.Create(id, me.Id, req.Body, req.ParentId);
         }
@@ -617,31 +621,64 @@ public static class ChatEndpoints
         return new(clean.Html, clean.Text, clean.FileIds.Count > 0, null);
     }
 
+    /// <summary>The caller's own uploaded files (kind "file"), as attachment cards.</summary>
+    private static async Task<(List<ChatAttachment> List, string? Error)> AttachmentsAsync(TenantDbContext db, Me me, List<Guid>? ids, CancellationToken ct)
+    {
+        var wanted = (ids ?? []).Distinct().ToList();
+        if (wanted.Count == 0) return ([], null);
+        if (wanted.Count > ChatMessage.MaxAttachments) return ([], $"At most {ChatMessage.MaxAttachments} files per message.");
+        var files = await db.ChatFiles.AsNoTracking()
+            .Where(f => wanted.Contains(f.Id) && f.TenantId == me.TenantId && f.AgentId == me.Id && f.Kind == ChatFileKind.File)
+            .ToListAsync(ct);
+        if (files.Count != wanted.Count) return ([], "A file in that message is no longer available — attach it again.");
+        return (wanted.Select(id => files.First(f => f.Id == id))
+            .Select(f => new ChatAttachment { Id = f.Id, Name = f.FileName, Size = f.SizeBytes, ContentType = f.ContentType }).ToList(), null);
+    }
+
     /// <summary>A pasted / attached image (raw body). Only PNG, JPEG, GIF and WebP, checked by content, up to 5 MB.</summary>
-    private static async Task<IResult> UploadFile(HttpContext http, TenantContext tc, ScopedTenantDbContextFactory dbf, IBlobStorage blobs, CancellationToken ct)
+    /// <param name="kind">"image" (default — shown inline) or "file" (an attachment, always downloaded).</param>
+    /// <param name="name">The file's name, for attachments.</param>
+    private static async Task<IResult> UploadFile(string? kind, string? name, HttpContext http, TenantContext tc, ScopedTenantDbContextFactory dbf,
+        IBlobStorage blobs, CancellationToken ct)
     {
         var me = WhoAmI(http, tc);
         if (me is null) return Results.Unauthorized();
         if (!Enabled(tc)) return Results.NotFound(new { error = NotEnabled });
+        var asFile = kind == ChatFileKind.File;
+        var fileName = ChatFile.CleanName(name);
+        if (asFile && ChatFile.BlockedExtensions.Contains(Path.GetExtension(fileName)))
+            return Results.BadRequest(new { error = "Programs and scripts can't be shared in chat." });
+        var max = asFile ? ChatFile.MaxFileBytes : ChatFile.MaxBytes;
         using var buffer = new MemoryStream();
         var limited = new byte[81920];
         int read;
         while ((read = await http.Request.Body.ReadAsync(limited, ct)) > 0)
         {
             buffer.Write(limited, 0, read);
-            if (buffer.Length > ChatFile.MaxBytes) return Results.BadRequest(new { error = "Images can be up to 5 MB." });
+            if (buffer.Length > max) return Results.BadRequest(new { error = asFile ? "Files can be up to 25 MB." : "Images can be up to 5 MB." });
         }
         if (buffer.Length == 0) return Results.BadRequest(new { error = "Nothing was uploaded." });
-        var type = ChatFile.SniffImageType(buffer.GetBuffer().AsSpan(0, (int)Math.Min(16, buffer.Length)));
-        if (type is null) return Results.BadRequest(new { error = "Only PNG, JPEG, GIF and WebP images can be shared." });
+        string type;
+        if (asFile)
+        {
+            // Shown on the card only; downloads are always served as plain bytes.
+            var declared = (http.Request.ContentType ?? "").Split(';')[0].Trim();
+            type = declared.Length is > 0 and <= 120 ? declared : "application/octet-stream";
+        }
+        else
+        {
+            var sniffed = ChatFile.SniffImageType(buffer.GetBuffer().AsSpan(0, (int)Math.Min(16, buffer.Length)));
+            if (sniffed is null) return Results.BadRequest(new { error = "Only PNG, JPEG, GIF and WebP images can be shared." });
+            type = sniffed;
+        }
 
-        var file = ChatFile.Create(me.TenantId, me.Id, type, buffer.Length);
+        var file = ChatFile.Create(me.TenantId, me.Id, type, buffer.Length, asFile ? ChatFileKind.File : ChatFileKind.Image, fileName);
         buffer.Position = 0;
         await blobs.PutAsync(file.StorageKey, buffer, type, ct);
         await using var db = dbf.Create();
         db.ChatFiles.Add(file);
         await db.SaveChangesAsync(ct);
-        return Results.Ok(new { file.Id, file.ContentType, file.SizeBytes });
+        return Results.Ok(new { file.Id, file.ContentType, file.SizeBytes, file.Kind, name = file.FileName });
     }
 
     /// <summary>An image, to its uploader or anyone who can see a message that uses it.</summary>
@@ -658,7 +695,7 @@ public static class ChatEndpoints
             var token = $"data-chat-file=\"{id}\"";
             var mine = db.ChatMembers.Where(m => m.AgentId == me.Id && m.LeftAt == null).Select(m => m.ChannelId);
             var publicChannels = db.ChatChannels.Where(c => c.Kind == ChatChannelKind.Channel && !c.IsPrivate).Select(c => c.Id);
-            var visible = await db.ChatMessages.AnyAsync(m => m.DeletedAt == null && m.Body.Contains(token)
+            var visible = await db.ChatMessages.AnyAsync(m => m.DeletedAt == null && (m.Body.Contains(token) || m.AttachmentIds.Contains(id))
                 && (mine.Contains(m.ChannelId) || publicChannels.Contains(m.ChannelId)), ct);
             if (!visible) return Results.NotFound();
         }
@@ -666,7 +703,10 @@ public static class ChatEndpoints
         if (stream is null) return Results.NotFound();
         http.Response.Headers["X-Content-Type-Options"] = "nosniff";
         http.Response.Headers["Cache-Control"] = "private, max-age=86400";
-        return Results.Stream(stream, file.ContentType);
+        // Attachments always download as plain bytes — an uploaded .html can never open as a page.
+        return file.Kind == ChatFileKind.File
+            ? Results.File(stream, "application/octet-stream", file.FileName)
+            : Results.Stream(stream, file.ContentType);
     }
 
     // ── Search ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -936,7 +976,7 @@ public static class ChatEndpoints
     }
 }
 
-public record PostChatMessageRequest(string Body, Guid? ParentId = null, string? Format = null);
+public record PostChatMessageRequest(string Body, Guid? ParentId = null, string? Format = null, List<Guid>? AttachmentIds = null);
 public record ReactRequest(string Emoji);
 public record OpenDirectRequest(List<Guid>? AgentIds);
 public record RaiseHandRequest(string? Note, Guid? CallRecordId);
