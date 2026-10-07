@@ -2,8 +2,8 @@
  * The platform's icon set (S183). 24×24 grid, 2px round strokes, currentColor — each icon takes the colour of its text.
  *
  *  • LIBRARY — Stephen's team-chat-icons library; paths copied as supplied.
- *  • DRAWN   — drawn here to match it (same grid, stroke and caps). Listed with where they're used on the Icons page
- *              (/admin/icons) for visual sign-off; any can be swapped for a library version later without touching callers.
+ *  • DRAWN   — drawn here to match it (same grid, stroke and caps), approved by Stephen. Listed with where they're used
+ *              on the Icons page (/admin/icons); any can be swapped for a library version later without touching callers.
  */
 
 export type IconProps = { size?: number; className?: string; title?: string }
@@ -37,7 +37,7 @@ export const AddImageIcon = (p: IconProps) => <Icon {...p}><rect x="3" y="4" wid
 export const PaperclipIcon = (p: IconProps) => <Icon {...p}><path d="M20 11.5l-8.2 8.2a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8" /></Icon>
 export const FileIcon = (p: IconProps) => <Icon {...p}><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M9 13h6M9 17h4" /></Icon>
 
-// ── DRAWN (S183 platform pass — awaiting Stephen's visual sign-off on /admin/icons) ──
+// ── DRAWN (S183 platform pass — approved by Stephen) ─────────────────────────
 export const CloseIcon = (p: IconProps) => <Icon {...p}><path d="M18 6L6 18M6 6l12 12" /></Icon>
 export const CheckIcon = (p: IconProps) => <Icon {...p}><path d="M20 6L9 17l-5-5" /></Icon>
 export const WarningIcon = (p: IconProps) => <Icon {...p}><path d="M10.3 3.9L2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /><path d="M12 9v4M12 17h.01" /></Icon>
@@ -59,4 +59,7 @@ export const MailIcon = (p: IconProps) => <Icon {...p}><rect x="3" y="5" width="
 export const TimerIcon = (p: IconProps) => <Icon {...p}><circle cx="12" cy="13" r="8" /><path d="M12 9v4l2.5 2.5" /><path d="M9 2h6" /></Icon>
 export const CartIcon = (p: IconProps) => <Icon {...p}><circle cx="9" cy="20" r="1.5" /><circle cx="18" cy="20" r="1.5" /><path d="M2 3h3l2.6 12.4a1 1 0 0 0 1 .8h9.8a1 1 0 0 0 1-.8L21 7H6" /></Icon>
 export const BoltIcon = (p: IconProps) => <Icon {...p}><path d="M13 2L4 14h7l-1 8 9-12h-7z" /></Icon>
+export const BulletListIcon = (p: IconProps) => <Icon {...p}><path d="M9 6h11M9 12h11M9 18h11" /><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01" /></Icon>
+export const NumberedListIcon = (p: IconProps) => <Icon {...p}><path d="M10 6h10M10 12h10M10 18h10" /><path d="M4 4.5L5.5 3.5V9" /><path d="M3.5 14a1.5 1.5 0 0 1 3 .4c0 1.4-3 2.4-3 3.6h3" /></Icon>
+export const ClearFormattingIcon = (p: IconProps) => <Icon {...p}><path d="M7 20l-3.3-3.3a1 1 0 0 1 0-1.4L14.3 4.7a1 1 0 0 1 1.4 0l4.6 4.6a1 1 0 0 1 0 1.4L11 20z" /><path d="M9 11l5 5" /><path d="M11 20h10" /></Icon>
 export const RefreshIcon = (p: IconProps) => <Icon {...p}><path d="M20 11a8 8 0 0 0-14.5-4.6L4 8" /><path d="M4 3v5h5" /><path d="M4 13a8 8 0 0 0 14.5 4.6L20 16" /><path d="M20 21v-5h-5" /></Icon>

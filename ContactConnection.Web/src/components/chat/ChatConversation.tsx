@@ -4,6 +4,7 @@ import { useChatStore, channelTitle, canPost, canPinForEveryone, canDeleteOthers
 import DOMPurify from 'dompurify'
 import { plainText, messagePreview } from '../../lib/chatConnection'
 import { loadChatImage, downloadChatFile, formatBytes } from '../../lib/chatImages'
+import { supportedEmojiVersion } from '../../lib/emojiSupport'
 import ChatEditor, { type ChatEditorHandle } from './ChatEditor'
 import { ACCENT, AddEmojiIcon, DeleteIcon, EditIcon, FileIcon, PinIcon, ReactIcon, ReplyThreadIcon } from './ChatIcons'
 
@@ -198,13 +199,15 @@ export function MessageList({ messages, users, meId, isManager, retired, onThrea
   )
 }
 
-/** The full emoji library (emoji-picker-react), loaded on first use; native emoji, so no images are fetched. */
+/** The full emoji library (emoji-picker-react), loaded on first use; native emoji, so no images are fetched — capped at the
+ *  newest emoji generation this device can draw, so nothing shows as an empty box. */
 const EmojiLibrary = lazy(async () => {
   const mod = await import('emoji-picker-react')
   const Picker = mod.default
   return {
     default: ({ onPick }: { onPick: (emoji: string) => void }) => (
       <Picker theme={mod.Theme.DARK} emojiStyle={mod.EmojiStyle.NATIVE} lazyLoadEmojis autoFocusSearch
+        emojiVersion={supportedEmojiVersion()}
         width={300} height={360} previewConfig={{ showPreview: false }} onEmojiClick={(d) => onPick(d.emoji)} />
     ),
   }

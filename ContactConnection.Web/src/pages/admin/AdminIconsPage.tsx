@@ -50,7 +50,10 @@ const DRAWN_NEW: Entry[] = [
   { name: 'TimerIcon', meaning: 'Waits / timed', where: 'Script node “auto-advances”' },
   { name: 'CartIcon', meaning: 'Cart', where: 'Agent portal cart bar' },
   { name: 'BoltIcon', meaning: 'Test now', where: 'API definition “Test Authentication”' },
-  { name: 'RefreshIcon', meaning: 'Retrying', where: 'Export delivery status' },
+  { name: 'RefreshIcon', meaning: 'Retrying · re-wire', where: 'Export delivery status · designer option picker “re-wire”' },
+  { name: 'BulletListIcon', meaning: 'Bulleted list', where: 'Script editor toolbar (Flow Designer) · chat composer toolbar' },
+  { name: 'NumberedListIcon', meaning: 'Numbered list', where: 'Script editor toolbar · chat composer toolbar' },
+  { name: 'ClearFormattingIcon', meaning: 'Clear formatting', where: 'Script editor toolbar · chat composer toolbar' },
 ]
 
 function Row({ e }: { e: Entry }) {
@@ -88,8 +91,8 @@ export default function AdminIconsPage() {
           One set across the platform — 24×24 grid, 2px round strokes, coloured by the surrounding text.
         </p>
         <Section title="Library" note="From the team-chat-icons library." list={LIBRARY} />
-        <Section title="Drawn — approved" note="Drawn to match the library; signed off." list={DRAWN_APPROVED} />
-        <Section title="Drawn — for review" note="Drawn to match the library for this pass. Replace any with a library version and every place it's used follows." list={DRAWN_NEW} />
+        <Section title="Drawn to match the library" note="Approved. Replace any with a library version in components/icons/Icons.tsx and every place it's used follows."
+          list={[...DRAWN_APPROVED, ...DRAWN_NEW]} />
       </div>
     </AdminShell>
   )

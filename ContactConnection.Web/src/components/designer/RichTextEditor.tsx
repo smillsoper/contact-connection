@@ -8,6 +8,7 @@ import Underline from '@tiptap/extension-underline'
 import FontFamily from '@tiptap/extension-font-family'
 import Image from '@tiptap/extension-image'
 import { useState, useRef, forwardRef, useImperativeHandle } from 'react'
+import { BulletListIcon, ClearFormattingIcon, NumberedListIcon } from '../icons/Icons'
 
 export interface RichTextEditorHandle {
   insert: (text: string) => void
@@ -319,8 +320,8 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(
           <Divider dark={dark} />
 
           {/* Lists */}
-          <Btn dark={dark} active={editor.isActive('bulletList')}  onClick={() => editor.chain().focus().toggleBulletList().run()}  title="Bullet list">•</Btn>
-          <Btn dark={dark} active={editor.isActive('orderedList')} onClick={() => editor.chain().focus().toggleOrderedList().run()} title="Numbered list">1.</Btn>
+          <Btn dark={dark} active={editor.isActive('bulletList')}  onClick={() => editor.chain().focus().toggleBulletList().run()}  title="Bullet list"><BulletListIcon size={14} /></Btn>
+          <Btn dark={dark} active={editor.isActive('orderedList')} onClick={() => editor.chain().focus().toggleOrderedList().run()} title="Numbered list"><NumberedListIcon size={14} /></Btn>
 
           <Divider dark={dark} />
 
@@ -335,7 +336,7 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(
           <Divider dark={dark} />
 
           {/* Clear formatting */}
-          <Btn dark={dark} onClick={() => editor.chain().focus().clearNodes().unsetAllMarks().run()} title="Clear formatting">✕</Btn>
+          <Btn dark={dark} onClick={() => editor.chain().focus().clearNodes().unsetAllMarks().run()} title="Clear formatting"><ClearFormattingIcon size={14} /></Btn>
 
           {/* Expand button — right-aligned */}
           {onExpand && (

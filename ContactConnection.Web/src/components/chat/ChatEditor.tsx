@@ -13,7 +13,7 @@ import {
 } from '../designer/RichTextEditor'
 import { stateStyle, type ChatUser } from '../../api/chat'
 import { loadChatImage, uploadChatImage, uploadChatAttachment, formatBytes } from '../../lib/chatImages'
-import { AddImageIcon, FileIcon, FormattingIcon, PaperclipIcon } from './ChatIcons'
+import { AddImageIcon, BulletListIcon, ClearFormattingIcon, FileIcon, FormattingIcon, NumberedListIcon, PaperclipIcon } from './ChatIcons'
 
 /**
  * The chat composer (S183): the script editor's formatting (font, size, bold / italic / underline / strike, colour,
@@ -270,10 +270,10 @@ const ChatEditor = forwardRef<ChatEditorHandle, Props>(function ChatEditor(
             <ColorPicker dark label="Highlight" colors={HIGHLIGHT_COLORS} current={mark}
               onSelect={(c) => (c ? editor.chain().focus().setHighlight({ color: c }).run() : editor.chain().focus().unsetHighlight().run())} />
             <Divider dark />
-            <Btn dark active={editor.isActive('bulletList')} onClick={() => editor.chain().focus().toggleBulletList().run()} title="Bullet list">•</Btn>
-            <Btn dark active={editor.isActive('orderedList')} onClick={() => editor.chain().focus().toggleOrderedList().run()} title="Numbered list">1.</Btn>
+            <Btn dark active={editor.isActive('bulletList')} onClick={() => editor.chain().focus().toggleBulletList().run()} title="Bullet list"><BulletListIcon size={14} /></Btn>
+            <Btn dark active={editor.isActive('orderedList')} onClick={() => editor.chain().focus().toggleOrderedList().run()} title="Numbered list"><NumberedListIcon size={14} /></Btn>
             <Divider dark />
-            <Btn dark onClick={() => editor.chain().focus().clearNodes().unsetAllMarks().run()} title="Clear formatting">✕</Btn>
+            <Btn dark onClick={() => editor.chain().focus().clearNodes().unsetAllMarks().run()} title="Clear formatting"><ClearFormattingIcon size={14} /></Btn>
           </div>
         )}
         {files.length > 0 && (
