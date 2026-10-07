@@ -31,6 +31,13 @@ public class ScreenRecording
     public DateTimeOffset StartedAtClient { get; private set; }
     /// <summary>server − client, in milliseconds. Added to client-relative offsets to place them on the server timeline.</summary>
     public long ClientClockOffsetMs { get; private set; }
+    /// <summary>Round trip of the clock-sync sample the offset came from (S183) — the offset is accurate to about half of it.
+    /// Null when the client sent no sync, in which case the start is the moment the start request arrived.</summary>
+    public long? ClockSyncRttMs { get; private set; }
+
+    /// <summary>Captured frame size in pixels — the coordinate space of the click / key cue points.</summary>
+    public int? VideoWidth { get; private set; }
+    public int? VideoHeight { get; private set; }
 
     /// <summary>Blob key prefix for this recording's chunks (and, later, its merged output).</summary>
     public string StorageKey { get; private set; } = string.Empty;
@@ -53,6 +60,9 @@ public class ScreenRecording
 
     private ScreenRecording() { }
 
+    /// <summary>A clock-sync round trip slower than this is too uncertain to place the start (±half of it).</summary>
+    public const long MaxTrustedRttMs = 2000;
+
     public static ScreenRecording Create(
         Guid tenantId,
         Guid callRecordId,
@@ -61,9 +71,18 @@ public class ScreenRecording
         string container,
         string codec,
         DateTimeOffset startedAtClient,
-        DateTimeOffset serverNow)
+        DateTimeOffset serverNow,
+        long? clockOffsetMs = null,
+        long? clockSyncRttMs = null,
+        int? videoWidth = null,
+        int? videoHeight = null)
     {
         var id = Guid.NewGuid();
+        // S183: the capture's real start on the server's clock = the client's start + the measured offset (server − client).
+        // The arrival time of the start request is late by the network and the time the client took to send it; only used
+        // when the client couldn't measure an offset, or the sample was too slow to trust.
+        var synced = clockOffsetMs is not null && clockSyncRttMs is >= 0 and <= MaxTrustedRttMs;
+        var startedAtServer = synced ? startedAtClient.AddMilliseconds(clockOffsetMs!.Value) : serverNow;
         return new ScreenRecording
         {
             Id                  = id,
@@ -74,9 +93,12 @@ public class ScreenRecording
             Container           = string.IsNullOrWhiteSpace(container) ? "webm" : container.Trim().ToLowerInvariant(),
             Codec               = codec?.Trim() ?? string.Empty,
             Status              = ScreenRecordingStatus.Recording,
-            StartedAtServer     = serverNow,
+            StartedAtServer     = startedAtServer,
             StartedAtClient     = startedAtClient,
-            ClientClockOffsetMs = (long)Math.Round((serverNow - startedAtClient).TotalMilliseconds),
+            ClientClockOffsetMs = synced ? clockOffsetMs!.Value : (long)Math.Round((serverNow - startedAtClient).TotalMilliseconds),
+            ClockSyncRttMs      = synced ? clockSyncRttMs : null,
+            VideoWidth          = videoWidth is > 0 ? videoWidth : null,
+            VideoHeight         = videoHeight is > 0 ? videoHeight : null,
             StorageKey          = $"screen/{callRecordId}/{id}",
             CreatedAt           = serverNow,
             UpdatedAt           = serverNow,
@@ -167,7 +189,11 @@ public static class ScreenRecordingCuePointKind
     public const string Unmask     = "unmask";
     public const string Disconnect = "disconnect";
     public const string Custom     = "custom";
+    /// <summary>The agent clicked (S183) — detail "x,y" in video pixels; drawn on the merged video as a ripple.</summary>
+    public const string Click      = "click";
+    /// <summary>The agent pressed a key (S183) — detail is its label ("A", "Enter", "Ctrl+C", "•" in password/card fields).</summary>
+    public const string Key        = "key";
 
     public static bool IsValid(string value) =>
-        value is Bridge or Hold or Unhold or Mask or Unmask or Disconnect or Custom;
+        value is Bridge or Hold or Unhold or Mask or Unmask or Disconnect or Custom or Click or Key;
 }

@@ -37,6 +37,9 @@ public class ScreenRecordingConfiguration : IEntityTypeConfiguration<ScreenRecor
         builder.Property(r => r.StartedAtServer).HasColumnName("started_at_server");
         builder.Property(r => r.StartedAtClient).HasColumnName("started_at_client");
         builder.Property(r => r.ClientClockOffsetMs).HasColumnName("client_clock_offset_ms");
+        builder.Property(r => r.ClockSyncRttMs).HasColumnName("clock_sync_rtt_ms");
+        builder.Property(r => r.VideoWidth).HasColumnName("video_width");
+        builder.Property(r => r.VideoHeight).HasColumnName("video_height");
 
         builder.Property(r => r.StorageKey).HasColumnName("storage_key").HasMaxLength(300).IsRequired();
         builder.Property(r => r.TotalBytes).HasColumnName("total_bytes");

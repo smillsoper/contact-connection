@@ -489,6 +489,7 @@ function RecordingSettingsForm({ campaign, onSaved }: RecordingSettingsFormProps
   const [recordStereo, setRecordStereo] = useState(campaign.recordStereo ?? true)
   const [recordingBeepEnabled, setRecordingBeepEnabled] = useState(campaign.recordingBeepEnabled ?? false)
   const [autoMaskOnHold, setAutoMaskOnHold] = useState(campaign.autoMaskOnHold ?? false)
+  const [screenRecording, setScreenRecording] = useState(campaign.screenRecordingEnabled ?? false)
   const [retentionDays, setRetentionDays] = useState(campaign.recordingRetentionDays ?? 90)
   const [unmappedDays, setUnmappedDays] = useState<string>(campaign.unmappedRecordingRetentionDays?.toString() ?? '')
   const [saving, setSaving] = useState(false)
@@ -521,6 +522,7 @@ function RecordingSettingsForm({ campaign, onSaved }: RecordingSettingsFormProps
       const updated = await updateCampaignRecording(campaign.id, {
         recordingMode, consentModel, recordingRequired, recordStereo,
         recordingBeepEnabled, autoMaskOnHold,
+        screenRecordingEnabled: enabled && screenRecording,
         recordingRetentionDays: retentionDays,
         unmappedRecordingRetentionDays: unmappedDays.trim() ? Number(unmappedDays) : null,
       })
@@ -607,6 +609,9 @@ function RecordingSettingsForm({ campaign, onSaved }: RecordingSettingsFormProps
           <Toggle on={recordingBeepEnabled} set={setRecordingBeepEnabled}
             label="Periodic beep"
             hint="Play an audible tone at intervals while recording (required in some jurisdictions)." />
+          <Toggle on={screenRecording} set={setScreenRecording}
+            label="Record agent screens"
+            hint="Agents share their screen once per shift; each call on this campaign records it, merged with the call audio, with the agent's clicks and keys marked (needs the ContactConnection Agent extension). Typing in password and card fields shows as •." />
         </div>
       </div>
 

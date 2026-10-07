@@ -1,3 +1,4 @@
+import { requestPortalFocus } from '../lib/extensionBridge'
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import CallerHistoryButton from './CallerHistory'
 import * as signalR from '@microsoft/signalr'
@@ -450,6 +451,7 @@ export default function FlowPanel() {
 
     // Script pop delivered after whisper bridge (agent_selected → tf_whisper → tf_end → CHANNEL_BRIDGE → agent_answer)
     connection.on('receiveScriptPop', (sessionJson: string) => {
+      requestPortalFocus('script pop')
       try {
         const node = JSON.parse(sessionJson) as FlowNodeState
         addSession({

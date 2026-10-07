@@ -197,7 +197,8 @@ public sealed class RecordingMergeService : BackgroundService
         var screens = (await screenRepo.ListByCallRecordAsync(job.CallRecordId, ct))
             .Where(s => s.Status == ScreenRecordingStatus.Complete)
             .Select(s => new ScreenRecordingInput(
-                s.Id, s.StorageKey, s.Container, s.ReceivedChunkIndices, s.StartedAtServer, s.DurationMs))
+                s.Id, s.StorageKey, s.Container, s.ReceivedChunkIndices, s.StartedAtServer, s.DurationMs,
+                s.CuePoints, s.VideoWidth, s.VideoHeight))
             .ToList();
 
         var request = new RecordingMergeRequest(

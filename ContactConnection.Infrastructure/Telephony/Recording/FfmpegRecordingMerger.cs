@@ -56,10 +56,31 @@ public sealed class FfmpegRecordingMerger : IRecordingMerger
             var outLocal = Path.Combine(workDir, $"merged.{ext}");
 
             IReadOnlyList<string> args;
+            var overlayDone = false;
             if (hadVideo)
             {
                 var offset = (chosen!.StartedAtServer - request.RecordingStartedAt).TotalSeconds;
-                args = FfmpegCommandBuilder.BuildMux(audioLocal, screenLocal!, offset, outLocal);
+                // S183: the agent's clicks and keys, drawn on. A failed overlay costs the overlay, never the video.
+                string? overlay = null;
+                var script = chosen.CuePoints is { Count: > 0 } cues && chosen.VideoWidth is { } w && chosen.VideoHeight is { } h
+                    ? InputOverlayBuilder.Build(cues, w, h, offset) : null;
+                if (script is not null)
+                {
+                    overlay = Path.Combine(workDir, "input-overlay.ass");
+                    await File.WriteAllTextAsync(overlay, script, ct);
+                }
+                args = FfmpegCommandBuilder.BuildMux(audioLocal, screenLocal!, offset, outLocal, overlay);
+                if (overlay is not null)
+                {
+                    var withOverlay = await _runner.RunAsync(args, ct);
+                    if (!withOverlay.Success)
+                    {
+                        _logger.LogWarning("Input overlay failed for call {CallId} — merging without it. stderr: {Err}",
+                            request.CallRecordId, Tail(withOverlay.StdErr));
+                        args = FfmpegCommandBuilder.BuildMux(audioLocal, screenLocal!, offset, outLocal);
+                    }
+                    else overlayDone = true;
+                }
             }
             else
             {
@@ -67,7 +88,7 @@ public sealed class FfmpegRecordingMerger : IRecordingMerger
             }
 
             var command = "ffmpeg " + string.Join(' ', args);
-            var run = await _runner.RunAsync(args, ct);
+            var run = overlayDone ? new FfmpegRunResult(0, "") : await _runner.RunAsync(args, ct);
 
             // If the mux failed, fall back to audio-only so the call still gets a recording.
             if (!run.Success && hadVideo)

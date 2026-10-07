@@ -14,6 +14,8 @@ import ChatPanel from './ChatPanel'
 import CartPanel from './cart/CartPanel'
 import MyCommissions from './MyCommissions'
 import WrapUpSummaries from './WrapUpSummaries'
+import ScreenRecordingBar from './ScreenRecordingBar'
+import { requestPortalFocus } from '../lib/extensionBridge'
 
 export default function AgentShell() {
   const clearAuth = useAuthStore((s) => s.clearAuth)
@@ -85,6 +87,7 @@ export default function AgentShell() {
     if (registrationStatus !== 'registered' && !takeOverWaitOver) return
     takeOverDone.current = true
     window.history.replaceState(null, '', '/agent')
+    requestPortalFocus('take over')   // the dashboard opened us in the background — come forward (S183)
     setTakeOverNote('Taking over the call…')
     supervisorApi.takeOver(agentId)
       .then((r) => setTakeOverNote(r.phone ? 'You have the call and the script.' : 'You have the script.'))
@@ -126,6 +129,7 @@ export default function AgentShell() {
           </button>
         </div>
       </header>
+      <ScreenRecordingBar />
 
       {/* 3-panel body */}
       <div className="flex flex-1 overflow-hidden">

@@ -52,6 +52,8 @@ export interface Campaign {
   recordStereo: boolean
   recordingBeepEnabled: boolean
   autoMaskOnHold: boolean
+  /** Record the agent's screen on this campaign's calls (S183). */
+  screenRecordingEnabled?: boolean
   recordingRetentionDays: number
   unmappedRecordingRetentionDays?: number | null
   // PCI SensitiveData (captured card/CVV/SSN) retention override in minutes — null falls back to
@@ -285,6 +287,7 @@ export const updateCampaignRecording = (id: string, data: {
   recordingRetentionDays: number
   /** Retain-by-disposition (S181): days to keep calls with a missing / unmapped disposition; null = the normal retention. */
   unmappedRecordingRetentionDays?: number | null
+  screenRecordingEnabled?: boolean
 }) => api.put<Campaign>(`/api/v1/campaigns/${id}/recording`, data)
 
 // ── Campaign sales tax ───────────────────────────────────────────────────────

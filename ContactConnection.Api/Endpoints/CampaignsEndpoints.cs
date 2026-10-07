@@ -137,6 +137,7 @@ public static class CampaignsEndpoints
             recordingRetentionDays: req.RecordingRetentionDays);
         // S181: "retain by disposition" — how long to keep calls whose disposition is missing / unmapped (null = normal).
         campaign.SetUnmappedRecordingRetention(req.UnmappedRecordingRetentionDays);
+        if (req.ScreenRecordingEnabled is { } screen) campaign.SetScreenRecording(screen);
 
         await repo.SaveChangesAsync(ct);
         return Results.Ok(ToSummaryResponse(campaign));
@@ -559,7 +560,7 @@ public static class CampaignsEndpoints
         c.QueueAccelerationEnabled, c.QueueAccelerationIntervalSeconds, c.QueueAccelerationPriorityBoost,
         c.RingStrategy, c.RingTopN,
         c.RecordingMode, c.ConsentModel, c.RecordingRequired, c.RecordStereo,
-        c.RecordingBeepEnabled, c.AutoMaskOnHold, c.RecordingRetentionDays, c.UnmappedRecordingRetentionDays,
+        c.RecordingBeepEnabled, c.AutoMaskOnHold, c.RecordingRetentionDays, c.UnmappedRecordingRetentionDays, c.ScreenRecordingEnabled,
         c.SensitiveDataRetentionMinutes, c.CardDataRetention, c.AiSummaryEnabled,
         c.TaxProvider, TaxSettings = ParseTaxSettings(c.TaxSettings),
         c.ExternalRoutingAcceptMode, c.ExternalRoutingLimit,
@@ -576,7 +577,7 @@ public static class CampaignsEndpoints
         c.QueueAccelerationEnabled, c.QueueAccelerationIntervalSeconds, c.QueueAccelerationPriorityBoost,
         c.RingStrategy, c.RingTopN,
         c.RecordingMode, c.ConsentModel, c.RecordingRequired, c.RecordStereo,
-        c.RecordingBeepEnabled, c.AutoMaskOnHold, c.RecordingRetentionDays, c.UnmappedRecordingRetentionDays,
+        c.RecordingBeepEnabled, c.AutoMaskOnHold, c.RecordingRetentionDays, c.UnmappedRecordingRetentionDays, c.ScreenRecordingEnabled,
         c.SensitiveDataRetentionMinutes, c.CardDataRetention, c.AiSummaryEnabled,
         c.TaxProvider, TaxSettings = ParseTaxSettings(c.TaxSettings),
         c.ExternalRoutingAcceptMode, c.ExternalRoutingLimit,
@@ -622,7 +623,8 @@ public record UpdateCampaignRecordingRequest(
     bool RecordingBeepEnabled = false,
     bool AutoMaskOnHold = false,
     int RecordingRetentionDays = 90,
-    int? UnmappedRecordingRetentionDays = null);
+    int? UnmappedRecordingRetentionDays = null,
+    bool? ScreenRecordingEnabled = null);
 public record UpdateCampaignSensitiveDataRetentionRequest(int? SensitiveDataRetentionMinutes = null, string? CardDataRetention = null);
 public record UpdateCampaignExternalRoutingRequest(string? AcceptMode, int? Limit = null);
 public record UpdateCampaignTaxRequest(string? TaxProvider, System.Text.Json.JsonElement? TaxSettings = null);

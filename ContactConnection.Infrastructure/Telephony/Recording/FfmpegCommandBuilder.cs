@@ -28,8 +28,9 @@ public static class FfmpegCommandBuilder
     /// Positive → screen started after audio, delay the video in (<c>-itsoffset</c>); negative →
     /// screen started first, trim its head (<c>-ss</c>).
     /// </summary>
+    /// <param name="overlayPath">Optional ASS script (the agent's clicks and keys, S183) drawn onto the video.</param>
     public static IReadOnlyList<string> BuildMux(
-        string audioPath, string screenPath, double videoOffsetSeconds, string outputPath)
+        string audioPath, string screenPath, double videoOffsetSeconds, string outputPath, string? overlayPath = null)
     {
         var args = new List<string>
         {
@@ -59,13 +60,20 @@ public static class FfmpegCommandBuilder
             "-c:a", "aac", "-b:a", "96k",
             "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
             // Guarantee even dimensions — yuv420p requires them.
-            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+            "-vf", overlayPath is null
+                ? "scale=trunc(iw/2)*2:trunc(ih/2)*2"
+                : $"scale=trunc(iw/2)*2:trunc(ih/2)*2,ass={FilterPath(overlayPath)}",
             "-movflags", "+faststart",
             outputPath,
         });
 
         return args;
     }
+
+    /// <summary>A file path as a filtergraph argument: forward slashes, and the drive colon / quotes escaped (the filtergraph
+    /// treats ':' as an option separator), wrapped in single quotes.</summary>
+    internal static string FilterPath(string path) =>
+        "'" + path.Replace('\\', '/').Replace("'", @"'\''").Replace(":", @"\:") + "'";
 
     private static string FormatSeconds(double seconds) =>
         seconds.ToString("0.###", CultureInfo.InvariantCulture);

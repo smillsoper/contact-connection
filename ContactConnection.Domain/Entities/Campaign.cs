@@ -88,6 +88,16 @@ public class Campaign
     /// or not in the catalog. Null = <see cref="RecordingRetentionDays"/>.</summary>
     public int? UnmappedRecordingRetentionDays { get; private set; }
 
+    /// <summary>Record the agent's screen on this campaign's calls (S183) — captured by the agent portal from a once-per-shift
+    /// screen share, merged with the call audio on the server's clock, with the agent's clicks and keys drawn on.</summary>
+    public bool ScreenRecordingEnabled { get; private set; }
+
+    public void SetScreenRecording(bool enabled)
+    {
+        ScreenRecordingEnabled = enabled;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
     public void SetUnmappedRecordingRetention(int? days)
     {
         UnmappedRecordingRetentionDays = days is { } d ? Math.Clamp(d, 1, 3650) : null;

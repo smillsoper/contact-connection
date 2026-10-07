@@ -12,13 +12,18 @@ public interface IRecordingMerger
 }
 
 /// <summary>One screen capture segment available for a call (see <c>ScreenRecording</c>).</summary>
+/// <param name="CuePoints">Its cue points — click / key ones are drawn onto the video (S183).</param>
+/// <param name="VideoWidth">Capture frame size — the click coordinates' space.</param>
 public sealed record ScreenRecordingInput(
     Guid Id,
     string StorageKey,
     string Container,
     IReadOnlyList<int> ChunkIndices,
     DateTimeOffset StartedAtServer,
-    long? DurationMs);
+    long? DurationMs,
+    IReadOnlyList<ContactConnection.Domain.ValueObjects.ScreenRecordingCuePoint>? CuePoints = null,
+    int? VideoWidth = null,
+    int? VideoHeight = null);
 
 /// <param name="AudioSourcePath">Absolute path (on the worker host) to the stereo call-audio WAV written by uuid_record.</param>
 /// <param name="RecordingStartedAt">Server-clock instant the audio recording started — the master time base for alignment.</param>

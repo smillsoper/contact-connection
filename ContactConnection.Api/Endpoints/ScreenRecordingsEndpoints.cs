@@ -2,6 +2,8 @@ using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
 using ContactConnection.Domain.Entities;
+using ContactConnection.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
 
 namespace ContactConnection.Api.Endpoints;
 
@@ -9,7 +11,8 @@ namespace ContactConnection.Api.Endpoints;
 /// Ingest for agent-side screen captures from the browser extension. Chunks stream in over HTTP
 /// and land in <see cref="IBlobStorage"/>; the <see cref="ScreenRecording"/> row tracks progress,
 /// the client↔server clock relationship, and the sync cue points the future A/V merge aligns to.
-/// The extension itself is not built yet — this is the server contract it will target.
+/// S183: the agent portal records (from a once-per-shift screen share) on campaigns with screen recording switched on;
+/// the browser extension feeds it the agent's clicks and keys, sent here as cue points.
 /// </summary>
 public static class ScreenRecordingsEndpoints
 {
@@ -17,8 +20,11 @@ public static class ScreenRecordingsEndpoints
     {
         var group = app.MapGroup("/api/v1/screen-recordings").RequireAuthorization();
 
-        // Bare server time — the extension polls this to keep its clock offset fresh.
+        // Bare server time — the portal samples this (shortest round trip wins) to measure its clock offset.
         group.MapGet("/time", () => Results.Ok(new { serverTime = DateTimeOffset.UtcNow }));
+        // Which campaigns record agent screens — the portal asks for a screen share at sign-in when any of them could
+        // reach the agent, and records each call on them.
+        group.MapGet("/campaigns", ListRecordingCampaigns);
 
         group.MapPost("/", StartRecording);
         group.MapPut("/{id:guid}/chunks/{index:int}", UploadChunk)
@@ -33,18 +39,41 @@ public static class ScreenRecordingsEndpoints
            .RequireAuthorization();
     }
 
+    private static async Task<IResult> ListRecordingCampaigns(ScopedTenantDbContextFactory dbf, TenantContext tenantContext, CancellationToken ct)
+    {
+        if (tenantContext.Current is null) return Results.Unauthorized();
+        await using var db = dbf.Create();
+        var ids = await db.Campaigns.AsNoTracking().Where(c => c.ScreenRecordingEnabled).Select(c => c.Id).ToListAsync(ct);
+        return Results.Ok(new { campaignIds = ids });
+    }
+
     private static async Task<IResult> StartRecording(
         StartScreenRecordingRequest req,
         IScreenRecordingRepository repo,
+        ScopedTenantDbContextFactory dbf,
         TenantContext tenantContext,
         HttpContext http,
         CancellationToken ct)
     {
+        var now = DateTimeOffset.UtcNow;   // as early as possible — the fallback start when the client sent no clock sync
         if (tenantContext.Current is null) return Results.Unauthorized();
         if (!TryGetAgentId(http, out var agentId)) return Results.Unauthorized();
         if (req.CallRecordId == Guid.Empty) return Results.BadRequest(new { error = "callRecordId is required." });
 
-        var now = DateTimeOffset.UtcNow;
+        // Only campaigns that record screens — the call's own, or one it was transferred into (an interaction's campaign).
+        await using (var db = dbf.Create())
+        {
+            var call = await db.CallRecords.AsNoTracking().Where(r => r.Id == req.CallRecordId)
+                .Select(r => new { r.CampaignId }).FirstOrDefaultAsync(ct);
+            if (call is null) return Results.NotFound(new { error = "Call record not found." });
+            var campaignIds = await db.CallInteractions.AsNoTracking()
+                .Where(i => i.CallRecordId == req.CallRecordId && i.CampaignId != null)
+                .Select(i => i.CampaignId!.Value).ToListAsync(ct);
+            if (call.CampaignId != Guid.Empty) campaignIds.Add(call.CampaignId);
+            if (!await db.Campaigns.AnyAsync(c => campaignIds.Contains(c.Id) && c.ScreenRecordingEnabled, ct))
+                return Results.Conflict(new { error = "This call's campaign doesn't record screens." });
+        }
+
         var recording = ScreenRecording.Create(
             tenantId:        tenantContext.Current.Id,
             callRecordId:    req.CallRecordId,
@@ -53,7 +82,11 @@ public static class ScreenRecordingsEndpoints
             container:       req.Container ?? "webm",
             codec:           req.Codec ?? "",
             startedAtClient: req.StartedAtClient,
-            serverNow:       now);
+            serverNow:       now,
+            clockOffsetMs:   req.ClockOffsetMs,
+            clockSyncRttMs:  req.ClockRttMs,
+            videoWidth:      req.VideoWidth,
+            videoHeight:     req.VideoHeight);
 
         await repo.AddAsync(recording, ct);
         await repo.SaveChangesAsync(ct);
@@ -108,8 +141,9 @@ public static class ScreenRecordingsEndpoints
         var recording = await repo.GetByIdAsync(id, ct);
         if (recording is null || recording.TenantId != tenantContext.Current.Id) return Results.NotFound();
 
-        foreach (var p in req.Points ?? [])
-            recording.AddCuePoint(p.AtMs, p.Kind ?? "custom", p.Detail);
+        // Clicks and keys arrive in batches; a runaway client can't grow the row without bound.
+        foreach (var p in (req.Points ?? []).Take(Math.Max(0, MaxCuePoints - recording.CuePoints.Count)))
+            recording.AddCuePoint(p.AtMs, p.Kind ?? "custom", p.Detail is { Length: > 40 } d ? d[..40] : p.Detail);
 
         await repo.SaveChangesAsync(ct);
         return Results.Ok(recording.ToResponse());
@@ -179,6 +213,8 @@ public static class ScreenRecordingsEndpoints
         return Results.Ok(list.Select(r => r.ToResponse()));
     }
 
+    private const int MaxCuePoints = 20_000;
+
     private static bool TryGetAgentId(HttpContext http, out Guid agentId) =>
         Guid.TryParse(http.User.FindFirst("sub")?.Value, out agentId);
 
@@ -194,13 +230,18 @@ public static class ScreenRecordingsEndpoints
         startedAtServer     = r.StartedAtServer,
         startedAtClient     = r.StartedAtClient,
         clientClockOffsetMs = r.ClientClockOffsetMs,
+        clockSyncRttMs      = r.ClockSyncRttMs,
+        videoWidth          = r.VideoWidth,
+        videoHeight         = r.VideoHeight,
         storageKey          = r.StorageKey,
         receivedChunkIndices = r.ReceivedChunkIndices,
         chunkCount          = r.ChunkCount,
         totalBytes          = r.TotalBytes,
         durationMs          = r.DurationMs,
         sha256              = r.Sha256,
-        cuePoints           = r.CuePoints.Select(c => new { atMs = c.AtMs, kind = c.Kind, detail = c.Detail }),
+        cuePointCount       = r.CuePoints.Count,
+        cuePoints           = r.CuePoints.Where(c => c.Kind is not (ScreenRecordingCuePointKind.Click or ScreenRecordingCuePointKind.Key))
+                                .Select(c => new { atMs = c.AtMs, kind = c.Kind, detail = c.Detail }),
         failureReason       = r.FailureReason,
         completedAt         = r.CompletedAt,
         createdAt           = r.CreatedAt,
@@ -213,7 +254,11 @@ public record StartScreenRecordingRequest(
     Guid? InteractionId,
     DateTimeOffset StartedAtClient,
     string? Container = "webm",
-    string? Codec = "");
+    string? Codec = "",
+    long? ClockOffsetMs = null,   // server − client, from the portal's best /time sample (S183)
+    long? ClockRttMs = null,      // that sample's round trip
+    int? VideoWidth = null,
+    int? VideoHeight = null);
 
 public record AddCuePointsRequest(List<CuePointDto>? Points);
 public record CuePointDto(long AtMs, string? Kind, string? Detail);

@@ -11,4 +11,5 @@ COPY chrony.conf /etc/chrony/chrony.conf
 
 # -d: run in foreground and log to stderr so `docker logs cc_timesync` shows
 # every step/slew. Clock control stays enabled (unlike -Q / -x).
-ENTRYPOINT ["chronyd", "-d", "-f", "/etc/chrony/chrony.conf"]
+# The stale pidfile is removed first on every (re)start -- see chrony.conf.
+ENTRYPOINT ["sh", "-c", "mkdir -p /run/chrony && rm -f /run/chrony/chronyd.pid && exec chronyd -d -f /etc/chrony/chrony.conf"]

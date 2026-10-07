@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "ContactConnection Agent",
+  "short_name": "ContactConnection",
+  "version": "0.1.0",
+  "description": "Brings the ContactConnection agent portal forward when a call arrives, and shows the agent's clicks and keys in screen recordings.",
+  "minimum_chrome_version": "116",
+  "permissions": ["tabs", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "all_frames": true,
+      "run_at": "document_start"
+    }
+  ],
+  "action": { "default_title": "ContactConnection Agent", "default_popup": "popup.html" }
+}

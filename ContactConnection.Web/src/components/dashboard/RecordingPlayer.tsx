@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react'
 export default function RecordingPlayer({ load }: { load: () => Promise<Response> }) {
   const [state, setState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [url, setUrl] = useState<string | null>(null)
+  const [isVideo, setIsVideo] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
 
   useEffect(() => () => { if (url) URL.revokeObjectURL(url) }, [url])
@@ -16,7 +17,10 @@ export default function RecordingPlayer({ load }: { load: () => Promise<Response
     try {
       const res = await load()
       if (res.status === 200 || res.status === 206) {
-        setUrl(URL.createObjectURL(await res.blob()))
+        const blob = await res.blob()
+        // A call with a screen recording (S183) is merged into an mp4 — show it as video.
+        setIsVideo(blob.type.startsWith('video/'))
+        setUrl(URL.createObjectURL(blob))
         setState('ready')
         return
       }
@@ -32,7 +36,9 @@ export default function RecordingPlayer({ load }: { load: () => Promise<Response
     }
   }
 
-  if (state === 'ready' && url) return <audio controls autoPlay src={url} className="w-full" />
+  if (state === 'ready' && url) return isVideo
+    ? <video controls autoPlay src={url} className="w-full max-h-[70vh] rounded bg-black" />
+    : <audio controls autoPlay src={url} className="w-full" />
   return (
     <div className="flex items-center gap-3">
       <button onClick={play} disabled={state === 'loading'}
