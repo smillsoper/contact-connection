@@ -42,7 +42,7 @@ public static class RecordsWidgetEndpoints
         var p = Paging(request, 25);
         return Results.Ok(await report.QueryAsync(new RecordsQuery(since, until, campaignId is null ? clientId : null, campaignId, null,
             Columns(columns), p.Search, p.Filters, p.Sort, p.Desc, p.Page, p.PageSize, tenant.Timezone,
-            await WidgetFilters.GroupAgentsAsync(groupId, agentGroups, ct), WidgetFilters.Dnis(dnis)), ct));
+            groupId, WidgetFilters.Dnis(dnis)), ct));
     }
 
     private static async Task<IResult> Detail(Guid id, Guid? clientId, Guid? campaignId, bool? allowRecordings, CallRecordsReport report,

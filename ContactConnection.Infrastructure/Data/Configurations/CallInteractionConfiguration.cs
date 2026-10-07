@@ -44,6 +44,7 @@ public class CallInteractionConfiguration : IEntityTypeConfiguration<CallInterac
         builder.Property(i => i.RoutedGroupId).HasColumnName("routed_group_id");
         builder.Property(i => i.RoutedTier).HasColumnName("routed_tier");
         builder.Property(i => i.RoutedTierLabel).HasColumnName("routed_tier_label").HasMaxLength(50);
+        builder.Property(i => i.AgentGroupIds).MapJson("agent_group_ids", () => new List<Guid>()).HasDefaultValueSql("'[]'::jsonb").IsRequired();
         builder.Property(i => i.CampaignId).HasColumnName("campaign_id");
 
         builder.Property(i => i.Type)

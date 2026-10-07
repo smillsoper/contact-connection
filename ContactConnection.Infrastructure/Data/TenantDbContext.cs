@@ -161,7 +161,7 @@ public class TenantDbContext : DbContext
         base.OnModelCreating(modelBuilder);
     }
 
-    public override Task<int> SaveChangesAsync(CancellationToken ct = default)
+    public override async Task<int> SaveChangesAsync(CancellationToken ct = default)
     {
         // Auto-update updated_at on any modified CallRecord
         foreach (var entry in ChangeTracker.Entries<CallRecord>())
@@ -169,6 +169,25 @@ public class TenantDbContext : DbContext
             if (entry.State == EntityState.Modified)
                 entry.Property("UpdatedAt").CurrentValue = DateTimeOffset.UtcNow;
         }
-        return base.SaveChangesAsync(ct);
+        await StampAgentGroupsAsync(ct);
+        return await base.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Agent-group snapshot (S181): an interaction that just got its agent records the groups that agent is in right now,
+    /// so reporting by group stays true to the time of the call. Done here so every path that assigns an agent is covered.
+    /// </summary>
+    private async Task StampAgentGroupsAsync(CancellationToken ct)
+    {
+        var pending = ChangeTracker.Entries<CallInteraction>()
+            .Where(e => e.Entity.AgentId is { } a && a != Guid.Empty
+                        && (e.State == EntityState.Added || (e.State == EntityState.Modified && e.Property(i => i.AgentId).IsModified)))
+            .Select(e => e.Entity).ToList();
+        if (pending.Count == 0) return;
+        var agentIds = pending.Select(i => i.AgentId!.Value).Distinct().ToList();
+        var memberships = await AgentGroupMembers.AsNoTracking().Where(m => agentIds.Contains(m.AgentId))
+            .Select(m => new { m.AgentId, m.GroupId }).ToListAsync(ct);
+        foreach (var ix in pending)
+            ix.SetAgentGroups(memberships.Where(m => m.AgentId == ix.AgentId).Select(m => m.GroupId));
     }
 }

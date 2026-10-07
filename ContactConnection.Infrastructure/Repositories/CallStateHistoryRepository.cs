@@ -114,7 +114,7 @@ public class CallStateHistoryRepository(ITenantDbContextFactory factory) : ICall
 
     public async Task<ServiceLevelStats> GetServiceLevelStatsAsync(
         string tenantSchemaName, List<Guid>? campaignIds, DateTimeOffset sinceUtc, CancellationToken ct = default,
-        IReadOnlySet<Guid>? agentIds = null, IReadOnlySet<string>? dnisKeys = null)
+        Guid? groupId = null, IReadOnlySet<string>? dnisKeys = null)
     {
         await using var db = factory.Create(tenantSchemaName);
         var query = db.CallStateHistory.Where(e => e.MetServiceLevel != null && e.EnteredAt >= sinceUtc);
@@ -125,8 +125,16 @@ public class CallStateHistoryRepository(ITenantDbContextFactory factory) : ICall
         // stamp for a re-bridge of the same queue entry (take-over / transfer), which isn't a second answer.
         var rows = await query.Select(e => new { e.CallRecordId, e.CampaignId, e.Sequence, e.MetServiceLevel, e.AgentId }).ToListAsync(ct);
         var firsts = rows.GroupBy(e => (e.CallRecordId, e.CampaignId)).Select(g => g.OrderBy(e => e.Sequence).First()).ToList();
-        // Agent group (S181): the agent who answered. DNIS: the number the caller dialed.
-        if (agentIds is not null) firsts = firsts.Where(f => f.AgentId is { } a && agentIds.Contains(a)).ToList();
+        // Agent group (S181): calls the group handled — its interactions record the agent's groups at the time of the call.
+        // DNIS: the number the caller dialed.
+        if (groupId is { } g)
+        {
+            var callIds = firsts.Select(f => f.CallRecordId).Distinct().ToList();
+            var inGroup = (await db.CallInteractions.AsNoTracking().Where(i => callIds.Contains(i.CallRecordId))
+                    .Select(i => new { i.CallRecordId, i.RoutedGroupId, i.AgentGroupIds }).ToListAsync(ct))
+                .Where(i => i.RoutedGroupId == g || i.AgentGroupIds.Contains(g)).Select(i => i.CallRecordId).ToHashSet();
+            firsts = firsts.Where(f => inGroup.Contains(f.CallRecordId)).ToList();
+        }
         if (dnisKeys is not null)
         {
             var ids = firsts.Select(f => f.CallRecordId).Distinct().ToList();

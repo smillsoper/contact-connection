@@ -38,11 +38,11 @@ public interface ICallStateHistoryRepository
     /// EnteredAt falls at/after sinceUtc. campaignIds null = every campaign in the tenant.
     /// Used by the Service Level dashboard widget.
     /// </summary>
-    /// <param name="agentIds">S181: only calls answered by these agents; null = all.</param>
+    /// <param name="groupId">S181: only calls an agent group handled (membership at the time of the call); null = all.</param>
     /// <param name="dnisKeys">S181: only calls to these numbers; null = all.</param>
     Task<ServiceLevelStats> GetServiceLevelStatsAsync(
         string tenantSchemaName, List<Guid>? campaignIds, DateTimeOffset sinceUtc, CancellationToken ct = default,
-        IReadOnlySet<Guid>? agentIds = null, IReadOnlySet<string>? dnisKeys = null);
+        Guid? groupId = null, IReadOnlySet<string>? dnisKeys = null);
 }
 
 public record CampaignStateCount(Guid CampaignId, string State, int Count);

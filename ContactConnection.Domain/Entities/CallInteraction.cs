@@ -65,6 +65,16 @@ public class CallInteraction
     public Guid? RoutedGroupId { get; private set; }
     public int? RoutedTier { get; private set; }
     public string? RoutedTierLabel { get; private set; }
+    /// <summary>
+    /// The agent groups this interaction's agent belonged to when they took it (S181) — so reporting by agent group stays
+    /// true to the time of the call when people later move between groups. Stamped when the agent is assigned.
+    /// </summary>
+    public List<Guid> AgentGroupIds { get; private set; } = [];
+
+    public void SetAgentGroups(IEnumerable<Guid> groupIds) => AgentGroupIds = groupIds.Distinct().ToList();
+
+    /// <summary>True if this interaction counts for the group: its agent was a member at the time, or it was routed there.</summary>
+    public bool InGroup(Guid groupId) => RoutedGroupId == groupId || AgentGroupIds.Contains(groupId);
 
     public void SetCart(CartDocument cart) => Cart = cart;
 

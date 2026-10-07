@@ -50,11 +50,11 @@ public static class RecordColumns
 /// <param name="CampaignIds">When set, only these campaigns (a client dashboard's locked scope); an empty set matches nothing.</param>
 /// <param name="Filters">Column key → text the column's value must contain (case-insensitive).</param>
 /// <param name="Sort">A column key; newest call first when unset.</param>
-/// <param name="AgentIds">An agent group's members (S181): calls any of them handled.</param>
+/// <param name="GroupId">An agent group (S181): calls with an interaction whose agent was in it at the time (or routed to it).</param>
 /// <param name="DnisKeys">Only calls to these numbers (PhoneKey keys).</param>
 public sealed record RecordsQuery(DateTimeOffset Since, DateTimeOffset Until, Guid? ClientId, Guid? CampaignId, IReadOnlySet<Guid>? CampaignIds,
     IReadOnlyList<string> Columns, string? Search, IReadOnlyDictionary<string, string>? Filters, string? Sort, bool Descending,
-    int Page, int PageSize, string TimeZone, IReadOnlySet<Guid>? AgentIds = null, IReadOnlySet<string>? DnisKeys = null);
+    int Page, int PageSize, string TimeZone, Guid? GroupId = null, IReadOnlySet<string>? DnisKeys = null);
 
 public sealed record RecordsRow(Guid Id, IReadOnlyDictionary<string, string?> Values);
 public sealed record RecordsPage(int Total, int Page, int PageSize, bool Truncated, IReadOnlyList<RecordColumn> Columns, IReadOnlyList<RecordsRow> Rows);
@@ -72,7 +72,7 @@ public sealed class CallRecordsReport(ScopedTenantDbContextFactory dbFactory)
 
     private sealed record Ix(Guid Id, Guid CallRecordId, int Number, Guid? CampaignId, Guid? AgentId, string? Disposition, Guid? DispositionId,
         string? OrderNumber, DateTimeOffset? OrderSubmittedAt, decimal? TotalAmount, decimal? CartTotal, string? PaymentStatus,
-        DateTimeOffset? StartedAt, string? CustomFields);
+        DateTimeOffset? StartedAt, string? CustomFields, Guid? RoutedGroupId = null, List<Guid>? AgentGroupIds = null);
 
     private sealed record Call(Guid Id, Guid CampaignId, Guid ClientId, Guid? AgentId, DateTimeOffset CreatedAt, DateTimeOffset? CallStartAt,
         int? HandleTimeSeconds, string? CallerId, string? Dnis, string OverallStatus, string? FirstName, string? LastName, string? Phone,
@@ -118,10 +118,12 @@ public sealed class CallRecordsReport(ScopedTenantDbContextFactory dbFactory)
             // The cart is a value-converted JSON column — load it whole and take its total here.
             var raw = await db.CallInteractions.AsNoTracking().Where(i => chunk.Contains(i.CallRecordId))
                 .Select(i => new { i.Id, i.CallRecordId, i.InteractionNumber, i.CampaignId, i.AgentId, i.Disposition, i.DispositionId,
-                    i.OrderNumber, i.OrderSubmittedAt, i.TotalAmount, i.Cart, i.PaymentStatus, i.StartedAt, i.CustomFields })
+                    i.OrderNumber, i.OrderSubmittedAt, i.TotalAmount, i.Cart, i.PaymentStatus, i.StartedAt, i.CustomFields,
+                    i.RoutedGroupId, i.AgentGroupIds })
                 .ToListAsync(ct);
             rows.AddRange(raw.Select(i => new Ix(i.Id, i.CallRecordId, i.InteractionNumber, i.CampaignId, i.AgentId, i.Disposition, i.DispositionId,
-                i.OrderNumber, i.OrderSubmittedAt, i.TotalAmount, i.Cart?.CartTotal, i.PaymentStatus, i.StartedAt, i.CustomFields)));
+                i.OrderNumber, i.OrderSubmittedAt, i.TotalAmount, i.Cart?.CartTotal, i.PaymentStatus, i.StartedAt, i.CustomFields,
+                i.RoutedGroupId, i.AgentGroupIds)));
         }
         return rows.GroupBy(i => i.CallRecordId).ToDictionary(g => g.Key, g => g.OrderBy(i => i.Number).ToList());
     }
@@ -162,9 +164,9 @@ public sealed class CallRecordsReport(ScopedTenantDbContextFactory dbFactory)
         if (truncated) calls.RemoveAt(calls.Count - 1);
         if (q.DnisKeys is not null) calls = calls.Where(c => Domain.ValueObjects.PhoneKey.Matches(q.DnisKeys, c.Dnis)).ToList();
         var interactions = await InteractionsAsync(db, calls.Select(c => c.Id).ToList(), ct);
-        if (q.AgentIds is not null)
-            calls = calls.Where(c => (c.AgentId is { } a && q.AgentIds.Contains(a))
-                || (interactions.GetValueOrDefault(c.Id) ?? []).Any(i => i.AgentId is { } ia && q.AgentIds.Contains(ia))).ToList();
+        if (q.GroupId is { } g)
+            calls = calls.Where(c => (interactions.GetValueOrDefault(c.Id) ?? [])
+                .Any(i => i.RoutedGroupId == g || (i.AgentGroupIds?.Contains(g) ?? false))).ToList();
 
         // Values for the shown columns, plus any column being filtered or sorted on.
         var needed = columns.Select(c => c.Key)

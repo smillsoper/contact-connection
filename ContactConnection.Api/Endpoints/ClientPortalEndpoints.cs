@@ -198,7 +198,7 @@ public static class ClientPortalEndpoints
         var (dashboard, type, config, campaigns, zone, mode, value) = (w.Dashboard, w.Type, w.Config, w.Campaigns, w.Zone, w.Mode, w.Value);
         string? Str(JsonNode? n) => n is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
         // The widget's saved agent-group and DNIS filters (S181) — narrowing inside the scope.
-        var groupAgents = await WidgetFilters.GroupAgentsAsync(Guid.TryParse(Str(config["groupId"]), out var gid) ? gid : null, agentGroups, ct);
+        Guid? groupId = Guid.TryParse(Str(config["groupId"]), out var gid) ? gid : null;
         var dnisKeys = Domain.ValueObjects.PhoneKey.Set(w.Strings("dnis"));
 
         switch (type)
@@ -212,7 +212,7 @@ public static class ClientPortalEndpoints
                 var filters = p.Filters.Where(f => columns.Contains(f.Key)).ToDictionary();
                 return Results.Ok(await records.QueryAsync(new RecordsQuery(since, until, dashboard.ScopeClientId, null, campaigns.ToHashSet(),
                     columns, p.Search, filters, p.Sort is { } so && columns.Contains(so) ? so : null, p.Desc, p.Page, p.PageSize, zone,
-                    groupAgents, dnisKeys), ct));
+                    groupId, dnisKeys), ct));
             }
             case "kpi":
             {
@@ -221,13 +221,13 @@ public static class ClientPortalEndpoints
                 var groupBy2 = Str(config["groupBy2"]);
                 return Results.Ok(await kpis.ComputeAsync(new KpiQuery(since, until, dashboard.ScopeClientId, null,
                     KpiDimension.IsValid(groupBy) ? groupBy! : "none", KpiDimension.IsValid(groupBy2) ? groupBy2 : null, zone,
-                    campaigns.ToHashSet(), groupAgents, dnisKeys), ct));
+                    campaigns.ToHashSet(), groupId, dnisKeys), ct));
             }
             case "service_level_threshold":
             {
                 if (campaigns.Count == 0) return Results.Ok(new { met = 0, missed = 0, percent_in_sl = (double?)null });
                 var (since, _) = KpiEndpoints.Window(zone, mode is "hours" or "minutes" ? mode : "today", value, DateTimeOffset.UtcNow);
-                var stats = await callStates.GetServiceLevelStatsAsync(tenant.SchemaName, campaigns.ToList(), since, ct, groupAgents, dnisKeys);
+                var stats = await callStates.GetServiceLevelStatsAsync(tenant.SchemaName, campaigns.ToList(), since, ct, groupId, dnisKeys);
                 var total = stats.Met + stats.Missed;
                 return Results.Ok(new { met = stats.Met, missed = stats.Missed, percent_in_sl = total > 0 ? Math.Round(stats.Met * 100.0 / total, 1) : (double?)null });
             }

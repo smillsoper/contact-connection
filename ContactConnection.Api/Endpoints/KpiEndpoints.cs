@@ -37,7 +37,7 @@ public static class KpiEndpoints
         var (since, until) = Window(tenant.Timezone, timeWindowMode, timeWindowValue, DateTimeOffset.UtcNow);
         var result = await kpis.ComputeAsync(new KpiQuery(since, until, clientId, campaignId,
             KpiDimension.IsValid(groupBy) ? groupBy! : "none", KpiDimension.IsValid(groupBy2) ? groupBy2 : null, tenant.Timezone,
-            AgentIds: await WidgetFilters.GroupAgentsAsync(groupId, agentGroups, ct), DnisKeys: WidgetFilters.Dnis(dnis)), ct);
+            GroupId: groupId, DnisKeys: WidgetFilters.Dnis(dnis)), ct);
         return Results.Ok(result);
     }
 

@@ -333,7 +333,7 @@ public static class DashboardWidgetsEndpoints
 
             var sinceUtc = ComputeSinceUtc(tenant.Timezone, timeWindowMode, timeWindowValue);
             var stats = await callStateHistory.GetServiceLevelStatsAsync(tenant.SchemaName, campaignIds, sinceUtc, ct,
-                await WidgetFilters.GroupAgentsAsync(groupId, agentGroups, ct), WidgetFilters.Dnis(dnis));
+                groupId, WidgetFilters.Dnis(dnis));
 
             var total = stats.Met + stats.Missed;
             return Results.Ok(new

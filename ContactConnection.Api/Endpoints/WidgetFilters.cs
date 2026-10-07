@@ -7,9 +7,10 @@ using Microsoft.EntityFrameworkCore;
 namespace ContactConnection.Api.Endpoints;
 
 /// <summary>
-/// Agent-group and DNIS filters for dashboard widgets (S181). Both narrow on top of the client / campaign filter:
-/// agent group = the agent who handled (or answered) the call — or, on agent widgets, the agents shown; DNIS = the number
-/// the caller dialed, compared on its last 10 digits.
+/// Agent-group and DNIS filters for dashboard widgets (S181). Both narrow on top of the client / campaign filter.
+/// Agent group: reporting widgets (KPIs, Service Level, Call Records) use the groups each interaction's agent was in at the
+/// time of the call (CallInteraction.AgentGroupIds, or the group it was routed through); live widgets (agents, Active Calls)
+/// use today's members. DNIS: the number the caller dialed, compared on its last 10 digits.
 /// </summary>
 public static class WidgetFilters
 {
