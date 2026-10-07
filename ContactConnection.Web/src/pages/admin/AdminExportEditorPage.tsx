@@ -692,13 +692,15 @@ export default function AdminExportEditorPage() {
 
         {activity.length > 0 && (
           <details className={card}>
-            <summary className="cursor-pointer text-sm text-gray-200 font-medium">Activity — downloads &amp; sends ({activity.length})</summary>
+            <summary className="cursor-pointer text-sm text-gray-200 font-medium">Activity — downloads &amp; sends ({activity.length}, newest first)</summary>
             <ul className="mt-3 space-y-1 text-sm">
               {activity.map((a) => (
                 <li key={a.id} className="text-gray-300">
-                  <span className="text-gray-500 text-xs mr-2">{when(a.at)}</span>
-                  <span className={a.action === 'delivery_failed' ? 'text-red-400' : a.action === 'delivered' ? 'text-emerald-300' : 'text-gray-200'}>
-                    {{ downloaded: 'Downloaded', delivered: 'Sent', delivery_failed: 'Send failed', send_requested: 'Send requested', file_expired: 'File deleted', host_key_pinned: 'Host key pinned' }[a.action] ?? a.action}
+                  <span className="text-gray-500 text-xs mr-2 tabular-nums">
+                    {new Date(a.at).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' })}
+                  </span>
+                  <span className={a.action === 'delivery_failed' ? 'text-red-400' : a.action === 'delivered' ? 'text-emerald-300' : a.action.startsWith('card_data') ? 'text-amber-300' : 'text-gray-200'}>
+                    {{ downloaded: 'Downloaded', delivered: 'Sent', delivery_failed: 'Send failed', send_requested: 'Send requested', file_expired: 'File deleted', host_key_pinned: 'Host key pinned', card_data_generated: 'Card-data file built (stored encrypted)', card_data_wiped: 'Card data wiped' }[a.action] ?? a.action}
                   </span>
                   {a.detail && <span> — {a.detail}</span>}
                   {a.actorName && <span className="text-gray-500"> — {a.actorName}</span>}
