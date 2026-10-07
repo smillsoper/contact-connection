@@ -4,8 +4,8 @@ import { create } from 'zustand'
  * Bridge to the ContactConnection Agent browser extension (S183, ContactConnection.Extension/). The page and the
  * extension's content script talk over window.postMessage:
  *   page → extension: hello (this is the portal) · focus (bring this tab forward) · capture on|off (report clicks)
- *   extension → page: ready (installed, version) · input (a click on a ContactConnection page; extensions ≥ 0.3.0
- *   never send keys — 'key' remains in the type only so older recordings' cues still render)
+ *   extension → page: loaded (just installed/updated — say hello) · ready (installed, version) · input (a click on a
+ *   ContactConnection page; extensions ≥ 0.3.0 never send keys — 'key' stays in the type so older cues still render)
  * Without the extension everything here is a no-op and the portal works as before.
  */
 
@@ -43,6 +43,8 @@ export function connectExtension() {
     window.addEventListener('message', (e) => {
       if (e.source !== window || !e.data || e.data.source !== FROM_EXT) return
       if (e.data.type === 'ready') useExtensionStore.setState({ installed: true, version: e.data.version ?? null })
+      // The extension was just installed or updated and loaded itself into this already-open page: introduce ourselves.
+      else if (e.data.type === 'loaded') post({ type: 'hello' })
       else if (e.data.type === 'input' && e.data.event) inputListeners.forEach((fn) => fn(e.data.event as ExtensionInputEvent))
     })
   }

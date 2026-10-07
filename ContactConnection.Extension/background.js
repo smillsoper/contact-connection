@@ -127,4 +127,20 @@ async function dropPortal(tabId) {
 
 // A fresh browser session starts with nothing recording.
 chrome.runtime.onStartup.addListener(() => { void setState({ portalTabIds: [], capturing: false }) })
-chrome.runtime.onInstalled.addListener(() => { void setState({ portalTabIds: [], capturing: false }) })
+chrome.runtime.onInstalled.addListener(() => {
+  void setState({ portalTabIds: [], capturing: false })
+  void loadIntoOpenTabs()
+})
+
+/**
+ * Chrome doesn't load content scripts into tabs that were open before an install or update, so the agent would have to
+ * reload the portal (mid-shift, maybe mid-call). Load it into the ContactConnection tabs that are already open instead.
+ */
+async function loadIntoOpenTabs() {
+  const { content_scripts: [cs] } = chrome.runtime.getManifest()
+  const tabs = await chrome.tabs.query({ url: cs.matches })
+  for (const t of tabs) {
+    if (!t.id || t.discarded) continue
+    chrome.scripting.executeScript({ target: { tabId: t.id, allFrames: true }, files: cs.js }).catch(() => {})
+  }
+}

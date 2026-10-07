@@ -35,7 +35,7 @@ export function ExtensionInstallButton({ compact = false }: { compact?: boolean 
         ) : (
           <span className="text-sm text-amber-300">The extension is awaiting {isEdge() ? 'Edge Add-ons' : 'Chrome Web Store'} approval — your administrator can install it for you in the meantime.</span>
         )}
-        <button onClick={() => { setChecking(true); connectExtension(); setTimeout(() => setChecking(false), 1500) }}
+        <button onClick={() => { setChecking(true); useExtensionStore.setState({ installed: false, version: null }); connectExtension(); setTimeout(() => setChecking(false), 1500) }}
           className="text-sm text-gray-400 hover:text-white underline">{checking ? 'Checking…' : "I've installed it"}</button>
       </div>
     </div>

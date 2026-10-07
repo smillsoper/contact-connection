@@ -6,8 +6,11 @@
 // coordinates). Keystrokes are never captured — not on our pages, not anywhere.
 
 (() => {
-  if (window.__ccAgentContent) return
-  window.__ccAgentContent = true
+  // After an update, the new copy is loaded into tabs that were already open, next to the old copy (which can no longer
+  // reach the extension). The newest copy owns the page; older ones stand down.
+  const token = Math.random()
+  window.__ccAgentToken = token
+  const current = () => window.__ccAgentToken === token
 
   const FROM_PAGE = 'cc-portal'
   const FROM_EXT  = 'cc-extension'
@@ -22,8 +25,9 @@
 
   // ── Portal bridge (top frame only) ────────────────────────────────────────
   if (isTop) {
+    window.postMessage({ source: FROM_EXT, type: 'loaded' }, window.location.origin)
     window.addEventListener('message', async (e) => {
-      if (e.source !== window || !e.data || e.data.source !== FROM_PAGE) return
+      if (!current() || e.source !== window || !e.data || e.data.source !== FROM_PAGE) return
       const { type } = e.data
       if (type === 'hello') {
         // The background decides from the tab's real address — only a ContactConnection portal is accepted.
@@ -40,6 +44,7 @@
   }
 
   chrome.runtime.onMessage.addListener((msg) => {
+    if (!current()) return
     if (msg?.cc === 'capture') capturing = !!msg.on
     else if (msg?.cc === 'input' && isTop && isPortal)
       window.postMessage({ source: FROM_EXT, type: 'input', event: msg.event }, window.location.origin)
@@ -54,7 +59,7 @@
   })
 
   window.addEventListener('pointerdown', (e) => {
-    if (!capturing || !e.isPrimary) return
+    if (!capturing || !e.isPrimary || !current()) return
     send({ cc: 'input', event: {
       kind: 'click', t: Date.now(), sx: e.screenX, sy: e.screenY, dpr: window.devicePixelRatio || 1, scr: screenInfo(),
     } })
