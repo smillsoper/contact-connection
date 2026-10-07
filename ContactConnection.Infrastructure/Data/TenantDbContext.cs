@@ -16,6 +16,13 @@ public class TenantDbContext : DbContext
     public TenantDbContext(DbContextOptions<TenantDbContext> options) : base(options) { }
 
     public DbSet<Agent> Agents => Set<Agent>();
+    // Team chat (S183)
+    public DbSet<ChatChannel> ChatChannels => Set<ChatChannel>();
+    public DbSet<ChatMember> ChatMembers => Set<ChatMember>();
+    public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+    public DbSet<ChatReaction> ChatReactions => Set<ChatReaction>();
+    public DbSet<AgentSupervisor> AgentSupervisors => Set<AgentSupervisor>();
+    public DbSet<HelpRequest> HelpRequests => Set<HelpRequest>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<CallRecord> CallRecords => Set<CallRecord>();
     public DbSet<CallInteraction> CallInteractions => Set<CallInteraction>();
@@ -158,6 +165,12 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new ClientUserConfiguration());
         modelBuilder.ApplyConfiguration(new ClientUserDashboardConfiguration());
         modelBuilder.ApplyConfiguration(new ClientUserAuditEntryConfiguration());
+        modelBuilder.ApplyConfiguration(new ChatChannelConfiguration());
+        modelBuilder.ApplyConfiguration(new ChatMemberConfiguration());
+        modelBuilder.ApplyConfiguration(new ChatMessageConfiguration());
+        modelBuilder.ApplyConfiguration(new ChatReactionConfiguration());
+        modelBuilder.ApplyConfiguration(new AgentSupervisorConfiguration());
+        modelBuilder.ApplyConfiguration(new HelpRequestConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 

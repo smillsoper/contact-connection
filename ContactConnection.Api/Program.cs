@@ -242,6 +242,11 @@ builder.Services.AddAuthorization(options =>
             (ctx.User.FindFirst("permissions")?.Value ?? "")
                 .Split(',', StringSplitOptions.RemoveEmptyEntries)
                 .Contains(Permission.ReportsView)));
+    options.AddPolicy("ChatManage", policy =>
+        policy.RequireAssertion(ctx =>
+            (ctx.User.FindFirst("permissions")?.Value ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Contains(Permission.ChatManage)));
     options.AddPolicy("ReportsManage", policy =>
         policy.RequireAssertion(ctx =>
             (ctx.User.FindFirst("permissions")?.Value ?? "")
@@ -295,6 +300,7 @@ app.MapCampaignsEndpoints();
 app.MapCampaignExternalNumbersEndpoints();
 app.MapPhoneNumbersEndpoints();
 app.MapPhoneNumbersBulkEndpoints();
+app.MapChatEndpoints();
 app.MapAssignmentMatrixEndpoints();
 app.MapNumberProvidersEndpoints();
 app.MapExternalRoutingEndpoints();
@@ -360,5 +366,6 @@ app.MapWebhooksEndpoints();
 app.MapHub<FlowHub>("/hubs/flow");
 app.MapHub<CallTraceHub>("/hubs/call-trace");
 app.MapHub<ClientDashboardHub>("/hubs/client");
+app.MapHub<ChatHub>("/hubs/chat");
 
 app.Run();

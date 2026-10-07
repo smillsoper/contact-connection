@@ -5,6 +5,9 @@ import { rolesApi, type Role } from '../../api/roles'
 import { agentLockApi } from '../../api/agentLock'
 import { useAuthStore } from '../../stores/authStore'
 import { TIMEZONE_GROUPS } from '../../utils/timezones'
+import { api } from '../../api/client'
+import { chatAdminApi } from '../../api/chat'
+import { PeoplePicker } from './AdminChatPage'
 
 export default function AdminAgentsPage() {
   const canUnlock = useAuthStore((s) => s.hasPermission('agents.manage'))
@@ -18,6 +21,18 @@ export default function AdminAgentsPage() {
   const [resetPw, setResetPw] = useState('')
   const [resetError, setResetError] = useState<string | null>(null)
   const [resetSaving, setResetSaving] = useState(false)
+
+  // Assigned supervisors (S183) — who an agent's raise-hand in Team Chat reaches first.
+  const [supMap, setSupMap] = useState<Record<string, string[]>>({})
+  const [supFor, setSupFor] = useState<string | null>(null)
+  useEffect(() => {
+    api.get<{ agentId: string; supervisorId: string }[]>('/api/v1/admin/agent-supervisors')
+      .then((rows) => {
+        const m: Record<string, string[]> = {}
+        for (const r of rows) (m[r.agentId] ??= []).push(r.supervisorId)
+        setSupMap(m)
+      }).catch(() => {})
+  }, [])
 
   // Per-row update (role/status) state
   const [updatingId, setUpdatingId] = useState<string | null>(null)
@@ -237,6 +252,7 @@ export default function AdminAgentsPage() {
                   <th className="px-4 py-3 font-medium">Email</th>
                   <th className="px-4 py-3 font-medium">Role</th>
                   <th className="px-4 py-3 font-medium">Timezone</th>
+                  <th className="px-4 py-3 font-medium" title="Who this person's raise-hand in Team Chat reaches first">Supervisors</th>
                   <th className="px-4 py-3 font-medium">Status</th>
                   <th className="px-4 py-3 font-medium">Last login</th>
                   <th className="px-4 py-3 font-medium"></th>
@@ -295,6 +311,14 @@ export default function AdminAgentsPage() {
                           ))}
                         </select>
                       </td>
+                      <td className="px-4 py-3 text-xs">
+                        <button onClick={() => setSupFor((cur) => (cur === agent.id ? null : agent.id))}
+                          className="text-left text-gray-300 hover:text-white" title="Set supervisors">
+                          {(supMap[agent.id] ?? []).length > 0
+                            ? (supMap[agent.id] ?? []).map((id) => agents.find((a) => a.id === id)?.firstName ?? '?').join(', ')
+                            : <span className="text-gray-600">— set</span>}
+                        </button>
+                      </td>
                       <td className="px-4 py-3">
                         <button
                           onClick={() => handleToggleActive(agent)}
@@ -331,10 +355,22 @@ export default function AdminAgentsPage() {
                       </td>
                     </tr>
 
+                    {supFor === agent.id && (
+                      <tr key={`${agent.id}-sup`} className="border-b border-gray-800 bg-gray-800/30">
+                        <td colSpan={8} className="px-4 py-3">
+                          <SupervisorEditor agentId={agent.id}
+                            people={agents.filter((a) => a.id !== agent.id && a.isActive).map((a) => ({ id: a.id, name: `${a.firstName} ${a.lastName}`.trim(), email: a.email }))}
+                            initial={supMap[agent.id] ?? []}
+                            onSaved={(ids) => { setSupMap((m) => ({ ...m, [agent.id]: ids })); setSupFor(null) }}
+                            onCancel={() => setSupFor(null)} />
+                        </td>
+                      </tr>
+                    )}
+
                     {/* Inline reset password row */}
                     {resetId === agent.id && (
                       <tr key={`${agent.id}-reset`} className="border-b border-gray-800 bg-gray-800/30">
-                        <td colSpan={7} className="px-4 py-3">
+                        <td colSpan={8} className="px-4 py-3">
                           <div className="flex items-center gap-3">
                             <input
                               type="password"
@@ -366,5 +402,28 @@ export default function AdminAgentsPage() {
         )}
       </div>
     </AdminShell>
+  )
+}
+
+function SupervisorEditor({ agentId, people, initial, onSaved, onCancel }: {
+  agentId: string; people: { id: string; name: string; email: string }[]; initial: string[]
+  onSaved: (ids: string[]) => void; onCancel: () => void
+}) {
+  const [chosen, setChosen] = useState(initial)
+  const [error, setError] = useState<string | null>(null)
+  async function save() {
+    try { onSaved(await chatAdminApi.setSupervisors(agentId, chosen)) }
+    catch (e) { setError(e instanceof Error ? e.message : 'Save failed.') }
+  }
+  return (
+    <div>
+      <p className="text-xs text-gray-400 mb-1.5">Supervisors — their “Ask a supervisor for help” in Team Chat alerts these people first (all on-duty supervisors when none of them is on duty).</p>
+      <PeoplePicker people={people} chosen={chosen} onChange={setChosen} />
+      <div className="flex gap-3 mt-2">
+        <button onClick={() => void save()} className="bg-indigo-600 hover:bg-indigo-500 text-white rounded px-3 py-1 text-xs font-medium">Save</button>
+        <button onClick={onCancel} className="text-gray-400 hover:text-white text-xs">Cancel</button>
+        {error && <span className="text-red-400 text-xs">{error}</span>}
+      </div>
+    </div>
   )
 }

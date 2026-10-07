@@ -1,0 +1,407 @@
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { chatApi, stateStyle, type ChatMessage, type ChatUser } from '../../api/chat'
+import { useChatStore, channelTitle, canPost } from '../../stores/chatStore'
+import { plainText } from '../../lib/chatConnection'
+
+const QUICK_REACTIONS = ['👍', '❤️', '😂', '🎉', '👀', '✅']
+
+// ── Conversation (a channel or DM) ───────────────────────────────────────────
+
+export function Conversation({ channelId }: { channelId: string }) {
+  const channel = useChatStore((s) => s.channels[channelId])
+  const page = useChatStore((s) => s.messages[channelId])
+  const users = useChatStore((s) => s.users)
+  const me = useChatStore((s) => s.me)
+  const visible = useChatStore((s) => s.visible)
+  const setView = useChatStore((s) => s.setView)
+  const [error, setError] = useState<string | null>(null)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const stickToBottom = useRef(true)
+
+  useEffect(() => {
+    if (page?.loaded) return
+    chatApi.messages(channelId)
+      .then((r) => useChatStore.getState().setPage(channelId, r.messages, r.hasMore, false))
+      .catch((e: Error) => setError(e.message))
+  }, [channelId, page?.loaded])
+
+  // Read while on screen: on open and whenever something new arrives.
+  const lastId = page?.messages[page.messages.length - 1]?.id
+  useEffect(() => {
+    if (!visible || document.visibilityState !== 'visible' || !channel) return
+    if (channel.unread === 0 && channel.mentions === 0 && lastId === undefined) return
+    const t = setTimeout(() => {
+      useChatStore.getState().markRead(channelId, new Date().toISOString())
+      chatApi.read(channelId).catch(() => {})
+    }, 400)
+    return () => clearTimeout(t)
+  }, [channelId, lastId, visible, channel?.unread]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (el && stickToBottom.current) el.scrollTop = el.scrollHeight
+  }, [lastId, page?.messages.length])
+
+  async function older() {
+    const first = page?.messages[0]
+    if (!first || loadingOlder) return
+    setLoadingOlder(true)
+    const el = scrollRef.current
+    const prevHeight = el?.scrollHeight ?? 0
+    try {
+      const r = await chatApi.messages(channelId, first.createdAt)
+      useChatStore.getState().setPage(channelId, r.messages, r.hasMore, true)
+      requestAnimationFrame(() => { if (el) el.scrollTop = el.scrollHeight - prevHeight })
+    } finally { setLoadingOlder(false) }
+  }
+
+  if (!channel) return <p className="p-4 text-xs text-gray-500">That conversation isn't available.</p>
+  const title = channelTitle(channel, users, me?.id)
+  const others = channel.memberIds.filter((id) => id !== me?.id)
+  const single = channel.kind === 'dm' && others.length === 1 ? users[others[0]] : null
+  const allowed = canPost(channel, me?.id, !!me?.isManager)
+
+  return (
+    <div className="flex flex-col h-full min-h-0">
+      <div className="px-3 py-2 border-b border-gray-800 flex items-center gap-2 shrink-0">
+        <button onClick={() => setView({ kind: 'list' })} className="text-gray-400 hover:text-white text-sm" title="Back">←</button>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm text-white font-medium truncate" title={title}>{title}</p>
+          {single ? <StateLine user={single} /> : (
+            <p className="text-[11px] text-gray-500 truncate">
+              {channel.kind === 'channel' && channel.description ? channel.description : `${channel.memberIds.length} members`}
+            </p>
+          )}
+        </div>
+        {channel.canLeave && (
+          <button onClick={() => chatApi.leave(channelId).catch((e: Error) => setError(e.message))}
+            className="text-[11px] text-gray-500 hover:text-red-300" title="Leave this channel">Leave</button>
+        )}
+      </div>
+
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-3 py-2"
+        onScroll={(e) => { const el = e.currentTarget; stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60 }}>
+        {page?.hasMore && (
+          <button onClick={() => void older()} className="w-full text-[11px] text-gray-500 hover:text-gray-300 py-1">
+            {loadingOlder ? 'Loading…' : 'Load earlier messages'}
+          </button>
+        )}
+        {!page?.loaded && !error && <p className="text-xs text-gray-500">Loading…</p>}
+        {page?.loaded && page.messages.length === 0 && (
+          <p className="text-xs text-gray-500 mt-4 text-center">No messages yet{allowed ? ' — say hello.' : '.'}</p>
+        )}
+        <MessageList messages={page?.messages ?? []} users={users} meId={me?.id} isManager={!!me?.isManager}
+          retired={channel.retired} onThread={(m) => setView({ kind: 'thread', channelId, parentId: m.id })} />
+        <TypingLine channelId={channelId} />
+      </div>
+
+      {error && <p className="px-3 text-[11px] text-red-400">{error}</p>}
+      {allowed
+        ? <Composer channelId={channelId} placeholder={`Message ${title}`} />
+        : <p className="px-3 py-2 text-[11px] text-amber-300 border-t border-gray-800">
+            {channel.retired ? 'This channel is retired — its history is read-only.' : 'Only selected people can post in this channel.'}
+          </p>}
+    </div>
+  )
+}
+
+// ── Thread ───────────────────────────────────────────────────────────────────
+
+export function ThreadView({ channelId, parentId }: { channelId: string; parentId: string }) {
+  const channel = useChatStore((s) => s.channels[channelId])
+  const parent = useChatStore((s) => s.messages[channelId]?.messages.find((m) => m.id === parentId))
+  const replies = useChatStore((s) => s.threads[parentId])
+  const users = useChatStore((s) => s.users)
+  const me = useChatStore((s) => s.me)
+  const setView = useChatStore((s) => s.setView)
+  const [loadedParent, setLoadedParent] = useState<ChatMessage | null>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    chatApi.thread(parentId).then((t) => { setLoadedParent(t.parent); useChatStore.getState().setThread(parentId, t.replies) }).catch(() => {})
+  }, [parentId])
+  useEffect(() => { const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight }, [replies?.length])
+
+  const p = parent ?? loadedParent
+  const allowed = channel ? canPost(channel, me?.id, !!me?.isManager) : false
+  return (
+    <div className="flex flex-col h-full min-h-0">
+      <div className="px-3 py-2 border-b border-gray-800 flex items-center gap-2 shrink-0">
+        <button onClick={() => setView({ kind: 'channel', channelId })} className="text-gray-400 hover:text-white text-sm" title="Back">←</button>
+        <div className="min-w-0">
+          <p className="text-sm text-white font-medium">Thread</p>
+          {channel && <p className="text-[11px] text-gray-500 truncate">{channelTitle(channel, users, me?.id)}</p>}
+        </div>
+      </div>
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
+        {p && <MessageList messages={[p]} users={users} meId={me?.id} isManager={!!me?.isManager} retired={!!channel?.retired} />}
+        <div className="border-t border-gray-800 my-2 text-[10px] text-gray-500 pt-1">
+          {(replies?.length ?? 0)} {replies?.length === 1 ? 'reply' : 'replies'}
+        </div>
+        <MessageList messages={replies ?? []} users={users} meId={me?.id} isManager={!!me?.isManager} retired={!!channel?.retired} />
+      </div>
+      {allowed && <Composer channelId={channelId} parentId={parentId} placeholder="Reply…" />}
+    </div>
+  )
+}
+
+// ── Messages ─────────────────────────────────────────────────────────────────
+
+function dayLabel(iso: string) {
+  const d = new Date(iso), today = new Date()
+  const y = new Date(); y.setDate(today.getDate() - 1)
+  if (d.toDateString() === today.toDateString()) return 'Today'
+  if (d.toDateString() === y.toDateString()) return 'Yesterday'
+  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+}
+const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+
+export function MessageList({ messages, users, meId, isManager, retired, onThread }: {
+  messages: ChatMessage[]; users: Record<string, ChatUser>; meId?: string; isManager: boolean; retired: boolean
+  onThread?: (m: ChatMessage) => void
+}) {
+  return (
+    <>
+      {messages.map((m, i) => {
+        const prev = messages[i - 1]
+        const newDay = !prev || new Date(prev.createdAt).toDateString() !== new Date(m.createdAt).toDateString()
+        const grouped = !newDay && !!prev && prev.agentId === m.agentId && prev.kind === m.kind
+          && new Date(m.createdAt).getTime() - new Date(prev.createdAt).getTime() < 5 * 60_000
+        return (
+          <Fragment key={m.id}>
+            {newDay && <div className="text-center text-[10px] text-gray-500 my-2">{dayLabel(m.createdAt)}</div>}
+            <MessageItem m={m} users={users} meId={meId} isManager={isManager} retired={retired} grouped={grouped} onThread={onThread} />
+          </Fragment>
+        )
+      })}
+    </>
+  )
+}
+
+function MessageItem({ m, users, meId, isManager, retired, grouped, onThread }: {
+  m: ChatMessage; users: Record<string, ChatUser>; meId?: string; isManager: boolean; retired: boolean; grouped: boolean
+  onThread?: (m: ChatMessage) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [picker, setPicker] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const author = m.agentId ? users[m.agentId] : null
+  const mine = !!meId && m.agentId === meId
+
+  if (m.kind === 'system') {
+    return <p className="text-[11px] text-sky-300/90 italic my-1.5 px-1">{plainText(m.body, users)} <span className="text-gray-600">{time(m.createdAt)}</span></p>
+  }
+
+  return (
+    <div className={`group relative rounded px-1 ${grouped ? 'mt-0.5' : 'mt-2'} hover:bg-gray-800/40`}>
+      {!grouped && (
+        <div className="flex items-baseline gap-2">
+          <span className="text-xs font-semibold text-gray-100">{author?.name ?? 'Former user'}</span>
+          <span className="text-[10px] text-gray-500">{time(m.createdAt)}</span>
+        </div>
+      )}
+      {m.deleted ? <p className="text-xs text-gray-600 italic">Message deleted</p>
+        : editing ? <EditBox m={m} users={users} onDone={() => setEditing(false)} />
+        : <p className="text-xs text-gray-200 whitespace-pre-wrap break-words leading-relaxed"><Body text={m.body} users={users} meId={meId} />
+            {m.editedAt && <span className="text-[10px] text-gray-500"> (edited)</span>}</p>}
+
+      {m.reactions.length > 0 && !m.deleted && (
+        <div className="flex flex-wrap gap-1 mt-1">
+          {m.reactions.map((r) => {
+            const reacted = !!meId && r.agentIds.includes(meId)
+            const who = r.agentIds.map((id) => users[id]?.name ?? 'Someone').join(', ')
+            return (
+              <button key={r.emoji} disabled={retired} title={who}
+                onClick={() => chatApi.react(m.id, r.emoji).catch((e: Error) => setError(e.message))}
+                className={`text-[11px] rounded-full px-1.5 py-0.5 border ${reacted ? 'border-indigo-500 bg-indigo-950/60 text-indigo-200' : 'border-gray-700 bg-gray-800/60 text-gray-300'}`}>
+                {r.emoji} {r.agentIds.length}
+              </button>
+            )
+          })}
+        </div>
+      )}
+      {onThread && m.replyCount > 0 && (
+        <button onClick={() => onThread(m)} className="text-[11px] text-indigo-300 hover:text-indigo-200 mt-0.5">
+          {m.replyCount} {m.replyCount === 1 ? 'reply' : 'replies'}{m.lastReplyAt ? ` · last ${time(m.lastReplyAt)}` : ''}
+        </button>
+      )}
+      {error && <p className="text-[10px] text-red-400">{error}</p>}
+
+      {!m.deleted && !editing && !retired && (
+        <div className="absolute -top-3 right-1 hidden group-hover:flex items-center gap-0.5 bg-gray-900 border border-gray-700 rounded px-1 shadow">
+          <button onClick={() => setPicker((v) => !v)} className="text-xs px-1 hover:bg-gray-800 rounded" title="React">☺</button>
+          {onThread && <button onClick={() => onThread(m)} className="text-xs px-1 hover:bg-gray-800 rounded" title="Reply in thread">↩</button>}
+          {mine && <button onClick={() => setEditing(true)} className="text-xs px-1 hover:bg-gray-800 rounded" title="Edit">✎</button>}
+          {(mine || isManager) && (
+            <button onClick={() => chatApi.remove(m.id).catch((e: Error) => setError(e.message))}
+              className="text-xs px-1 hover:bg-gray-800 rounded text-red-300" title="Delete">🗑</button>
+          )}
+        </div>
+      )}
+      {picker && (
+        <div className="absolute right-1 top-4 z-10 flex gap-0.5 bg-gray-900 border border-gray-700 rounded px-1 py-0.5 shadow">
+          {QUICK_REACTIONS.map((e) => (
+            <button key={e} onClick={() => { setPicker(false); chatApi.react(m.id, e).catch((x: Error) => setError(x.message)) }}
+              className="text-sm px-0.5 hover:bg-gray-800 rounded">{e}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Text with mentions as highlighted names and links clickable — React escapes everything else. */
+function Body({ text, users, meId }: { text: string; users: Record<string, ChatUser>; meId?: string }) {
+  const parts = text.split(/(<@[0-9a-fA-F-]{36}>|https?:\/\/[^\s<]+)/g)
+  return (
+    <>
+      {parts.map((p, i) => {
+        const mention = /^<@([0-9a-fA-F-]{36})>$/.exec(p)
+        if (mention) {
+          const isMe = mention[1].toLowerCase() === meId?.toLowerCase()
+          return <span key={i} className={`rounded px-0.5 ${isMe ? 'bg-amber-500/25 text-amber-200' : 'bg-indigo-500/20 text-indigo-200'}`}>@{users[mention[1]]?.name ?? 'someone'}</span>
+        }
+        if (/^https?:\/\//.test(p)) return <a key={i} href={p} target="_blank" rel="noreferrer noopener" className="text-sky-300 underline break-all">{p}</a>
+        return <Fragment key={i}>{p}</Fragment>
+      })}
+    </>
+  )
+}
+
+function TypingLine({ channelId }: { channelId: string }) {
+  const typing = useChatStore((s) => s.typing[channelId])
+  const users = useChatStore((s) => s.users)
+  const [, tick] = useState(0)
+  useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t) }, [])
+  const now = Date.now()
+  const names = Object.entries(typing ?? {}).filter(([, until]) => until > now).map(([id]) => users[id]?.name.split(' ')[0] ?? 'Someone')
+  if (names.length === 0) return null
+  return <p className="text-[10px] text-gray-500 italic mt-1">{names.join(', ')} {names.length === 1 ? 'is' : 'are'} typing…</p>
+}
+
+export function StateLine({ user }: { user: ChatUser }) {
+  const st = stateStyle(user.state)
+  return (
+    <p className="text-[11px] text-gray-500 flex items-center gap-1.5 truncate">
+      <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${st.dot}`} />{st.text}
+    </p>
+  )
+}
+
+// ── Composer ─────────────────────────────────────────────────────────────────
+
+/** Mentions are typed as @Name (picked from a list) and sent as <@id> tokens. */
+function useMentions(users: Record<string, ChatUser>, meId?: string) {
+  const picked = useRef(new Map<string, string>())   // display name → id
+  const encode = (text: string) => {
+    let out = text
+    for (const [name, id] of [...picked.current.entries()].sort((a, b) => b[0].length - a[0].length))
+      out = out.split(`@${name}`).join(`<@${id}>`)
+    return out
+  }
+  const candidates = (q: string) => Object.values(users)
+    .filter((u) => u.id !== meId && u.name.toLowerCase().includes(q.toLowerCase())).slice(0, 6)
+  return { picked, encode, candidates }
+}
+
+function Composer({ channelId, parentId, placeholder }: { channelId: string; parentId?: string; placeholder: string }) {
+  const users = useChatStore((s) => s.users)
+  const meId = useChatStore((s) => s.me?.id)
+  const [text, setText] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [sending, setSending] = useState(false)
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null)
+  const [highlight, setHighlight] = useState(0)
+  const ref = useRef<HTMLTextAreaElement>(null)
+  const lastTyping = useRef(0)
+  const { picked, encode, candidates } = useMentions(users, meId)
+  const list = useMemo(() => (mentionQuery === null ? [] : candidates(mentionQuery)), [mentionQuery, users]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function onChange(v: string) {
+    setText(v)
+    const caret = ref.current?.selectionStart ?? v.length
+    const before = v.slice(0, caret)
+    const at = /(?:^|\s)@([^\s@]{0,30})$/.exec(before)
+    setMentionQuery(at ? at[1] : null)
+    setHighlight(0)
+    if (Date.now() - lastTyping.current > 3000) { lastTyping.current = Date.now(); chatApi.typing(channelId).catch(() => {}) }
+  }
+
+  function pick(u: ChatUser) {
+    const caret = ref.current?.selectionStart ?? text.length
+    const before = text.slice(0, caret).replace(/@([^\s@]{0,30})$/, `@${u.name} `)
+    picked.current.set(u.name, u.id)
+    setText(before + text.slice(caret))
+    setMentionQuery(null)
+    requestAnimationFrame(() => { ref.current?.focus(); ref.current?.setSelectionRange(before.length, before.length) })
+  }
+
+  async function send() {
+    const body = encode(text).trim()
+    if (!body || sending) return
+    setSending(true); setError(null)
+    try {
+      await chatApi.post(channelId, body, parentId)
+      setText(''); picked.current.clear()
+    } catch (e) { setError(e instanceof Error ? e.message : 'Send failed.') }
+    finally { setSending(false); ref.current?.focus() }
+  }
+
+  return (
+    <div className="relative border-t border-gray-800 p-2 shrink-0">
+      {list.length > 0 && (
+        <div className="absolute bottom-full left-2 right-2 mb-1 bg-gray-900 border border-gray-700 rounded shadow-lg z-20">
+          {list.map((u, i) => (
+            <button key={u.id} onMouseDown={(e) => { e.preventDefault(); pick(u) }}
+              className={`w-full text-left px-2 py-1 text-xs flex items-center gap-2 ${i === highlight ? 'bg-indigo-900/50 text-white' : 'text-gray-300'}`}>
+              <span className={`inline-block w-2 h-2 rounded-full ${stateStyle(u.state).dot}`} />{u.name}
+            </button>
+          ))}
+        </div>
+      )}
+      <textarea ref={ref} value={text} rows={2} placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (list.length > 0) {
+            if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight((h) => (h + 1) % list.length); return }
+            if (e.key === 'ArrowUp') { e.preventDefault(); setHighlight((h) => (h - 1 + list.length) % list.length); return }
+            if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pick(list[highlight]); return }
+            if (e.key === 'Escape') { setMentionQuery(null); return }
+          }
+          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() }
+        }}
+        className="w-full resize-none bg-gray-800 text-white text-xs rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-indigo-500" />
+      <div className="flex items-center justify-between mt-1">
+        <span className="text-[10px] text-gray-600">Enter to send · Shift+Enter for a new line · @ to mention</span>
+        <button onClick={() => void send()} disabled={sending || !text.trim()}
+          className="text-[11px] bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded px-2 py-0.5">Send</button>
+      </div>
+      {error && <p className="text-[11px] text-red-400 mt-1">{error}</p>}
+    </div>
+  )
+}
+
+function EditBox({ m, users, onDone }: { m: ChatMessage; users: Record<string, ChatUser>; onDone: () => void }) {
+  // Show mentions as @Name while editing; turn them back into tokens on save.
+  const [text, setText] = useState(() => plainText(m.body, users))
+  const [error, setError] = useState<string | null>(null)
+  async function save() {
+    let body = text
+    for (const id of m.mentionIds) { const n = users[id]?.name; if (n) body = body.split(`@${n}`).join(`<@${id}>`) }
+    try { await chatApi.edit(m.id, body.trim()); onDone() }
+    catch (e) { setError(e instanceof Error ? e.message : 'Save failed.') }
+  }
+  return (
+    <div className="mt-1">
+      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={2} autoFocus
+        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void save() } if (e.key === 'Escape') onDone() }}
+        className="w-full resize-none bg-gray-800 text-white text-xs rounded px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-500" />
+      <div className="flex gap-2 text-[11px]">
+        <button onClick={() => void save()} className="text-indigo-300 hover:text-indigo-200">Save</button>
+        <button onClick={onDone} className="text-gray-500 hover:text-white">Cancel</button>
+        {error && <span className="text-red-400">{error}</span>}
+      </div>
+    </div>
+  )
+}

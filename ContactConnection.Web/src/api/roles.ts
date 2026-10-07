@@ -45,6 +45,7 @@ export const PERMISSION_LABELS: Record<string, string> = {
   'softphone.internal_list': 'Included in Softphone Internal Dial List',
   'billing.manage':        'Manage Billing (pay ContactConnection invoices)',
   'exports.card_data':     'Create / change data exports that include card data (when enabled for the account)',
+  'chat.manage':           'Manage Team Chat (channels, members, posting, retiring)',
 }
 
 export const PERMISSION_GROUPS: Record<string, string[]> = {
@@ -61,6 +62,7 @@ export const PERMISSION_GROUPS: Record<string, string[]> = {
   Softphone:   ['calls.direct_dial', 'softphone.internal_list'],
   Billing:     ['billing.manage'],
   'Data Exports': ['exports.card_data'],
+  'Team Chat':  ['chat.manage'],
 }
 
 export const LANDING_PAGE_LABELS: Record<string, string> = {

@@ -52,6 +52,7 @@ const NAV_SECTIONS: NavSection[] = [
     heading: 'Account',
     cards: [
       { title: 'Billing', desc: 'Your ContactConnection invoices, payment method and autopay.', path: '/admin/billing', live: true, requiredPermission: 'billing.manage' },
+      { title: 'Team Chat', desc: 'Channels, who is in them, who can post, and retiring old channels.', path: '/admin/chat', live: true, requiredPermission: 'chat.manage' },
     ],
   },
   {

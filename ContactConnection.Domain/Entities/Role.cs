@@ -91,6 +91,9 @@ public static class Permission
     /// <summary>Create or change a data export that includes card data (S182; the tenant's Card data exports switch must be on).</summary>
     public const string ExportsCardData = "exports.card_data";
 
+    /// <summary>Team chat configuration (S183): create / configure / retire channels, assign members and posters.</summary>
+    public const string ChatManage = "chat.manage";
+
     public static readonly IReadOnlyList<string> All = [
         AgentsView, AgentsManage, RolesManage,
         FlowsView, FlowsManage, FlowsPublish,
@@ -103,7 +106,8 @@ public static class Permission
         TrainingMode,
         DirectDial, InternalDialList,
         BillingManage,
-        ExportsCardData
+        ExportsCardData,
+        ChatManage
     ];
 
     // Permissions derived from legacy AgentRole strings (for agents without a custom RoleId)

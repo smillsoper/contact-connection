@@ -1,3 +1,4 @@
+import ChatLauncher from '../chat/ChatLauncher'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../stores/authStore'
@@ -85,6 +86,7 @@ export default function AdminShell({ children }: Props) {
       <main className="flex-1 overflow-auto">
         {children}
       </main>
+      <ChatLauncher />
     </div>
   )
 }

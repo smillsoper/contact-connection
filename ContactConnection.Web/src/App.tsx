@@ -25,6 +25,7 @@ import AdminProductsPage from './pages/admin/AdminProductsPage'
 import AdminMediaAgenciesPage from './pages/admin/AdminMediaAgenciesPage'
 import AdminCommissionsPage from './pages/admin/AdminCommissionsPage'
 import BillingPage from './pages/admin/BillingPage'
+import AdminChatPage from './pages/admin/AdminChatPage'
 import CommissionReportPage from './pages/CommissionReportPage'
 import AdminExportsPage from './pages/admin/AdminExportsPage'
 import AdminDispositionsPage from './pages/admin/AdminDispositionsPage'
@@ -66,7 +67,7 @@ function RequirePortalAuth({ children }: { children: React.ReactNode }) {
   return token ? <>{children}</> : <Navigate to={isAdminSubdomain ? '/login' : '/portal/login'} replace />
 }
 
-const ADMIN_PERMISSIONS = ['agents.view', 'agents.manage', 'roles.manage', 'flows.view', 'flows.manage', 'telephony.view', 'telephony.manage', 'integrations.view', 'integrations.manage', 'reports.view', 'supervisor.monitor', 'blocklist.view', 'blocklist.manage', 'calls.manage', 'billing.manage']
+const ADMIN_PERMISSIONS = ['agents.view', 'agents.manage', 'roles.manage', 'flows.view', 'flows.manage', 'telephony.view', 'telephony.manage', 'integrations.view', 'integrations.manage', 'reports.view', 'supervisor.monitor', 'blocklist.view', 'blocklist.manage', 'calls.manage', 'billing.manage', 'chat.manage']
 
 function RequireAdminAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -295,6 +296,14 @@ export default function App() {
             <RequireAdminAuth>
               <AdminCustomFieldDefinitionsPage />
             </RequireAdminAuth>
+          }
+        />
+        <Route
+          path="/admin/chat"
+          element={
+            <RequirePermission permission="chat.manage">
+              <AdminChatPage />
+            </RequirePermission>
           }
         />
         <Route

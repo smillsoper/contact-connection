@@ -9,12 +9,18 @@ namespace ContactConnection.Api.Hubs;
 /// AgentStateStore, which is a singleton with no HTTP request scope.
 /// </summary>
 public class DashboardNotifier(IHubContext<FlowHub, IFlowHubClient> hubContext,
-    IHubContext<ClientDashboardHub, IClientDashboardHubClient> clientHub) : IDashboardNotifier
+    IHubContext<ClientDashboardHub, IClientDashboardHubClient> clientHub,
+    IHubContext<ChatHub, IChatHubClient> chatHub) : IDashboardNotifier
 {
     public Task NotifyAgentStateChangedAsync(
         Guid tenantId, Guid agentId, string stateCode, string label, DateTimeOffset since, CancellationToken ct = default) =>
-        hubContext.Clients.Group($"supervisor:{tenantId}")
-            .ReceiveAgentStateSnapshot(agentId.ToString(), stateCode, label, since.ToString("O"));
+        Task.WhenAll(
+            hubContext.Clients.Group($"supervisor:{tenantId}")
+                .ReceiveAgentStateSnapshot(agentId.ToString(), stateCode, label, since.ToString("O")),
+            // Team chat (S183) shows everyone's real status, not just chat presence.
+            chatHub.Clients.Group(ChatHub.TenantGroup(tenantId)).ReceiveChatEvent("presence",
+                System.Text.Json.JsonSerializer.Serialize(new { agentId, code = stateCode, label, since },
+                    new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))));
 
     public Task NotifyCallStateChangedAsync(
         Guid tenantId, Guid campaignId, string state, CancellationToken ct = default) =>

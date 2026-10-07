@@ -1,3 +1,4 @@
+import ChatLauncher from '../components/chat/ChatLauncher'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import GridLayout, { WidthProvider, type Layout } from 'react-grid-layout/legacy'
@@ -298,6 +299,7 @@ export default function DashboardBuilderPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col">
+      <ChatLauncher />
       {/* Header */}
       <div className="flex items-stretch bg-gray-900 border-b border-gray-800 shrink-0">
         <img src="/cc-navbar-dark.svg" alt="Contact Connection" className="shrink-0 block" />

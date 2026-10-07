@@ -1,3 +1,4 @@
+import ChatLauncher from '../components/chat/ChatLauncher'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { dashboardsApi, type DashboardSummary } from '../api/dashboards'
@@ -44,6 +45,7 @@ export default function DashboardsPage() {
 
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col">
+      <ChatLauncher />
       <div className="flex items-stretch bg-gray-900 border-b border-gray-800 shrink-0">
         <img src="/cc-navbar-dark.svg" alt="Contact Connection" className="shrink-0 block" />
         <div className="flex items-center justify-between flex-1 px-4">

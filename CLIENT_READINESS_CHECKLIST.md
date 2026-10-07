@@ -798,10 +798,10 @@ everything above it, but genuinely important given Life Seasons' media-driven bu
       leadership) are invited to log in and view only the dashboards assigned to them. Read-only, scoped to their
       client/campaigns. Reference: TMS View (Stephen has it).
 
-- [ ] **Chrome Extension (added S175 to the checklist).** Screen recording merged with call audio (server ingest exists);
+- [x] **Chrome Extension (added S175 to the checklist).** *(S183 — built + live-verified: tab focus, per-campaign screen recording on the server clock, click/key overlay.)* Screen recording merged with call audio (server ingest exists);
       raise the agent-portal tab on Take Over and when the queue selects the agent. See memory: chrome extension scope.
 
-- [ ] **Team Chat.** Valuable but internal-only — doesn't affect the client's service or reportable
+- [x] **Team Chat.** *(S183 — built: channels / DMs / group DMs / threads / reactions / @mentions / search, live agent status for everyone, assigned supervisors + raise-hand (first supervisor to pick up gets a DM), Team Chat config page (chat.manage) with posting-restricted / membership-locked / retired controls, chat in the agent portal + a launcher on admin and dashboard pages; API live-verified, browser test pending.)* Valuable but internal-only — doesn't affect the client's service or reportable
       results, hence lowest priority on this list. Full requirements (expands on the existing
       "planned, not yet built" architecture note in CLAUDE.md's Chat System Architecture section):
       - Should function a lot like Slack.
