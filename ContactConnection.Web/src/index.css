@@ -151,3 +151,7 @@ html, body, #root {
 .chat-editor .tiptap img { max-width: 220px; max-height: 160px; border-radius: 6px; margin: 0.2rem 0; }
 .chat-editor .tiptap img.ProseMirror-selectednode { outline: 2px solid #6366f1; }
 .chat-editor .tiptap mark { color: #111827; }
+
+/* Default emoticon for an emoji the device can't draw (S183) */
+.emoji-missing { display: inline-flex; vertical-align: -0.2em; color: #9ca3af; cursor: help; }
+.emoji-missing svg { width: 1.15em; height: 1.15em; }

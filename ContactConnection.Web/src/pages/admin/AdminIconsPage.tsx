@@ -54,6 +54,7 @@ const DRAWN_NEW: Entry[] = [
   { name: 'BulletListIcon', meaning: 'Bulleted list', where: 'Script editor toolbar (Flow Designer) · chat composer toolbar' },
   { name: 'NumberedListIcon', meaning: 'Numbered list', where: 'Script editor toolbar · chat composer toolbar' },
   { name: 'ClearFormattingIcon', meaning: 'Clear formatting', where: 'Script editor toolbar · chat composer toolbar' },
+  { name: 'EmojiMissingIcon', meaning: 'An emoji this device can’t display', where: 'Chat messages, reactions, pinned previews and search — stands in for emoji newer than the device’s font (tooltip names it)' },
 ]
 
 function Row({ e }: { e: Entry }) {

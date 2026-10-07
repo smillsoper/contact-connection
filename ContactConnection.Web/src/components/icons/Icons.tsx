@@ -62,4 +62,8 @@ export const BoltIcon = (p: IconProps) => <Icon {...p}><path d="M13 2L4 14h7l-1 
 export const BulletListIcon = (p: IconProps) => <Icon {...p}><path d="M9 6h11M9 12h11M9 18h11" /><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01" /></Icon>
 export const NumberedListIcon = (p: IconProps) => <Icon {...p}><path d="M10 6h10M10 12h10M10 18h10" /><path d="M4 4.5L5.5 3.5V9" /><path d="M3.5 14a1.5 1.5 0 0 1 3 .4c0 1.4-3 2.4-3 3.6h3" /></Icon>
 export const ClearFormattingIcon = (p: IconProps) => <Icon {...p}><path d="M7 20l-3.3-3.3a1 1 0 0 1 0-1.4L14.3 4.7a1 1 0 0 1 1.4 0l4.6 4.6a1 1 0 0 1 0 1.4L11 20z" /><path d="M9 11l5 5" /><path d="M11 20h10" /></Icon>
+/** Default emoticon — stands in for an emoji this device's font can't draw (dashed face: "an emoji was here"). */
+export const EmojiMissingIcon = (p: IconProps) => <Icon {...p}><circle cx="12" cy="12" r="9" strokeDasharray="3 2.6" /><path d="M9 9.5h.01M15 9.5h.01" /><path d="M9 15h6" /></Icon>
+/** Same drawing as markup, for HTML rendered outside React (formatted chat messages). */
+export const EMOJI_MISSING_SVG = '<svg viewBox="0 0 24 24" width="1.15em" height="1.15em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke-dasharray="3 2.6"/><path d="M9 9.5h.01M15 9.5h.01"/><path d="M9 15h6"/></svg>'
 export const RefreshIcon = (p: IconProps) => <Icon {...p}><path d="M20 11a8 8 0 0 0-14.5-4.6L4 8" /><path d="M4 3v5h5" /><path d="M4 13a8 8 0 0 0 14.5 4.6L20 16" /><path d="M20 21v-5h-5" /></Icon>

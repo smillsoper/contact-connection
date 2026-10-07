@@ -5,6 +5,7 @@ import DOMPurify from 'dompurify'
 import { plainText, messagePreview } from '../../lib/chatConnection'
 import { loadChatImage, downloadChatFile, formatBytes } from '../../lib/chatImages'
 import { supportedEmojiVersion } from '../../lib/emojiSupport'
+import EmojiText, { replaceMissingEmoji } from './EmojiText'
 import ChatEditor, { type ChatEditorHandle } from './ChatEditor'
 import { ACCENT, AddEmojiIcon, DeleteIcon, EditIcon, FileIcon, PinIcon, ReactIcon, ReplyThreadIcon } from './ChatIcons'
 
@@ -280,7 +281,7 @@ function MessageItem({ m, users, meId, isManager, retired, grouped, onThread, ca
               <button key={r.emoji} disabled={retired} title={who}
                 onClick={() => chatApi.react(m.id, r.emoji).catch((e: Error) => setError(e.message))}
                 className={`text-[11px] rounded-full px-1.5 py-0.5 border ${reacted ? 'border-indigo-500 bg-indigo-950/60 text-indigo-200' : 'border-gray-700 bg-gray-800/60 text-gray-300'}`}>
-                {r.emoji} {r.agentIds.length}
+                <EmojiText text={r.emoji} /> {r.agentIds.length}
               </button>
             )
           })}
@@ -352,7 +353,7 @@ function Body({ text, users, meId }: { text: string; users: Record<string, ChatU
           return <span key={i} className={`rounded px-0.5 ${isMe ? 'bg-amber-500/25 text-amber-200' : 'bg-indigo-500/20 text-indigo-200'}`}>@{users[mention[1]]?.name ?? 'someone'}</span>
         }
         if (/^https?:\/\//.test(p)) return <a key={i} href={p} target="_blank" rel="noreferrer noopener" className="text-sky-300 underline break-all">{p}</a>
-        return <Fragment key={i}>{p}</Fragment>
+        return <EmojiText key={i} text={p} />
       })}
     </>
   )
@@ -376,7 +377,7 @@ function PinnedBar({ channelId, onJump }: { channelId: string; onJump: (m: ChatM
       <p className={`text-[10px] ${forAll ? 'text-amber-300' : 'text-sky-300'}`}>
         <PinIcon size={10} className="inline -mt-0.5 mr-1" />{forAll ? '' : '(you) '}{m.agentId ? users[m.agentId]?.name ?? 'Someone' : 'ContactConnection'} · {new Date(m.createdAt).toLocaleDateString()}
       </p>
-      <p className="text-xs text-gray-200 line-clamp-2 break-words">{messagePreview(m, users)}</p>
+      <p className="text-xs text-gray-200 line-clamp-2 break-words"><EmojiText text={messagePreview(m, users)} /></p>
     </button>
   )
 
@@ -395,7 +396,7 @@ function PinnedBar({ channelId, onJump }: { channelId: string; onJump: (m: ChatM
       )}
       {!open && everyone[0] && (
         <button onClick={() => onJump(everyone[0])} className="w-full text-left px-3 pb-1.5 text-xs text-gray-300 truncate block">
-          {messagePreview(everyone[0], users)}
+          <EmojiText text={messagePreview(everyone[0], users)} />
         </button>
       )}
     </div>
@@ -441,6 +442,7 @@ function RichBody({ html, meId }: { html: string; meId?: string }) {
       const who = m.getAttribute('data-mention')
       m.classList.toggle('me', who === meId || who === 'channel')
     })
+    replaceMissingEmoji(el)   // emoji this device can't draw → the default emoticon
     el.querySelectorAll<HTMLImageElement>('img[data-chat-file]').forEach((img) => {
       const id = img.getAttribute('data-chat-file')!
       img.alt = 'Image'

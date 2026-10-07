@@ -4,6 +4,7 @@ import { useChatStore, channelTitle } from '../stores/chatStore'
 import { useCallStore } from '../stores/callStore'
 import { startChat, messagePreview, canAskForNotifications, askForNotifications } from '../lib/chatConnection'
 import { Conversation, ThreadView, StateLine, Lightbox } from './chat/ChatConversation'
+import EmojiText from './chat/EmojiText'
 import { SearchIcon, BrowseChannelsIcon, NewMessageIcon, AnnouncementIcon, PinIcon } from './chat/ChatIcons'
 
 /**
@@ -300,7 +301,7 @@ function HelpCard({ h }: { h: HelpRequest }) {
     <div className="m-2 rounded border border-red-700 bg-red-950/40 px-3 py-2 animate-[pulse_2s_ease-in-out_3]">
       <p className="text-xs text-red-100 font-medium">✋ {h.agentName ?? 'An agent'} needs help <span className="text-red-300/80 font-normal">{since(h.createdAt)}</span></p>
       {h.callerNumber && <p className="text-[10px] text-red-200/80">On a call{h.campaignName ? ` · ${h.campaignName}` : ''} · {h.callerNumber}</p>}
-      {h.note && <p className="text-[11px] text-gray-200 mt-0.5">“{h.note}”</p>}
+      {h.note && <p className="text-[11px] text-gray-200 mt-0.5">“<EmojiText text={h.note} />”</p>}
       <button onClick={() => void claim()} className="text-[11px] bg-red-600 hover:bg-red-500 text-white rounded px-2 py-0.5 mt-1">Pick up</button>
       {error && <p className="text-[11px] text-red-300 mt-1">{error}</p>}
     </div>
@@ -424,7 +425,7 @@ function Search() {
             <button key={m.id} className="w-full text-left px-4 py-2 border-b border-gray-800/60 hover:bg-gray-800/50"
               onClick={() => setView(m.parentId ? { kind: 'thread', channelId: m.channelId, parentId: m.parentId } : { kind: 'channel', channelId: m.channelId })}>
               <p className="text-[10px] text-gray-500">{c ? channelTitle(c, users, me?.id) : ''} · {new Date(m.createdAt).toLocaleString()}</p>
-              <p className="text-xs text-gray-300"><span className="text-gray-100 font-medium">{m.agentId ? users[m.agentId]?.name : ''}</span> {messagePreview(m, users)}</p>
+              <p className="text-xs text-gray-300"><span className="text-gray-100 font-medium">{m.agentId ? users[m.agentId]?.name : ''}</span> <EmojiText text={messagePreview(m, users)} /></p>
             </button>
           )
         })}
