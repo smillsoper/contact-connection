@@ -34,6 +34,8 @@ interface ChatState {
   visible: boolean
   /** Wide enough for the two-pane layout (conversation list beside the conversation). */
   wide: boolean
+  /** An image opened full size. */
+  lightbox: string | null
 
   load: (b: ChatBootstrap) => void
   setDisabled: (message: string) => void
@@ -57,7 +59,7 @@ const sortMsgs = (a: ChatMessage, b: ChatMessage) => a.createdAt.localeCompare(b
 
 export const useChatStore = create<ChatState>((set, get) => ({
   status: 'idle', disabledMessage: null, me: null, users: {}, channels: {}, supervisorIds: [], myHelp: null, helpQueue: [],
-  messages: {}, threads: {}, pins: {}, typing: {}, view: { kind: 'list' }, visible: false, wide: false,
+  messages: {}, threads: {}, pins: {}, typing: {}, view: { kind: 'list' }, visible: false, wide: false, lightbox: null,
 
   load: (b) => set({
     status: 'ready', me: b.me,

@@ -15,7 +15,7 @@ export interface RichTextEditorHandle {
 
 // ── Custom FontSize extension ──────────────────────────────────────────────
 
-const FontSize = Extension.create({
+export const FontSize = Extension.create({
   name: 'fontSize',
   addGlobalAttributes() {
     return [{
@@ -44,7 +44,7 @@ const FontSize = Extension.create({
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-const FONT_FAMILIES = [
+export const FONT_FAMILIES = [
   { label: 'Default',          value: '' },
   { label: 'Arial',            value: 'Arial, sans-serif' },
   { label: 'Georgia',          value: 'Georgia, serif' },
@@ -53,9 +53,9 @@ const FONT_FAMILIES = [
   { label: 'Courier New',      value: "'Courier New', monospace" },
 ]
 
-const FONT_SIZES = ['10px', '11px', '12px', '13px', '14px', '16px', '18px', '20px', '24px', '28px']
+export const FONT_SIZES = ['10px', '11px', '12px', '13px', '14px', '16px', '18px', '20px', '24px', '28px']
 
-const TEXT_COLORS = [
+export const TEXT_COLORS = [
   { label: 'Default',  value: '' },
   { label: 'Red',      value: '#dc2626' },
   { label: 'Blue',     value: '#2563eb' },
@@ -65,7 +65,7 @@ const TEXT_COLORS = [
   { label: 'Gray',     value: '#6b7280' },
 ]
 
-const HIGHLIGHT_COLORS = [
+export const HIGHLIGHT_COLORS = [
   { label: 'None',    value: '' },
   { label: 'Yellow',  value: '#fef08a' },
   { label: 'Green',   value: '#bbf7d0' },
@@ -76,7 +76,7 @@ const HIGHLIGHT_COLORS = [
 
 // ── Toolbar button ─────────────────────────────────────────────────────────
 
-function Btn({
+export function Btn({
   active, onClick, title, children, dark,
 }: {
   active?: boolean
@@ -104,13 +104,13 @@ function Btn({
   )
 }
 
-function Divider({ dark }: { dark?: boolean }) {
+export function Divider({ dark }: { dark?: boolean }) {
   return <div className={`w-px h-4 mx-0.5 shrink-0 ${dark ? 'bg-gray-600' : 'bg-gray-300'}`} />
 }
 
 // ── Color picker popover ───────────────────────────────────────────────────
 
-function ColorPicker({
+export function ColorPicker({
   colors, onSelect, current, label, dark,
 }: {
   colors: { label: string; value: string }[]

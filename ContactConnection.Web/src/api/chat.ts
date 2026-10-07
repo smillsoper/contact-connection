@@ -49,7 +49,11 @@ export interface ChatMessage {
   agentId: string | null
   kind: 'user' | 'system'
   parentId: string | null
+  /** Plain text with <@id> tokens ('text') or sanitized HTML from the rich composer ('html'). */
   body: string
+  format: 'text' | 'html'
+  /** The words alone — previews, search, notifications. */
+  bodyText: string
   mentionIds: string[]
   replyCount: number
   lastReplyAt: string | null
@@ -103,9 +107,10 @@ export const chatApi = {
   messages: (id: string, before?: string) =>
     api.get<{ messages: ChatMessage[]; hasMore: boolean }>(`/api/v1/chat/channels/${id}/messages${before ? `?before=${encodeURIComponent(before)}` : ''}`),
   thread: (messageId: string) => api.get<{ parent: ChatMessage; replies: ChatMessage[] }>(`/api/v1/chat/messages/${messageId}/thread`),
-  post: (channelId: string, body: string, parentId?: string | null) =>
-    api.post<ChatMessage>(`/api/v1/chat/channels/${channelId}/messages`, { body, parentId: parentId ?? null }),
-  edit: (messageId: string, body: string) => api.patch<ChatMessage>(`/api/v1/chat/messages/${messageId}`, { body }),
+  post: (channelId: string, body: string, parentId?: string | null, format: 'text' | 'html' = 'html') =>
+    api.post<ChatMessage>(`/api/v1/chat/channels/${channelId}/messages`, { body, parentId: parentId ?? null, format }),
+  edit: (messageId: string, body: string, format: 'text' | 'html' = 'html') =>
+    api.patch<ChatMessage>(`/api/v1/chat/messages/${messageId}`, { body, format }),
   remove: (messageId: string) => api.delete<void>(`/api/v1/chat/messages/${messageId}`),
   pins: (channelId: string) => api.get<ChatPins>(`/api/v1/chat/channels/${channelId}/pins`),
   pin: (messageId: string, scope: 'me' | 'everyone') => api.post<unknown>(`/api/v1/chat/messages/${messageId}/pin`, { scope }),

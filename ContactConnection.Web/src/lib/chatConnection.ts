@@ -113,7 +113,12 @@ function alertForMessage(m: ChatMessage) {
   if (viewing || !(direct || mentioned)) return
   chime(false)
   const who = m.agentId ? s.users[m.agentId]?.name ?? 'Someone' : 'ContactConnection'
-  notify(direct ? who : `${who} in ${channelTitle(c, s.users, s.me.id)}`, plainText(m.body, s.users), `chat-${m.channelId}`)
+  notify(direct ? who : `${who} in ${channelTitle(c, s.users, s.me.id)}`, messagePreview(m, s.users), `chat-${m.channelId}`)
+}
+
+/** A message's words for previews (formatted messages carry their own plain text). */
+export function messagePreview(m: ChatMessage, users: Record<string, { name: string }>) {
+  return m.format === 'html' ? m.bodyText : plainText(m.body, users)
 }
 
 export function plainText(body: string, users: Record<string, { name: string }>) {

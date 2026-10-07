@@ -133,3 +133,21 @@ html, body, #root {
 .react-flow__node:focus-visible > div {
   box-shadow: none !important;
 }
+
+/* ── Team chat rich messages (S183) ─────────────────────────────────────── */
+.chat-rich p { margin: 0; min-height: 1em; }
+.chat-rich ul { list-style: disc; padding-left: 1.1rem; margin: 0.15rem 0; }
+.chat-rich ol { list-style: decimal; padding-left: 1.1rem; margin: 0.15rem 0; }
+.chat-rich a { color: #7dd3fc; text-decoration: underline; word-break: break-all; }
+.chat-rich mark { border-radius: 2px; padding: 0 1px; color: #111827; }
+.chat-rich img { display: block; max-width: min(100%, 360px); max-height: 260px; border-radius: 6px; margin: 0.25rem 0; cursor: zoom-in; background: #1f2937; min-width: 40px; min-height: 30px; }
+.chat-rich img.missing { cursor: default; }
+.chat-rich span[data-mention], .chat-editor span[data-mention] { background: rgba(99,102,241,0.2); color: #c7d2fe; border-radius: 3px; padding: 0 2px; }
+.chat-rich span[data-mention].me { background: rgba(245,158,11,0.25); color: #fde68a; }
+.chat-editor .tiptap { outline: none; min-height: 1.4rem; }
+.chat-editor .tiptap p { margin: 0; }
+.chat-editor .tiptap ul { list-style: disc; padding-left: 1.1rem; }
+.chat-editor .tiptap ol { list-style: decimal; padding-left: 1.1rem; }
+.chat-editor .tiptap img { max-width: 220px; max-height: 160px; border-radius: 6px; margin: 0.2rem 0; }
+.chat-editor .tiptap img.ProseMirror-selectednode { outline: 2px solid #6366f1; }
+.chat-editor .tiptap mark { color: #111827; }

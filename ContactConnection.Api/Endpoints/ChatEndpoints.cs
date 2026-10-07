@@ -42,6 +42,8 @@ public static class ChatEndpoints
         g.MapPost("channels/{id:guid}/typing", Typing);
         g.MapPost("direct", OpenDirect);
         g.MapGet("search", Search);
+        g.MapPost("files", UploadFile).DisableAntiforgery();
+        g.MapGet("files/{id:guid}", GetFile);
         g.MapPost("help", RaiseHand);
         g.MapPost("help/{id:guid}/claim", ClaimHelp);
         g.MapPost("help/{id:guid}/cancel", CancelHelp);
@@ -165,7 +167,7 @@ public static class ChatEndpoints
     private static object MessageDto(ChatMessage m, IEnumerable<ChatReaction> reactions) => new
     {
         m.Id, m.ChannelId, m.AgentId, m.Kind, m.ParentId,
-        body = m.DeletedAt is null ? m.Body : "", m.MentionIds, m.ReplyCount, m.LastReplyAt, m.CreatedAt, m.EditedAt,
+        body = m.DeletedAt is null ? m.Body : "", m.Format, bodyText = m.DeletedAt is null ? m.BodyText : "", m.MentionIds, m.ReplyCount, m.LastReplyAt, m.CreatedAt, m.EditedAt,
         deleted = m.DeletedAt is not null,
         m.PinnedAt, m.PinnedById,
         reactions = reactions.GroupBy(r => r.Emoji).OrderBy(g => g.Min(r => r.CreatedAt))
@@ -378,7 +380,16 @@ public static class ChatEndpoints
         }
 
         ChatMessage msg;
-        try { msg = ChatMessage.Create(id, me.Id, req.Body, req.ParentId); }
+        try
+        {
+            if (req.Format == ChatMessageFormat.Html)
+            {
+                var rich = await CleanRichAsync(db, me, req.Body, ct);
+                if (rich.Error is not null) return Results.BadRequest(new { error = rich.Error });
+                msg = ChatMessage.CreateRich(id, me.Id, rich.Html!, rich.Text!, rich.HasImages, req.ParentId);
+            }
+            else msg = ChatMessage.Create(id, me.Id, req.Body, req.ParentId);
+        }
         catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
         db.ChatMessages.Add(msg);
         parent?.AddReply(msg.CreatedAt);
@@ -404,7 +415,16 @@ public static class ChatEndpoints
         if (msg is null || msg.AgentId != me.Id || msg.DeletedAt is not null) return Results.NotFound();
         var c = await db.ChatChannels.FirstAsync(x => x.Id == msg.ChannelId, ct);
         if (c.IsRetired) return Results.Conflict(new { error = "This channel is retired — its history is read-only." });
-        try { msg.Edit(req.Body); }
+        try
+        {
+            if (req.Format == ChatMessageFormat.Html)
+            {
+                var rich = await CleanRichAsync(db, me, req.Body, ct);
+                if (rich.Error is not null) return Results.BadRequest(new { error = rich.Error });
+                msg.EditRich(rich.Html!, rich.Text!, rich.HasImages);
+            }
+            else msg.Edit(req.Body);
+        }
         catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
         await db.SaveChangesAsync(ct);
         var dto = MessageDto(msg, await db.ChatReactions.AsNoTracking().Where(r => r.MessageId == id).ToListAsync(ct));
@@ -578,6 +598,77 @@ public static class ChatEndpoints
         return (channel, null);
     }
 
+    // ── Formatted messages + images ──────────────────────────────────────────────────────────────────────────────
+
+    private const int MaxImagesPerMessage = 10;
+
+    private sealed record RichBody(string? Html, string? Text, bool HasImages, string? Error);
+
+    /// <summary>Sanitizes composer HTML and checks every image it references is an upload in this account.</summary>
+    private static async Task<RichBody> CleanRichAsync(TenantDbContext db, Me me, string html, CancellationToken ct)
+    {
+        var clean = ChatRichText.Clean(html);
+        if (clean.FileIds.Count > MaxImagesPerMessage) return new(null, null, false, $"At most {MaxImagesPerMessage} images per message.");
+        if (clean.FileIds.Count > 0)
+        {
+            var found = await db.ChatFiles.CountAsync(f => clean.FileIds.Contains(f.Id) && f.TenantId == me.TenantId, ct);
+            if (found != clean.FileIds.Count) return new(null, null, false, "An image in that message is no longer available — paste it again.");
+        }
+        return new(clean.Html, clean.Text, clean.FileIds.Count > 0, null);
+    }
+
+    /// <summary>A pasted / attached image (raw body). Only PNG, JPEG, GIF and WebP, checked by content, up to 5 MB.</summary>
+    private static async Task<IResult> UploadFile(HttpContext http, TenantContext tc, ScopedTenantDbContextFactory dbf, IBlobStorage blobs, CancellationToken ct)
+    {
+        var me = WhoAmI(http, tc);
+        if (me is null) return Results.Unauthorized();
+        if (!Enabled(tc)) return Results.NotFound(new { error = NotEnabled });
+        using var buffer = new MemoryStream();
+        var limited = new byte[81920];
+        int read;
+        while ((read = await http.Request.Body.ReadAsync(limited, ct)) > 0)
+        {
+            buffer.Write(limited, 0, read);
+            if (buffer.Length > ChatFile.MaxBytes) return Results.BadRequest(new { error = "Images can be up to 5 MB." });
+        }
+        if (buffer.Length == 0) return Results.BadRequest(new { error = "Nothing was uploaded." });
+        var type = ChatFile.SniffImageType(buffer.GetBuffer().AsSpan(0, (int)Math.Min(16, buffer.Length)));
+        if (type is null) return Results.BadRequest(new { error = "Only PNG, JPEG, GIF and WebP images can be shared." });
+
+        var file = ChatFile.Create(me.TenantId, me.Id, type, buffer.Length);
+        buffer.Position = 0;
+        await blobs.PutAsync(file.StorageKey, buffer, type, ct);
+        await using var db = dbf.Create();
+        db.ChatFiles.Add(file);
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(new { file.Id, file.ContentType, file.SizeBytes });
+    }
+
+    /// <summary>An image, to its uploader or anyone who can see a message that uses it.</summary>
+    private static async Task<IResult> GetFile(Guid id, HttpContext http, TenantContext tc, ScopedTenantDbContextFactory dbf, IBlobStorage blobs, CancellationToken ct)
+    {
+        var me = WhoAmI(http, tc);
+        if (me is null) return Results.Unauthorized();
+        if (!Enabled(tc)) return Results.NotFound();
+        await using var db = dbf.Create();
+        var file = await db.ChatFiles.AsNoTracking().FirstOrDefaultAsync(f => f.Id == id && f.TenantId == me.TenantId, ct);
+        if (file is null) return Results.NotFound();
+        if (file.AgentId != me.Id)
+        {
+            var token = $"data-chat-file=\"{id}\"";
+            var mine = db.ChatMembers.Where(m => m.AgentId == me.Id && m.LeftAt == null).Select(m => m.ChannelId);
+            var publicChannels = db.ChatChannels.Where(c => c.Kind == ChatChannelKind.Channel && !c.IsPrivate).Select(c => c.Id);
+            var visible = await db.ChatMessages.AnyAsync(m => m.DeletedAt == null && m.Body.Contains(token)
+                && (mine.Contains(m.ChannelId) || publicChannels.Contains(m.ChannelId)), ct);
+            if (!visible) return Results.NotFound();
+        }
+        var stream = await blobs.OpenReadAsync(file.StorageKey, ct);
+        if (stream is null) return Results.NotFound();
+        http.Response.Headers["X-Content-Type-Options"] = "nosniff";
+        http.Response.Headers["Cache-Control"] = "private, max-age=86400";
+        return Results.Stream(stream, file.ContentType);
+    }
+
     // ── Search ───────────────────────────────────────────────────────────────────────────────────────────────────
 
     private static async Task<IResult> Search(string q, HttpContext http, TenantContext tc, ScopedTenantDbContextFactory dbf, CancellationToken ct)
@@ -591,7 +682,7 @@ public static class ChatEndpoints
         var mine = db.ChatMembers.Where(m => m.AgentId == me.Id && m.LeftAt == null).Select(m => m.ChannelId);
         var like = "%" + term.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%";
         var hits = await db.ChatMessages.AsNoTracking()
-            .Where(m => mine.Contains(m.ChannelId) && m.DeletedAt == null && EF.Functions.ILike(m.Body, like))
+            .Where(m => mine.Contains(m.ChannelId) && m.DeletedAt == null && EF.Functions.ILike(m.BodyText, like))
             .OrderByDescending(m => m.CreatedAt).Take(50).ToListAsync(ct);
         return Results.Ok(await WithReactionsAsync(db, hits, ct));
     }
@@ -843,7 +934,7 @@ public static class ChatEndpoints
     }
 }
 
-public record PostChatMessageRequest(string Body, Guid? ParentId = null);
+public record PostChatMessageRequest(string Body, Guid? ParentId = null, string? Format = null);
 public record ReactRequest(string Emoji);
 public record OpenDirectRequest(List<Guid>? AgentIds);
 public record RaiseHandRequest(string? Note, Guid? CallRecordId);

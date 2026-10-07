@@ -1,7 +1,10 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { chatApi, stateStyle, type ChatMessage, type ChatUser } from '../../api/chat'
 import { useChatStore, channelTitle, canPost, canPinForEveryone, canDeleteOthers } from '../../stores/chatStore'
-import { plainText } from '../../lib/chatConnection'
+import DOMPurify from 'dompurify'
+import { plainText, messagePreview } from '../../lib/chatConnection'
+import { loadChatImage } from '../../lib/chatImages'
+import ChatEditor, { type ChatEditorHandle } from './ChatEditor'
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '🎉', '👀', '✅']
 
@@ -238,8 +241,11 @@ function MessageItem({ m, users, meId, isManager, retired, grouped, onThread, ca
       )}
       {m.deleted ? <p className="text-xs text-gray-600 italic">Message deleted</p>
         : editing ? <EditBox m={m} users={users} onDone={() => setEditing(false)} />
-        : <p className="text-xs text-gray-200 whitespace-pre-wrap break-words leading-relaxed"><Body text={m.body} users={users} meId={meId} />
-            {m.editedAt && <span className="text-[10px] text-gray-500"> (edited)</span>}</p>}
+        : m.format === 'html'
+          ? <div className="text-xs text-gray-200 break-words leading-relaxed"><RichBody html={m.body} meId={meId} />
+              {m.editedAt && <span className="text-[10px] text-gray-500">(edited)</span>}</div>
+          : <p className="text-xs text-gray-200 whitespace-pre-wrap break-words leading-relaxed"><Body text={m.body} users={users} meId={meId} />
+              {m.editedAt && <span className="text-[10px] text-gray-500"> (edited)</span>}</p>}
 
       {m.reactions.length > 0 && !m.deleted && (
         <div className="flex flex-wrap gap-1 mt-1">
@@ -335,7 +341,7 @@ function PinnedBar({ channelId, onJump }: { channelId: string; onJump: (m: ChatM
       <p className={`text-[10px] ${forAll ? 'text-amber-300' : 'text-sky-300'}`}>
         {forAll ? '📌' : '🔖'} {m.agentId ? users[m.agentId]?.name ?? 'Someone' : 'ContactConnection'} · {new Date(m.createdAt).toLocaleDateString()}
       </p>
-      <p className="text-xs text-gray-200 line-clamp-2 break-words">{plainText(m.body, users)}</p>
+      <p className="text-xs text-gray-200 line-clamp-2 break-words">{messagePreview(m, users)}</p>
     </button>
   )
 
@@ -354,7 +360,7 @@ function PinnedBar({ channelId, onJump }: { channelId: string; onJump: (m: ChatM
       )}
       {!open && everyone[0] && (
         <button onClick={() => onJump(everyone[0])} className="w-full text-left px-3 pb-1.5 text-xs text-gray-300 truncate block">
-          {plainText(everyone[0].body, users)}
+          {messagePreview(everyone[0], users)}
         </button>
       )}
     </div>
@@ -381,119 +387,80 @@ export function StateLine({ user }: { user: ChatUser }) {
   )
 }
 
-// ── Composer ─────────────────────────────────────────────────────────────────
+// ── Rich messages ────────────────────────────────────────────────────────────
 
-/** Mentions are typed as @Name (picked from a list) and sent as <@id> tokens. */
-function useMentions(users: Record<string, ChatUser>, meId?: string) {
-  const picked = useRef(new Map<string, string>())   // display name → id
-  const encode = (text: string) => {
-    let out = text
-    for (const [name, id] of [...picked.current.entries()].sort((a, b) => b[0].length - a[0].length))
-      out = out.split(`@${name}`).join(`<@${id}>`)
-    return out
-  }
-  const candidates = (q: string) => Object.values(users)
-    .filter((u) => u.id !== meId && u.name.toLowerCase().includes(q.toLowerCase())).slice(0, 6)
-  return { picked, encode, candidates }
+const ALLOWED_TAGS = ['p', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'span', 'mark', 'ul', 'ol', 'li', 'a', 'img', 'code', 'pre', 'blockquote']
+const ALLOWED_ATTR = ['style', 'href', 'data-chat-file', 'data-mention', 'data-color']
+
+/** A formatted message: sanitized again here (the server already did), then images loaded with the viewer's sign-in,
+ *  mentions highlighted (amber when it's you) and links opened in a new tab. */
+function RichBody({ html, meId }: { html: string; meId?: string }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const clean = useMemo(() => DOMPurify.sanitize(html, { ALLOWED_TAGS, ALLOWED_ATTR, ALLOW_DATA_ATTR: false }), [html])
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.querySelectorAll('a[href]').forEach((a) => { a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noreferrer noopener') })
+    el.querySelectorAll('span[data-mention]').forEach((m) => m.classList.toggle('me', m.getAttribute('data-mention') === meId))
+    el.querySelectorAll<HTMLImageElement>('img[data-chat-file]').forEach((img) => {
+      const id = img.getAttribute('data-chat-file')!
+      img.alt = 'Image'
+      loadChatImage(id).then((url) => {
+        img.src = url
+        img.onclick = () => useChatStore.setState({ lightbox: url })
+      }).catch(() => { img.alt = 'Image unavailable'; img.classList.add('missing') })
+    })
+  }, [clean, meId])
+  return <div ref={ref} className="chat-rich" dangerouslySetInnerHTML={{ __html: clean }} />
 }
+
+export function Lightbox() {
+  const url = useChatStore((s) => s.lightbox)
+  if (!url) return null
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-6 cursor-zoom-out"
+      onClick={() => useChatStore.setState({ lightbox: null })}>
+      <img src={url} alt="" className="max-w-full max-h-full rounded shadow-2xl" />
+    </div>
+  )
+}
+
+// ── Composer ─────────────────────────────────────────────────────────────────
 
 function Composer({ channelId, parentId, placeholder }: { channelId: string; parentId?: string; placeholder: string }) {
   const users = useChatStore((s) => s.users)
   const meId = useChatStore((s) => s.me?.id)
-  const [text, setText] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [sending, setSending] = useState(false)
-  const [mentionQuery, setMentionQuery] = useState<string | null>(null)
-  const [highlight, setHighlight] = useState(0)
-  const ref = useRef<HTMLTextAreaElement>(null)
+  const ref = useRef<ChatEditorHandle>(null)
   const lastTyping = useRef(0)
-  const { picked, encode, candidates } = useMentions(users, meId)
-  const list = useMemo(() => (mentionQuery === null ? [] : candidates(mentionQuery)), [mentionQuery, users]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  function onChange(v: string) {
-    setText(v)
-    const caret = ref.current?.selectionStart ?? v.length
-    const before = v.slice(0, caret)
-    const at = /(?:^|\s)@([^\s@]{0,30})$/.exec(before)
-    setMentionQuery(at ? at[1] : null)
-    setHighlight(0)
-    if (Date.now() - lastTyping.current > 3000) { lastTyping.current = Date.now(); chatApi.typing(channelId).catch(() => {}) }
-  }
-
-  function pick(u: ChatUser) {
-    const caret = ref.current?.selectionStart ?? text.length
-    const before = text.slice(0, caret).replace(/@([^\s@]{0,30})$/, `@${u.name} `)
-    picked.current.set(u.name, u.id)
-    setText(before + text.slice(caret))
-    setMentionQuery(null)
-    requestAnimationFrame(() => { ref.current?.focus(); ref.current?.setSelectionRange(before.length, before.length) })
-  }
-
-  async function send() {
-    const body = encode(text).trim()
-    if (!body || sending) return
-    setSending(true); setError(null)
-    try {
-      await chatApi.post(channelId, body, parentId)
-      setText(''); picked.current.clear()
-    } catch (e) { setError(e instanceof Error ? e.message : 'Send failed.') }
-    finally { setSending(false); ref.current?.focus() }
-  }
-
   return (
-    <div className="relative border-t border-gray-800 p-2 shrink-0">
-      {list.length > 0 && (
-        <div className="absolute bottom-full left-2 right-2 mb-1 bg-gray-900 border border-gray-700 rounded shadow-lg z-20">
-          {list.map((u, i) => (
-            <button key={u.id} onMouseDown={(e) => { e.preventDefault(); pick(u) }}
-              className={`w-full text-left px-2 py-1 text-xs flex items-center gap-2 ${i === highlight ? 'bg-indigo-900/50 text-white' : 'text-gray-300'}`}>
-              <span className={`inline-block w-2 h-2 rounded-full ${stateStyle(u.state).dot}`} />{u.name}
-            </button>
-          ))}
-        </div>
-      )}
-      <textarea ref={ref} value={text} rows={2} placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => {
-          if (list.length > 0) {
-            if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight((h) => (h + 1) % list.length); return }
-            if (e.key === 'ArrowUp') { e.preventDefault(); setHighlight((h) => (h - 1 + list.length) % list.length); return }
-            if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pick(list[highlight]); return }
-            if (e.key === 'Escape') { setMentionQuery(null); return }
-          }
-          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() }
+    <div className="border-t border-gray-800 p-2 shrink-0">
+      <ChatEditor ref={ref} key={`${channelId}:${parentId ?? ''}`} users={users} meId={meId} placeholder={placeholder}
+        onTyping={() => {
+          if (Date.now() - lastTyping.current > 3000) { lastTyping.current = Date.now(); chatApi.typing(channelId).catch(() => {}) }
         }}
-        className="w-full resize-none bg-gray-800 text-white text-xs rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-indigo-500" />
-      <div className="flex items-center justify-between mt-1">
-        <span className="text-[10px] text-gray-600">Enter to send · Shift+Enter for a new line · @ to mention</span>
-        <button onClick={() => void send()} disabled={sending || !text.trim()}
-          className="text-[11px] bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded px-2 py-0.5">Send</button>
-      </div>
-      {error && <p className="text-[11px] text-red-400 mt-1">{error}</p>}
+        onSubmit={async (html) => {
+          await chatApi.post(channelId, html, parentId, 'html')
+          ref.current?.clear()
+          ref.current?.focus()
+        }} />
     </div>
   )
 }
 
 function EditBox({ m, users, onDone }: { m: ChatMessage; users: Record<string, ChatUser>; onDone: () => void }) {
-  // Show mentions as @Name while editing; turn them back into tokens on save.
-  const [text, setText] = useState(() => plainText(m.body, users))
-  const [error, setError] = useState<string | null>(null)
-  async function save() {
-    let body = text
-    for (const id of m.mentionIds) { const n = users[id]?.name; if (n) body = body.split(`@${n}`).join(`<@${id}>`) }
-    try { await chatApi.edit(m.id, body.trim()); onDone() }
-    catch (e) { setError(e instanceof Error ? e.message : 'Save failed.') }
-  }
+  const meId = useChatStore((s) => s.me?.id)
+  // Plain-text messages open as their words (mentions shown as @Name); saving makes them formatted messages.
+  const initial = m.format === 'html' ? m.body
+    : `<p>${escapeHtml(m.body).replace(/&lt;@([0-9a-fA-F-]{36})&gt;/g, (_, id: string) =>
+        `<span data-mention="${id}">@${escapeHtml(users[id]?.name ?? 'someone')}</span>`).replace(/\n/g, '<br>')}</p>`
   return (
     <div className="mt-1">
-      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={2} autoFocus
-        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void save() } if (e.key === 'Escape') onDone() }}
-        className="w-full resize-none bg-gray-800 text-white text-xs rounded px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-500" />
-      <div className="flex gap-2 text-[11px]">
-        <button onClick={() => void save()} className="text-indigo-300 hover:text-indigo-200">Save</button>
-        <button onClick={onDone} className="text-gray-500 hover:text-white">Cancel</button>
-        {error && <span className="text-red-400">{error}</span>}
-      </div>
+      <ChatEditor users={users} meId={meId} initialHtml={initial} placeholder="Edit message" submitLabel="Save" onCancel={onDone}
+        onSubmit={async (html) => { await chatApi.edit(m.id, html, 'html'); onDone() }} />
     </div>
   )
+}
+
+function escapeHtml(s: string) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }

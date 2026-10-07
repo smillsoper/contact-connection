@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { chatApi, stateStyle, type BrowseChannel, type ChatChannel, type ChatMessage, type ChatUser, type HelpRequest } from '../api/chat'
 import { useChatStore, channelTitle } from '../stores/chatStore'
 import { useCallStore } from '../stores/callStore'
-import { startChat, plainText, canAskForNotifications, askForNotifications } from '../lib/chatConnection'
-import { Conversation, ThreadView, StateLine } from './chat/ChatConversation'
+import { startChat, messagePreview, canAskForNotifications, askForNotifications } from '../lib/chatConnection'
+import { Conversation, ThreadView, StateLine, Lightbox } from './chat/ChatConversation'
 
 /**
  * Team chat (S183) — the agent portal's right panel, and the body of the chat launcher on admin pages. Slack-like:
@@ -63,7 +63,7 @@ export default function ChatPanel({ onClose }: { onClose?: () => void }) {
       </div>
     ) : (detail ?? <ChannelList onClose={onClose} />)
   }
-  return <div ref={root} className="h-full min-h-0 flex flex-col">{body}</div>
+  return <div ref={root} className="h-full min-h-0 flex flex-col">{body}<Lightbox /></div>
 }
 
 function Shell({ children, onClose, actions }: { children: React.ReactNode; onClose?: () => void; actions?: React.ReactNode }) {
@@ -419,7 +419,7 @@ function Search() {
             <button key={m.id} className="w-full text-left px-4 py-2 border-b border-gray-800/60 hover:bg-gray-800/50"
               onClick={() => setView(m.parentId ? { kind: 'thread', channelId: m.channelId, parentId: m.parentId } : { kind: 'channel', channelId: m.channelId })}>
               <p className="text-[10px] text-gray-500">{c ? channelTitle(c, users, me?.id) : ''} · {new Date(m.createdAt).toLocaleString()}</p>
-              <p className="text-xs text-gray-300"><span className="text-gray-100 font-medium">{m.agentId ? users[m.agentId]?.name : ''}</span> {plainText(m.body, users)}</p>
+              <p className="text-xs text-gray-300"><span className="text-gray-100 font-medium">{m.agentId ? users[m.agentId]?.name : ''}</span> {messagePreview(m, users)}</p>
             </button>
           )
         })}

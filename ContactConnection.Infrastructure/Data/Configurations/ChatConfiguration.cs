@@ -69,8 +69,10 @@ public class ChatMessageConfiguration : IEntityTypeConfiguration<ChatMessage>
         b.Property(m => m.AgentId).HasColumnName("agent_id");
         b.Property(m => m.Kind).HasColumnName("kind").HasMaxLength(10).IsRequired();
         b.Property(m => m.ParentId).HasColumnName("parent_id");
-        b.Property(m => m.Body).HasColumnName("body").HasMaxLength(ChatMessage.MaxLength).IsRequired();
+        b.Property(m => m.Body).HasColumnName("body").HasMaxLength(ChatMessage.MaxHtmlLength).IsRequired();
         b.Property(m => m.MentionIds).HasColumnName("mention_ids").HasColumnType("uuid[]");
+        b.Property(m => m.Format).HasColumnName("format").HasMaxLength(8).HasDefaultValue(ChatMessageFormat.Text).IsRequired();
+        b.Property(m => m.BodyText).HasColumnName("body_text").HasMaxLength(ChatMessage.MaxLength + 20).HasDefaultValue("").IsRequired();
         b.Property(m => m.ReplyCount).HasColumnName("reply_count");
         b.Property(m => m.LastReplyAt).HasColumnName("last_reply_at");
         b.Property(m => m.CreatedAt).HasColumnName("created_at");
@@ -80,6 +82,22 @@ public class ChatMessageConfiguration : IEntityTypeConfiguration<ChatMessage>
         b.Property(m => m.PinnedById).HasColumnName("pinned_by_id");
         b.HasOne<ChatChannel>().WithMany().HasForeignKey(m => m.ChannelId).OnDelete(DeleteBehavior.Cascade);
         b.HasIndex(m => new { m.ChannelId, m.ParentId, m.CreatedAt }).HasDatabaseName("ix_chat_messages_channel_parent_created");
+    }
+}
+
+public class ChatFileConfiguration : IEntityTypeConfiguration<ChatFile>
+{
+    public void Configure(EntityTypeBuilder<ChatFile> b)
+    {
+        b.ToTable("chat_files");
+        b.HasKey(f => f.Id);
+        b.Property(f => f.Id).HasColumnName("id");
+        b.Property(f => f.TenantId).HasColumnName("tenant_id");
+        b.Property(f => f.AgentId).HasColumnName("agent_id");
+        b.Property(f => f.ContentType).HasColumnName("content_type").HasMaxLength(40).IsRequired();
+        b.Property(f => f.SizeBytes).HasColumnName("size_bytes");
+        b.Property(f => f.StorageKey).HasColumnName("storage_key").HasMaxLength(200).IsRequired();
+        b.Property(f => f.CreatedAt).HasColumnName("created_at");
     }
 }
 

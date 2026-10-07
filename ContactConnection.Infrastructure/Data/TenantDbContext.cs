@@ -22,6 +22,7 @@ public class TenantDbContext : DbContext
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
     public DbSet<ChatReaction> ChatReactions => Set<ChatReaction>();
     public DbSet<ChatPersonalPin> ChatPersonalPins => Set<ChatPersonalPin>();
+    public DbSet<ChatFile> ChatFiles => Set<ChatFile>();
     public DbSet<AgentSupervisor> AgentSupervisors => Set<AgentSupervisor>();
     public DbSet<HelpRequest> HelpRequests => Set<HelpRequest>();
     public DbSet<Role> Roles => Set<Role>();
@@ -171,6 +172,7 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new ChatMessageConfiguration());
         modelBuilder.ApplyConfiguration(new ChatReactionConfiguration());
         modelBuilder.ApplyConfiguration(new ChatPersonalPinConfiguration());
+        modelBuilder.ApplyConfiguration(new ChatFileConfiguration());
         modelBuilder.ApplyConfiguration(new AgentSupervisorConfiguration());
         modelBuilder.ApplyConfiguration(new HelpRequestConfiguration());
         base.OnModelCreating(modelBuilder);

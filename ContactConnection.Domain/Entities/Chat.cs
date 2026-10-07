@@ -181,6 +181,14 @@ public static class ChatMessageKind
     public const string System = "system";
 }
 
+/// <summary>How a message body is written (S183): plain text with &lt;@id&gt; mention tokens, or sanitized HTML from the
+/// rich composer (formatting, pasted images as data-chat-file references, mentions as data-mention spans).</summary>
+public static class ChatMessageFormat
+{
+    public const string Text = "text";
+    public const string Html = "html";
+}
+
 public class ChatMessage
 {
     public Guid Id { get; private set; }
@@ -190,8 +198,11 @@ public class ChatMessage
     public string Kind { get; private set; } = ChatMessageKind.User;
     /// <summary>Thread replies point at their top-level message.</summary>
     public Guid? ParentId { get; private set; }
-    /// <summary>Text; mentions are written as &lt;@agentId&gt; tokens and rendered as names.</summary>
+    /// <summary>Text (mentions as &lt;@agentId&gt; tokens) or sanitized HTML — see <see cref="Format"/>.</summary>
     public string Body { get; private set; } = string.Empty;
+    public string Format { get; private set; } = ChatMessageFormat.Text;
+    /// <summary>The words alone — search, notifications, pinned previews.</summary>
+    public string BodyText { get; private set; } = string.Empty;
     public List<Guid> MentionIds { get; private set; } = [];
     public int ReplyCount { get; private set; }
     public DateTimeOffset? LastReplyAt { get; private set; }
@@ -203,6 +214,8 @@ public class ChatMessage
     public Guid? PinnedById { get; private set; }
 
     public const int MaxLength = 4000;
+    /// <summary>Formatted messages carry markup; the words are still capped at <see cref="MaxLength"/>.</summary>
+    public const int MaxHtmlLength = 40000;
 
     private ChatMessage() { }
 
@@ -214,20 +227,69 @@ public class ChatMessage
         return new ChatMessage
         {
             Id = Guid.NewGuid(), ChannelId = channelId, AgentId = agentId, Kind = kind, ParentId = parentId,
-            Body = text, MentionIds = ParseMentions(text), CreatedAt = DateTimeOffset.UtcNow,
+            Body = text, BodyText = text, MentionIds = ParseMentions(text), CreatedAt = DateTimeOffset.UtcNow,
         };
+    }
+
+    /// <summary>A formatted message. <paramref name="html"/> must already be sanitized; <paramref name="text"/> is its words.</summary>
+    public static ChatMessage CreateRich(Guid channelId, Guid agentId, string html, string text, bool hasImages, Guid? parentId)
+    {
+        var m = new ChatMessage
+        {
+            Id = Guid.NewGuid(), ChannelId = channelId, AgentId = agentId, Kind = ChatMessageKind.User, ParentId = parentId,
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        m.SetRich(html, text, hasImages);
+        return m;
+    }
+
+    private void SetRich(string html, string text, bool hasImages)
+    {
+        var words = (text ?? "").Trim();
+        if (words.Length == 0 && !hasImages) throw new ArgumentException("A message can't be empty.", nameof(text));
+        if (words.Length > MaxLength) throw new ArgumentException($"A message is at most {MaxLength} characters.", nameof(text));
+        if ((html ?? "").Length > MaxHtmlLength) throw new ArgumentException("That message has too much formatting — try splitting it up.", nameof(html));
+        Format = ChatMessageFormat.Html;
+        Body = html!;
+        BodyText = words.Length > 0 ? words : "[image]";
+        MentionIds = ParseHtmlMentions(html!);
     }
 
     public void Edit(string body)
     {
         var text = (body ?? "").Trim();
         if (text.Length is 0 or > MaxLength) throw new ArgumentException($"A message is 1–{MaxLength} characters.", nameof(body));
+        Format = ChatMessageFormat.Text;
         Body = text;
+        BodyText = text;
         MentionIds = ParseMentions(text);
         EditedAt = DateTimeOffset.UtcNow;
     }
 
-    public void Delete() { DeletedAt = DateTimeOffset.UtcNow; Body = string.Empty; MentionIds = []; Unpin(); }
+    public void EditRich(string html, string text, bool hasImages)
+    {
+        SetRich(html, text, hasImages);
+        EditedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>Mentions in formatted messages: data-mention="guid" attributes, in order, once each.</summary>
+    public static List<Guid> ParseHtmlMentions(string html)
+    {
+        var ids = new List<Guid>();
+        const string attr = "data-mention=\"";
+        var i = 0;
+        while ((i = html.IndexOf(attr, i, StringComparison.Ordinal)) >= 0)
+        {
+            var start = i + attr.Length;
+            var end = html.IndexOf('"', start);
+            if (end < 0) break;
+            if (Guid.TryParse(html.AsSpan(start, end - start), out var id) && !ids.Contains(id)) ids.Add(id);
+            i = end + 1;
+        }
+        return ids;
+    }
+
+    public void Delete() { DeletedAt = DateTimeOffset.UtcNow; Body = string.Empty; BodyText = string.Empty; MentionIds = []; Unpin(); }
 
     public void Pin(Guid byId)
     {
@@ -270,6 +332,43 @@ public class ChatReaction
         var e = (emoji ?? "").Trim();
         if (e.Length is 0 or > 16) throw new ArgumentException("Pick an emoji.", nameof(emoji));
         return new ChatReaction { MessageId = messageId, AgentId = agentId, Emoji = e, CreatedAt = DateTimeOffset.UtcNow };
+    }
+}
+
+/// <summary>An image pasted or attached in chat (S183) — stored in blob storage, served only to signed-in people who can see a
+/// message that uses it (or its uploader).</summary>
+public class ChatFile
+{
+    public Guid Id { get; private set; }
+    public Guid TenantId { get; private set; }
+    public Guid AgentId { get; private set; }
+    public string ContentType { get; private set; } = string.Empty;
+    public long SizeBytes { get; private set; }
+    public string StorageKey { get; private set; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; private set; }
+
+    public const long MaxBytes = 5 * 1024 * 1024;
+
+    private ChatFile() { }
+    public static ChatFile Create(Guid tenantId, Guid agentId, string contentType, long size)
+    {
+        var id = Guid.NewGuid();
+        return new ChatFile
+        {
+            Id = id, TenantId = tenantId, AgentId = agentId, ContentType = contentType, SizeBytes = size,
+            StorageKey = $"chat/{tenantId:N}/{id:N}", CreatedAt = DateTimeOffset.UtcNow,
+        };
+    }
+
+    /// <summary>The image type from the file's own first bytes — never trust the declared type (no SVG / HTML).</summary>
+    public static string? SniffImageType(ReadOnlySpan<byte> head)
+    {
+        if (head.Length >= 8 && head[0] == 0x89 && head[1] == 0x50 && head[2] == 0x4E && head[3] == 0x47) return "image/png";
+        if (head.Length >= 3 && head[0] == 0xFF && head[1] == 0xD8 && head[2] == 0xFF) return "image/jpeg";
+        if (head.Length >= 6 && head[0] == 0x47 && head[1] == 0x49 && head[2] == 0x46 && head[3] == 0x38) return "image/gif";
+        if (head.Length >= 12 && head[0] == 0x52 && head[1] == 0x49 && head[2] == 0x46 && head[3] == 0x46
+            && head[8] == 0x57 && head[9] == 0x45 && head[10] == 0x42 && head[11] == 0x50) return "image/webp";
+        return null;
     }
 }
 
