@@ -5,6 +5,7 @@ import * as signalR from '@microsoft/signalr'
 import AdminShell from '../../components/admin/AdminShell'
 import CallCommissionsPanel from '../../components/admin/CallCommissionsPanel'
 import AiSummaryPanel from '../../components/admin/AiSummaryPanel'
+import RecordingPlayer, { fetchCallRecording } from '../../components/dashboard/RecordingPlayer'
 import { useAuthStore } from '../../stores/authStore'
 import {
   abandonLabel,
@@ -95,6 +96,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 export default function AdminCallDetailPage() {
   const { id } = useParams<{ id: string }>()
   const canManage = useAuthStore((s) => s.hasPermission('calls.manage'))
+  const canPlayRecording = useAuthStore((s) => s.hasPermission('recordings.play'))
   const [call, setCall] = useState<CallDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [live, setLive] = useState<'connecting' | 'live' | 'offline'>('connecting')
@@ -237,6 +239,12 @@ export default function AdminCallDetailPage() {
             </div>
           )
         })()}
+
+        {canPlayRecording && (
+          <Section title="Recording">
+            <RecordingPlayer key={call.id} load={() => fetchCallRecording(call.id)} />
+          </Section>
+        )}
 
         <FinalizePanel call={call} canManage={canManage} onChanged={load} />
 

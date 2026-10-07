@@ -92,9 +92,7 @@ public static class CallerHistoryEndpoints
         if (await QueryAsync(db, id, ct) is not { } q || !await q.Past.AnyAsync(r => r.Id == pastId, ct)) return Results.NotFound();
         var built = await CallDetailView.BuildAsync(pastId, deps, tenant.Timezone, ct);
         if (built is not { } b) return Results.NotFound();
-        // Recordings of past calls: people who may review calls, not every agent.
-        var perms = (http.User.FindFirst("permissions")?.Value ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries);
-        var canListen = perms.Any(p => p is Permission.CallsView or Permission.CallsManage or Permission.ReportsView);
-        return Results.Ok(new { detail = b.Detail, canPlayRecording = b.RecordingStatus == "available" && canListen });
+        // Recordings of past calls: only roles allowed to play recordings, not every agent.
+        return Results.Ok(new { detail = b.Detail, canPlayRecording = b.RecordingStatus == "available" && CallRecordingsEndpoints.CanPlay(http) });
     }
 }

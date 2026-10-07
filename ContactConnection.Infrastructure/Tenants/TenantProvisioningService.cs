@@ -78,7 +78,7 @@ public class TenantProvisioningService : ITenantProvisioningService
 
         ctx.Roles.AddRange(
             Role.Create(tenantId, "Administrator", Permission.All.ToList(), AdminDashboard, isBuiltIn: true),
-            Role.Create(tenantId, "Supervisor",    [AgentsView, FlowsView, CallsView, CallsExport, SupervisorMonitor, SupervisorOverride, ReportsView], AgentPortal, isBuiltIn: true),
+            Role.Create(tenantId, "Supervisor",    [AgentsView, FlowsView, CallsView, CallsExport, RecordingsPlay, SupervisorMonitor, SupervisorOverride, ReportsView], AgentPortal, isBuiltIn: true),
             Role.Create(tenantId, "Agent",         [CallsView], AgentPortal, isBuiltIn: true)
         );
 

@@ -1,5 +1,16 @@
 import { useEffect, useState } from 'react'
 import { PlayIcon } from '../icons/Icons'
+import { useAuthStore } from '../../stores/authStore'
+import { getSubdomainFromHostname } from '../../utils/subdomain'
+
+/** A tenant user's fetch of a call's recording (needs the recordings.play permission; the client portal has its own). */
+export function fetchCallRecording(callId: string) {
+  const { token, tenantSubdomain } = useAuthStore.getState()
+  const sub = getSubdomainFromHostname() ?? tenantSubdomain
+  return fetch(`/api/v1/call-records/${callId}/recording`, {
+    headers: { Authorization: `Bearer ${token ?? ''}`, ...(sub ? { 'X-Tenant-Subdomain': sub } : {}) },
+  })
+}
 
 /**
  * Plays a call recording fetched with the viewer's own sign-in (S181) — the bytes come back through an authenticated

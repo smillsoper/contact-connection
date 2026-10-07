@@ -27,11 +27,18 @@ public static class CallRecordingsEndpoints
         IRecordingMergeJobRepository mergeJobs,
         IBlobStorage blobs,
         TenantContext tenantContext,
+        HttpContext http,
         CancellationToken ct)
     {
         if (tenantContext.Current is null) return Results.Unauthorized();
+        if (!CanPlay(http)) return Results.Json(new { status = "forbidden" }, statusCode: StatusCodes.Status403Forbidden);
         return await StreamAsync(id, callRecords, mergeJobs, blobs, ct);
     }
+
+    /// <summary>The signed-in user's role may play call recordings (S183).</summary>
+    internal static bool CanPlay(HttpContext http) =>
+        (http.User.FindFirst("permissions")?.Value ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Contains(Permission.RecordingsPlay, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The merged recording's bytes (or its status) — shared with the client portal's records widget (S181),
     /// which checks the client user's recording permission and the dashboard scope first.</summary>

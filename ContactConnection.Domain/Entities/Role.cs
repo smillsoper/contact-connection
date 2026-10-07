@@ -62,6 +62,9 @@ public static class Permission
     public const string CallsView   = "calls.view";
     public const string CallsExport = "calls.export";
     public const string CallsManage = "calls.manage"; // edit a call's data after the fact + re-run its API calls (order resubmit)
+    /// <summary>Play call recordings (S183) — Call Records, the dashboard Records widget and the agent portal's caller
+    /// history. calls.view alone (which every agent holds) is not enough.</summary>
+    public const string RecordingsPlay = "recordings.play";
 
     public const string IntegrationsView   = "integrations.view";
     public const string IntegrationsManage = "integrations.manage";
@@ -98,7 +101,7 @@ public static class Permission
         AgentsView, AgentsManage, RolesManage,
         FlowsView, FlowsManage, FlowsPublish,
         TelephonyView, TelephonyManage,
-        CallsView, CallsExport, CallsManage,
+        CallsView, CallsExport, CallsManage, RecordingsPlay,
         IntegrationsView, IntegrationsManage,
         SupervisorMonitor, SupervisorOverride,
         ReportsView, ReportsManage,
@@ -114,7 +117,7 @@ public static class Permission
     public static IReadOnlyList<string> ForLegacyRole(string role) => role switch
     {
         AgentRole.Admin      => All.ToList(),
-        AgentRole.Supervisor => [AgentsView, FlowsView, CallsView, CallsExport, SupervisorMonitor, SupervisorOverride, ReportsView, InternalDialList],
+        AgentRole.Supervisor => [AgentsView, FlowsView, CallsView, CallsExport, RecordingsPlay, SupervisorMonitor, SupervisorOverride, ReportsView, InternalDialList],
         _                    => [CallsView]
     };
 }

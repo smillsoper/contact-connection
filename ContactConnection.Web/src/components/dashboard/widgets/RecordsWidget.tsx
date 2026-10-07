@@ -5,20 +5,11 @@ import type { WidgetFilterConfig } from '../../../types/dashboard'
 import { useDashboardLiveAgentSessions, useDashboardLiveCallState } from '../DashboardLiveContext'
 import { useRecordsSource } from '../RecordsSource'
 import CallDetailModal from '../CallDetailModal'
-import { useAuthStore } from '../../../stores/authStore'
-import { getSubdomainFromHostname } from '../../../utils/subdomain'
+import { fetchCallRecording } from '../RecordingPlayer'
 import { ChevronDownIcon, ChevronUpIcon } from '../../icons/Icons'
 
 // Records widget (S181, docs/client-dashboards-plan.md §C): call records in the widget's window and scope — search, sort,
 // per-column filters, paging, and a detail drawer with recording playback where allowed.
-
-function internalRecording(callId: string) {
-  const { token, tenantSubdomain } = useAuthStore.getState()
-  const sub = getSubdomainFromHostname() ?? tenantSubdomain
-  return fetch(`/api/v1/call-records/${callId}/recording`, {
-    headers: { Authorization: `Bearer ${token ?? ''}`, ...(sub ? { 'X-Tenant-Subdomain': sub } : {}) },
-  })
-}
 
 export default function RecordsWidget({ config }: { config: WidgetFilterConfig }) {
   const source = useRecordsSource()
@@ -149,7 +140,7 @@ export default function RecordsWidget({ config }: { config: WidgetFilterConfig }
         </div>, document.body
       ) : (
         <CallDetailModal data={detail?.detail ?? null} canPlayRecording={detail?.canPlayRecording ?? false}
-          loadRecording={() => (source ? source.recording(openId) : internalRecording(openId))} onClose={() => setOpenId(null)} />
+          loadRecording={() => (source ? source.recording(openId) : fetchCallRecording(openId))} onClose={() => setOpenId(null)} />
       ))}
     </div>
   )

@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../api/client'
-import { useAuthStore } from '../stores/authStore'
-import { getSubdomainFromHostname } from '../utils/subdomain'
+import { fetchCallRecording } from './dashboard/RecordingPlayer'
 import CallDetailModal, { type CallDetailData } from './dashboard/CallDetailModal'
 import { CloseIcon } from './icons/Icons'
 
@@ -16,14 +15,6 @@ interface PastCall {
 interface History { number: string | null; total: number; items: PastCall[] }
 
 const money = (n: number | null) => (n == null ? '' : `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
-
-function recording(callId: string) {
-  const { token, tenantSubdomain } = useAuthStore.getState()
-  const sub = getSubdomainFromHostname() ?? tenantSubdomain
-  return fetch(`/api/v1/call-records/${callId}/recording`, {
-    headers: { Authorization: `Bearer ${token ?? ''}`, ...(sub ? { 'X-Tenant-Subdomain': sub } : {}) },
-  })
-}
 
 export default function CallerHistoryButton({ callRecordId }: { callRecordId: string | null }) {
   const [history, setHistory] = useState<History | null>(null)
@@ -106,7 +97,7 @@ export default function CallerHistoryButton({ callRecordId }: { callRecordId: st
 
       {open && detailId && (
         <CallDetailModal data={detail?.detail ?? null} canPlayRecording={detail?.canPlayRecording ?? false}
-          loadRecording={() => recording(detailId)} onClose={() => setDetailId(null)} />
+          loadRecording={() => fetchCallRecording(detailId)} onClose={() => setDetailId(null)} />
       )}
     </>
   )
