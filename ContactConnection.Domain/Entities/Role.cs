@@ -88,6 +88,9 @@ public static class Permission
     /// <summary>The tenant's Billing page (S179): payment method, autopay, paying our invoices.</summary>
     public const string BillingManage = "billing.manage";
 
+    /// <summary>Create or change a data export that includes card data (S182; the tenant's Card data exports switch must be on).</summary>
+    public const string ExportsCardData = "exports.card_data";
+
     public static readonly IReadOnlyList<string> All = [
         AgentsView, AgentsManage, RolesManage,
         FlowsView, FlowsManage, FlowsPublish,
@@ -99,7 +102,8 @@ public static class Permission
         BlocklistView, BlocklistManage,
         TrainingMode,
         DirectDial, InternalDialList,
-        BillingManage
+        BillingManage,
+        ExportsCardData
     ];
 
     // Permissions derived from legacy AgentRole strings (for agents without a custom RoleId)

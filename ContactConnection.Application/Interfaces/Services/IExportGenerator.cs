@@ -23,8 +23,11 @@ public interface IExportGenerator
 
 /// <param name="DataSource"><c>production</c> or <c>practice</c> (training + sandbox calls).</param>
 /// <param name="MaxCalls">Preview: stop after this many calls.</param>
+/// <param name="MaskCardData">S182: a card-data export's preview / test file — card values shown as X (last four kept).</param>
 public sealed record ExportGenerationRequest(
     ExportSpec Spec, string ExportName, Guid? RunId, bool IsTest, string DataSource,
-    DateTimeOffset WindowStart, DateTimeOffset WindowEnd, int? MaxCalls = null, string Kind = "manual");
+    DateTimeOffset WindowStart, DateTimeOffset WindowEnd, int? MaxCalls = null, string Kind = "manual", bool MaskCardData = true);
 
-public sealed record ExportGenerationResult(bool Success, int RowCount, int CallCount, bool Truncated, string? Error);
+/// <param name="CardCallIds">S182: calls whose real card data went into the file (wiped once it's delivered).</param>
+public sealed record ExportGenerationResult(bool Success, int RowCount, int CallCount, bool Truncated, string? Error,
+    IReadOnlyList<Guid>? CardCallIds = null);

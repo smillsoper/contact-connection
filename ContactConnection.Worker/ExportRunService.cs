@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
 using ContactConnection.Domain.Entities;
@@ -226,6 +227,12 @@ public sealed class ExportRunService : BackgroundService
         try
         {
             var request = Request(run);
+            // A real card-data file (S182) never touches disk in the clear: built in memory, stored encrypted.
+            if (run.HoldsCardData)
+            {
+                await ProcessCardFileAsync(db, run, generator, request, scope.ServiceProvider, ct);
+                return;
+            }
             ExportGenerationResult result;
             await using (var file = new FileStream(temp, FileMode.Create, FileAccess.ReadWrite, FileShare.None))
                 result = await generator.GenerateAsync(request, file, ct);
@@ -273,8 +280,93 @@ public sealed class ExportRunService : BackgroundService
         }
     }
 
+    /// <summary>Real card-data files (preview and test files are masked) show the actual card values.</summary>
     private static ExportGenerationRequest Request(ExportRun run) =>
-        new(run.Spec, run.DefinitionName, run.Id, run.IsTest, run.DataSource, run.WindowStart, run.WindowEnd, Kind: run.Kind);
+        new(run.Spec, run.DefinitionName, run.Id, run.IsTest, run.DataSource, run.WindowStart, run.WindowEnd, Kind: run.Kind,
+            MaskCardData: !run.HoldsCardData);
+
+    /// <summary>
+    /// A real card-data file (S182): generated in memory, encrypted with the platform's data key (AES-256-GCM) before it's
+    /// stored — the only copy kept. Delivery decrypts it in memory and PGP-encrypts it to the recipient.
+    /// </summary>
+    private async Task ProcessCardFileAsync(TenantDbContext db, ExportRun run, IExportGenerator generator, ExportGenerationRequest request,
+        IServiceProvider services, CancellationToken ct)
+    {
+        var protector = services.GetRequiredService<ISensitiveDataProtector>();
+        if (!protector.IsConfigured)
+        {
+            run.Fail("Card-data files need the platform's data key (SensitiveData:MasterKey), which isn't configured.", _retryBackoff, permanent: true);
+            await db.SaveChangesAsync(CancellationToken.None);
+            return;
+        }
+        using var memory = new MemoryStream();
+        var result = await generator.GenerateAsync(request, memory, ct);
+        if (!result.Success)
+        {
+            run.Fail(result.Error ?? "export failed", _retryBackoff, permanent: true);
+            await db.SaveChangesAsync(CancellationToken.None);
+            return;
+        }
+        var bytes = memory.ToArray();
+        var sha = Convert.ToHexStringLower(SHA256.HashData(bytes));
+        var sealedText = Encoding.UTF8.GetBytes(protector.Protect(Convert.ToBase64String(bytes)));
+        Array.Clear(bytes);
+        var fileName = generator.RenderFileName(request);
+        var key = $"exports/{run.DefinitionId}/{run.Id}/{fileName}.sealed";
+        using (var sealedStream = new MemoryStream(sealedText))
+            await _blobs.PutAsync(key, sealedStream, "application/octet-stream", ct);
+
+        run.Succeed(result.RowCount, result.CallCount, fileName, key, generator.ContentType(run.Spec), memory.Length, sha);
+        run.SetCardCalls(result.CardCallIds ?? []);
+        db.ExportAuditEntries.Add(ExportAuditEntry.Record(run.TenantId, run.DefinitionId, run.Id, ExportAuditAction.CardDataGenerated,
+            run.RequestedByName, $"{fileName}: card data for {run.CardCallIds.Count} call(s), stored encrypted"));
+        if (run.Deliver && await db.ExportDefinitions.AsNoTracking().FirstOrDefaultAsync(d => d.Id == run.DefinitionId, ct) is { } def)
+            foreach (var target in def.DeliveryTargets.Where(t => t.Enabled))
+                db.ExportDeliveries.Add(ExportDelivery.Queue(run, target.Id, target.Name, target.Type, run.RequestedByName));
+        await db.SaveChangesAsync(CancellationToken.None);
+        _logger.LogInformation("Card-data export run {RunId} ({Name}) → {File}: {Rows} rows, card data for {Cards} calls (stored encrypted).",
+            run.Id, run.DefinitionName, fileName, result.RowCount, run.CardCallIds.Count);
+    }
+
+    /// <summary>The card-data file, PGP-encrypted to the target in memory; only the encrypted file is written for upload.</summary>
+    private async Task<string?> SealedToPgpAsync(ExportRun run, ExportDeliveryTarget target, string temp, IServiceProvider services, CancellationToken ct)
+    {
+        await using var blob = await _blobs.OpenReadAsync(run.BlobKey!, ct);
+        if (blob is null) return null;
+        using var reader = new StreamReader(blob, Encoding.UTF8);
+        var plain = Convert.FromBase64String(services.GetRequiredService<ISensitiveDataProtector>().Unprotect(await reader.ReadToEndAsync(ct)));
+        try
+        {
+            var pgp = new PgpCore.PGP(new PgpCore.EncryptionKeys(target.PgpPublicKey!));
+            using var input = new MemoryStream(plain);
+            await using var output = File.Create(temp);
+            await pgp.EncryptAsync(input, output, armor: false, withIntegrityCheck: true, name: run.FileName);
+        }
+        finally { Array.Clear(plain); }
+        return temp;
+    }
+
+    /// <summary>
+    /// Once every enabled target has the card-data file (S182), the calls' card data has done its job: wiped, and the
+    /// wipe audited. A target still failing keeps it — the aged-card-data alert shows that.
+    /// </summary>
+    private static async Task WipeCardDataIfDeliveredAsync(TenantDbContext db, ExportRun run, ExportDefinition def, CancellationToken ct)
+    {
+        if (!run.HoldsCardData || run.CardDataWipedAt is not null || run.CardCallIds.Count == 0) return;
+        var targets = def.DeliveryTargets.Where(t => t.Enabled).Select(t => t.Id).ToList();
+        var delivered = await db.ExportDeliveries.AsNoTracking()
+            .Where(d => d.RunId == run.Id && d.Status == ExportDeliveryStatus.Succeeded).Select(d => d.TargetId).ToListAsync(ct);
+        if (targets.Count == 0 || targets.Except(delivered).Any()) return;
+
+        var ids = run.CardCallIds;
+        var records = await db.CallRecords.Where(r => ids.Contains(r.Id) && r.SensitiveData != null).ToListAsync(ct);
+        foreach (var r in records) r.WipeSensitiveData("exported");
+        var tracked = await db.ExportRuns.FirstAsync(x => x.Id == run.Id, ct);
+        tracked.MarkCardDataWiped();
+        db.ExportAuditEntries.Add(ExportAuditEntry.Record(run.TenantId, run.DefinitionId, run.Id, ExportAuditAction.CardDataWiped, null,
+            $"{run.FileName}: delivered to every target — card data wiped for {records.Count} call(s)"));
+        await db.SaveChangesAsync(CancellationToken.None);
+    }
 
     // ── 4. Deliver ─────────────────────────────────────────────────────────────
 
@@ -295,8 +387,20 @@ public sealed class ExportRunService : BackgroundService
             if (target is null) { await FailAsync(db, delivery, $"The delivery target '{delivery.TargetName}' was removed.", true); return; }
             if (!target.Enabled) { await FailAsync(db, delivery, $"The delivery target '{target.Name}' is turned off.", true); return; }
 
-            await using (var blob = await _blobs.OpenReadAsync(run.BlobKey, ct))
+            var sendTarget = target;
+            var sendName = run.FileName!;
+            if (run.HoldsCardData)
             {
+                // S182: FTPS + PGP only, checked again at send time whatever the saved settings say.
+                if (target.CardDataProblem() is { } problem) { await FailAsync(db, delivery, problem, true); return; }
+                if (await SealedToPgpAsync(run, target, temp, scope.ServiceProvider, ct) is null)
+                { await FailAsync(db, delivery, "The file is no longer stored.", true); return; }
+                sendTarget = target with { Encryption = ExportEncryption.None };   // already PGP-encrypted, in memory
+                sendName = run.FileName + ".pgp";
+            }
+            else
+            {
+                await using var blob = await _blobs.OpenReadAsync(run.BlobKey, ct);
                 if (blob is null) { await FailAsync(db, delivery, "The file is no longer stored.", true); return; }
                 await using var file = File.Create(temp);
                 await blob.CopyToAsync(file, ct);
@@ -304,7 +408,7 @@ public sealed class ExportRunService : BackgroundService
 
             var sender = scope.ServiceProvider.GetRequiredService<IExportDeliveryService>();
             var result = await sender.DeliverAsync(new ExportDeliveryRequest(
-                tenant.Subdomain, target, temp, run.FileName!, run.ContentType ?? "application/octet-stream",
+                tenant.Subdomain, sendTarget, temp, sendName, run.ContentType ?? "application/octet-stream",
                 ExportGenerator.Context(Request(run)), run.Spec.TimeZone), ct);
             var sentAs = result.SentAs;
 
@@ -324,6 +428,7 @@ public sealed class ExportRunService : BackgroundService
                 ExportAuditAction.Delivered, delivery.RequestedByName, $"{run.FileName} → {target.Name} ({sentAs})"));
             await db.SaveChangesAsync(CancellationToken.None);
             _logger.LogInformation("Export file {File} delivered to {Target}.", run.FileName, target.Name);
+            if (def is not null) await WipeCardDataIfDeliveredAsync(db, run, def, ct);
         }
         catch (ExportDeliveryException ex)
         {

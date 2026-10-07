@@ -43,6 +43,13 @@ public sealed record ExportSpec
     public string TestFileSuffix { get; init; } = "_TEST";
     /// <summary>IANA time zone every date in the file is written in (<c>format_time</c>) and the window's dates are read in.</summary>
     public string TimeZone { get; init; } = "America/New_York";
+
+    /// <summary>
+    /// S182: the file carries card data (the <c>card</c> variables). Needs the tenant's Card data exports switch and the
+    /// exports.card_data permission; delivery is FTPS + PGP only; the file is stored encrypted and can't be downloaded; the
+    /// preview and test files are masked; each call's card data is wiped once every target confirms the file.
+    /// </summary>
+    public bool IncludesCardData { get; init; }
 }
 
 /// <param name="Header">Header line text (delimited / xlsx; fixed width pads it to the width).</param>

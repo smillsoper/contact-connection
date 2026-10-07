@@ -163,10 +163,12 @@ public class AuthorizeNetGatewayClient(
                 {
                     ["cardNumber"] = cardNumber,
                     ["expirationDate"] = ToExpirationDate(expirationMMYY),
-                    ["cardCode"] = cvv,
                 },
             },
         };
+        // Left out when absent — a re-authorization after the security code was wiped (S182).
+        if (!string.IsNullOrEmpty(cvv))
+            transactionRequest["payment"]!["creditCard"]!.AsObject()["cardCode"] = cvv;
         if (!string.IsNullOrEmpty(orderNumber))
             transactionRequest["order"] = new JsonObject { ["invoiceNumber"] = orderNumber };
         if (!string.IsNullOrEmpty(zip))

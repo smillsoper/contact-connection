@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import AdminShell from '../../components/admin/AdminShell'
-import { exportsApi, STATUS_LABEL, STATUS_STYLE, type ExportDefinition } from '../../api/exports'
+import { exportsApi, STATUS_LABEL, STATUS_STYLE, type CardDataStatus, type ExportDefinition } from '../../api/exports'
 import ExportKeysCard from '../../components/admin/exports/ExportKeysCard'
 
 // Data Exports (S180, Export Worker) — every export file this tenant sends (e.g. the nightly media-agency files), with
@@ -16,6 +16,9 @@ export default function AdminExportsPage() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => { exportsApi.list().then(setItems).catch((e: Error) => setError(e.message)) }, [])
+  // S182: card data held for a card-data export — flag anything waiting more than 2 days.
+  const [cardStatus, setCardStatus] = useState<CardDataStatus | null>(null)
+  useEffect(() => { exportsApi.cardDataStatus().then(setCardStatus).catch(() => {}) }, [])
 
   return (
     <AdminShell>
@@ -29,6 +32,12 @@ export default function AdminExportsPage() {
           draft → testing with the vendor → vendor approved → live. Test files can be generated at any stage.
         </p>
         {error && <p className="text-red-400 text-sm mb-4">{error}</p>}
+        {cardStatus && cardStatus.waitingOverTwoDays > 0 && (
+          <div className="mb-4 rounded-lg border border-red-800 bg-red-950/40 px-4 py-3 text-sm text-red-200">
+            {cardStatus.waitingOverTwoDays} call{cardStatus.waitingOverTwoDays === 1 ? ' has' : 's have'} held card data for more than 2 days
+            waiting for a card-data export. Check that export's deliveries — the card data is wiped as soon as a file reaches every target.
+          </div>
+        )}
         {items === null ? <p className="text-gray-500 text-sm">Loading…</p>
           : items.length === 0 ? <p className="text-gray-500 italic text-sm">No exports yet.</p>
           : (

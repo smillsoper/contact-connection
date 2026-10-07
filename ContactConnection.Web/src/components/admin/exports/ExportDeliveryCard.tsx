@@ -265,7 +265,10 @@ export default function ExportDeliveryCard({ def, onSaved }: { def: ExportDefini
     <div className="bg-gray-800/60 border border-gray-700 rounded-lg p-4 mb-4">
       <datalist id="export-credential-names">{(names ?? []).map((n) => <option key={n} value={n} />)}</datalist>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-        <h2 className="text-sm font-semibold text-gray-100">Delivery</h2>
+        <h2 className="text-sm font-semibold text-gray-100">
+          Delivery
+          {def.spec.includesCardData && <span className="ml-2 text-xs font-normal text-amber-300">Card data: FTPS + PGP only</span>}
+        </h2>
         <div className="flex flex-wrap gap-2">
           {(['sftp', 'ftps', 'email'] as const).map((type) => (
             <button key={type} className="px-2.5 py-1 rounded text-sm bg-gray-700 hover:bg-gray-600 text-white"

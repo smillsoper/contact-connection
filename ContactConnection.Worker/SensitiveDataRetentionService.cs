@@ -127,6 +127,9 @@ public sealed class SensitiveDataRetentionService : BackgroundService
         var ttlMinutesByCampaign = await db.Campaigns
             .Where(c => campaignIds.Contains(c.Id))
             .ToDictionaryAsync(c => c.Id, c => c.SensitiveDataRetentionMinutes, ct);
+        // S182: card data held for a card-data export isn't on a timer — the export wipes it once delivered.
+        var heldForExport = (await db.Campaigns.Where(c => campaignIds.Contains(c.Id) && c.CardDataRetention == CardDataRetentionMode.UntilExported)
+            .Select(c => c.Id).ToListAsync(ct)).ToHashSet();
 
         var now = DateTimeOffset.UtcNow;
         var wiped = 0;
@@ -138,6 +141,14 @@ public sealed class SensitiveDataRetentionService : BackgroundService
             var record = await callRepo.GetByIdAsync(id, ct);
             if (record is null || record.SensitiveData is null) continue;
 
+            if (heldForExport.Contains(record.CampaignId))
+            {
+                var held = record.SensitiveDataStoredAt ?? record.CreatedAt;
+                if (now - held > TimeSpan.FromDays(2))
+                    _logger.LogWarning("Card data for call {CallId} (tenant {Subdomain}) has waited {Days:0.0} days for its export — check the export's deliveries.",
+                        id, tenant.Subdomain, (now - held).TotalDays);
+                continue;
+            }
             var ttlMinutes = ttlMinutesByCampaign.GetValueOrDefault(record.CampaignId) ?? _defaultTtlMinutes;
             var anchor     = record.SensitiveDataStoredAt ?? record.CreatedAt;
             if (anchor.AddMinutes(ttlMinutes) > now) continue;   // not due yet — campaigns vary, keep scanning the batch

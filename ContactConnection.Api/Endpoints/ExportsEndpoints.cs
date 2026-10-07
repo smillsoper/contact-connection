@@ -40,6 +40,7 @@ public static class ExportsEndpoints
         g.MapPut("{id:guid}/delivery-targets", SaveTargets);
         g.MapPost("{id:guid}/delivery-targets/test", TestTarget);
         g.MapGet("{id:guid}/activity", Activity);
+        g.MapGet("card-data", CardDataStatus);
 
         var r = app.MapGroup("/api/v1/export-runs").RequireAuthorization("ReportsManage");
         r.MapGet("{runId:guid}/download", Download);
@@ -83,6 +84,7 @@ public static class ExportsEndpoints
         if (string.IsNullOrWhiteSpace(req.Name)) return Results.BadRequest(new { error = "A name is required." });
         var spec = WithDefaults(req.Spec ?? new ExportSpec(), tenant.Timezone);
         if (generator.Validate(spec) is { } error) return Results.BadRequest(new { error });
+        if (spec.IncludesCardData && CardDataGate(tenant, http) is { } denied) return denied;
 
         await using var db = dbf.Create();
         var d = ExportDefinition.Create(tenant.Id, req.Name, req.Description, spec);
@@ -105,10 +107,17 @@ public static class ExportsEndpoints
 
         var spec = WithDefaults(req.Spec ?? d.Spec, tenant.Timezone);
         if (generator.Validate(spec) is { } error) return Results.BadRequest(new { error });
+        // A card-data export (S182) — turning it on, or changing one — needs the tenant switch and the permission, and
+        // every delivery target must already be FTPS + PGP.
+        if ((spec.IncludesCardData || d.Spec.IncludesCardData) && CardDataGate(tenant, http) is { } denied) return denied;
+        if (spec.IncludesCardData && d.DeliveryTargets.Select(t => t.CardDataProblem()).FirstOrDefault(p => p is not null) is { } targetProblem)
+            return Results.BadRequest(new { error = $"Card data can't go to this export's current delivery targets — {targetProblem}" });
+        var cardTurnedOff = d.Spec.IncludesCardData && !spec.IncludesCardData;
         var renamed = d.Name != req.Name.Trim() || d.Description != (string.IsNullOrWhiteSpace(req.Description) ? null : req.Description.Trim());
         d.Rename(req.Name, req.Description);
         var specChanged = d.UpdateSpec(spec);
         await db.SaveChangesAsync(ct);
+        if (cardTurnedOff) await WipeOrphanedCardDataAsync(db, "card_export_turned_off", ct);
         if (renamed || specChanged)
         {
             var summary = specChanged
@@ -121,14 +130,15 @@ public static class ExportsEndpoints
 
     /// <summary>Only a draft can be deleted (an approved or live export is a vendor commitment — pause it instead).</summary>
     private static async Task<IResult> Delete(
-        Guid id, ScopedTenantDbContextFactory dbf, IBlobStorage blobs, TenantContext tc, CancellationToken ct)
+        Guid id, ScopedTenantDbContextFactory dbf, IBlobStorage blobs, TenantContext tc, HttpContext http, CancellationToken ct)
     {
-        if (!tc.HasTenant) return Results.Unauthorized();
+        if (tc.Current is not { } tenant) return Results.Unauthorized();
         await using var db = dbf.Create();
         var d = await db.ExportDefinitions.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (d is null) return Results.NotFound();
         if (d.Status != ExportStatus.Draft)
             return Results.Conflict(new { error = "Only a draft export can be deleted — move it back to draft first." });
+        if (d.Spec.IncludesCardData && CardDataGate(tenant, http) is { } denied) return denied;
         if (await db.ExportRuns.AnyAsync(x => x.DefinitionId == id && (x.Status == ExportRunStatus.Queued || x.Status == ExportRunStatus.Running), ct))
             return Results.Conflict(new { error = "A file is being generated — try again when it finishes." });
         if (await db.ExportDeliveries.AnyAsync(x => x.DefinitionId == id && (x.Status == ExportDeliveryStatus.Queued || x.Status == ExportDeliveryStatus.Running), ct))
@@ -138,6 +148,7 @@ public static class ExportsEndpoints
         db.ExportRuns.RemoveRange(db.ExportRuns.Where(x => x.DefinitionId == id));
         db.ExportDefinitions.Remove(d);
         await db.SaveChangesAsync(ct);
+        if (d.Spec.IncludesCardData) await WipeOrphanedCardDataAsync(db, "card_export_deleted", ct);
         await blobs.DeletePrefixAsync($"exports/{id}/", ct);
         return Results.NoContent();
     }
@@ -213,8 +224,9 @@ public static class ExportsEndpoints
         var renderSpec = asGrid
             ? spec with { Format = ExportFormat.Delimited, Delimiter = "\t", LineEnding = "lf", Columns = spec.Columns.Select(c => c with { Quote = "never" }).ToList() }
             : spec;
+        // A preview never shows real card data (S182) — masked like a test file.
         var request = new ExportGenerationRequest(renderSpec, req.Name ?? "Preview", null, req.IsTest, source, start, end,
-            Math.Clamp(req.MaxCalls ?? DefaultPreviewCalls, 1, MaxPreviewCalls));
+            Math.Clamp(req.MaxCalls ?? DefaultPreviewCalls, 1, MaxPreviewCalls), MaskCardData: true);
         using var ms = new MemoryStream();
         var result = await generator.GenerateAsync(request, ms, ct);
         var text = ExportRowWriter.Utf8NoBom.GetString(ms.GetBuffer(), 0, (int)Math.Min(ms.Length, MaxPreviewChars * 4));
@@ -290,6 +302,8 @@ public static class ExportsEndpoints
         if (run is not { Status: ExportRunStatus.Succeeded, BlobKey: { } key }) return Results.NotFound();
         if (run.FileDeletedAt is not null)
             return Results.Json(new { error = "This file was deleted by the retention policy — re-run its window to make it again." }, statusCode: 410);
+        if (run.HoldsCardData)
+            return Results.Json(new { error = "Files with card data can't be downloaded — they only go to the export's FTPS targets, PGP-encrypted." }, statusCode: 403);
         var stream = await blobs.OpenReadAsync(key, ct);
         if (stream is null) return Results.NotFound(new { error = "The file is no longer stored." });
         var actor = ActorResolver.Resolve(http.User);
@@ -297,6 +311,50 @@ public static class ExportsEndpoints
             actor?.Name, run.FileName));
         await db.SaveChangesAsync(ct);
         return Results.File(stream, run.ContentType ?? "application/octet-stream", run.FileName);
+    }
+
+    // ── Card data (S182) ───────────────────────────────────────────────────────
+
+    /// <summary>Card-data exports need the tenant's switch (set by the platform) and the exports.card_data permission.</summary>
+    private static IResult? CardDataGate(Tenant tenant, HttpContext http)
+    {
+        if (!tenant.FeatureFlags.CardDataExports)
+            return Results.Json(new { error = "Card data exports aren't enabled for this account — ContactConnection support turns them on." }, statusCode: 403);
+        var perms = (http.User.FindFirst("permissions")?.Value ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries);
+        return perms.Contains(Permission.ExportsCardData, StringComparer.OrdinalIgnoreCase) ? null
+            : Results.Json(new { error = "Your role doesn't allow card-data exports (exports.card_data)." }, statusCode: 403);
+    }
+
+    /// <summary>When no card-data export is left, card data held for one has nowhere to go — wipe it rather than keep it.</summary>
+    private static async Task WipeOrphanedCardDataAsync(TenantDbContext db, string reason, CancellationToken ct)
+    {
+        var remaining = (await db.ExportDefinitions.AsNoTracking().ToListAsync(ct)).Any(x => x.Spec.IncludesCardData);
+        if (remaining) return;
+        var campaigns = await db.Campaigns.AsNoTracking().Where(c => c.CardDataRetention == CardDataRetentionMode.UntilExported)
+            .Select(c => c.Id).ToListAsync(ct);
+        var held = await db.CallRecords.Where(r => campaigns.Contains(r.CampaignId) && r.SensitiveData != null).ToListAsync(ct);
+        foreach (var r in held) r.WipeSensitiveData(reason);
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>Is the tenant allowed card-data exports, may this user manage them, and how much card data is waiting.</summary>
+    private static async Task<IResult> CardDataStatus(ScopedTenantDbContextFactory dbf, TenantContext tc, HttpContext http, CancellationToken ct)
+    {
+        if (tc.Current is not { } tenant) return Results.Unauthorized();
+        await using var db = dbf.Create();
+        var campaigns = await db.Campaigns.AsNoTracking().Where(c => c.CardDataRetention == CardDataRetentionMode.UntilExported)
+            .Select(c => c.Id).ToListAsync(ct);
+        var held = await db.CallRecords.AsNoTracking().Where(r => campaigns.Contains(r.CampaignId) && r.SensitiveData != null)
+            .Select(r => r.SensitiveDataStoredAt ?? r.CreatedAt).ToListAsync(ct);
+        var cutoff = DateTimeOffset.UtcNow.AddDays(-2);
+        return Results.Ok(new
+        {
+            enabled = tenant.FeatureFlags.CardDataExports,
+            canManage = CardDataGate(tenant, http) is null,
+            waiting = held.Count,
+            waitingOverTwoDays = held.Count(t => t < cutoff),
+            oldest = held.Count == 0 ? (DateTimeOffset?)null : held.Min(),
+        });
     }
 
     // ── Schedule + delivery (session 2) ────────────────────────────────────────
@@ -350,6 +408,12 @@ public static class ExportsEndpoints
         await using var db = dbf.Create();
         var d = await db.ExportDefinitions.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (d is null) return Results.NotFound();
+        if (d.Spec.IncludesCardData)
+        {
+            if (tc.Current is { } tenant && CardDataGate(tenant, http) is { } denied) return denied;
+            if (targets.Select(t => t.CardDataProblem()).FirstOrDefault(p => p is not null) is { } problem)
+                return Results.BadRequest(new { error = $"This export carries card data — {problem}" });
+        }
         d.SetDeliveryTargets(targets.Select(t => t with { Name = t.Name.Trim() }).ToList());
         await db.SaveChangesAsync(ct);
         await versions.SnapshotAsync(VersionedEntityType.ExportDefinition, d.Id, Snapshot(d), actor.Id, actor.Name,
@@ -494,6 +558,7 @@ public static class ExportsEndpoints
         r.Id, r.DefinitionId, r.DefinitionName, r.SpecRevision, r.Kind, r.IsTest, r.DataSource, r.WindowStart, r.WindowEnd,
         r.Status, r.Attempts, r.Error, r.RequestedByName, r.RowCount, r.CallCount, r.FileName, r.FileSize, r.Sha256,
         r.QueuedAt, r.StartedAt, r.FinishedAt, r.ScheduledFor, r.Deliver, r.FileDeletedAt,
+        r.HoldsCardData, CardCallCount = r.CardCallIds.Count, r.CardDataWipedAt,
         Deliveries = deliveries.Select(x => new
         {
             x.Id, x.TargetId, x.TargetName, x.TargetType, x.Status, x.Attempts, x.MaxAttempts, x.NextAttemptAt, x.Error,

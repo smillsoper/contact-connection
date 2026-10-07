@@ -59,7 +59,7 @@ public class ExportTemplateAndDeliveryTests
     [Fact]
     public void StarterTemplates_AllValidate()
     {
-        var generator = new ExportGenerator(null!);
+        var generator = new ExportGenerator(null!, null!);
         foreach (var t in ExportStarterTemplates.All)
         {
             Assert.Null(generator.Validate(t.Spec));

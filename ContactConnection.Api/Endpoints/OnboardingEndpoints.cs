@@ -78,7 +78,11 @@ public static class OnboardingEndpoints
         tenant.UpdateSettings(settings);
         tenant.CompleteOnboarding();
         if (request.FeatureFlags is not null)
+        {
+            // Card data exports are switched on by the platform only (S182) — never self-service.
+            request.FeatureFlags.CardDataExports = tenant.FeatureFlags.CardDataExports;
             tenant.UpdateFeatureFlags(request.FeatureFlags);
+        }
 
         // Load the built-in Administrator role so new admin gets it assigned
         var allRoles = await roles.GetAllAsync(ct);

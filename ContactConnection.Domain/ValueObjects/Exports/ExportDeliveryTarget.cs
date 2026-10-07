@@ -69,6 +69,14 @@ public sealed record ExportDeliveryTarget
         return null;
     }
 
+    /// <summary>Why this target can't carry card data (S182), or null: FTPS (SFTP is disabled by the PCI scans the platform
+    /// follows) with PGP to the recipient's key — never email, never a password zip.</summary>
+    public string? CardDataProblem() =>
+        Type != ExportDeliveryType.Ftps ? $"{Name}: a card-data file can only go by FTPS."
+        : Encryption != ExportEncryption.Pgp ? $"{Name}: a card-data file must be PGP-encrypted to the recipient's key."
+        : string.IsNullOrWhiteSpace(PgpPublicKey) ? $"{Name}: paste the recipient's PGP public key."
+        : null;
+
     public int DefaultPort => Type == ExportDeliveryType.Sftp ? 22 : FtpsImplicit ? 990 : 21;
 }
 

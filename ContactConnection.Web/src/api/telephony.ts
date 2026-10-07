@@ -58,7 +58,7 @@ export interface Campaign {
   // the platform default (SensitiveData:Retention:TtlMinutes on the Worker). A campaign running a
   // daily/weekly secure export needs this longer than the default safety-net window.
   sensitiveDataRetentionMinutes?: number | null
-  /** 'until_script_ends' (default) | 'until_order_submitted' */
+  /** 'until_script_ends' (default) | 'until_order_submitted' | 'until_exported' (S182) */
   cardDataRetention?: string
   aiSummaryEnabled?: boolean
   taxProvider?: TaxProviderKey

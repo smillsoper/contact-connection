@@ -145,7 +145,10 @@ public class GeneralApiCallNodeHandler(
         {
             await using var db = tenantDbFactory.Create(ctx.TenantSchemaName);
             var record = await db.CallRecords.FirstOrDefaultAsync(r => r.Id == ctx.CallRecordId, ct);
-            if (record is not null && !string.IsNullOrEmpty(record.SensitiveData))
+            // S182: a campaign whose card data goes out in an export keeps it until the file is delivered.
+            var holdsForExport = record is not null && await db.Campaigns.AsNoTracking()
+                .AnyAsync(c => c.Id == record.CampaignId && c.CardDataRetention == CardDataRetentionMode.UntilExported, ct);
+            if (record is not null && !string.IsNullOrEmpty(record.SensitiveData) && !holdsForExport)
             {
                 record.WipeSensitiveData(ContactConnection.Infrastructure.Payments.CardDataRetentionService.OrderSubmittedReason);
                 await db.SaveChangesAsync(ct);

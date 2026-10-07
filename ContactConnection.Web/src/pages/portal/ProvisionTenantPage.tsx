@@ -9,6 +9,7 @@ const FLAG_LABELS: Record<keyof TenantFeatureFlags, string> = {
   omsBuiltIn: 'Commerce Engine (OMS)',
   shopifyAdapter: 'Shopify Adapter',
   tenantChat: 'Tenant Chat',
+  cardDataExports: 'Card data exports (PCI — FTPS + PGP only)',
 }
 
 export default function ProvisionTenantPage() {
@@ -23,6 +24,7 @@ export default function ProvisionTenantPage() {
     omsBuiltIn: false,
     shopifyAdapter: false,
     tenantChat: false,
+    cardDataExports: false,
   })
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)

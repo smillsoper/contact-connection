@@ -106,10 +106,12 @@ public class PaymentService(
     {
         if (fields is null
             || !fields.TryGetValue(cardNumberField, out var cardNumber)
-            || !fields.TryGetValue(expField, out var expirationMMYY)
-            || !fields.TryGetValue(cvvField, out var cvv))
+            || !fields.TryGetValue(expField, out var expirationMMYY))
             return new PaymentAuthResult(false, PaymentTransactionStatus.Error, null, null, null,
                 "Captured card data is missing one or more configured fields.", Action: action);
+        // The security code is wiped after the first successful authorization (S182), so a re-authorization after an
+        // order change goes without it — gateways accept that for a card already verified on this call.
+        var cvv = fields.GetValueOrDefault(cvvField) ?? "";
 
         var zip = !string.IsNullOrEmpty(zipOverride) ? zipOverride
             : zipField is not null && fields.TryGetValue(zipField, out var zipValue) ? zipValue : null;
@@ -149,6 +151,14 @@ public class PaymentService(
         // The card is deliberately NOT wiped here any more (S164): a changed order re-authorizes, and a
         // decline after fixing the billing address retries, without the caller re-keying it. It's wiped
         // at the Commit Point, when the flow session completes, or by the retention job.
+        // But the security code goes now (S182, PCI DSS 3.3.1: sensitive authentication data is never kept after
+        // authorization) — so it can never reach a card-data export or anything else.
+        if (result.Succeeded && fields.ContainsKey(cvvField) && !string.IsNullOrEmpty(record.SensitiveData))
+        {
+            var remaining = fields.Where(kv => kv.Key != cvvField).ToDictionary(kv => kv.Key, kv => kv.Value);
+            record.ReplaceSensitiveData(sensitiveData.Protect(JsonSerializer.Serialize(remaining)));
+            await callRecords.SaveChangesAsync(ct);
+        }
 
         return new PaymentAuthResult(
             result.Succeeded, result.Status, transaction.Id, result.GatewayTransactionId,

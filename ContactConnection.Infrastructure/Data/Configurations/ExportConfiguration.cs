@@ -87,6 +87,9 @@ public class ExportRunConfiguration : IEntityTypeConfiguration<ExportRun>
         b.Property(r => r.ScheduledFor).HasColumnName("scheduled_for");
         b.Property(r => r.Deliver).HasColumnName("deliver");
         b.Property(r => r.FileDeletedAt).HasColumnName("file_deleted_at");
+        b.Property(r => r.CardCallIds).MapJson("card_call_ids", () => new List<Guid>()).HasDefaultValueSql("'[]'::jsonb").IsRequired();
+        b.Property(r => r.CardDataWipedAt).HasColumnName("card_data_wiped_at");
+        b.Ignore(r => r.HoldsCardData);
         b.Property(r => r.Status).HasColumnName("status").HasMaxLength(20).IsRequired();
         b.Property(r => r.Attempts).HasColumnName("attempts");
         b.Property(r => r.MaxAttempts).HasColumnName("max_attempts");

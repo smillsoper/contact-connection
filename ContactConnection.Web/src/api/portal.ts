@@ -73,6 +73,8 @@ export interface TenantFeatureFlags {
   omsBuiltIn: boolean
   shopifyAdapter: boolean
   tenantChat: boolean
+  /** S182: data exports may include card data — platform-controlled, after the client's PCI paperwork. */
+  cardDataExports: boolean
 }
 
 export interface TenantSettings {

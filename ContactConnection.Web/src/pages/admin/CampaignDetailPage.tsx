@@ -723,6 +723,8 @@ function SensitiveDataRetentionForm({ campaign, onSaved }: SensitiveDataRetentio
               desc: 'Wiped when the agent finishes the script or passes a Commit Point — the card is only kept while the call can still re-authorize.' },
             { value: 'until_order_submitted', title: 'When the order is submitted',
               desc: 'Kept past the script until an API Call node marked "Order submission — release card data" succeeds — in the CRM flow, the telephony flow, or a resubmit from Call Records — so a reviewer can re-authorize a corrected order. The retention period below still wipes it if the order is never submitted; set it long enough for your review turnaround.' },
+            { value: 'until_exported', title: 'When a card-data export delivers it',
+              desc: 'For campaigns whose orders go out only as files to a fulfillment center that runs the cards: kept until a Data Export that includes card data delivers the file to every target (FTPS + PGP), then wiped. The retention period below does not apply; Data Exports warns about card data waiting more than 2 days. The security code is still wiped after any authorization done here.' },
           ].map((o) => (
             <label key={o.value} className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer ${cardMode === o.value ? 'border-indigo-600 bg-indigo-950/30' : 'border-gray-800 hover:border-gray-700'}`}>
               <input type="radio" name="cardDataRetention" className="mt-1" checked={cardMode === o.value} onChange={() => setCardMode(o.value)} />

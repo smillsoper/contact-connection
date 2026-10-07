@@ -24,6 +24,7 @@ const FLAG_LABELS: Record<keyof TenantFeatureFlags, string> = {
   omsBuiltIn: 'Commerce Engine (OMS)',
   shopifyAdapter: 'Shopify Adapter',
   tenantChat: 'Tenant Chat',
+  cardDataExports: 'Card data exports (PCI — FTPS + PGP only)',
 }
 
 export default function TenantDetailPage() {
@@ -59,6 +60,7 @@ export default function TenantDetailPage() {
     omsBuiltIn: false,
     shopifyAdapter: false,
     tenantChat: false,
+    cardDataExports: false,
   })
 
   useEffect(() => {

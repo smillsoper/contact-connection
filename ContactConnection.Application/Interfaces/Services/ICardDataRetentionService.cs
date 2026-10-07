@@ -13,4 +13,7 @@ public interface ICardDataRetentionService
     /// <summary>The order was submitted (an API Call node marked "releases card data" succeeded) —
     /// wipe the card now. No-op when nothing is on file.</summary>
     Task ReleaseAfterOrderSubmittedAsync(Guid callRecordId, CancellationToken ct = default);
+
+    /// <summary>S182: the campaign keeps card data until a card-data export delivers it.</summary>
+    Task<bool> HoldsForExportAsync(Guid campaignId, CancellationToken ct = default);
 }

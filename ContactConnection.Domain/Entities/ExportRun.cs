@@ -55,6 +55,15 @@ public class ExportRun
     /// <summary>The stored file was removed by retention (the vendor-approved test file never is).</summary>
     public DateTimeOffset? FileDeletedAt { get; private set; }
 
+    /// <summary>S182: the calls whose card data is in this (real, card-data) file — wiped once every target confirms it.</summary>
+    public List<Guid> CardCallIds { get; private set; } = [];
+    public DateTimeOffset? CardDataWipedAt { get; private set; }
+    /// <summary>A real card-data file: stored encrypted, never downloadable, FTPS + PGP only.</summary>
+    public bool HoldsCardData => Spec.IncludesCardData && !IsTest;
+
+    public void SetCardCalls(IEnumerable<Guid> callIds) => CardCallIds = callIds.Distinct().ToList();
+    public void MarkCardDataWiped() => CardDataWipedAt = DateTimeOffset.UtcNow;
+
     public DateTimeOffset QueuedAt { get; private set; }
     public DateTimeOffset? StartedAt { get; private set; }
     public DateTimeOffset? FinishedAt { get; private set; }

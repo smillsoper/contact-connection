@@ -7,6 +7,7 @@ import {
   type LifecycleAction, type PreviewResult, type VersionRow, type ActivityRow, type ExportSchedule, type StarterTemplate,
 } from '../../api/exports'
 import ExportScheduleCard from '../../components/admin/exports/ExportScheduleCard'
+import ExportCardDataCard from '../../components/admin/exports/ExportCardDataCard'
 import ExportDeliveryCard from '../../components/admin/exports/ExportDeliveryCard'
 import { listCampaigns, listClients, type Campaign, type Client } from '../../api/telephony'
 import { mediaApi, type MediaAgency } from '../../api/media'
@@ -554,6 +555,8 @@ export default function AdminExportEditorPage() {
           </div>
         </div>
 
+        <ExportCardDataCard spec={spec} onChange={setS} />
+
         {def && <ExportScheduleCard def={def} onSaved={(d) => { setDef(d); refreshVersions() }} />}
         {def && <ExportDeliveryCard def={def} onSaved={(d) => { setDef(d); refreshVersions() }} />}
 
@@ -664,7 +667,12 @@ export default function AdminExportEditorPage() {
                         <td className="py-1.5 pr-3 text-gray-300">{r.rowCount ?? '—'}{r.callCount != null && <span className="block text-xs text-gray-500">{r.callCount} calls</span>}</td>
                         <td className="py-1.5 pr-3 text-gray-400 text-xs">{when(r.queuedAt)}<br />{r.requestedByName}</td>
                         <td className="py-1.5 whitespace-nowrap text-right">
-                          {r.status === 'succeeded' && !r.fileDeletedAt && <button className="text-indigo-400 hover:text-indigo-300 text-sm mr-3" onClick={() => exportsApi.download(r).then(refreshActivity).catch((e: Error) => setError(e.message))}>Download</button>}
+                          {r.holdsCardData && r.status === 'succeeded' && (
+                            <span className="text-xs text-amber-300 mr-3" title="Stored encrypted; goes only to FTPS targets, PGP-encrypted">
+                              Card data · {r.cardDataWipedAt ? 'wiped after delivery' : `held for ${r.cardCallCount ?? 0} call(s)`}
+                            </span>
+                          )}
+                          {r.status === 'succeeded' && !r.fileDeletedAt && !r.holdsCardData && <button className="text-indigo-400 hover:text-indigo-300 text-sm mr-3" onClick={() => exportsApi.download(r).then(refreshActivity).catch((e: Error) => setError(e.message))}>Download</button>}
                           {r.status === 'succeeded' && !r.fileDeletedAt && def && (r.isTest || ['approved', 'live', 'paused'].includes(def.status)) && (
                             <button className="text-indigo-400 hover:text-indigo-300 text-sm mr-3" onClick={() => setSending(r)}>Send…</button>
                           )}

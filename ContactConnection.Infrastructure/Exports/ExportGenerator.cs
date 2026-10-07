@@ -18,7 +18,7 @@ namespace ContactConnection.Infrastructure.Exports;
 /// Every template also sees <c>export</c> (name, is_test, run_id, data_source, time_zone, generated_at) and <c>window</c>
 /// (start, end, end_inclusive). A template error stops the file — a vendor file with a broken column is worse than none.
 /// </summary>
-public sealed class ExportGenerator(ScopedTenantDbContextFactory dbFactory) : IExportGenerator
+public sealed class ExportGenerator(ScopedTenantDbContextFactory dbFactory, ISensitiveDataProtector protector) : IExportGenerator
 {
     private const int PageSize = 500;
 
@@ -29,6 +29,10 @@ public sealed class ExportGenerator(ScopedTenantDbContextFactory dbFactory) : IE
         if (ResolveZone(spec.TimeZone) is null) return $"Unknown time zone '{spec.TimeZone}'.";
         if (spec.LineEnding is not ("crlf" or "lf")) return "Line ending must be crlf or lf.";
         if (string.IsNullOrWhiteSpace(spec.FileNameTemplate)) return "A file name is required.";
+        // Card data (S182): only an export marked as carrying it may use the card variables — and never in a file name.
+        if (ExportCardData.UsesCard(spec.FileNameTemplate)) return "The file name can't use card data.";
+        if (!spec.IncludesCardData && new[] { spec.DocumentTemplate, spec.Condition }.Concat(spec.Columns.Select(c => c.Template)).Any(ExportCardData.UsesCard))
+            return "This layout uses card data (card.…) — turn on \"Includes card data\" for this export, or remove it.";
         if (ExportTemplateEngine.Validate(spec.FileNameTemplate) is { } fe) return $"File name: {fe}";
         if (!string.IsNullOrWhiteSpace(spec.Condition)
             && ExportTemplateEngine.Validate(ExportTemplateEngine.ConditionTemplate(spec.Condition)) is { } ce)
@@ -92,33 +96,37 @@ public sealed class ExportGenerator(ScopedTenantDbContextFactory dbFactory) : IE
         var rows = 0;
         var truncated = false;
         string? where = null;
+        var cardCalls = new List<Guid>();
         try
         {
             if (spec.LayoutMode == ExportLayoutMode.Document)
             {
                 var models = new List<object?>();
-                await foreach (var call in Calls(db, request, lookups, ct))
+                var numbers = new List<string>();
+                await foreach (var (call, id, card) in Calls(db, request, lookups, ct))
                 {
                     if (request.MaxCalls is { } max && calls >= max) { truncated = true; break; }
                     where = Where(call);
                     if (!await Passes(engine, spec, Model(context, call))) continue;
                     models.Add(call);
                     calls++;
+                    if (card?.Number is { } n) { numbers.Add(n); if (card.Real) cardCalls.Add(id); }
                 }
                 where = "the document template";
                 var model = new Dictionary<string, object?>(context) { ["calls"] = models, ["call_count"] = models.Count };
                 var text = ExportTemplateEngine.NormalizeLines(
                     await engine.RenderAsync(spec.DocumentTemplate!, model, document: true), spec.LineEnding, spec.SkipBlankLines);
+                if (!spec.IncludesCardData && numbers.Any(text.Contains)) return LeakResult(rows, calls);
                 rows = text.Length == 0 ? 0 : text.Count(ch => ch == '\n');
                 var bytes = ExportRowWriter.Utf8NoBom.GetBytes(text);
                 await output.WriteAsync(bytes, ct);
-                return new(true, rows, calls, truncated, null);
+                return new(true, rows, calls, truncated, null, cardCalls);
             }
 
             await using var writer = ExportRowWriter.For(spec, output);
             if (spec.IncludeHeader) await writer.WriteHeaderAsync(spec.Columns);
             var values = new string[spec.Columns.Count];
-            await foreach (var call in Calls(db, request, lookups, ct))
+            await foreach (var (call, id, card) in Calls(db, request, lookups, ct))
             {
                 if (request.MaxCalls is { } max && calls >= max) { truncated = true; break; }
                 var counted = false;
@@ -132,14 +140,20 @@ public sealed class ExportGenerator(ScopedTenantDbContextFactory dbFactory) : IE
                         where = $"{Where(call)}, column '{spec.Columns[i].Header}'";
                         values[i] = await engine.RenderAsync(spec.Columns[i].Template ?? "", row);
                     }
+                    // A call's real card number must never reach a file that isn't marked as carrying card data (S182).
+                    if (!spec.IncludesCardData && card?.Number is { } pan && values.Any(v => v.Contains(pan))) return LeakResult(rows, calls);
                     await writer.WriteRowAsync(spec.Columns, values);
                     rows++;
                     counted = true;
                 }
-                if (counted) calls++;
+                if (counted)
+                {
+                    calls++;
+                    if (card is { Real: true }) cardCalls.Add(id);
+                }
             }
             await writer.CompleteAsync();
-            return new(true, rows, calls, truncated, null);
+            return new(true, rows, calls, truncated, null, cardCalls);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -156,7 +170,13 @@ public sealed class ExportGenerator(ScopedTenantDbContextFactory dbFactory) : IE
             .ToDictionary(d => d.Id, d => (d, categories.GetValueOrDefault(d.CategoryId)));
     }
 
-    private static async IAsyncEnumerable<Dictionary<string, object?>> Calls(
+    /// <summary>A call's captured card (S182): its number (for the leak guard) and whether real values were exported.</summary>
+    private sealed record CardInfo(string? Number, bool Real);
+
+    private static ExportGenerationResult LeakResult(int rows, int calls) => new(false, rows, calls, false,
+        "This file would contain a caller's card number, but the export isn't marked as including card data. Remove the field that carries it, or (if card data is meant to go out) turn on \"Includes card data\".");
+
+    private async IAsyncEnumerable<(Dictionary<string, object?> Call, Guid Id, CardInfo? Card)> Calls(
         TenantDbContext db, ExportGenerationRequest request, ExportCallModel.Lookups lookups,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
@@ -194,10 +214,22 @@ public sealed class ExportGenerator(ScopedTenantDbContextFactory dbFactory) : IE
                     && !string.Equals(r.MediaAttribution?.Agency, spec.MediaAgency.Trim(), StringComparison.OrdinalIgnoreCase))
                     continue;
                 var json = ExportCallModel.Build(r, lookups, payments.GetValueOrDefault(r.Id) ?? []);
-                yield return (Dictionary<string, object?>)FluidLiquidTemplateRenderer.ToPlain(json)!;
+                var call = (Dictionary<string, object?>)FluidLiquidTemplateRenderer.ToPlain(json)!;
+                var fields = CardFields(r.SensitiveData);
+                CardInfo? card = fields is null ? null : new(ExportCardData.Number(fields), Real: spec.IncludesCardData && !request.MaskCardData);
+                // The card variables exist only on a card-data export; masked on previews and test files.
+                if (spec.IncludesCardData) call["card"] = fields is null ? null : ExportCardData.Build(fields, request.MaskCardData);
+                yield return (call, r.Id, card);
             }
             if (batch.Count < PageSize) yield break;
         }
+    }
+
+    private Dictionary<string, string>? CardFields(string? sensitive)
+    {
+        if (string.IsNullOrEmpty(sensitive) || !protector.IsConfigured) return null;
+        try { return System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(protector.Unprotect(sensitive)); }
+        catch (Exception) { return null; }
     }
 
     /// <summary>The row models for one call, by grain. Interaction / cart-line rows honour the campaign filter per

@@ -399,6 +399,15 @@ public static class CardDataRetentionMode
     /// if the order is never submitted.</summary>
     public const string UntilOrderSubmitted = "until_order_submitted";
 
-    public static readonly IReadOnlyList<string> All = [UntilScriptEnds, UntilOrderSubmitted];
+    /// <summary>Kept until a card-data export (S182) delivers it — for campaigns whose orders go out only as files to a
+    /// fulfillment center that runs the cards. Wiped once every delivery target confirms the file; the retention period
+    /// doesn't apply (an alert flags card data waiting more than 2 days). The security code is still wiped after any
+    /// authorization done here.</summary>
+    public const string UntilExported = "until_exported";
+
+    public static readonly IReadOnlyList<string> All = [UntilScriptEnds, UntilOrderSubmitted, UntilExported];
+
+    /// <summary>Modes that keep card data past the end of the script.</summary>
+    public static bool KeepsPastScript(string? mode) => mode is UntilOrderSubmitted or UntilExported;
 }
 

@@ -543,6 +543,14 @@ public class CallRecord
     /// ciphertext is dropped; the wipe is stamped and reasoned for the PCI audit trail.
     /// Idempotent — a second wipe just refreshes the timestamp/reason.
     /// </summary>
+    /// <summary>Re-stores the card data with some fields removed (S182: the security code after a successful
+    /// authorization) — keeps the original capture time, so retention is unchanged.</summary>
+    public void ReplaceSensitiveData(string encryptedJson)
+    {
+        if (SensitiveData is null) return;
+        SensitiveData = encryptedJson;
+    }
+
     public void WipeSensitiveData(string reason)
     {
         SensitiveData        = null;

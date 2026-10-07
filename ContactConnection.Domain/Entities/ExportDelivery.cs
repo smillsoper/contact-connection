@@ -128,4 +128,7 @@ public static class ExportAuditAction
     /// <summary>An SFTP target's host key was pinned on its first connection (accept-new).</summary>
     public const string HostKeyPinned = "host_key_pinned";
     public const string FileExpired = "file_expired";
+    /// <summary>S182: the calls' card data was wiped after every target confirmed the card-data file.</summary>
+    public const string CardDataWiped = "card_data_wiped";
+    public const string CardDataGenerated = "card_data_generated";
 }

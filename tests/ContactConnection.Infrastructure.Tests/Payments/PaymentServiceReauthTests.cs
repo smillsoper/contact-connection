@@ -32,6 +32,7 @@ public class PaymentServiceReauthTests
         callRecords.Setup(r => r.GetByIdWithInteractionsAsync(record.Id, It.IsAny<CancellationToken>())).ReturnsAsync(record);
         var protector = new Mock<ISensitiveDataProtector>();
         protector.Setup(p => p.Unprotect(It.IsAny<string>())).Returns(CardJson);
+        protector.Setup(p => p.Protect(It.IsAny<string>())).Returns((string plain) => "sealed:" + plain);
 
         var gateway = new Mock<IPaymentGatewayClient>();
         gateway.Setup(g => g.AuthorizeAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<decimal>(), It.IsAny<string>(),
@@ -75,6 +76,10 @@ public class PaymentServiceReauthTests
         Assert.Equal((true, PaymentAuthAction.Authorized, 144.85m, "1111"), (result.Succeeded, result.Action, result.Amount, result.CardLast4));
         VerifyAuthorized(h, Times.Once());
         Assert.NotNull(h.Record.SensitiveData);   // kept for a possible re-auth
+        // …but without the security code (S182: never kept after authorization).
+        Assert.StartsWith("sealed:", h.Record.SensitiveData);
+        Assert.DoesNotContain("cvv", h.Record.SensitiveData);
+        Assert.Contains("4111111111111111", h.Record.SensitiveData);
     }
 
     [Fact]

@@ -21,6 +21,8 @@ export interface ExportColumn {
 }
 
 export interface ExportSpec {
+  /** S182: the file carries card data (card.* variables) — FTPS + PGP only, masked preview, wiped once delivered. */
+  includesCardData?: boolean
   clientId: string | null
   campaignIds: string[]
   mediaAgency: string | null
@@ -122,6 +124,10 @@ export interface ExportRunRow {
   scheduledFor: string | null
   deliver: boolean
   fileDeletedAt: string | null
+  /** S182: a real card-data file — stored encrypted, never downloadable. */
+  holdsCardData?: boolean
+  cardCallCount?: number
+  cardDataWipedAt?: string | null
   deliveries: ExportDeliveryRow[]
 }
 
@@ -201,7 +207,11 @@ export const exportKeysApi = {
   revoke: (id: string) => api.post<ExportKeyRow>(`/api/v1/export-keys/${id}/revoke`),
 }
 
+/** S182: may this account / user use card-data exports, and how much card data is waiting for one. */
+export interface CardDataStatus { enabled: boolean; canManage: boolean; waiting: number; waitingOverTwoDays: number; oldest: string | null }
+
 export const exportsApi = {
+  cardDataStatus: () => api.get<CardDataStatus>('/api/v1/exports/card-data'),
   list: () => api.get<ExportDefinition[]>('/api/v1/exports'),
   get: (id: string) => api.get<ExportDefinition>(`/api/v1/exports/${id}`),
   create: (name: string, description: string | null, spec: ExportSpec) =>
