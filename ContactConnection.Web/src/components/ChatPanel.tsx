@@ -229,11 +229,15 @@ function since(iso: string) {
 function HelpArea() {
   const myHelp = useChatStore((s) => s.myHelp)
   const queue = useChatStore((s) => s.helpQueue)
+  // Only people with an assigned supervisor can raise a hand (supervisors themselves usually have none).
+  const hasSupervisors = useChatStore((s) => s.supervisorIds.length > 0)
   const [composing, setComposing] = useState(false)
   const [note, setNote] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [, tick] = useState(0)
   useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t) }, [])
+
+  if (queue.length === 0 && myHelp?.status !== 'open' && !hasSupervisors) return null
 
   async function raise() {
     setError(null)
@@ -259,7 +263,7 @@ function HelpArea() {
           <button onClick={() => chatApi.cancelHelp(myHelp.id).then((h) => useChatStore.getState().setHelp(h)).catch(() => {})}
             className="text-[11px] text-gray-400 hover:text-white mt-1">Cancel</button>
         </div>
-      ) : composing ? (
+      ) : !hasSupervisors ? null : composing ? (
         <div className="m-2 rounded border border-gray-700 bg-gray-900 px-2 py-2">
           <input autoFocus value={note} onChange={(e) => setNote(e.target.value)} maxLength={300}
             onKeyDown={(e) => { if (e.key === 'Enter') void raise(); if (e.key === 'Escape') setComposing(false) }}

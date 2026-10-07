@@ -705,6 +705,8 @@ public static class ChatEndpoints
         // Their own supervisors who are on duty; when none is, every on-duty supervisor; when nobody is on duty at all,
         // their own supervisors anyway — the request waits for them in the queue.
         var mine = await db.AgentSupervisors.Where(s => s.AgentId == me.Id).Select(s => s.SupervisorId).ToListAsync(ct);
+        if (mine.Count == 0)
+            return Results.Conflict(new { error = "You don't have a supervisor assigned — an admin can set one on the Users page." });
         var mineOnDuty = new List<Guid>();
         foreach (var s in mine) if (OnDuty(await states.GetAsync(me.TenantId, s, ct))) mineOnDuty.Add(s);
         var notified = mineOnDuty;
