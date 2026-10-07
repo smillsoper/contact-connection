@@ -42,11 +42,67 @@ public static class KpiDimension
     public const string Agency = "agency";
     public const string Station = "station";
     public const string Dnis = "dnis";
+    // Time axes for charts (S182): intervals as "yyyy-MM-dd HH:mm" (sortable), week = its Monday, month, day of week.
+    public const string Interval15 = "interval15";
+    public const string Interval30 = "interval30";
+    public const string Interval60 = "interval60";
+    public const string Week = "week";
+    public const string Month = "month";
+    public const string DayOfWeek = "dow";
     public const string CustomFieldPrefix = "cf:";
 
     public static bool IsValid(string? d) =>
         d is Campaign or Client or Agent or Disposition or Category or Day or Hour or Agency or Station or Dnis
+            or Interval15 or Interval30 or Interval60 or Week or Month or DayOfWeek
         || (d?.StartsWith(CustomFieldPrefix, StringComparison.Ordinal) == true && d.Length > CustomFieldPrefix.Length);
+
+    /// <summary>Dimensions whose values are periods of time — their empty periods are filled with zeros.</summary>
+    public static bool IsTime(string? d) => d is Day or Hour or Interval15 or Interval30 or Interval60 or Week or Month or DayOfWeek;
+
+    public static readonly string[] DayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+    /// <summary>The label a moment gets on a time dimension, in the report's zone (local time already applied).</summary>
+    public static string? TimeLabel(string dim, DateTime local) => dim switch
+    {
+        Day => local.ToString("yyyy-MM-dd ddd", System.Globalization.CultureInfo.InvariantCulture),
+        Hour => local.ToString("HH:00", System.Globalization.CultureInfo.InvariantCulture),
+        Interval15 or Interval30 or Interval60 => Floor(local, dim == Interval15 ? 15 : dim == Interval30 ? 30 : 60)
+            .ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture),
+        Week => local.Date.AddDays(-(((int)local.DayOfWeek + 6) % 7)).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+        Month => local.ToString("yyyy-MM", System.Globalization.CultureInfo.InvariantCulture),
+        DayOfWeek => DayNames[((int)local.DayOfWeek + 6) % 7],
+        _ => null,
+    };
+
+    private static DateTime Floor(DateTime t, int minutes) => new(t.Year, t.Month, t.Day, t.Hour, t.Minute / minutes * minutes, 0, t.Kind);
+
+    /// <summary>Every label of a time dimension between two local moments (inclusive start, exclusive end), in order.</summary>
+    public static IEnumerable<string> TimeLabels(string dim, DateTime fromLocal, DateTime toLocal)
+    {
+        if (dim == Hour) { foreach (var h in Enumerable.Range(0, 24)) yield return $"{h:00}:00"; yield break; }
+        if (dim == DayOfWeek) { foreach (var n in DayNames) yield return n; yield break; }
+        var step = dim switch
+        {
+            Interval15 => TimeSpan.FromMinutes(15), Interval30 => TimeSpan.FromMinutes(30), Interval60 => TimeSpan.FromHours(1),
+            Day => TimeSpan.FromDays(1), Week => TimeSpan.FromDays(7), _ => TimeSpan.Zero,
+        };
+        var seen = new HashSet<string>();
+        if (dim == Month)
+        {
+            for (var m = new DateTime(fromLocal.Year, fromLocal.Month, 1); m < toLocal; m = m.AddMonths(1))
+                yield return m.ToString("yyyy-MM", System.Globalization.CultureInfo.InvariantCulture);
+            yield break;
+        }
+        var start = dim == Week ? fromLocal.Date.AddDays(-(((int)fromLocal.DayOfWeek + 6) % 7)) : dim == Day ? fromLocal.Date
+            : Floor(fromLocal, dim == Interval15 ? 15 : dim == Interval30 ? 30 : 60);
+        for (var t = start; t < toLocal && seen.Count < 5000; t += step)
+            if (TimeLabel(dim, t) is { } label && seen.Add(label)) yield return label;
+    }
+
+    /// <summary>Sort order for a dimension's values — days of the week in week order, everything else as text.</summary>
+    public static IComparer<string> Order(string dim) => dim == DayOfWeek
+        ? Comparer<string>.Create((a, b) => Array.IndexOf(DayNames, a).CompareTo(Array.IndexOf(DayNames, b)))
+        : StringComparer.OrdinalIgnoreCase;
 }
 
 /// <summary>An agent's time in the window: logged in (any state but logged out) and after-call work.</summary>

@@ -152,6 +152,7 @@ export const dashboardWidgetsApi = {
   kpi: (params: WidgetFilterConfig) => {
     const q = buildQuery(params)
     const extra = `groupBy=${encodeURIComponent(params.groupBy ?? 'none')}${params.groupBy2 ? `&groupBy2=${encodeURIComponent(params.groupBy2)}` : ''}`
+      + (params.compare && params.chartType ? '&compare=true' : '')
     return api.get<KpiResult>(`/api/v1/dashboard-widgets/kpi${q ? `${q}&${extra}` : `?${extra}`}`)
   },
 }
@@ -182,6 +183,8 @@ export interface KpiResult {
   total: KpiMetrics
   rows: { key: string; label: string; label2: string | null; subtotal: boolean; metrics: KpiMetrics }[]
   since: string; until: string
+  /** The previous period, when a chart asked to compare (S182). */
+  previous?: KpiResult | null
 }
 
 export interface CustomKpi {

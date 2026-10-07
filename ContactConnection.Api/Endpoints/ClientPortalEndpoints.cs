@@ -214,14 +214,16 @@ public static class ClientPortalEndpoints
                     columns, p.Search, filters, p.Sort is { } so && columns.Contains(so) ? so : null, p.Desc, p.Page, p.PageSize, zone,
                     groupId, dnisKeys), ct));
             }
-            case "kpi":
+            case "kpi" or "chart":
             {
                 var (since, until) = KpiEndpoints.Window(zone, mode, value, DateTimeOffset.UtcNow);
                 var groupBy = Str(config["groupBy"]);
                 var groupBy2 = Str(config["groupBy2"]);
-                return Results.Ok(await kpis.ComputeAsync(new KpiQuery(since, until, dashboard.ScopeClientId, null,
+                var query = new KpiQuery(since, until, dashboard.ScopeClientId, null,
                     KpiDimension.IsValid(groupBy) ? groupBy! : "none", KpiDimension.IsValid(groupBy2) ? groupBy2 : null, zone,
-                    campaigns.ToHashSet(), groupId, dnisKeys), ct));
+                    campaigns.ToHashSet(), groupId, dnisKeys);
+                return Results.Ok(await KpiEndpoints.ComputeWithPreviousAsync(kpis, query, mode,
+                    type == "chart" && w.Flag("compare", false), ct));
             }
             case "service_level_threshold":
             {

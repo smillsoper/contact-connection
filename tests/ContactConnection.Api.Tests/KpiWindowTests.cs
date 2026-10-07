@@ -26,4 +26,24 @@ public class KpiWindowTests
         Assert.Equal(Now.AddHours(-4), KpiEndpoints.Window("America/Los_Angeles", "hours", 4, Now).Since);
         Assert.Equal(Now.AddMinutes(-15), KpiEndpoints.Window("America/Los_Angeles", "minutes", 15, Now).Since);
     }
+
+    [Theory]
+    [InlineData("today", -1)]
+    [InlineData("week", -7)]
+    public void Previous_period_is_the_same_span_earlier(string mode, int days)
+    {
+        var (since, until) = KpiEndpoints.Window("America/Los_Angeles", mode, null, Now);
+        var (ps, pu) = KpiEndpoints.PreviousWindow(mode, since, until);
+        Assert.Equal(since.AddDays(days), ps);
+        Assert.Equal(until.AddDays(days), pu);
+    }
+
+    [Fact]
+    public void Previous_moving_window_is_the_window_before()
+    {
+        var (since, until) = KpiEndpoints.Window("UTC", "hours", 2, Now);
+        var (ps, pu) = KpiEndpoints.PreviousWindow("hours", since, until);
+        Assert.Equal(since.AddHours(-2), ps);
+        Assert.Equal(since, pu);
+    }
 }

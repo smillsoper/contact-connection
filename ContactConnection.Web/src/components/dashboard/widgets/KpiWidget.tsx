@@ -15,7 +15,7 @@ export function customFormat(f: string | undefined): Format {
   return f === 'currency' ? 'money' : f === 'duration' ? 'secs' : f === 'integer' ? 'int' : f === 'number' ? 'num' : 'pct'
 }
 
-interface KpiDef {
+export interface KpiDef {
   key: string
   label: string
   group: string
@@ -60,7 +60,9 @@ export const KPI_CATALOG: KpiDef[] = [
 export const KPI_DIMENSIONS: { value: string; label: string }[] = [
   { value: 'campaign', label: 'Campaign' }, { value: 'client', label: 'Client' }, { value: 'agent', label: 'Agent' },
   { value: 'disposition', label: 'Disposition' }, { value: 'category', label: 'Reporting category' },
-  { value: 'day', label: 'Day' }, { value: 'hour', label: 'Hour of day' },
+  { value: 'interval15', label: '15-minute interval' }, { value: 'interval30', label: '30-minute interval' },
+  { value: 'interval60', label: 'Hour' }, { value: 'day', label: 'Day' }, { value: 'week', label: 'Week' },
+  { value: 'month', label: 'Month' }, { value: 'hour', label: 'Hour of day' }, { value: 'dow', label: 'Day of week' },
   { value: 'agency', label: 'Media agency' }, { value: 'station', label: 'Station' }, { value: 'dnis', label: 'Number dialed (DNIS)' },
 ]
 
@@ -79,10 +81,33 @@ export function targetColor(value: number | null | undefined, t: KpiTarget | und
   return 'text-red-400'
 }
 
+/** KPI keys (catalog or "custom:<id>") → definitions; unknown / deleted custom KPIs are dropped (shared with the Chart widget). */
+export function resolveKpiDefs(keys: string[], custom: KpiMetrics['custom']): KpiDef[] {
+  return keys.flatMap((key) => {
+    if (key.startsWith('custom:')) {
+      const id = key.slice(7)
+      const k = custom.find((c) => c.id === id)
+      return k ? [{ key, label: k.name, group: 'Your KPIs', format: customFormat(k.format),
+        value: (m: KpiMetrics) => m.custom.find((c) => c.id === id)?.value ?? null }] : []
+    }
+    const d = KPI_CATALOG.find((x) => x.key === key)
+    return d ? [d] : []
+  })
+}
+
+/** One KPI's value from a metrics block, under the widget's revenue basis. */
+export function kpiValue(d: KpiDef, m: KpiMetrics, basis: 'gross' | 'exclTax' | 'merch', net: boolean): number | null {
+  if (d.revenue) {
+    const r = m[basis]
+    return d.revenue === 'total' && net ? r.net : r[d.revenue]
+  }
+  return d.value?.(m) ?? null
+}
+
 export const DEFAULT_KPIS = ['grossCloseRate', 'netCloseRate', 'orders', 'revenue', 'revenuePerCall', 'averageOrder',
   'revenuePerAgentHour', 'callsOffered', 'serviceLevel', 'aht']
 
-function fmt(v: number | null | undefined, f: Format) {
+export function fmt(v: number | null | undefined, f: Format) {
   if (v == null) return '—'
   switch (f) {
     case 'pct': return `${v.toFixed(1)}%`
@@ -128,25 +153,8 @@ export default function KpiWidget({ config }: { config: WidgetFilterConfig }) {
 
   const basis = config.revenueBasis ?? 'exclTax'
   const net = config.netRevenue ?? false
-  const custom = data.total.custom
-  const defs: KpiDef[] = (config.kpis ?? DEFAULT_KPIS).flatMap((key) => {
-    if (key.startsWith('custom:')) {
-      const id = key.slice(7)
-      const k = custom.find((c) => c.id === id)
-      const format = customFormat(k?.format)
-      return k ? [{ key, label: k.name, group: 'Your KPIs', format,
-        value: (m: KpiMetrics) => m.custom.find((c) => c.id === id)?.value ?? null }] : []
-    }
-    const d = KPI_CATALOG.find((x) => x.key === key)
-    return d ? [d] : []
-  })
-  const valueOf = (d: KpiDef, m: KpiMetrics) => {
-    if (d.revenue) {
-      const r = m[basis]
-      return d.revenue === 'total' && net ? r.net : r[d.revenue]
-    }
-    return d.value?.(m) ?? null
-  }
+  const defs = resolveKpiDefs(config.kpis ?? DEFAULT_KPIS, data.total.custom)
+  const valueOf = (d: KpiDef, m: KpiMetrics) => kpiValue(d, m, basis, net)
   const basisLabel = `${basis === 'gross' ? 'gross' : basis === 'merch' ? 'merchandise' : 'excl. tax'}${net ? ', net' : ''}`
   const footer = (
     <p className="text-[10px] text-gray-600 mt-1 shrink-0">

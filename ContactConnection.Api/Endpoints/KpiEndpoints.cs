@@ -30,16 +30,37 @@ public static class KpiEndpoints
 
     private static async Task<IResult> Get(
         Guid? campaignId, Guid? clientId, string? groupBy, string? groupBy2, string? timeWindowMode, int? timeWindowValue,
-        Guid? groupId, string? dnis, IAgentGroupRepository agentGroups,
+        Guid? groupId, string? dnis, bool? compare, IAgentGroupRepository agentGroups,
         KpiService kpis, TenantContext tc, CancellationToken ct)
     {
         if (tc.Current is not { } tenant) return Results.Unauthorized();
         var (since, until) = Window(tenant.Timezone, timeWindowMode, timeWindowValue, DateTimeOffset.UtcNow);
-        var result = await kpis.ComputeAsync(new KpiQuery(since, until, clientId, campaignId,
+        var query = new KpiQuery(since, until, clientId, campaignId,
             KpiDimension.IsValid(groupBy) ? groupBy! : "none", KpiDimension.IsValid(groupBy2) ? groupBy2 : null, tenant.Timezone,
-            GroupId: groupId, DnisKeys: WidgetFilters.Dnis(dnis)), ct);
-        return Results.Ok(result);
+            GroupId: groupId, DnisKeys: WidgetFilters.Dnis(dnis));
+        return Results.Ok(await ComputeWithPreviousAsync(kpis, query, timeWindowMode, compare == true, ct));
     }
+
+    /// <summary>The query, and — for a chart comparing periods (S182) — the same query over the previous period.</summary>
+    internal static async Task<KpiResult> ComputeWithPreviousAsync(KpiService kpis, KpiQuery query, string? mode, bool compare, CancellationToken ct)
+    {
+        var result = await kpis.ComputeAsync(query, ct);
+        if (!compare) return result;
+        var (ps, pu) = PreviousWindow(mode, query.Since, query.Until);
+        return result with { Previous = await kpis.ComputeAsync(query with { Since = ps, Until = pu }, ct) };
+    }
+
+    /// <summary>
+    /// The period to compare with: today (so far) → the same hours yesterday; yesterday → the day before; this week → the
+    /// same span last week; this month → the same span last month; a moving window → the window before it.
+    /// </summary>
+    internal static (DateTimeOffset Since, DateTimeOffset Until) PreviousWindow(string? mode, DateTimeOffset since, DateTimeOffset until) => mode switch
+    {
+        "week" => (since.AddDays(-7), until.AddDays(-7)),
+        "month" => (since.AddMonths(-1), until.AddMonths(-1)),
+        "hours" or "minutes" => (since - (until - since), since),
+        _ => (since.AddDays(-1), until.AddDays(-1)),
+    };
 
     /// <summary>The KPI window, ending now (or at the end of the previous day for "yesterday"). Calendar windows are in the
     /// tenant's time zone; this week starts Monday.</summary>

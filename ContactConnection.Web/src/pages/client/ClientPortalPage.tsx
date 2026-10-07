@@ -12,6 +12,7 @@ import KpiWidget from '../../components/dashboard/widgets/KpiWidget'
 import ServiceLevelThresholdWidget from '../../components/dashboard/widgets/ServiceLevelThresholdWidget'
 import CallStateByCampaignWidget from '../../components/dashboard/widgets/CallStateByCampaignWidget'
 import RecordsWidget from '../../components/dashboard/widgets/RecordsWidget'
+import ChartWidget from '../../components/dashboard/widgets/ChartWidget'
 import { RecordsSourceContext, type RecordsSource } from '../../components/dashboard/RecordsSource'
 import { recordsQuery, type RecordDetailResponse, type RecordsPage } from '../../api/dashboardWidgets'
 import { WidgetDataSourceContext } from '../../components/dashboard/WidgetDataSource'
@@ -35,6 +36,7 @@ function ClientWidget({ dashboardId, widget }: { dashboardId: string; widget: Da
   const body = (() => {
     switch (widget.widgetType) {
       case 'kpi': return <KpiWidget config={widget.config} />
+      case 'chart': return <ChartWidget config={widget.config} />
       case 'service_level_threshold': return <ServiceLevelThresholdWidget config={widget.config} />
       case 'call_state_by_campaign': return <CallStateByCampaignWidget config={widget.config} />
       case 'records': return <RecordsSourceContext.Provider value={records}><RecordsWidget config={widget.config} /></RecordsSourceContext.Provider>

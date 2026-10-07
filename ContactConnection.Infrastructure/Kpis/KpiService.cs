@@ -23,7 +23,9 @@ public sealed record KpiQuery(DateTimeOffset Since, DateTimeOffset Until, Guid? 
 /// <param name="Subtotal">A first-level group's subtotal row (two-dimension reports).</param>
 public sealed record KpiRow(string Key, string Label, KpiMetrics Metrics, string? Label2 = null, bool Subtotal = false);
 
-public sealed record KpiResult(KpiMetrics Total, IReadOnlyList<KpiRow> Rows, DateTimeOffset Since, DateTimeOffset Until);
+/// <param name="Previous">The same query over the previous period (charts' "compare to previous period", S182).</param>
+public sealed record KpiResult(KpiMetrics Total, IReadOnlyList<KpiRow> Rows, DateTimeOffset Since, DateTimeOffset Until,
+    KpiResult? Previous = null);
 
 /// <summary>
 /// Loads production data for the KPI widget (S181) and runs <see cref="KpiCalculator"/> per group and for the total.
@@ -92,8 +94,7 @@ public sealed class KpiService(ScopedTenantDbContextFactory dbFactory)
                     KpiDimension.Agent => AgentLabel(agentId),
                     KpiDimension.Disposition => isCall ? null : disposition ?? "No disposition",
                     KpiDimension.Category => isCall ? null : category ?? "No category",
-                    KpiDimension.Day => at is { } t ? TimeZoneInfo.ConvertTime(t, zone).ToString("yyyy-MM-dd ddd") : "No date",
-                    KpiDimension.Hour => at is { } h ? TimeZoneInfo.ConvertTime(h, zone).ToString("HH:00") : "No time",
+                    _ when KpiDimension.IsTime(dim) => at is { } t ? KpiDimension.TimeLabel(dim, TimeZoneInfo.ConvertTime(t, zone).DateTime) : "No time",
                     KpiDimension.Agency => media?.Agency is { Length: > 0 } ag ? ag : "No media agency",
                     KpiDimension.Station => media?.Station is { Length: > 0 } st ? st : "No station",
                     KpiDimension.Dnis => string.IsNullOrWhiteSpace(dnis) ? "No number" : dnis,
@@ -212,8 +213,12 @@ public sealed class KpiService(ScopedTenantDbContextFactory dbFactory)
             var d1 = q.GroupBy;
             var d2 = KpiDimension.IsValid(q.GroupBy2) && q.GroupBy2 != d1 ? q.GroupBy2 : null;
             static string? Of(IReadOnlyDictionary<string, string>? dims, string dim) => dims?.GetValueOrDefault(dim);
-            foreach (var v1 in interactions.Select(i => Of(i.Dims, d1)).Concat(calls.Select(c => Of(c.Dims, d1)))
-                         .OfType<string>().Distinct().Order(StringComparer.OrdinalIgnoreCase))
+            var values1 = interactions.Select(i => Of(i.Dims, d1)).Concat(calls.Select(c => Of(c.Dims, d1))).OfType<string>().ToHashSet();
+            // A time axis keeps its empty periods (zeros) so a chart doesn't skip a quiet half hour (S182).
+            if (KpiDimension.IsTime(d1))
+                values1.UnionWith(KpiDimension.TimeLabels(d1, TimeZoneInfo.ConvertTime(q.Since, zone).DateTime,
+                    TimeZoneInfo.ConvertTime(q.Until, zone).DateTime));
+            foreach (var v1 in values1.Order(KpiDimension.Order(d1)))
             {
                 var ix1 = interactions.Where(i => Of(i.Dims, d1) == v1).ToList();
                 var calls1 = calls.Where(c => Of(c.Dims, d1) == v1).ToList();
@@ -223,7 +228,7 @@ public sealed class KpiService(ScopedTenantDbContextFactory dbFactory)
                     continue;
                 }
                 foreach (var v2 in ix1.Select(i => Of(i.Dims, d2)).Concat(calls1.Select(c => Of(c.Dims, d2)))
-                             .OfType<string>().Distinct().Order(StringComparer.OrdinalIgnoreCase))
+                             .OfType<string>().Distinct().Order(KpiDimension.Order(d2)))
                     rows.Add(new KpiRow($"{v1}|{v2}", v1,
                         Metrics(ix1.Where(i => Of(i.Dims, d2) == v2), calls1.Where(c => Of(c.Dims, d2) == v2)), v2));
                 rows.Add(new KpiRow($"{v1}|", v1, Metrics(ix1, calls1), null, Subtotal: true));

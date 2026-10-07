@@ -6,6 +6,7 @@ import { KPI_CATALOG, DEFAULT_KPIS, KPI_DIMENSIONS, customFormat, type Format } 
 import KpiTargetInput from './KpiTargetInput'
 import RecordsColumnsEditor from './RecordsColumnsEditor'
 import DnisPicker from './DnisPicker'
+import ChartSettings, { chartConfig, type ChartSettingsValue } from './ChartSettings'
 import { dashboardWidgetsApi, type RecordColumn } from '../../api/dashboardWidgets'
 import { customFieldsApi } from '../../api/customFields'
 import type { KpiTarget } from '../../types/dashboard'
@@ -48,12 +49,23 @@ export default function WidgetConfigModal({ title, fields: rawFields, initial, i
   const [revenueBasis, setRevenueBasis] = useState<NonNullable<KpiWidgetConfig['revenueBasis']>>(initial.revenueBasis ?? 'exclTax')
   const [netRevenue, setNetRevenue] = useState(initial.netRevenue ?? false)
   const [customKpis, setCustomKpis] = useState<CustomKpi[]>([])
-  const [tab, setTab] = useState<'data' | 'layout' | 'kpis' | 'columns'>('data')
+  const [tab, setTab] = useState<'data' | 'layout' | 'kpis' | 'columns' | 'chart'>('data')
+  const [chart, setChart] = useState<ChartSettingsValue>({
+    chartType: initial.chartType ?? 'line',
+    groupBy: initial.groupBy && initial.groupBy !== 'none' ? initial.groupBy : 'interval30',
+    groupBy2: initial.groupBy2 ?? '',
+    chartMetrics: initial.chartMetrics ?? [],
+    compare: initial.compare ?? false,
+    showTargets: initial.showTargets ?? false,
+    targets: initial.targets ?? {},
+    revenueBasis: initial.revenueBasis ?? 'exclTax',
+    netRevenue: initial.netRevenue ?? false,
+  })
   const [recordColumns, setRecordColumns] = useState<RecordColumn[]>([])
   const [columns, setColumns] = useState<string[]>(initial.columns ?? [])
   const [pageSize, setPageSize] = useState(initial.pageSize ?? 25)
   const [allowRecordings, setAllowRecordings] = useState(initial.allowRecordings !== false)
-  const tabbed = !!(fields.kpi || fields.records)
+  const tabbed = !!(fields.kpi || fields.records || fields.chart)
   const [timeWindowValue, setTimeWindowValue] = useState(
     initial.timeWindow?.value ?? (initial.timeWindow?.mode === 'minutes' ? DEFAULT_MINUTES : DEFAULT_HOURS),
   )
@@ -64,13 +76,13 @@ export default function WidgetConfigModal({ title, fields: rawFields, initial, i
       .then((c) => setCampaigns(scope?.campaignIds.length ? c.filter((x) => scope.campaignIds.includes(x.id)) : c))
       .catch(() => {})
     listAgentGroups().then(setGroups).catch(() => {})
-    if (fields.kpi) customKpisApi.list().then((k) => setCustomKpis(k.filter((x) => x.isActive))).catch(() => {})
+    if (fields.kpi || fields.chart) customKpisApi.list().then((k) => setCustomKpis(k.filter((x) => x.isActive))).catch(() => {})
     if (fields.records) dashboardWidgetsApi.recordColumns().then(setRecordColumns).catch(() => {})
-    if (fields.kpi || fields.records) customFieldsApi.listDefinitions()
+    if (fields.kpi || fields.records || fields.chart) customFieldsApi.listDefinitions()
       .then((d) => setFieldNames([...new Map(d.filter((x) => x.isActive).map((x) => [x.fieldName, { name: x.fieldName, label: x.displayLabel }])).values()]))
       .catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fields.kpi, fields.records])
+  }, [fields.kpi, fields.records, fields.chart])
 
   function handleSave() {
     onSave({
@@ -87,6 +99,7 @@ export default function WidgetConfigModal({ title, fields: rawFields, initial, i
         percentOfTotal: percentOfTotal || undefined,
         targets: Object.fromEntries(Object.entries(targets).filter(([k, t]) => kpis.includes(k) && (t.good != null || t.warn != null))),
       } : {}),
+      ...(fields.chart ? chartConfig(chart) : {}),
       ...(fields.records ? {
         columns: columns.length ? columns : undefined,
         pageSize,
@@ -176,9 +189,9 @@ export default function WidgetConfigModal({ title, fields: rawFields, initial, i
               className="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-sky-500"
             >
               <option value="today">Today</option>
-              {(fields.kpi || fields.records) && <option value="yesterday">Yesterday</option>}
-              {(fields.kpi || fields.records) && <option value="week">This week (from Monday)</option>}
-              {(fields.kpi || fields.records) && <option value="month">This month</option>}
+              {(fields.kpi || fields.records || fields.chart) && <option value="yesterday">Yesterday</option>}
+              {(fields.kpi || fields.records || fields.chart) && <option value="week">This week (from Monday)</option>}
+              {(fields.kpi || fields.records || fields.chart) && <option value="month">This month</option>}
               <option value="hours">Last N hours</option>
               <option value="minutes">Last N minutes</option>
             </select>
@@ -302,7 +315,9 @@ export default function WidgetConfigModal({ title, fields: rawFields, initial, i
     </div>
   )
 
-  const TABS = fields.records
+  const TABS = fields.chart
+    ? [{ key: 'data' as const, label: 'Data' }, { key: 'chart' as const, label: 'Chart' }]
+    : fields.records
     ? [{ key: 'data' as const, label: 'Data' }, { key: 'columns' as const, label: `Columns (${columns.length || 'default'})` }]
     : [
       { key: 'data' as const, label: 'Data' },
@@ -346,6 +361,9 @@ export default function WidgetConfigModal({ title, fields: rawFields, initial, i
           {!tabbed && dataSection}
           {tabbed && tab === 'data' && <div className="max-w-xl">{dataSection}</div>}
           {fields.records && tab === 'columns' && columnsSection}
+          {fields.chart && tab === 'chart' && (
+            <ChartSettings value={chart} onChange={setChart} customKpis={customKpis} fieldNames={fieldNames} windowMode={timeWindowMode} />
+          )}
           {fields.kpi && tab === 'layout' && layoutSection}
           {fields.kpi && tab === 'kpis' && kpisSection}
         </div>

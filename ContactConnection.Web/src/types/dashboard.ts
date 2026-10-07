@@ -1,5 +1,5 @@
 export type DashboardWidgetType =
-  'agent_state_counter' | 'agent_list' | 'call_state_by_campaign' | 'callbacks' | 'service_level_threshold' | 'queued_calls' | 'active_calls' | 'kpi' | 'records'
+  'agent_state_counter' | 'agent_list' | 'call_state_by_campaign' | 'callbacks' | 'service_level_threshold' | 'queued_calls' | 'active_calls' | 'kpi' | 'records' | 'chart'
 
 export interface TimeWindowConfig {
   /** yesterday / week / month: the KPI widget only (S181). */
@@ -38,7 +38,28 @@ export interface RecordsWidgetConfig {
   allowRecordings?: boolean
 }
 
-export interface WidgetFilterConfig extends KpiWidgetConfig, RecordsWidgetConfig {
+/** Chart widget (S182): a view of the KPI engine. X axis = groupBy, series split = groupBy2. */
+export type ChartType = 'line' | 'area' | 'bar' | 'hbar' | 'stacked' | 'combo' | 'pie' | 'donut' | 'heatmap' | 'funnel'
+
+export interface ChartMetric {
+  /** KPI key (catalog or "custom:<id>"). */
+  key: string
+  /** Which Y axis — counts / money on the left, rates / times on the right by default. */
+  axis?: 'left' | 'right'
+  /** Combo charts: drawn as bars or a line. */
+  as?: 'bar' | 'line'
+}
+
+export interface ChartWidgetConfig {
+  chartType?: ChartType
+  chartMetrics?: ChartMetric[]
+  /** Overlay the previous period (time axes, no series split). */
+  compare?: boolean
+  /** Draw each metric's target (KPI targets' "good" value) as a reference line. */
+  showTargets?: boolean
+}
+
+export interface WidgetFilterConfig extends KpiWidgetConfig, RecordsWidgetConfig, ChartWidgetConfig {
   campaignId?: string
   clientId?: string
   /** Agent group (S181): the agents shown, or the agent who handled / answered the call. Combines with client / campaign. */
@@ -113,6 +134,12 @@ export const WIDGET_META: Record<DashboardWidgetType, WidgetMeta> = {
     defaultSize: { w: 7, h: 8 },
     minSize: { w: 4, h: 5 },
   },
+  chart: {
+    type: 'chart',
+    label: 'Chart',
+    defaultSize: { w: 8, h: 9 },
+    minSize: { w: 4, h: 6 },
+  },
   records: {
     type: 'records',
     label: 'Call Records',
@@ -128,10 +155,10 @@ export const WIDGET_META: Record<DashboardWidgetType, WidgetMeta> = {
 }
 
 /** Report widgets only — what a client dashboard (S181) may hold. Mirrors Dashboard.ClientWidgetTypes on the server. */
-export const CLIENT_WIDGET_TYPES: DashboardWidgetType[] = ['kpi', 'service_level_threshold', 'call_state_by_campaign', 'records']
+export const CLIENT_WIDGET_TYPES: DashboardWidgetType[] = ['kpi', 'chart', 'service_level_threshold', 'call_state_by_campaign', 'records']
 
 export const WIDGET_TYPES: DashboardWidgetType[] =
-  ['agent_state_counter', 'agent_list', 'call_state_by_campaign', 'callbacks', 'service_level_threshold', 'queued_calls', 'active_calls', 'kpi', 'records']
+  ['agent_state_counter', 'agent_list', 'call_state_by_campaign', 'callbacks', 'service_level_threshold', 'queued_calls', 'active_calls', 'kpi', 'chart', 'records']
 
 // Which filter fields each widget's config modal should show — agent-scoped widgets support
 // Client/Campaign/Agent Group + Logged-in-only; call-scoped widgets only support Client/Campaign
@@ -149,6 +176,8 @@ export interface WidgetFilterFields {
   records?: boolean
   /** Multi-select of numbers dialed (S181) — call widgets only. */
   dnis?: boolean
+  /** Chart widget: type, axes, metrics, compare, targets (S182). */
+  chart?: boolean
 }
 
 export const WIDGET_FILTER_FIELDS: Record<DashboardWidgetType, WidgetFilterFields> = {
@@ -162,6 +191,7 @@ export const WIDGET_FILTER_FIELDS: Record<DashboardWidgetType, WidgetFilterField
   active_calls: { client: true, campaign: true, group: true, loggedInOnly: false, timeWindow: false, dnis: true },
   kpi: { client: true, campaign: true, group: true, loggedInOnly: false, timeWindow: true, kpi: true, dnis: true },
   records: { client: true, campaign: true, group: true, loggedInOnly: false, timeWindow: true, records: true, dnis: true },
+  chart: { client: true, campaign: true, group: true, loggedInOnly: false, timeWindow: true, chart: true, dnis: true },
 }
 
 export function newWidgetId(): string {

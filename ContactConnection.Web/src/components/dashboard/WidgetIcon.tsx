@@ -47,6 +47,15 @@ export default function WidgetIcon({ type }: { type: DashboardWidgetType }) {
           <rect x="3" y="16" width="18" height="4" rx="1" fill="#6b7280" />
         </svg>
       )
+    case 'chart':
+      return (
+        <svg viewBox="0 0 24 24" className="w-7 h-7" fill="none" strokeWidth="1.8" strokeLinecap="round">
+          <path d="M4 4v16h16" stroke="#6b7280" />
+          <rect x="7" y="12" width="3" height="6" rx="0.5" fill="#a78bfa" stroke="none" />
+          <rect x="12" y="9" width="3" height="9" rx="0.5" fill="#38bdf8" stroke="none" />
+          <path d="M6.5 10l4-3 4 2 5-5" stroke="#34d399" />
+        </svg>
+      )
     case 'records':
       return (
         <svg viewBox="0 0 24 24" className="w-7 h-7" fill="none" strokeWidth="1.6" strokeLinecap="round">
