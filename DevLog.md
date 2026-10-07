@@ -191,6 +191,7 @@
 | 179 | 2026-10-05 | 7:38 AM PDT | 7:38 PM PDT | 720 min | ~22372 min |
 | 180 | 2026-10-05 | 7:38 PM PDT | 10:54 PM PDT | 196 min | ~22568 min |
 | 181 | 2026-10-06 | 9:21 AM PDT | 6:15 PM PDT | 534 min | ~23102 min |
+| 182 | 2026-10-06 | 7:27 PM PDT | 9:52 PM PDT | 145 min | ~23247 min |
 
 ---
 
@@ -11713,3 +11714,80 @@ browser unless marked otherwise.
   - `test_contact_center` tenant migrations;
   - LLC reinstatement → SignalWire proof;
   - `dotnet watch` hot reload keeps crashing on larger edits — restart instead.
+
+---
+
+## Session 182
+
+**Date:** 2026-10-06
+**Start:** 7:27 PM PDT
+**End:** 9:52 PM PDT
+**Duration:** 145 minutes
+**Total Duration:** ~23247 minutes
+
+### Focus
+
+Stephen's **Chart** dashboard widget, then **card-data exports** for file-only fulfillment campaigns (not a Life Seasons
+requirement; built early because we're ahead of schedule). Then started **bulk number / assignment management + Reserve
+numbers**, a Life Seasons go-live requirement.
+
+### Done
+
+- **Chart widget** (`d6d3dfc`, `e8c3dde`, `d813932`, `f08a1ec`), live-verified by Stephen ("the best widget yet"):
+  - a view over the KPI engine: X axis = group-by, series = second group-by;
+  - line, area, bar, stacked, combo, pie, donut, heatmap, funnel; metrics picked per axis;
+  - new time dimensions: 15 / 30 / 60-minute intervals, week, month, day of week, all gap-filled on the server;
+  - compare with the previous period (`?compare=true`) in its own muted colour;
+  - fixes: the heatmap shows all 24 hours (fixed table layout), whole-number ticks for counts, straight lines on interval
+    axes, readable tooltip heading.
+- **Card-data exports** (`c2ff3e6`, `fe1e58c`, `6253d42`), live-verified end to end:
+  - Stephen's rules: **FTPS + PGP only, no exceptions** (SFTP is not allowed; TMS PCI scans required it disabled);
+  - the CVV is exportable when the platform didn't authorize;
+  - **the CVV is wiped automatically after any successful authorization**;
+  - card data is wiped once the file is delivered (campaign retention "When a card-data export delivers it");
+  - masked preview (including the CVC), payment-token warning, downloads refused, a sealed (AES-GCM) stored copy, full audit
+    trail;
+  - gated on the Portal flag `CardDataExports` + the `exports.card_data` permission. The campaign option and the roles toggle
+    are forced off and disabled, with a contact-support note, while the flag is off; turning the flag off reverts campaigns.
+  - local FTPS test server `ftps-test` (127.0.0.1:2121, password in `.env`). The live run sent the vendor a `.pgp` file that
+    decrypted correctly, and the call was wiped 27 ms after the send.
+  - Activity list shows seconds, newest first, and plain labels for card-data events.
+  - Flag turned back **off** after testing (it stays off for Life Seasons).
+- **Bulk management + Reserve numbers (IN PROGRESS, uncommitted, does not compile yet).** Decisions:
+  - a number with no campaign is in **Reserve**; calls to Reserve and to inactive numbers get a **SIP 404 reject**;
+  - assigning from Reserve takes the **longest-waiting numbers first** (`reserved_at` ascending), to cut drag calls from
+    retired campaigns;
+  - an inactive number stays on its campaign (held for that campaign);
+  - a number deactivated in Reserve is **released**: no longer the tenant's, but kept for audit, never deleted. Another
+    tenant may then take it, and the old tenant's row stays inactive;
+  - assignments: an agents/groups × campaigns **grid + bulk apply**.
+
+  Written so far:
+  - `PhoneNumber`: nullable `CampaignId`, `ReservedAt`, `MoveToReserve`, `InReserve` / `IsReleased` / `TakesCalls`,
+    `Normalize` / `Forms`;
+  - `PhoneNumberRouting`: nullable campaign, `TransferTo`;
+  - both EF configurations;
+  - new `Infrastructure/Telephony/NumberOwnership.cs`, which **closes a hole: Create could take over another tenant's live
+    number**;
+  - registered in DI;
+  - `PhoneNumbersEndpoints` Create / Update / Activate / Deactivate rewritten around it; changes now need `TenantAdmin`.
+- **Tests:** 1700 / 1700 passed at the last commit (`6253d42`).
+
+### Next
+
+- **Finish bulk / Reserve** (pick up from the uncommitted working tree):
+  1. Fix the compile sites for the nullable `CampaignId`: `CallRecordsEndpoints` ~84, `WidgetFilters` 40-42,
+     `CampaignsEndpoints` ~584, `ExternalRoutingEndpoints` ~87, `MediaEndpoints`, `EslBackgroundService` ~339 / 360+ / 434,
+     and `PhoneNumberRoutingRepository.UpsertAsync`.
+  2. ESL: look up routing without the `IsActive` filter; if the number doesn't take calls (Reserve / inactive / released),
+     send a SIP 404 reject. Unknown DIDs are rejected too, but agent extensions must keep working.
+  3. Endpoints: list all numbers with their status; bulk paste-add; bulk move / reserve / activate / deactivate / label /
+     provider; assign-from-reserve `{campaignId, count}` oldest first; an assignment-matrix GET plus a bulk POST.
+  4. Migration, tests, web pages (Phone Numbers bulk page + Reserve view; assignment grid), live verification, commit.
+- **Left for Stephen:** remove the throwaway gpg home `%TEMP%\gfc` and the `.pgp` files in `ftps-test/upload` (the
+  deletion was blocked by the safety check).
+- **Carried:**
+  - keypad `#` (SIP INFO) after SignalWire vetting;
+  - `test_contact_center` tenant migrations;
+  - LLC reinstatement;
+  - Clint's Cannella SFTP details and figures.
