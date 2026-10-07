@@ -118,14 +118,14 @@ public static class ChatEndpoints
 
     // ── Shapes ───────────────────────────────────────────────────────────────────────────────────────────────────
 
-    private static object ChannelDto(ChatChannel c, ChatMember m, Me me, List<Guid> members, int unread, int mentions, bool roleAssigned) => new
+    private static object ChannelDto(ChatChannel c, ChatMember m, Me me, Guid? roleId, List<Guid> members, int unread, int mentions) => new
     {
-        c.Id, c.Kind, c.Name, c.Description, c.IsPrivate, c.PostingRestricted, c.PosterIds, c.MembershipLocked,
+        c.Id, c.Kind, c.Name, c.Description, c.IsPrivate, c.PostingRestricted, c.PosterIds, c.PosterRoleIds, c.MembershipLocked,
         retired = c.IsRetired, c.LastMessageAt, lastReadAt = m.LastReadAt,
         memberIds = members,
-        canPost = c.PostBlockedReason(me.Id, me.IsManager) is null,
-        postBlockedReason = c.PostBlockedReason(me.Id, me.IsManager),
-        canLeave = !c.IsDirect && !(c.MembershipLocked && (m.IsAssigned || roleAssigned)),
+        canPost = c.PostBlockedReason(me.Id, roleId, me.IsManager) is null,
+        postBlockedReason = c.PostBlockedReason(me.Id, roleId, me.IsManager),
+        canLeave = !c.IsDirect && !(c.MembershipLocked && (m.IsAssigned || (roleId is { } r && c.AssignedRoleIds.Contains(r)))),
         unread, mentions,
     };
 
@@ -137,8 +137,7 @@ public static class ChatEndpoints
         var members = await ActiveMemberIds(db, c.Id, ct);
         var counts = await UnreadAsync(db, [(c.Id, m.LastReadAt)], me.Id, ct);
         var roleId = await db.Agents.Where(a => a.Id == me.Id).Select(a => a.RoleId).FirstOrDefaultAsync(ct);
-        return ChannelDto(c, m, me, members, counts.GetValueOrDefault(c.Id).Unread, counts.GetValueOrDefault(c.Id).Mentions,
-            roleId is { } r && c.AssignedRoleIds.Contains(r));
+        return ChannelDto(c, m, me, roleId, members, counts.GetValueOrDefault(c.Id).Unread, counts.GetValueOrDefault(c.Id).Mentions);
     }
 
     private static async Task<Dictionary<Guid, (int Unread, int Mentions)>> UnreadAsync(
@@ -228,7 +227,7 @@ public static class ChatEndpoints
         return Results.Ok(new
         {
             enabled = true,
-            me = new { id = me.Id, isManager = me.IsManager, isSupervisor = me.IsSupervisor },
+            me = new { id = me.Id, isManager = me.IsManager, isSupervisor = me.IsSupervisor, roleId = myRoleId },
             users = agents.Select(a => new
             {
                 a.Id, name = $"{a.FirstName} {a.LastName}".Trim(), a.Email,
@@ -238,8 +237,7 @@ public static class ChatEndpoints
             channels = channels.Select(c =>
             {
                 var m = memberships.First(x => x.ChannelId == c.Id);
-                return ChannelDto(c, m, me, membersBy[c.Id].ToList(), counts.GetValueOrDefault(c.Id).Unread, counts.GetValueOrDefault(c.Id).Mentions,
-                    myRoleId is { } r && c.AssignedRoleIds.Contains(r));
+                return ChannelDto(c, m, me, myRoleId, membersBy[c.Id].ToList(), counts.GetValueOrDefault(c.Id).Unread, counts.GetValueOrDefault(c.Id).Mentions);
             }),
             supervisorIds,
             myHelp = myHelp is null ? null : await HelpDto(db, myHelp, ct),
@@ -360,7 +358,9 @@ public static class ChatEndpoints
         var c = await db.ChatChannels.FirstOrDefaultAsync(x => x.Id == id, ct);
         var member = c is null ? null : await Membership(db, id, me.Id, ct);
         if (c is null || member is null) return Results.NotFound(new { error = "Join the channel to post in it." });
-        if (c.PostBlockedReason(me.Id, me.IsManager) is { } blocked) return Results.Conflict(new { error = blocked });
+        // The person's role now, not as of their sign-in token — a role change applies straight away.
+        var myRole = await db.Agents.Where(a => a.Id == me.Id).Select(a => a.RoleId).FirstOrDefaultAsync(ct);
+        if (c.PostBlockedReason(me.Id, myRole, me.IsManager) is { } blocked) return Results.Conflict(new { error = blocked });
 
         ChatMessage? parent = null;
         if (req.ParentId is { } pid)
@@ -653,7 +653,7 @@ public static class ChatEndpoints
             enabled = Enabled(tc),
             channels = channels.Select(c => new
             {
-                c.Id, c.Name, c.Description, c.IsPrivate, c.PostingRestricted, c.PosterIds, c.MembershipLocked, c.AssignedRoleIds,
+                c.Id, c.Name, c.Description, c.IsPrivate, c.PostingRestricted, c.PosterIds, c.PosterRoleIds, c.MembershipLocked, c.AssignedRoleIds,
                 retired = c.IsRetired, c.RetiredAt, c.CreatedAt, c.LastMessageAt,
                 assignedIds = by[c.Id].Where(m => m.IsAssigned).Select(m => m.AgentId),
                 memberCount = by[c.Id].Count(),
@@ -695,9 +695,11 @@ public static class ChatEndpoints
     private static async Task<IResult> ApplyConfigAsync(TenantDbContext db, ChatChannel c, SaveChannelRequest req, TenantContext tc,
         IHubContext<ChatHub, IChatHubClient> hub, CancellationToken ct, bool isNew)
     {
-        var roleIds = (req.AssignedRoleIds ?? []).Distinct().ToList();
-        var validRoles = await db.Roles.Where(r => roleIds.Contains(r.Id)).Select(r => r.Id).ToListAsync(ct);
-        c.Configure(req.IsPrivate, req.PostingRestricted, req.PosterIds ?? [], req.MembershipLocked, validRoles);
+        var roleIds = (req.AssignedRoleIds ?? []).Concat(req.PosterRoleIds ?? []).Distinct().ToList();
+        var existingRoles = await db.Roles.Where(r => roleIds.Contains(r.Id)).Select(r => r.Id).ToListAsync(ct);
+        var validRoles = (req.AssignedRoleIds ?? []).Where(existingRoles.Contains).Distinct().ToList();
+        var posterRoles = (req.PosterRoleIds ?? []).Where(existingRoles.Contains).Distinct().ToList();
+        c.Configure(req.IsPrivate, req.PostingRestricted, req.PosterIds ?? [], req.MembershipLocked, validRoles, posterRoles);
 
         var named = (req.AssignedIds ?? []).Distinct().ToList();
         var byRole = validRoles.Count == 0 ? [] : await db.Agents.Where(a => a.IsActive && a.RoleId != null && validRoles.Contains(a.RoleId.Value)).Select(a => a.Id).ToListAsync(ct);
@@ -774,5 +776,5 @@ public record ReactRequest(string Emoji);
 public record OpenDirectRequest(List<Guid>? AgentIds);
 public record RaiseHandRequest(string? Note, Guid? CallRecordId);
 public record SaveChannelRequest(string Name, string? Description, bool IsPrivate, bool PostingRestricted, List<Guid>? PosterIds,
-    bool MembershipLocked, List<Guid>? AssignedRoleIds, List<Guid>? AssignedIds);
+    bool MembershipLocked, List<Guid>? AssignedRoleIds, List<Guid>? AssignedIds, List<Guid>? PosterRoleIds = null);
 public record SetSupervisorsRequest(List<Guid>? SupervisorIds);

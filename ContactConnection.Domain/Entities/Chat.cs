@@ -24,9 +24,11 @@ public class ChatChannel
     /// <summary>Private channels are visible only to their members; public ones can be browsed and joined.</summary>
     public bool IsPrivate { get; private set; }
 
-    /// <summary>Only <see cref="PosterIds"/> (and chat managers) may post.</summary>
+    /// <summary>Only <see cref="PosterIds"/>, holders of <see cref="PosterRoleIds"/> (and chat managers) may post.</summary>
     public bool PostingRestricted { get; private set; }
     public List<Guid> PosterIds { get; private set; } = [];
+    /// <summary>Everyone holding one of these custom roles may post — follows role changes without editing the channel.</summary>
+    public List<Guid> PosterRoleIds { get; private set; } = [];
 
     /// <summary>Assigned members — individually (<see cref="ChatMember.IsAssigned"/>) or through
     /// <see cref="AssignedRoleIds"/> — can't leave.</summary>
@@ -84,11 +86,13 @@ public class ChatChannel
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
-    public void Configure(bool isPrivate, bool postingRestricted, IEnumerable<Guid> posterIds, bool membershipLocked, IEnumerable<Guid> assignedRoleIds)
+    public void Configure(bool isPrivate, bool postingRestricted, IEnumerable<Guid> posterIds, bool membershipLocked, IEnumerable<Guid> assignedRoleIds,
+        IEnumerable<Guid>? posterRoleIds = null)
     {
         IsPrivate = isPrivate;
         PostingRestricted = postingRestricted;
         PosterIds = posterIds.Distinct().ToList();
+        PosterRoleIds = (posterRoleIds ?? []).Distinct().ToList();
         MembershipLocked = membershipLocked;
         AssignedRoleIds = assignedRoleIds.Distinct().ToList();
         UpdatedAt = DateTimeOffset.UtcNow;
@@ -100,10 +104,12 @@ public class ChatChannel
     public void Touch(DateTimeOffset at) { LastMessageAt = at; }
 
     /// <summary>Why this person can't post here, or null. Membership is checked by the caller.</summary>
-    public string? PostBlockedReason(Guid agentId, bool isChatManager)
+    /// <param name="roleId">The person's current custom role, if any.</param>
+    public string? PostBlockedReason(Guid agentId, Guid? roleId, bool isChatManager)
     {
         if (IsRetired) return "This channel is retired — its history is read-only.";
-        if (PostingRestricted && !isChatManager && !PosterIds.Contains(agentId)) return "Only selected people can post in this channel.";
+        if (PostingRestricted && !isChatManager && !PosterIds.Contains(agentId) && !(roleId is { } r && PosterRoleIds.Contains(r)))
+            return "Only selected people can post in this channel.";
         return null;
     }
 }

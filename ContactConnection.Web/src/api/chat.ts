@@ -20,6 +20,7 @@ export interface ChatChannel {
   isPrivate: boolean
   postingRestricted: boolean
   posterIds: string[]
+  posterRoleIds: string[]
   membershipLocked: boolean
   retired: boolean
   lastMessageAt: string | null
@@ -71,7 +72,7 @@ export interface HelpRequest {
 export interface ChatBootstrap {
   enabled: boolean
   message?: string
-  me: { id: string; isManager: boolean; isSupervisor: boolean }
+  me: { id: string; isManager: boolean; isSupervisor: boolean; roleId: string | null }
   users: ChatUser[]
   channels: ChatChannel[]
   supervisorIds: string[]
@@ -112,6 +113,7 @@ export interface AdminChatChannel {
   isPrivate: boolean
   postingRestricted: boolean
   posterIds: string[]
+  posterRoleIds: string[]
   membershipLocked: boolean
   assignedRoleIds: string[]
   retired: boolean
@@ -128,6 +130,7 @@ export interface SaveChatChannel {
   isPrivate: boolean
   postingRestricted: boolean
   posterIds: string[]
+  posterRoleIds: string[]
   membershipLocked: boolean
   assignedRoleIds: string[]
   assignedIds: string[]

@@ -149,8 +149,9 @@ export function channelTitle(c: ChatChannel, users: Record<string, ChatUser>, me
 }
 
 /** canPost from the flags with this viewer's own role (pushed channel updates are computed without it). */
-export function canPost(c: ChatChannel, meId: string | undefined, isManager: boolean) {
+export function canPost(c: ChatChannel, meId: string | undefined, isManager: boolean, roleId?: string | null) {
   if (c.retired) return false
   if (c.kind === 'dm') return true
   return !c.postingRestricted || isManager || (!!meId && c.posterIds.includes(meId))
+    || (!!roleId && (c.posterRoleIds ?? []).includes(roleId))
 }

@@ -21,6 +21,7 @@ public class ChatChannelConfiguration : IEntityTypeConfiguration<ChatChannel>
         b.Property(c => c.IsPrivate).HasColumnName("is_private");
         b.Property(c => c.PostingRestricted).HasColumnName("posting_restricted");
         b.Property(c => c.PosterIds).HasColumnName("poster_ids").HasColumnType("uuid[]");
+        b.Property(c => c.PosterRoleIds).HasColumnName("poster_role_ids").HasColumnType("uuid[]");
         b.Property(c => c.MembershipLocked).HasColumnName("membership_locked");
         b.Property(c => c.AssignedRoleIds).HasColumnName("assigned_role_ids").HasColumnType("uuid[]");
         b.Property(c => c.RetiredAt).HasColumnName("retired_at");

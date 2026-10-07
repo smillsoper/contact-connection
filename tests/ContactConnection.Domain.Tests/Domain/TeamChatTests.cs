@@ -21,7 +21,7 @@ public class TeamChatTests
     [Fact]
     public void Anyone_in_an_open_channel_can_post()
     {
-        Assert.Null(Channel().PostBlockedReason(Bob, isChatManager: false));
+        Assert.Null(Channel().PostBlockedReason(Bob, null, isChatManager: false));
     }
 
     [Fact]
@@ -29,9 +29,20 @@ public class TeamChatTests
     {
         var c = Channel();
         c.Configure(isPrivate: false, postingRestricted: true, posterIds: [Ann], membershipLocked: false, assignedRoleIds: []);
-        Assert.Null(c.PostBlockedReason(Ann, false));
-        Assert.NotNull(c.PostBlockedReason(Bob, false));
-        Assert.Null(c.PostBlockedReason(Bob, isChatManager: true));
+        Assert.Null(c.PostBlockedReason(Ann, null, false));
+        Assert.NotNull(c.PostBlockedReason(Bob, null, false));
+        Assert.Null(c.PostBlockedReason(Bob, null, isChatManager: true));
+    }
+
+    [Fact]
+    public void Restricted_posting_follows_poster_roles()
+    {
+        var leads = Guid.NewGuid();
+        var c = Channel();
+        c.Configure(false, postingRestricted: true, posterIds: [], membershipLocked: false, assignedRoleIds: [], posterRoleIds: [leads]);
+        Assert.Null(c.PostBlockedReason(Bob, leads, false));                 // holds the role today
+        Assert.NotNull(c.PostBlockedReason(Bob, Guid.NewGuid(), false));     // role changed — no longer
+        Assert.NotNull(c.PostBlockedReason(Bob, null, false));
     }
 
     [Fact]
@@ -40,9 +51,9 @@ public class TeamChatTests
         var c = Channel();
         c.Retire();
         Assert.True(c.IsRetired);
-        Assert.NotNull(c.PostBlockedReason(Ann, isChatManager: true));
+        Assert.NotNull(c.PostBlockedReason(Ann, null, isChatManager: true));
         c.Unretire();
-        Assert.Null(c.PostBlockedReason(Ann, false));
+        Assert.Null(c.PostBlockedReason(Ann, null, false));
     }
 
     [Fact]

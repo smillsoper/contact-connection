@@ -60,7 +60,7 @@ export function Conversation({ channelId }: { channelId: string }) {
   const title = channelTitle(channel, users, me?.id)
   const others = channel.memberIds.filter((id) => id !== me?.id)
   const single = channel.kind === 'dm' && others.length === 1 ? users[others[0]] : null
-  const allowed = canPost(channel, me?.id, !!me?.isManager)
+  const allowed = canPost(channel, me?.id, !!me?.isManager, me?.roleId)
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -124,7 +124,7 @@ export function ThreadView({ channelId, parentId }: { channelId: string; parentI
   useEffect(() => { const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight }, [replies?.length])
 
   const p = parent ?? loadedParent
-  const allowed = channel ? canPost(channel, me?.id, !!me?.isManager) : false
+  const allowed = channel ? canPost(channel, me?.id, !!me?.isManager, me?.roleId) : false
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="px-3 py-2 border-b border-gray-800 flex items-center gap-2 shrink-0">

@@ -12,7 +12,7 @@ interface Person { id: string; name: string; email: string; roleId: string | nul
 interface RoleOpt { id: string; name: string }
 
 const EMPTY: SaveChatChannel = {
-  name: '', description: null, isPrivate: false, postingRestricted: false, posterIds: [], membershipLocked: false,
+  name: '', description: null, isPrivate: false, postingRestricted: false, posterIds: [], posterRoleIds: [], membershipLocked: false,
   assignedRoleIds: [], assignedIds: [],
 }
 
@@ -86,6 +86,7 @@ export default function AdminChatPage() {
 
 const toForm = (c: AdminChatChannel): SaveChatChannel => ({
   name: c.name, description: c.description, isPrivate: c.isPrivate, postingRestricted: c.postingRestricted, posterIds: c.posterIds,
+  posterRoleIds: c.posterRoleIds ?? [],
   membershipLocked: c.membershipLocked, assignedRoleIds: c.assignedRoleIds, assignedIds: c.assignedIds,
 })
 
@@ -122,7 +123,8 @@ function ChannelTable({ list, people, roles, onEdit, onRetire, retiredList }: {
               </td>
               <td className="px-4 py-3 text-xs">
                 {c.retired ? <span className="text-gray-500">Retired</span>
-                  : c.postingRestricted ? <span className="text-amber-300">📣 {c.posterIds.length ? c.posterIds.map(name).join(', ') : 'Chat managers only'}</span>
+                  : c.postingRestricted ? <span className="text-amber-300">📣 {
+                      [...(c.posterRoleIds ?? []).map((r) => `${role(r)} (role)`), ...c.posterIds.map(name)].join(', ') || 'Chat managers only'}</span>
                   : <span className="text-gray-400">Everyone</span>}
               </td>
               <td className="px-4 py-3 text-xs text-gray-400">{c.memberCount}</td>
@@ -189,11 +191,17 @@ function ChannelEditor({ id, initial, people, roles, onClose, onSaved }: {
           hint="Assigned people and role holders can't leave this channel." />
 
         <Check on={f.postingRestricted} set={(v) => set({ postingRestricted: v })} label="Restrict posting"
-          hint="Only the people chosen here can post (chat managers always can). Everyone else reads and reacts." />
+          hint="Only the roles and people chosen here can post (chat managers always can). Everyone else reads and reacts." />
         {f.postingRestricted && (
-          <div className="pl-12">
-            <p className="text-xs text-gray-400 mb-1">Who can post</p>
-            <PeoplePicker people={people} chosen={f.posterIds} onChange={(v) => set({ posterIds: v })} />
+          <div className="pl-12 space-y-3">
+            <div>
+              <p className="text-xs text-gray-400 mb-1">Roles that can post — whoever holds the role, now or later</p>
+              <Chips options={roles} chosen={f.posterRoleIds} onChange={(v) => set({ posterRoleIds: v })} empty="No roles yet" />
+            </div>
+            <div>
+              <p className="text-xs text-gray-400 mb-1">People who can post</p>
+              <PeoplePicker people={people} chosen={f.posterIds} onChange={(v) => set({ posterIds: v })} />
+            </div>
           </div>
         )}
         <p className="text-xs text-gray-500">To stop all posting but keep the history readable, save and then <b>Retire</b> the channel.</p>
