@@ -150,9 +150,25 @@ public class EligibleAgentRanker(IAgentStateStore stateStore)
             .ToList(), windows);
     }
 
-    /// <summary>Every route each agent has to the campaign: direct assignment (tier 0) and each
-    /// active group assignment they're a member of and not excluded from.</summary>
+    /// <summary>Every route each agent has to the campaign right now: their assignments (below), then dedications
+    /// (S183) — an agent dedicated to other campaigns has no route here at all, and one dedicated to this campaign gets
+    /// a direct route even without an assignment (not into a pinned group, though: that stays members-only).</summary>
     private static async Task<Dictionary<Guid, List<AgentRoute>>> LoadRoutesAsync(
+        TenantDbContext db, Guid campaignId, Guid? restrictGroupId, Guid? onlyAgentId, CancellationToken ct)
+    {
+        var routes = await LoadAssignedRoutesAsync(db, campaignId, restrictGroupId, onlyAgentId, ct);
+        foreach (var (agentId, campaigns) in await AgentDedications.ActiveAsync(db, DateTimeOffset.UtcNow, onlyAgentId, ct))
+        {
+            if (!campaigns.Contains(campaignId)) routes.Remove(agentId);
+            else if (restrictGroupId is null && !routes.ContainsKey(agentId))
+                routes[agentId] = [new AgentRoute(0, null, null, AgentDedications.DefaultProficiency)];
+        }
+        return routes;
+    }
+
+    /// <summary>Every route each agent has to the campaign through assignments: direct assignment (tier 0) and each
+    /// active group assignment they're a member of and not excluded from.</summary>
+    private static async Task<Dictionary<Guid, List<AgentRoute>>> LoadAssignedRoutesAsync(
         TenantDbContext db, Guid campaignId, Guid? restrictGroupId, Guid? onlyAgentId, CancellationToken ct)
     {
         var routes = new Dictionary<Guid, List<AgentRoute>>();

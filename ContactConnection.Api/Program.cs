@@ -322,6 +322,7 @@ app.MapKpiEndpoints();
 app.MapRecordsWidgetEndpoints();
 app.MapScriptIntegrationsEndpoints();
 app.MapCallerHistoryEndpoints();
+app.MapAgentDedicationsEndpoints();
 app.MapWidgetFilterOptions();
 app.MapClientPortalAuthEndpoints();
 app.MapClientPortalEndpoints();

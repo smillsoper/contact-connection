@@ -73,9 +73,30 @@ public sealed class QueuePollingService : BackgroundService
         }
     }
 
+    /// <summary>Per tenant, who was queued at the last tick — a change pushes ReceiveMyQueueChanged (S183).</summary>
+    private readonly Dictionary<Guid, string> _queueSignatures = new();
+
+    /// <summary>Personal queue (S183): when a tenant's set of queued callers changes, tell its agent portals to refetch
+    /// their own view. Each portal filters to its own campaigns server-side.</summary>
+    private async Task PublishQueueChangesAsync(IReadOnlyList<TelephonyCallSession> sessions)
+    {
+        var current = sessions.Where(s => s.Vars.GetValueOrDefault("_queued") == "true")
+            .GroupBy(s => s.TenantId)
+            .ToDictionary(g => g.Key, g => string.Join(",", g.Select(s => s.CallRecordId.ToString()).Order()));
+        foreach (var tenantId in current.Keys.Union(_queueSignatures.Keys).ToList())
+        {
+            var sig = current.GetValueOrDefault(tenantId, "");
+            if (_queueSignatures.GetValueOrDefault(tenantId, "") == sig) continue;
+            if (sig == "") _queueSignatures.Remove(tenantId); else _queueSignatures[tenantId] = sig;
+            await _hub.Clients.Group($"agents:{tenantId}").ReceiveMyQueueChanged();
+        }
+    }
+
     private async Task PollAsync(CancellationToken ct)
     {
         var sessions = await _sessionStore.GetAllAsync(ct);
+        try { await PublishQueueChangesAsync(sessions); }
+        catch (Exception ex) { _logger.LogWarning(ex, "QueuePoller: personal-queue push failed"); }
 
         // A queued caller currently inside an input/record sub-dialog (tf_ivr_menu → ivr_collect,
         // or tf_voicemail → vm_record) is NOT deliverable — bridging them to an agent mid-

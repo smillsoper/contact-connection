@@ -26,6 +26,10 @@ public class FlowHub : Hub<IFlowHubClient>
         var agentId = Context.User?.FindFirst("sub")?.Value;
         if (!string.IsNullOrEmpty(agentId))
             await Groups.AddToGroupAsync(Context.ConnectionId, $"agent:{agentId}");
+        // Everyone signed in to the tenant hears "the queue changed" (S183 personal queue) and refetches their own view.
+        var tenantId = Context.User?.FindFirst("tenant_id")?.Value;
+        if (!string.IsNullOrEmpty(tenantId))
+            await Groups.AddToGroupAsync(Context.ConnectionId, $"agents:{tenantId}");
         await base.OnConnectedAsync();
     }
 
@@ -123,6 +127,14 @@ public interface IFlowHubClient
     /// higher routing tier, or this agent is no longer eligible for it (parallel queuing, see
     /// docs/design/parallel-queuing.md). The agent UI drops the pop for that callRecordId.</summary>
     Task ReceiveOfferWithdrawn(string callRecordId);
+
+    /// <summary>Personal queue (S183): someone joined or left the tenant's queue — each agent portal refetches the
+    /// callers waiting on its own campaigns.</summary>
+    Task ReceiveMyQueueChanged();
+
+    /// <summary>A supervisor dedicated this agent to campaigns, or ended a dedication (S183) — the portal refreshes its
+    /// dedication banner and personal queue.</summary>
+    Task ReceiveDedicationChanged();
 
     /// <summary>Supervisor dashboards: the routing tier a queued call on this campaign is being
     /// offered to changed (or who's in it) — the Queued Calls widget refetches.</summary>

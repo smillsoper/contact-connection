@@ -7,6 +7,7 @@ import { useAuthStore } from '../../../stores/authStore'
 import { agentLockApi } from '../../../api/agentLock'
 import { supervisorApi, MONITOR_MODE_LABEL, type MonitorMode, type MonitorState } from '../../../api/supervisor'
 import { ChevronDownIcon, ChevronUpIcon, CloseIcon, ExternalLinkIcon, HeadsetIcon, LockIcon, PhoneIcon } from '../../icons/Icons'
+import DedicationModal from '../DedicationModal'
 
 type SortColumn = 'name' | 'state' | 'time'
 type SortDirection = 'asc' | 'desc'
@@ -50,6 +51,9 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
   const [unlocking, setUnlocking] = useState<string | null>(null)
   const canMonitor = useAuthStore((s) => s.hasPermission('supervisor.monitor') || s.hasPermission('supervisor.override'))
   const canOverride = useAuthStore((s) => s.hasPermission('supervisor.override'))
+  // Dedicate an agent to campaigns (S183).
+  const canDedicate = useAuthStore((s) => s.hasPermission('supervisor.override') || s.hasPermission('agents.manage'))
+  const [dedicating, setDedicating] = useState<{ id: string; name: string } | null>(null)
   const myId = useAuthStore((s) => s.agentId)
   const [monitoring, setMonitoring] = useState<MonitorState | null>(null)
   const [supBusy, setSupBusy] = useState(false)
@@ -274,9 +278,19 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
         </thead>
         <tbody>
           {sortedRows.map((r) => (
-            <tr key={r.agent_id} className="border-b border-gray-800/60 last:border-0">
+            <tr key={r.agent_id} className="group border-b border-gray-800/60 last:border-0">
               <td className="py-1.5 pr-2 text-gray-200 max-w-[11rem]">
                 <span className="truncate block">{r.name}</span>
+                {(r.dedications ?? []).length > 0 ? (
+                  <button onClick={() => setDedicating({ id: r.agent_id, name: r.name })}
+                    title={(r.dedications ?? []).map((d) => `${d.campaigns.join(', ')} — ${d.summary}${d.active_now ? '' : ' (waiting for its next window)'}`).join('\n')}
+                    className={`block max-w-full truncate text-left text-[10px] ${(r.dedications ?? []).some((d) => d.active_now) ? 'text-indigo-300 hover:text-indigo-200' : 'text-gray-500 hover:text-gray-300'}`}>
+                    Dedicated · {[...new Set((r.dedications ?? []).flatMap((d) => d.campaigns))].join(', ')}
+                  </button>
+                ) : canDedicate && (
+                  <button onClick={() => setDedicating({ id: r.agent_id, name: r.name })}
+                    className="hidden group-hover:block text-[10px] text-gray-500 hover:text-indigo-300">Dedicate…</button>
+                )}
                 {r.status_locked && (
                   <span className="flex items-center gap-1.5 text-[10px] text-red-300"
                     title={`Locked by ${r.locked_by ?? 'a supervisor'}${r.lock_reason ? `: ${r.lock_reason}` : ''}`}>
@@ -375,6 +389,10 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
           )}
         </tbody>
       </table>
+      {dedicating && (
+        <DedicationModal agentId={dedicating.id} agentName={dedicating.name} canManage={canDedicate}
+          onClose={() => { setDedicating(null); load() }} />
+      )}
     </div>
   )
 }

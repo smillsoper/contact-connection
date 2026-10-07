@@ -25,6 +25,7 @@ public class TenantDbContext : DbContext
     public DbSet<ChatFile> ChatFiles => Set<ChatFile>();
     public DbSet<AgentSupervisor> AgentSupervisors => Set<AgentSupervisor>();
     public DbSet<HelpRequest> HelpRequests => Set<HelpRequest>();
+    public DbSet<AgentDedication> AgentDedications => Set<AgentDedication>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<CallRecord> CallRecords => Set<CallRecord>();
     public DbSet<CallInteraction> CallInteractions => Set<CallInteraction>();
@@ -175,6 +176,7 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new ChatFileConfiguration());
         modelBuilder.ApplyConfiguration(new AgentSupervisorConfiguration());
         modelBuilder.ApplyConfiguration(new HelpRequestConfiguration());
+        modelBuilder.ApplyConfiguration(new AgentDedicationConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 

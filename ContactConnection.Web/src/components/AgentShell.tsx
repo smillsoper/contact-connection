@@ -9,6 +9,7 @@ import { authApi } from '../api/auth'
 import { api } from '../api/client'
 import SessionTimeoutModal from './SessionTimeoutModal'
 import SoftphonePanel from './SoftphonePanel'
+import MyQueuePanel from './MyQueuePanel'
 import FlowPanel from './FlowPanel'
 import ChatPanel from './ChatPanel'
 import CartPanel from './cart/CartPanel'
@@ -136,8 +137,12 @@ export default function AgentShell() {
       {/* 3-panel body */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left — Softphone (~240px) */}
-        <div className="w-60 shrink-0 border-r border-gray-800 overflow-y-auto">
-          <SoftphonePanel />
+        <div className="w-60 shrink-0 border-r border-gray-800 flex flex-col">
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            <SoftphonePanel />
+          </div>
+          {/* Personal queue (S183), pinned to the bottom of the softphone */}
+          <MyQueuePanel />
         </div>
 
         {/* Center — Flow/Script (flex grow) */}

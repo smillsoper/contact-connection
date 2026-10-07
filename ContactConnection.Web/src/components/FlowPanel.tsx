@@ -506,6 +506,10 @@ export default function FlowPanel() {
       window.dispatchEvent(new CustomEvent('cc:ai-summary-ready', { detail: callRecordId }))
     })
 
+    // Personal queue + dedications (S183) — MyQueuePanel listens for these.
+    connection.on('receiveMyQueueChanged', () => { window.dispatchEvent(new Event('cc:my-queue-changed')) })
+    connection.on('receiveDedicationChanged', () => { window.dispatchEvent(new Event('cc:dedication-changed')) })
+
     // Sign-in lock: sign out now. AgentShell owns the sign-out (it clears SIP + auth).
     connection.on('receiveForceSignOut', (message: string) => {
       window.dispatchEvent(new CustomEvent('cc:force-signout', { detail: message }))
@@ -549,6 +553,8 @@ export default function FlowPanel() {
       for (const entry of useFlowSessionsStore.getState().sessions) {
         connection.invoke('JoinSession', entry.sessionId).catch(console.error)
       }
+      // Pushes may have been missed while disconnected — the personal queue catches up.
+      window.dispatchEvent(new Event('cc:dedication-changed'))
     })
 
     connection.start()

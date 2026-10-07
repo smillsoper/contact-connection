@@ -2,7 +2,9 @@ using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
 using ContactConnection.Domain.Entities;
+using ContactConnection.Infrastructure.Data;
 using ContactConnection.Infrastructure.Telephony;
+using Microsoft.EntityFrameworkCore;
 
 namespace ContactConnection.Api.Endpoints;
 
@@ -62,6 +64,7 @@ public static class DashboardWidgetsEndpoints
             IAgentRegistrationStore registrationStore,
             IFlowEngine flowEngine,
             ITelephonyCallSessionStore telephonySessions,
+            ScopedTenantDbContextFactory dbf,
             TenantContext tenantContext,
             CancellationToken ct) =>
         {
@@ -69,6 +72,23 @@ public static class DashboardWidgetsEndpoints
             var tenantId = tenantContext.Current.Id;
 
             var agentIds = await ResolveAgentIdsAsync(campaignId, clientId, groupId, campaigns, agentGroups, agents, ct);
+
+            // Dedications (S183): each agent's current ones, summarised for the row.
+            var dedNow = DateTimeOffset.UtcNow;
+            Dictionary<Guid, List<AgentDedication>> dedications;
+            Dictionary<Guid, string> dedCampaignNames;
+            await using (var ddb = dbf.Create())
+            {
+                var idList = agentIds.ToList();
+                var open = await ddb.AgentDedications.AsNoTracking()
+                    .Where(d => idList.Contains(d.AgentId) && d.EndedAt == null && (d.EndsAt == null || d.EndsAt > dedNow))
+                    .ToListAsync(ct);
+                dedications = open.GroupBy(d => d.AgentId).ToDictionary(g => g.Key, g => g.ToList());
+                var cids = open.SelectMany(d => d.CampaignIds).Distinct().ToList();
+                dedCampaignNames = await ddb.Campaigns.AsNoTracking().Where(c => cids.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Name, ct);
+            }
+            TimeZoneInfo dedZone;
+            try { dedZone = TimeZoneInfo.FindSystemTimeZoneById(tenantContext.Current.Timezone); } catch (Exception) { dedZone = TimeZoneInfo.Utc; }
 
             // Agents bridged to a live caller right now — Monitor / Coach / Barge need one.
             var onLiveCall = (await telephonySessions.GetAllAsync(ct))
@@ -116,6 +136,13 @@ public static class DashboardWidgetsEndpoints
                     sign_in_locked    = agent.SignInLocked,
                     lock_reason       = agent.StatusLockReason,
                     locked_by         = agent.StatusLockedByName,
+                    dedications       = (dedications.GetValueOrDefault(agent.Id) ?? []).Select(d => new
+                    {
+                        id         = d.Id,
+                        active_now = d.IsActiveAt(dedNow),
+                        campaigns  = d.CampaignIds.Select(c => dedCampaignNames.GetValueOrDefault(c, "")).Where(n => n != ""),
+                        summary    = AgentDedicationsEndpoints.Describe(d, dedZone),
+                    }),
                 });
             }
 
