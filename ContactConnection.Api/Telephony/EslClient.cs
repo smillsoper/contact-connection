@@ -154,8 +154,11 @@ public sealed class EslClient(ILogger<EslClient>? logger = null, IConfiguration?
             logger?.LogWarning("ESL bgapi command failed: '{Command}' → {Response}", command, reply.Body.Trim());
     }
 
+    /// <summary>Hangs up with a Q.850 cause (1 = UNALLOCATED_NUMBER → SIP 404, 17 = USER_BUSY → 486, …). uuid_kill takes the
+    /// cause as a name or a bare number — "Q.850:1" is neither and silently became NORMAL_CLEARING (S183), which the
+    /// carrier treated as retryable and re-sent the call, leaving the caller in dead air.</summary>
     public Task KillChannelAsync(string uuid, int causeCode, CancellationToken ct = default) =>
-        SendApiAsync($"uuid_kill {uuid} Q.850:{causeCode}", ct);
+        SendApiAsync($"uuid_kill {uuid} {causeCode}", ct);
 
     public Task AnswerChannelAsync(string uuid, CancellationToken ct = default) =>
         SendApiAsync($"uuid_answer {uuid}", ct);
