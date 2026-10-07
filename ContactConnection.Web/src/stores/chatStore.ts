@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ChatBootstrap, ChatChannel, ChatMessage, ChatUser, ChatUserState, HelpRequest } from '../api/chat'
+import type { ChatBootstrap, ChatChannel, ChatMessage, ChatPins, ChatUser, ChatUserState, HelpRequest } from '../api/chat'
 
 /**
  * Team chat client state (S183). One SignalR connection per page (lib/chatConnection) feeds it; the chat panel in the
@@ -27,6 +27,7 @@ interface ChatState {
   helpQueue: HelpRequest[]
   messages: Record<string, ChannelMessages>
   threads: Record<string, ChatMessage[]>       // parentId → replies
+  pins: Record<string, ChatPins>               // channelId → pinned for everyone + my own pins
   typing: Record<string, Record<string, number>> // channelId → agentId → expires (ms)
   view: ChatView
   /** Is the chat UI on screen (portal panel always; admin launcher when open)? */
@@ -41,6 +42,7 @@ interface ChatState {
   setMembers: (channelId: string, memberIds: string[]) => void
   setPage: (channelId: string, messages: ChatMessage[], hasMore: boolean, older: boolean) => void
   setThread: (parentId: string, replies: ChatMessage[]) => void
+  setPins: (channelId: string, pins: ChatPins) => void
   addMessage: (m: ChatMessage) => void
   updateMessage: (m: ChatMessage) => void
   markRead: (channelId: string, at: string) => void
@@ -53,7 +55,7 @@ const sortMsgs = (a: ChatMessage, b: ChatMessage) => a.createdAt.localeCompare(b
 
 export const useChatStore = create<ChatState>((set, get) => ({
   status: 'idle', disabledMessage: null, me: null, users: {}, channels: {}, supervisorIds: [], myHelp: null, helpQueue: [],
-  messages: {}, threads: {}, typing: {}, view: { kind: 'list' }, visible: false,
+  messages: {}, threads: {}, pins: {}, typing: {}, view: { kind: 'list' }, visible: false,
 
   load: (b) => set({
     status: 'ready', me: b.me,
@@ -82,6 +84,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     return { messages: { ...s.messages, [channelId]: { messages, hasMore, loaded: true } } }
   }),
   setThread: (parentId, replies) => set((s) => ({ threads: { ...s.threads, [parentId]: [...replies].sort(sortMsgs) } })),
+  setPins: (channelId, pins) => set((s) => ({ pins: { ...s.pins, [channelId]: pins } })),
 
   addMessage: (m) => set((s) => {
     const patch: Partial<ChatState> = {}
@@ -117,6 +120,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       patch.messages = { ...s.messages, [m.channelId]: { ...cur, messages: cur.messages.map((x) => (x.id === m.id ? m : x)) } }
     if (m.parentId && s.threads[m.parentId]?.some((x) => x.id === m.id))
       patch.threads = { ...s.threads, [m.parentId]: s.threads[m.parentId].map((x) => (x.id === m.id ? m : x)) }
+    const p = s.pins[m.channelId]
+    if (p && (p.everyone.some((x) => x.id === m.id) || p.mine.some((x) => x.id === m.id))) {
+      const swap = (list: ChatMessage[]) => list.map((x) => (x.id === m.id ? m : x)).filter((x) => !x.deleted)
+      patch.pins = { ...s.pins, [m.channelId]: { everyone: swap(p.everyone).filter((x) => x.pinnedAt), mine: swap(p.mine) } }
+    }
     return patch
   }),
   markRead: (channelId, at) => set((s) => s.channels[channelId]
@@ -146,6 +154,20 @@ export function channelTitle(c: ChatChannel, users: Record<string, ChatUser>, me
   if (c.kind === 'channel') return `# ${c.name}`
   const others = c.memberIds.filter((id) => id !== meId).map((id) => users[id]?.name ?? 'Someone')
   return others.length ? others.join(', ') : 'Just you'
+}
+
+/** May this viewer pin for everyone here? (pushed channel updates are computed without the viewer's role) */
+export function canPinForEveryone(c: ChatChannel, meId: string | undefined, isManager: boolean, roleId?: string | null) {
+  if (c.retired) return false
+  if (c.kind === 'dm' || isManager) return true
+  return (!!meId && (c.pinnerIds ?? []).includes(meId)) || (!!roleId && (c.pinnerRoleIds ?? []).includes(roleId))
+}
+
+/** May this viewer delete other people's messages here? */
+export function canDeleteOthers(c: ChatChannel, meId: string | undefined, isManager: boolean, roleId?: string | null) {
+  if (isManager) return true
+  if (c.kind === 'dm' || c.retired) return false
+  return (!!meId && (c.moderatorIds ?? []).includes(meId)) || (!!roleId && (c.moderatorRoleIds ?? []).includes(roleId))
 }
 
 /** canPost from the flags with this viewer's own role (pushed channel updates are computed without it). */

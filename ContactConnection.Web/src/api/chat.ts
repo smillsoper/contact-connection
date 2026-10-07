@@ -21,6 +21,14 @@ export interface ChatChannel {
   postingRestricted: boolean
   posterIds: string[]
   posterRoleIds: string[]
+  pinnerIds: string[]
+  pinnerRoleIds: string[]
+  /** May pin for everyone here (computed for the viewer; recompute with canPin() for pushed updates). */
+  canPin: boolean
+  moderatorIds: string[]
+  moderatorRoleIds: string[]
+  /** May delete other people's messages here. */
+  canDeleteAny: boolean
   membershipLocked: boolean
   retired: boolean
   lastMessageAt: string | null
@@ -48,8 +56,13 @@ export interface ChatMessage {
   createdAt: string
   editedAt: string | null
   deleted: boolean
+  /** Pinned for everyone in the channel. */
+  pinnedAt: string | null
+  pinnedById: string | null
   reactions: ChatReactionGroup[]
 }
+
+export interface ChatPins { everyone: ChatMessage[]; mine: ChatMessage[] }
 
 export interface HelpRequest {
   id: string
@@ -94,6 +107,9 @@ export const chatApi = {
     api.post<ChatMessage>(`/api/v1/chat/channels/${channelId}/messages`, { body, parentId: parentId ?? null }),
   edit: (messageId: string, body: string) => api.patch<ChatMessage>(`/api/v1/chat/messages/${messageId}`, { body }),
   remove: (messageId: string) => api.delete<void>(`/api/v1/chat/messages/${messageId}`),
+  pins: (channelId: string) => api.get<ChatPins>(`/api/v1/chat/channels/${channelId}/pins`),
+  pin: (messageId: string, scope: 'me' | 'everyone') => api.post<unknown>(`/api/v1/chat/messages/${messageId}/pin`, { scope }),
+  unpin: (messageId: string, scope: 'me' | 'everyone') => api.delete<unknown>(`/api/v1/chat/messages/${messageId}/pin?scope=${scope}`),
   react: (messageId: string, emoji: string) => api.post<ChatMessage>(`/api/v1/chat/messages/${messageId}/reactions`, { emoji }),
   read: (channelId: string) => api.post<void>(`/api/v1/chat/channels/${channelId}/read`),
   typing: (channelId: string) => api.post<void>(`/api/v1/chat/channels/${channelId}/typing`),
@@ -114,6 +130,10 @@ export interface AdminChatChannel {
   postingRestricted: boolean
   posterIds: string[]
   posterRoleIds: string[]
+  pinnerIds: string[]
+  pinnerRoleIds: string[]
+  moderatorIds: string[]
+  moderatorRoleIds: string[]
   membershipLocked: boolean
   assignedRoleIds: string[]
   retired: boolean
@@ -131,6 +151,10 @@ export interface SaveChatChannel {
   postingRestricted: boolean
   posterIds: string[]
   posterRoleIds: string[]
+  pinnerIds: string[]
+  pinnerRoleIds: string[]
+  moderatorIds: string[]
+  moderatorRoleIds: string[]
   membershipLocked: boolean
   assignedRoleIds: string[]
   assignedIds: string[]

@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { chatApi, stateStyle, type ChatMessage, type ChatUser } from '../../api/chat'
-import { useChatStore, channelTitle, canPost } from '../../stores/chatStore'
+import { useChatStore, channelTitle, canPost, canPinForEveryone, canDeleteOthers } from '../../stores/chatStore'
 import { plainText } from '../../lib/chatConnection'
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '🎉', '👀', '✅']
@@ -80,6 +80,13 @@ export function Conversation({ channelId }: { channelId: string }) {
         )}
       </div>
 
+      <PinnedBar channelId={channelId} onJump={(m) => {
+        if (m.parentId) { setView({ kind: 'thread', channelId, parentId: m.parentId }); return }
+        const el = document.getElementById(`chat-msg-${m.id}`)
+        if (el) { el.scrollIntoView({ block: 'center' }); el.classList.add('ring-1', 'ring-amber-400'); setTimeout(() => el.classList.remove('ring-1', 'ring-amber-400'), 1500) }
+        else setView({ kind: 'thread', channelId, parentId: m.id })   // older than the loaded page — open it on its own
+      }} />
+
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-3 py-2"
         onScroll={(e) => { const el = e.currentTarget; stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60 }}>
         {page?.hasMore && (
@@ -92,7 +99,9 @@ export function Conversation({ channelId }: { channelId: string }) {
           <p className="text-xs text-gray-500 mt-4 text-center">No messages yet{allowed ? ' — say hello.' : '.'}</p>
         )}
         <MessageList messages={page?.messages ?? []} users={users} meId={me?.id} isManager={!!me?.isManager}
-          retired={channel.retired} onThread={(m) => setView({ kind: 'thread', channelId, parentId: m.id })} />
+          retired={channel.retired} onThread={(m) => setView({ kind: 'thread', channelId, parentId: m.id })}
+          canPinAll={canPinForEveryone(channel, me?.id, !!me?.isManager, me?.roleId)}
+          canDeleteAny={canDeleteOthers(channel, me?.id, !!me?.isManager, me?.roleId)} />
         <TypingLine channelId={channelId} />
       </div>
 
@@ -135,11 +144,15 @@ export function ThreadView({ channelId, parentId }: { channelId: string; parentI
         </div>
       </div>
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
-        {p && <MessageList messages={[p]} users={users} meId={me?.id} isManager={!!me?.isManager} retired={!!channel?.retired} />}
+        {p && <MessageList messages={[p]} users={users} meId={me?.id} isManager={!!me?.isManager} retired={!!channel?.retired}
+          canPinAll={!!channel && canPinForEveryone(channel, me?.id, !!me?.isManager, me?.roleId)}
+          canDeleteAny={!!channel && canDeleteOthers(channel, me?.id, !!me?.isManager, me?.roleId)} />}
         <div className="border-t border-gray-800 my-2 text-[10px] text-gray-500 pt-1">
           {(replies?.length ?? 0)} {replies?.length === 1 ? 'reply' : 'replies'}
         </div>
-        <MessageList messages={replies ?? []} users={users} meId={me?.id} isManager={!!me?.isManager} retired={!!channel?.retired} />
+        <MessageList messages={replies ?? []} users={users} meId={me?.id} isManager={!!me?.isManager} retired={!!channel?.retired}
+          canPinAll={!!channel && canPinForEveryone(channel, me?.id, !!me?.isManager, me?.roleId)}
+          canDeleteAny={!!channel && canDeleteOthers(channel, me?.id, !!me?.isManager, me?.roleId)} />
       </div>
       {allowed && <Composer channelId={channelId} parentId={parentId} placeholder="Reply…" />}
     </div>
@@ -157,9 +170,9 @@ function dayLabel(iso: string) {
 }
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 
-export function MessageList({ messages, users, meId, isManager, retired, onThread }: {
+export function MessageList({ messages, users, meId, isManager, retired, onThread, canPinAll = false, canDeleteAny = false }: {
   messages: ChatMessage[]; users: Record<string, ChatUser>; meId?: string; isManager: boolean; retired: boolean
-  onThread?: (m: ChatMessage) => void
+  onThread?: (m: ChatMessage) => void; canPinAll?: boolean; canDeleteAny?: boolean
 }) {
   return (
     <>
@@ -171,7 +184,8 @@ export function MessageList({ messages, users, meId, isManager, retired, onThrea
         return (
           <Fragment key={m.id}>
             {newDay && <div className="text-center text-[10px] text-gray-500 my-2">{dayLabel(m.createdAt)}</div>}
-            <MessageItem m={m} users={users} meId={meId} isManager={isManager} retired={retired} grouped={grouped} onThread={onThread} />
+            <MessageItem m={m} users={users} meId={meId} isManager={isManager} retired={retired} grouped={grouped && !m.pinnedAt && !prev?.pinnedAt}
+              onThread={onThread} canPinAll={canPinAll} canDeleteAny={canDeleteAny} />
           </Fragment>
         )
       })}
@@ -179,12 +193,14 @@ export function MessageList({ messages, users, meId, isManager, retired, onThrea
   )
 }
 
-function MessageItem({ m, users, meId, isManager, retired, grouped, onThread }: {
+function MessageItem({ m, users, meId, isManager, retired, grouped, onThread, canPinAll, canDeleteAny }: {
   m: ChatMessage; users: Record<string, ChatUser>; meId?: string; isManager: boolean; retired: boolean; grouped: boolean
-  onThread?: (m: ChatMessage) => void
+  onThread?: (m: ChatMessage) => void; canPinAll: boolean; canDeleteAny: boolean
 }) {
   const [editing, setEditing] = useState(false)
   const [picker, setPicker] = useState(false)
+  const [pinMenu, setPinMenu] = useState(false)
+  const pinnedForMe = useChatStore((s) => !!s.pins[m.channelId]?.mine.some((x) => x.id === m.id))
   const [error, setError] = useState<string | null>(null)
   const author = m.agentId ? users[m.agentId] : null
   const mine = !!meId && m.agentId === meId
@@ -193,12 +209,30 @@ function MessageItem({ m, users, meId, isManager, retired, grouped, onThread }: 
     return <p className="text-[11px] text-sky-300/90 italic my-1.5 px-1">{plainText(m.body, users)} <span className="text-gray-600">{time(m.createdAt)}</span></p>
   }
 
+  async function pin(scope: 'me' | 'everyone', on: boolean) {
+    setPinMenu(false); setError(null)
+    try {
+      await (on ? chatApi.pin(m.id, scope) : chatApi.unpin(m.id, scope))
+      const pins = await chatApi.pins(m.channelId)
+      useChatStore.getState().setPins(m.channelId, pins)
+    } catch (e) { setError(e instanceof Error ? e.message : 'Pin failed.') }
+  }
+
+  // Pinned for everyone: amber band + label, so it stands out wherever it sits in the conversation.
+  const pinnedAll = !!m.pinnedAt && !m.deleted
   return (
-    <div className={`group relative rounded px-1 ${grouped ? 'mt-0.5' : 'mt-2'} hover:bg-gray-800/40`}>
+    <div id={`chat-msg-${m.id}`}
+      className={`group relative rounded px-1 ${grouped ? 'mt-0.5' : 'mt-2'} ${pinnedAll ? 'bg-amber-500/10 border-l-2 border-amber-400 pl-2 py-1' : 'hover:bg-gray-800/40'}`}>
+      {pinnedAll && (
+        <p className="text-[10px] text-amber-300 font-medium mb-0.5">
+          📌 Pinned for everyone{m.pinnedById ? ` by ${users[m.pinnedById]?.name ?? 'someone'}` : ''}
+        </p>
+      )}
       {!grouped && (
         <div className="flex items-baseline gap-2">
           <span className="text-xs font-semibold text-gray-100">{author?.name ?? 'Former user'}</span>
           <span className="text-[10px] text-gray-500">{time(m.createdAt)}</span>
+          {pinnedForMe && <span className="text-[10px] text-sky-300" title="Pinned for you">🔖</span>}
         </div>
       )}
       {m.deleted ? <p className="text-xs text-gray-600 italic">Message deleted</p>
@@ -232,10 +266,23 @@ function MessageItem({ m, users, meId, isManager, retired, grouped, onThread }: 
         <div className="absolute -top-3 right-1 hidden group-hover:flex items-center gap-0.5 bg-gray-900 border border-gray-700 rounded px-1 shadow">
           <button onClick={() => setPicker((v) => !v)} className="text-xs px-1 hover:bg-gray-800 rounded" title="React">☺</button>
           {onThread && <button onClick={() => onThread(m)} className="text-xs px-1 hover:bg-gray-800 rounded" title="Reply in thread">↩</button>}
+          <button onClick={() => setPinMenu((v) => !v)} className="text-xs px-1 hover:bg-gray-800 rounded" title="Pin">📌</button>
           {mine && <button onClick={() => setEditing(true)} className="text-xs px-1 hover:bg-gray-800 rounded" title="Edit">✎</button>}
-          {(mine || isManager) && (
+          {(mine || isManager || canDeleteAny) && (
             <button onClick={() => chatApi.remove(m.id).catch((e: Error) => setError(e.message))}
               className="text-xs px-1 hover:bg-gray-800 rounded text-red-300" title="Delete">🗑</button>
+          )}
+        </div>
+      )}
+      {pinMenu && (
+        <div className="absolute right-1 top-4 z-10 flex flex-col bg-gray-900 border border-gray-700 rounded py-0.5 shadow text-[11px]">
+          <button onClick={() => void pin('me', !pinnedForMe)} className="text-left px-2 py-1 hover:bg-gray-800 text-gray-200">
+            {pinnedForMe ? 'Unpin for me' : 'Pin for me'}
+          </button>
+          {canPinAll && (
+            <button onClick={() => void pin('everyone', !m.pinnedAt)} className="text-left px-2 py-1 hover:bg-gray-800 text-amber-300">
+              {m.pinnedAt ? 'Unpin for everyone' : 'Pin for everyone'}
+            </button>
           )}
         </div>
       )}
@@ -266,6 +313,50 @@ function Body({ text, users, meId }: { text: string; users: Record<string, ChatU
         return <Fragment key={i}>{p}</Fragment>
       })}
     </>
+  )
+}
+
+/** The conversation's pins, at the top: pinned for everyone (amber) and the viewer's own. */
+function PinnedBar({ channelId, onJump }: { channelId: string; onJump: (m: ChatMessage) => void }) {
+  const pins = useChatStore((s) => s.pins[channelId])
+  const users = useChatStore((s) => s.users)
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    chatApi.pins(channelId).then((p) => useChatStore.getState().setPins(channelId, p)).catch(() => {})
+  }, [channelId])
+  const everyone = pins?.everyone ?? []
+  const mine = (pins?.mine ?? []).filter((m) => !everyone.some((e) => e.id === m.id))
+  if (everyone.length + mine.length === 0) return null
+
+  const row = (m: ChatMessage, forAll: boolean) => (
+    <button key={`${forAll ? 'a' : 'm'}-${m.id}`} onClick={() => onJump(m)}
+      className={`w-full text-left px-3 py-1.5 border-t border-gray-800/60 hover:bg-gray-800/60 ${forAll ? 'bg-amber-500/5' : ''}`}>
+      <p className={`text-[10px] ${forAll ? 'text-amber-300' : 'text-sky-300'}`}>
+        {forAll ? '📌' : '🔖'} {m.agentId ? users[m.agentId]?.name ?? 'Someone' : 'ContactConnection'} · {new Date(m.createdAt).toLocaleDateString()}
+      </p>
+      <p className="text-xs text-gray-200 line-clamp-2 break-words">{plainText(m.body, users)}</p>
+    </button>
+  )
+
+  return (
+    <div className="border-b border-gray-800 shrink-0 max-h-[40%] overflow-y-auto">
+      <button onClick={() => setOpen((v) => !v)} className="w-full text-left px-3 py-1.5 text-[11px] flex items-center gap-2 hover:bg-gray-800/40">
+        {everyone.length > 0 && <span className="text-amber-300">📌 {everyone.length} pinned for everyone</span>}
+        {mine.length > 0 && <span className="text-sky-300">🔖 {mine.length} pinned for you</span>}
+        <span className="ml-auto text-gray-500">{open ? '▾' : '▸'}</span>
+      </button>
+      {open && (
+        <>
+          {everyone.map((m) => row(m, true))}
+          {mine.map((m) => row(m, false))}
+        </>
+      )}
+      {!open && everyone[0] && (
+        <button onClick={() => onJump(everyone[0])} className="w-full text-left px-3 pb-1.5 text-xs text-gray-300 truncate block">
+          {plainText(everyone[0].body, users)}
+        </button>
+      )}
+    </div>
   )
 }
 

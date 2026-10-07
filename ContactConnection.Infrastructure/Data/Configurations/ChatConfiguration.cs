@@ -22,6 +22,10 @@ public class ChatChannelConfiguration : IEntityTypeConfiguration<ChatChannel>
         b.Property(c => c.PostingRestricted).HasColumnName("posting_restricted");
         b.Property(c => c.PosterIds).HasColumnName("poster_ids").HasColumnType("uuid[]");
         b.Property(c => c.PosterRoleIds).HasColumnName("poster_role_ids").HasColumnType("uuid[]");
+        b.Property(c => c.PinnerIds).HasColumnName("pinner_ids").HasColumnType("uuid[]");
+        b.Property(c => c.PinnerRoleIds).HasColumnName("pinner_role_ids").HasColumnType("uuid[]");
+        b.Property(c => c.ModeratorIds).HasColumnName("moderator_ids").HasColumnType("uuid[]");
+        b.Property(c => c.ModeratorRoleIds).HasColumnName("moderator_role_ids").HasColumnType("uuid[]");
         b.Property(c => c.MembershipLocked).HasColumnName("membership_locked");
         b.Property(c => c.AssignedRoleIds).HasColumnName("assigned_role_ids").HasColumnType("uuid[]");
         b.Property(c => c.RetiredAt).HasColumnName("retired_at");
@@ -72,8 +76,25 @@ public class ChatMessageConfiguration : IEntityTypeConfiguration<ChatMessage>
         b.Property(m => m.CreatedAt).HasColumnName("created_at");
         b.Property(m => m.EditedAt).HasColumnName("edited_at");
         b.Property(m => m.DeletedAt).HasColumnName("deleted_at");
+        b.Property(m => m.PinnedAt).HasColumnName("pinned_at");
+        b.Property(m => m.PinnedById).HasColumnName("pinned_by_id");
         b.HasOne<ChatChannel>().WithMany().HasForeignKey(m => m.ChannelId).OnDelete(DeleteBehavior.Cascade);
         b.HasIndex(m => new { m.ChannelId, m.ParentId, m.CreatedAt }).HasDatabaseName("ix_chat_messages_channel_parent_created");
+    }
+}
+
+public class ChatPersonalPinConfiguration : IEntityTypeConfiguration<ChatPersonalPin>
+{
+    public void Configure(EntityTypeBuilder<ChatPersonalPin> b)
+    {
+        b.ToTable("chat_personal_pins");
+        b.HasKey(p => new { p.AgentId, p.MessageId });
+        b.Property(p => p.AgentId).HasColumnName("agent_id");
+        b.Property(p => p.MessageId).HasColumnName("message_id");
+        b.Property(p => p.ChannelId).HasColumnName("channel_id");
+        b.Property(p => p.CreatedAt).HasColumnName("created_at");
+        b.HasOne<ChatMessage>().WithMany().HasForeignKey(p => p.MessageId).OnDelete(DeleteBehavior.Cascade);
+        b.HasIndex(p => new { p.AgentId, p.ChannelId }).HasDatabaseName("ix_chat_personal_pins_agent_channel");
     }
 }
 

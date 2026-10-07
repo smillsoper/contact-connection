@@ -30,6 +30,14 @@ public class ChatChannel
     /// <summary>Everyone holding one of these custom roles may post — follows role changes without editing the channel.</summary>
     public List<Guid> PosterRoleIds { get; private set; } = [];
 
+    /// <summary>Who may pin messages for everyone in this channel (chat managers always can; in a DM, any member).</summary>
+    public List<Guid> PinnerIds { get; private set; } = [];
+    public List<Guid> PinnerRoleIds { get; private set; } = [];
+
+    /// <summary>Who may delete other people's messages in this channel (chat managers always can; everyone can delete their own).</summary>
+    public List<Guid> ModeratorIds { get; private set; } = [];
+    public List<Guid> ModeratorRoleIds { get; private set; } = [];
+
     /// <summary>Assigned members — individually (<see cref="ChatMember.IsAssigned"/>) or through
     /// <see cref="AssignedRoleIds"/> — can't leave.</summary>
     public bool MembershipLocked { get; private set; }
@@ -97,6 +105,28 @@ public class ChatChannel
         AssignedRoleIds = assignedRoleIds.Distinct().ToList();
         UpdatedAt = DateTimeOffset.UtcNow;
     }
+
+    public void SetPinners(IEnumerable<Guid> pinnerIds, IEnumerable<Guid> pinnerRoleIds)
+    {
+        PinnerIds = pinnerIds.Distinct().ToList();
+        PinnerRoleIds = pinnerRoleIds.Distinct().ToList();
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void SetModerators(IEnumerable<Guid> moderatorIds, IEnumerable<Guid> moderatorRoleIds)
+    {
+        ModeratorIds = moderatorIds.Distinct().ToList();
+        ModeratorRoleIds = moderatorRoleIds.Distinct().ToList();
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>May this person delete someone else's message here? Chat managers anywhere; moderators in a live channel.</summary>
+    public bool CanDeleteOthers(Guid agentId, Guid? roleId, bool isChatManager) =>
+        isChatManager || (!IsDirect && !IsRetired && (ModeratorIds.Contains(agentId) || (roleId is { } r && ModeratorRoleIds.Contains(r))));
+
+    /// <summary>May this person pin / unpin messages for everyone here?</summary>
+    public bool CanPinForEveryone(Guid agentId, Guid? roleId, bool isChatManager) =>
+        !IsRetired && (IsDirect || isChatManager || PinnerIds.Contains(agentId) || (roleId is { } r && PinnerRoleIds.Contains(r)));
 
     public void Retire()   { RetiredAt ??= DateTimeOffset.UtcNow; UpdatedAt = DateTimeOffset.UtcNow; }
     public void Unretire() { RetiredAt = null; UpdatedAt = DateTimeOffset.UtcNow; }
@@ -168,6 +198,9 @@ public class ChatMessage
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? EditedAt { get; private set; }
     public DateTimeOffset? DeletedAt { get; private set; }
+    /// <summary>Pinned for everyone in the channel (S183) — shown highlighted, and at the top of the conversation.</summary>
+    public DateTimeOffset? PinnedAt { get; private set; }
+    public Guid? PinnedById { get; private set; }
 
     public const int MaxLength = 4000;
 
@@ -194,7 +227,15 @@ public class ChatMessage
         EditedAt = DateTimeOffset.UtcNow;
     }
 
-    public void Delete() { DeletedAt = DateTimeOffset.UtcNow; Body = string.Empty; MentionIds = []; }
+    public void Delete() { DeletedAt = DateTimeOffset.UtcNow; Body = string.Empty; MentionIds = []; Unpin(); }
+
+    public void Pin(Guid byId)
+    {
+        if (DeletedAt is not null) throw new InvalidOperationException("A deleted message can't be pinned.");
+        PinnedAt ??= DateTimeOffset.UtcNow;
+        PinnedById ??= byId;
+    }
+    public void Unpin() { PinnedAt = null; PinnedById = null; }
 
     public void AddReply(DateTimeOffset at) { ReplyCount++; LastReplyAt = at; }
     public void RemoveReply() { if (ReplyCount > 0) ReplyCount--; }
@@ -230,6 +271,19 @@ public class ChatReaction
         if (e.Length is 0 or > 16) throw new ArgumentException("Pick an emoji.", nameof(emoji));
         return new ChatReaction { MessageId = messageId, AgentId = agentId, Emoji = e, CreatedAt = DateTimeOffset.UtcNow };
     }
+}
+
+/// <summary>A message someone pinned for themselves only (S183).</summary>
+public class ChatPersonalPin
+{
+    public Guid AgentId { get; private set; }
+    public Guid MessageId { get; private set; }
+    public Guid ChannelId { get; private set; }
+    public DateTimeOffset CreatedAt { get; private set; }
+
+    private ChatPersonalPin() { }
+    public static ChatPersonalPin Create(Guid agentId, Guid messageId, Guid channelId) =>
+        new() { AgentId = agentId, MessageId = messageId, ChannelId = channelId, CreatedAt = DateTimeOffset.UtcNow };
 }
 
 /// <summary>An agent's assigned supervisor (S183) — who an agent's "raise hand" reaches first.</summary>

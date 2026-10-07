@@ -68,6 +68,12 @@ function handle(type: string, p: unknown) {
     case 'channel': s.upsertChannel(p as ChatChannel); break
     case 'channel-removed': s.removeChannel((p as { channelId: string }).channelId); break
     case 'members': { const x = p as { channelId: string; memberIds: string[] }; s.setMembers(x.channelId, x.memberIds); break }
+    case 'pins': {
+      // Someone pinned / unpinned (or this person did, in another tab) — refresh that conversation's pins if it's open.
+      const channelId = (p as { channelId: string }).channelId
+      if (s.pins[channelId]) chatApi.pins(channelId).then((x) => useChatStore.getState().setPins(channelId, x)).catch(() => {})
+      break
+    }
     case 'read': { const x = p as { channelId: string; at: string }; s.markRead(x.channelId, x.at); break }
     case 'typing': { const x = p as { channelId: string; agentId: string }; s.setTyping(x.channelId, x.agentId); break }
     case 'presence': {

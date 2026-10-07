@@ -12,7 +12,9 @@ interface Person { id: string; name: string; email: string; roleId: string | nul
 interface RoleOpt { id: string; name: string }
 
 const EMPTY: SaveChatChannel = {
-  name: '', description: null, isPrivate: false, postingRestricted: false, posterIds: [], posterRoleIds: [], membershipLocked: false,
+  name: '', description: null, isPrivate: false, postingRestricted: false, posterIds: [], posterRoleIds: [], pinnerIds: [], pinnerRoleIds: [],
+  moderatorIds: [], moderatorRoleIds: [],
+  membershipLocked: false,
   assignedRoleIds: [], assignedIds: [],
 }
 
@@ -86,7 +88,8 @@ export default function AdminChatPage() {
 
 const toForm = (c: AdminChatChannel): SaveChatChannel => ({
   name: c.name, description: c.description, isPrivate: c.isPrivate, postingRestricted: c.postingRestricted, posterIds: c.posterIds,
-  posterRoleIds: c.posterRoleIds ?? [],
+  posterRoleIds: c.posterRoleIds ?? [], pinnerIds: c.pinnerIds ?? [], pinnerRoleIds: c.pinnerRoleIds ?? [],
+  moderatorIds: c.moderatorIds ?? [], moderatorRoleIds: c.moderatorRoleIds ?? [],
   membershipLocked: c.membershipLocked, assignedRoleIds: c.assignedRoleIds, assignedIds: c.assignedIds,
 })
 
@@ -104,6 +107,8 @@ function ChannelTable({ list, people, roles, onEdit, onRetire, retiredList }: {
             <th className="px-4 py-3 font-medium">Channel</th>
             <th className="px-4 py-3 font-medium">Who's in it</th>
             <th className="px-4 py-3 font-medium">Posting</th>
+            <th className="px-4 py-3 font-medium">Pin for everyone</th>
+            <th className="px-4 py-3 font-medium">Delete others' messages</th>
             <th className="px-4 py-3 font-medium">Members</th>
             <th className="px-4 py-3"></th>
           </tr>
@@ -126,6 +131,12 @@ function ChannelTable({ list, people, roles, onEdit, onRetire, retiredList }: {
                   : c.postingRestricted ? <span className="text-amber-300">📣 {
                       [...(c.posterRoleIds ?? []).map((r) => `${role(r)} (role)`), ...c.posterIds.map(name)].join(', ') || 'Chat managers only'}</span>
                   : <span className="text-gray-400">Everyone</span>}
+              </td>
+              <td className="px-4 py-3 text-xs text-gray-400">
+                {[...(c.pinnerRoleIds ?? []).map((r) => `${role(r)} (role)`), ...(c.pinnerIds ?? []).map(name)].join(', ') || 'Chat managers only'}
+              </td>
+              <td className="px-4 py-3 text-xs text-gray-400">
+                {[...(c.moderatorRoleIds ?? []).map((r) => `${role(r)} (role)`), ...(c.moderatorIds ?? []).map(name)].join(', ') || 'Chat managers only'}
               </td>
               <td className="px-4 py-3 text-xs text-gray-400">{c.memberCount}</td>
               <td className="px-4 py-3 text-right whitespace-nowrap">
@@ -204,6 +215,39 @@ function ChannelEditor({ id, initial, people, roles, onClose, onSaved }: {
             </div>
           </div>
         )}
+        <div>
+          <p className="text-sm text-gray-300 font-medium">Pin messages for everyone</p>
+          <p className="text-xs text-gray-500 mt-0.5 mb-2 leading-snug">
+            Who can pin a message to the top of this channel for all its members (shown highlighted). Chat managers always can;
+            anyone can pin messages for themselves.
+          </p>
+          <div className="space-y-3">
+            <div>
+              <p className="text-xs text-gray-400 mb-1">Roles — whoever holds the role, now or later</p>
+              <Chips options={roles} chosen={f.pinnerRoleIds} onChange={(v) => set({ pinnerRoleIds: v })} empty="No roles yet" />
+            </div>
+            <div>
+              <p className="text-xs text-gray-400 mb-1">People</p>
+              <PeoplePicker people={people} chosen={f.pinnerIds} onChange={(v) => set({ pinnerIds: v })} />
+            </div>
+          </div>
+        </div>
+        <div>
+          <p className="text-sm text-gray-300 font-medium">Delete other people's messages</p>
+          <p className="text-xs text-gray-500 mt-0.5 mb-2 leading-snug">
+            Who can remove anyone's message in this channel. Chat managers always can; everyone can delete their own.
+          </p>
+          <div className="space-y-3">
+            <div>
+              <p className="text-xs text-gray-400 mb-1">Roles — whoever holds the role, now or later</p>
+              <Chips options={roles} chosen={f.moderatorRoleIds} onChange={(v) => set({ moderatorRoleIds: v })} empty="No roles yet" />
+            </div>
+            <div>
+              <p className="text-xs text-gray-400 mb-1">People</p>
+              <PeoplePicker people={people} chosen={f.moderatorIds} onChange={(v) => set({ moderatorIds: v })} />
+            </div>
+          </div>
+        </div>
         <p className="text-xs text-gray-500">To stop all posting but keep the history readable, save and then <b>Retire</b> the channel.</p>
       </div>
 

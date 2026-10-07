@@ -33,6 +33,11 @@ public static class ChatEndpoints
         g.MapPatch("messages/{id:guid}", Edit);
         g.MapDelete("messages/{id:guid}", Delete);
         g.MapPost("messages/{id:guid}/reactions", React);
+        g.MapGet("channels/{id:guid}/pins", Pins);
+        g.MapPost("messages/{id:guid}/pin", (Guid id, PinRequest req, HttpContext http, TenantContext tc, ScopedTenantDbContextFactory dbf,
+            IHubContext<ChatHub, IChatHubClient> hub, CancellationToken ct) => SetPin(id, req.Scope, true, http, tc, dbf, hub, ct));
+        g.MapDelete("messages/{id:guid}/pin", (Guid id, string? scope, HttpContext http, TenantContext tc, ScopedTenantDbContextFactory dbf,
+            IHubContext<ChatHub, IChatHubClient> hub, CancellationToken ct) => SetPin(id, scope, false, http, tc, dbf, hub, ct));
         g.MapPost("channels/{id:guid}/read", MarkRead);
         g.MapPost("channels/{id:guid}/typing", Typing);
         g.MapPost("direct", OpenDirect);
@@ -121,6 +126,8 @@ public static class ChatEndpoints
     private static object ChannelDto(ChatChannel c, ChatMember m, Me me, Guid? roleId, List<Guid> members, int unread, int mentions) => new
     {
         c.Id, c.Kind, c.Name, c.Description, c.IsPrivate, c.PostingRestricted, c.PosterIds, c.PosterRoleIds, c.MembershipLocked,
+        c.PinnerIds, c.PinnerRoleIds, canPin = c.CanPinForEveryone(me.Id, roleId, me.IsManager),
+        c.ModeratorIds, c.ModeratorRoleIds, canDeleteAny = c.CanDeleteOthers(me.Id, roleId, me.IsManager),
         retired = c.IsRetired, c.LastMessageAt, lastReadAt = m.LastReadAt,
         memberIds = members,
         canPost = c.PostBlockedReason(me.Id, roleId, me.IsManager) is null,
@@ -160,6 +167,7 @@ public static class ChatEndpoints
         m.Id, m.ChannelId, m.AgentId, m.Kind, m.ParentId,
         body = m.DeletedAt is null ? m.Body : "", m.MentionIds, m.ReplyCount, m.LastReplyAt, m.CreatedAt, m.EditedAt,
         deleted = m.DeletedAt is not null,
+        m.PinnedAt, m.PinnedById,
         reactions = reactions.GroupBy(r => r.Emoji).OrderBy(g => g.Min(r => r.CreatedAt))
             .Select(g => new { emoji = g.Key, agentIds = g.Select(r => r.AgentId).ToList() }),
     };
@@ -413,7 +421,13 @@ public static class ChatEndpoints
         await using var db = dbf.Create();
         var msg = await db.ChatMessages.FirstOrDefaultAsync(m => m.Id == id, ct);
         if (msg is null || msg.DeletedAt is not null) return Results.NotFound();
-        if (msg.AgentId != me.Id && !me.IsManager) return Results.Forbid();
+        if (msg.AgentId != me.Id)
+        {
+            var channel = await db.ChatChannels.AsNoTracking().FirstAsync(x => x.Id == msg.ChannelId, ct);
+            var roleId = await db.Agents.Where(a => a.Id == me.Id).Select(a => a.RoleId).FirstOrDefaultAsync(ct);
+            if (!channel.CanDeleteOthers(me.Id, roleId, me.IsManager))
+                return Results.Json(new { error = "You can only delete your own messages here." }, statusCode: 403);
+        }
         msg.Delete();
         ChatMessage? parent = msg.ParentId is { } pid ? await db.ChatMessages.FirstOrDefaultAsync(m => m.Id == pid, ct) : null;
         parent?.RemoveReply();
@@ -473,6 +487,60 @@ public static class ChatEndpoints
         var members = await ActiveMemberIds(db, id, ct);
         if (!members.Contains(me.Id)) return Results.NoContent();
         await Push(hub, members.Where(x => x != me.Id), "typing", new { channelId = id, agentId = me.Id });
+        return Results.NoContent();
+    }
+
+    // ── Pins ─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>What's pinned in a conversation: for everyone (newest first) and this person's own pins.</summary>
+    private static async Task<IResult> Pins(Guid id, HttpContext http, TenantContext tc, ScopedTenantDbContextFactory dbf, CancellationToken ct)
+    {
+        var me = WhoAmI(http, tc);
+        if (me is null) return Results.Unauthorized();
+        if (!Enabled(tc)) return Results.NotFound(new { error = NotEnabled });
+        await using var db = dbf.Create();
+        var c = await db.ChatChannels.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (c is null || (await Membership(db, id, me.Id, ct) is null && (c.IsPrivate || c.IsDirect))) return Results.NotFound();
+        var everyone = await db.ChatMessages.AsNoTracking().Where(m => m.ChannelId == id && m.PinnedAt != null && m.DeletedAt == null)
+            .OrderByDescending(m => m.PinnedAt).Take(50).ToListAsync(ct);
+        var mineIds = db.ChatPersonalPins.Where(p => p.AgentId == me.Id && p.ChannelId == id).Select(p => p.MessageId);
+        var mine = await db.ChatMessages.AsNoTracking().Where(m => mineIds.Contains(m.Id) && m.DeletedAt == null)
+            .OrderByDescending(m => m.CreatedAt).Take(50).ToListAsync(ct);
+        return Results.Ok(new { everyone = await WithReactionsAsync(db, everyone, ct), mine = await WithReactionsAsync(db, mine, ct) });
+    }
+
+    /// <param name="scope">"me" (pin for yourself) or "everyone" (needs the channel's pin permission).</param>
+    private static async Task<IResult> SetPin(Guid id, string? scope, bool pin, HttpContext http, TenantContext tc, ScopedTenantDbContextFactory dbf,
+        IHubContext<ChatHub, IChatHubClient> hub, CancellationToken ct)
+    {
+        var me = WhoAmI(http, tc);
+        if (me is null) return Results.Unauthorized();
+        if (!Enabled(tc)) return Results.NotFound(new { error = NotEnabled });
+        await using var db = dbf.Create();
+        var msg = await db.ChatMessages.FirstOrDefaultAsync(m => m.Id == id, ct);
+        if (msg is null || await Membership(db, msg.ChannelId, me.Id, ct) is null) return Results.NotFound();
+        if (pin && msg.DeletedAt is not null) return Results.BadRequest(new { error = "A deleted message can't be pinned." });
+
+        if (scope == "everyone")
+        {
+            var c = await db.ChatChannels.AsNoTracking().FirstAsync(x => x.Id == msg.ChannelId, ct);
+            var roleId = await db.Agents.Where(a => a.Id == me.Id).Select(a => a.RoleId).FirstOrDefaultAsync(ct);
+            if (!c.CanPinForEveryone(me.Id, roleId, me.IsManager))
+                return Results.Conflict(new { error = c.IsRetired ? "This channel is retired — its history is read-only." : "You can't pin messages for everyone in this channel." });
+            if (pin) msg.Pin(me.Id); else msg.Unpin();
+            await db.SaveChangesAsync(ct);
+            var members = await ActiveMemberIds(db, msg.ChannelId, ct);
+            var dto = MessageDto(msg, await db.ChatReactions.AsNoTracking().Where(r => r.MessageId == id).ToListAsync(ct));
+            await Push(hub, members, "message-updated", dto);
+            await Push(hub, members, "pins", new { channelId = msg.ChannelId });
+            return Results.Ok(dto);
+        }
+
+        var existing = await db.ChatPersonalPins.FirstOrDefaultAsync(p => p.AgentId == me.Id && p.MessageId == id, ct);
+        if (pin && existing is null) db.ChatPersonalPins.Add(ChatPersonalPin.Create(me.Id, id, msg.ChannelId));
+        if (!pin && existing is not null) db.ChatPersonalPins.Remove(existing);
+        await db.SaveChangesAsync(ct);
+        await Push(hub, [me.Id], "pins", new { channelId = msg.ChannelId });   // the person's other tabs
         return Results.NoContent();
     }
 
@@ -654,6 +722,7 @@ public static class ChatEndpoints
             channels = channels.Select(c => new
             {
                 c.Id, c.Name, c.Description, c.IsPrivate, c.PostingRestricted, c.PosterIds, c.PosterRoleIds, c.MembershipLocked, c.AssignedRoleIds,
+                c.PinnerIds, c.PinnerRoleIds, c.ModeratorIds, c.ModeratorRoleIds,
                 retired = c.IsRetired, c.RetiredAt, c.CreatedAt, c.LastMessageAt,
                 assignedIds = by[c.Id].Where(m => m.IsAssigned).Select(m => m.AgentId),
                 memberCount = by[c.Id].Count(),
@@ -695,11 +764,14 @@ public static class ChatEndpoints
     private static async Task<IResult> ApplyConfigAsync(TenantDbContext db, ChatChannel c, SaveChannelRequest req, TenantContext tc,
         IHubContext<ChatHub, IChatHubClient> hub, CancellationToken ct, bool isNew)
     {
-        var roleIds = (req.AssignedRoleIds ?? []).Concat(req.PosterRoleIds ?? []).Distinct().ToList();
+        var roleIds = (req.AssignedRoleIds ?? []).Concat(req.PosterRoleIds ?? []).Concat(req.PinnerRoleIds ?? [])
+            .Concat(req.ModeratorRoleIds ?? []).Distinct().ToList();
         var existingRoles = await db.Roles.Where(r => roleIds.Contains(r.Id)).Select(r => r.Id).ToListAsync(ct);
         var validRoles = (req.AssignedRoleIds ?? []).Where(existingRoles.Contains).Distinct().ToList();
         var posterRoles = (req.PosterRoleIds ?? []).Where(existingRoles.Contains).Distinct().ToList();
         c.Configure(req.IsPrivate, req.PostingRestricted, req.PosterIds ?? [], req.MembershipLocked, validRoles, posterRoles);
+        c.SetPinners(req.PinnerIds ?? [], (req.PinnerRoleIds ?? []).Where(existingRoles.Contains));
+        c.SetModerators(req.ModeratorIds ?? [], (req.ModeratorRoleIds ?? []).Where(existingRoles.Contains));
 
         var named = (req.AssignedIds ?? []).Distinct().ToList();
         var byRole = validRoles.Count == 0 ? [] : await db.Agents.Where(a => a.IsActive && a.RoleId != null && validRoles.Contains(a.RoleId.Value)).Select(a => a.Id).ToListAsync(ct);
@@ -776,5 +848,7 @@ public record ReactRequest(string Emoji);
 public record OpenDirectRequest(List<Guid>? AgentIds);
 public record RaiseHandRequest(string? Note, Guid? CallRecordId);
 public record SaveChannelRequest(string Name, string? Description, bool IsPrivate, bool PostingRestricted, List<Guid>? PosterIds,
-    bool MembershipLocked, List<Guid>? AssignedRoleIds, List<Guid>? AssignedIds, List<Guid>? PosterRoleIds = null);
+    bool MembershipLocked, List<Guid>? AssignedRoleIds, List<Guid>? AssignedIds, List<Guid>? PosterRoleIds = null,
+    List<Guid>? PinnerIds = null, List<Guid>? PinnerRoleIds = null, List<Guid>? ModeratorIds = null, List<Guid>? ModeratorRoleIds = null);
+public record PinRequest(string? Scope);
 public record SetSupervisorsRequest(List<Guid>? SupervisorIds);
