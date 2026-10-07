@@ -124,7 +124,7 @@ public class ChatReactionConfiguration : IEntityTypeConfiguration<ChatReaction>
         b.HasKey(r => new { r.MessageId, r.AgentId, r.Emoji });
         b.Property(r => r.MessageId).HasColumnName("message_id");
         b.Property(r => r.AgentId).HasColumnName("agent_id");
-        b.Property(r => r.Emoji).HasColumnName("emoji").HasMaxLength(16);
+        b.Property(r => r.Emoji).HasColumnName("emoji").HasMaxLength(32);
         b.Property(r => r.CreatedAt).HasColumnName("created_at");
         b.HasOne<ChatMessage>().WithMany().HasForeignKey(r => r.MessageId).OnDelete(DeleteBehavior.Cascade);
     }

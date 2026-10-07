@@ -13,6 +13,7 @@ import {
 } from '../designer/RichTextEditor'
 import { stateStyle, type ChatUser } from '../../api/chat'
 import { loadChatImage, uploadChatImage } from '../../lib/chatImages'
+import { AddImageIcon, FormattingIcon } from './ChatIcons'
 
 /**
  * The chat composer (S183): the script editor's formatting (font, size, bold / italic / underline / strike, colour,
@@ -248,9 +249,9 @@ const ChatEditor = forwardRef<ChatEditorHandle, Props>(function ChatEditor(
         </div>
         <div className="flex items-center gap-1 px-1.5 pb-1">
           <button type="button" onClick={() => setToolbar((v) => !v)} title="Formatting"
-            className={`text-[11px] px-1.5 rounded ${toolbar ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}>Aa</button>
+            className={`p-1 rounded ${toolbar ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}><FormattingIcon size={16} /></button>
           <button type="button" onClick={() => fileRef.current?.click()} title="Add an image (or paste one)"
-            className="text-[11px] px-1.5 rounded text-gray-400 hover:text-white">🖼</button>
+            className="p-1 rounded text-gray-400 hover:text-white"><AddImageIcon size={16} /></button>
           <span className="text-[10px] text-gray-600 truncate flex-1">
             {uploading > 0 ? 'Uploading image…' : 'Enter to send · Shift+Enter new line · @ to mention · paste images'}
           </span>

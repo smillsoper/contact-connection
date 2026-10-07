@@ -1,10 +1,11 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { chatApi, stateStyle, type ChatMessage, type ChatUser } from '../../api/chat'
 import { useChatStore, channelTitle, canPost, canPinForEveryone, canDeleteOthers } from '../../stores/chatStore'
 import DOMPurify from 'dompurify'
 import { plainText, messagePreview } from '../../lib/chatConnection'
 import { loadChatImage } from '../../lib/chatImages'
 import ChatEditor, { type ChatEditorHandle } from './ChatEditor'
+import { ACCENT, AddEmojiIcon, DeleteIcon, EditIcon, PinIcon, ReactIcon, ReplyThreadIcon } from './ChatIcons'
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '🎉', '👀', '✅']
 
@@ -197,12 +198,27 @@ export function MessageList({ messages, users, meId, isManager, retired, onThrea
   )
 }
 
+/** The full emoji library (emoji-picker-react), loaded on first use; native emoji, so no images are fetched. */
+const EmojiLibrary = lazy(async () => {
+  const mod = await import('emoji-picker-react')
+  const Picker = mod.default
+  return {
+    default: ({ onPick }: { onPick: (emoji: string) => void }) => (
+      <Picker theme={mod.Theme.DARK} emojiStyle={mod.EmojiStyle.NATIVE} lazyLoadEmojis autoFocusSearch
+        width={300} height={360} previewConfig={{ showPreview: false }} onEmojiClick={(d) => onPick(d.emoji)} />
+    ),
+  }
+})
+
+/** Hover-bar button: grey until hovered, then the icon's accent colour. */
+const hb = 'text-gray-400 p-1 rounded hover:bg-gray-800 transition-colors'
+
 function MessageItem({ m, users, meId, isManager, retired, grouped, onThread, canPinAll, canDeleteAny }: {
   m: ChatMessage; users: Record<string, ChatUser>; meId?: string; isManager: boolean; retired: boolean; grouped: boolean
   onThread?: (m: ChatMessage) => void; canPinAll: boolean; canDeleteAny: boolean
 }) {
   const [editing, setEditing] = useState(false)
-  const [picker, setPicker] = useState(false)
+  const [picker, setPicker] = useState<'quick' | 'more' | null>(null)
   const [pinMenu, setPinMenu] = useState(false)
   const pinnedForMe = useChatStore((s) => !!s.pins[m.channelId]?.mine.some((x) => x.id === m.id))
   const [error, setError] = useState<string | null>(null)
@@ -229,14 +245,14 @@ function MessageItem({ m, users, meId, isManager, retired, grouped, onThread, ca
       className={`group relative rounded px-1 ${grouped ? 'mt-0.5' : 'mt-2'} ${pinnedAll ? 'bg-amber-500/10 border-l-2 border-amber-400 pl-2 py-1' : 'hover:bg-gray-800/40'}`}>
       {pinnedAll && (
         <p className="text-[10px] text-amber-300 font-medium mb-0.5">
-          📌 Pinned for everyone{m.pinnedById ? ` by ${users[m.pinnedById]?.name ?? 'someone'}` : ''}
+          <PinIcon size={11} className="inline -mt-0.5 mr-1" />Pinned for everyone{m.pinnedById ? ` by ${users[m.pinnedById]?.name ?? 'someone'}` : ''}
         </p>
       )}
       {!grouped && (
         <div className="flex items-baseline gap-2">
           <span className="text-xs font-semibold text-gray-100">{author?.name ?? 'Former user'}</span>
           <span className="text-[10px] text-gray-500">{time(m.createdAt)}</span>
-          {pinnedForMe && <span className="text-[10px] text-sky-300" title="Pinned for you">🔖</span>}
+          {pinnedForMe && <span className="text-sky-300" title="Pinned for you"><PinIcon size={11} /></span>}
         </div>
       )}
       {m.deleted ? <p className="text-xs text-gray-600 italic">Message deleted</p>
@@ -271,18 +287,19 @@ function MessageItem({ m, users, meId, isManager, retired, grouped, onThread, ca
 
       {!m.deleted && !editing && !retired && (
         <div className="absolute -top-3 right-1 hidden group-hover:flex items-center gap-0.5 bg-gray-900 border border-gray-700 rounded px-1 shadow">
-          <button onClick={() => setPicker((v) => !v)} className="text-xs px-1 hover:bg-gray-800 rounded" title="React">☺</button>
-          {onThread && <button onClick={() => onThread(m)} className="text-xs px-1 hover:bg-gray-800 rounded" title="Reply in thread">↩</button>}
-          <button onClick={() => setPinMenu((v) => !v)} className="text-xs px-1 hover:bg-gray-800 rounded" title="Pin">📌</button>
-          {mine && <button onClick={() => setEditing(true)} className="text-xs px-1 hover:bg-gray-800 rounded" title="Edit">✎</button>}
+          <button onClick={() => { setPinMenu(false); setPicker((v) => (v === 'quick' ? null : 'quick')) }} className={`${hb} ${ACCENT.react}`} title="React"><ReactIcon size={15} /></button>
+          <button onClick={() => { setPinMenu(false); setPicker((v) => (v === 'more' ? null : 'more')) }} className={`${hb} ${ACCENT.react}`} title="Add emoji"><AddEmojiIcon size={15} /></button>
+          {onThread && <button onClick={() => onThread(m)} className={`${hb} ${ACCENT.reply}`} title="Reply in thread"><ReplyThreadIcon size={15} /></button>}
+          <button onClick={() => { setPicker(null); setPinMenu((v) => !v) }} className={`${hb} ${ACCENT.pin}`} title="Pin message"><PinIcon size={15} /></button>
+          {mine && <button onClick={() => setEditing(true)} className={`${hb} ${ACCENT.edit}`} title="Edit"><EditIcon size={15} /></button>}
           {(mine || isManager || canDeleteAny) && (
             <button onClick={() => chatApi.remove(m.id).catch((e: Error) => setError(e.message))}
-              className="text-xs px-1 hover:bg-gray-800 rounded text-red-300" title="Delete">🗑</button>
+              className={`${hb} ${ACCENT.delete}`} title="Delete"><DeleteIcon size={15} /></button>
           )}
         </div>
       )}
       {pinMenu && (
-        <div className="absolute right-1 top-4 z-10 flex flex-col bg-gray-900 border border-gray-700 rounded py-0.5 shadow text-[11px]">
+        <div className="absolute right-1 top-5 z-10 flex flex-col bg-gray-900 border border-gray-700 rounded py-0.5 shadow text-[11px]">
           <button onClick={() => void pin('me', !pinnedForMe)} className="text-left px-2 py-1 hover:bg-gray-800 text-gray-200">
             {pinnedForMe ? 'Unpin for me' : 'Pin for me'}
           </button>
@@ -293,13 +310,23 @@ function MessageItem({ m, users, meId, isManager, retired, grouped, onThread, ca
           )}
         </div>
       )}
-      {picker && (
-        <div className="absolute right-1 top-4 z-10 flex gap-0.5 bg-gray-900 border border-gray-700 rounded px-1 py-0.5 shadow">
+      {picker === 'quick' && (
+        <div className="absolute right-1 top-5 z-10 flex gap-0.5 bg-gray-900 border border-gray-700 rounded px-1 py-0.5 shadow">
           {QUICK_REACTIONS.map((e) => (
-            <button key={e} onClick={() => { setPicker(false); chatApi.react(m.id, e).catch((x: Error) => setError(x.message)) }}
+            <button key={e} onClick={() => { setPicker(null); chatApi.react(m.id, e).catch((x: Error) => setError(x.message)) }}
               className="text-sm px-0.5 hover:bg-gray-800 rounded">{e}</button>
           ))}
         </div>
+      )}
+      {picker === 'more' && (
+        <>
+          <div className="fixed inset-0 z-20" onClick={() => setPicker(null)} />
+          <div className="absolute right-1 top-5 z-30 shadow-2xl">
+            <Suspense fallback={<div className="w-[300px] h-[360px] bg-gray-900 border border-gray-700 rounded-lg text-xs text-gray-500 p-3">Loading emoji…</div>}>
+              <EmojiLibrary onPick={(emoji) => { setPicker(null); chatApi.react(m.id, emoji).catch((x: Error) => setError(x.message)) }} />
+            </Suspense>
+          </div>
+        </>
       )}
     </div>
   )
@@ -339,7 +366,7 @@ function PinnedBar({ channelId, onJump }: { channelId: string; onJump: (m: ChatM
     <button key={`${forAll ? 'a' : 'm'}-${m.id}`} onClick={() => onJump(m)}
       className={`w-full text-left px-3 py-1.5 border-t border-gray-800/60 hover:bg-gray-800/60 ${forAll ? 'bg-amber-500/5' : ''}`}>
       <p className={`text-[10px] ${forAll ? 'text-amber-300' : 'text-sky-300'}`}>
-        {forAll ? '📌' : '🔖'} {m.agentId ? users[m.agentId]?.name ?? 'Someone' : 'ContactConnection'} · {new Date(m.createdAt).toLocaleDateString()}
+        <PinIcon size={10} className="inline -mt-0.5 mr-1" />{forAll ? '' : '(you) '}{m.agentId ? users[m.agentId]?.name ?? 'Someone' : 'ContactConnection'} · {new Date(m.createdAt).toLocaleDateString()}
       </p>
       <p className="text-xs text-gray-200 line-clamp-2 break-words">{messagePreview(m, users)}</p>
     </button>
@@ -348,8 +375,8 @@ function PinnedBar({ channelId, onJump }: { channelId: string; onJump: (m: ChatM
   return (
     <div className="border-b border-gray-800 shrink-0 max-h-[40%] overflow-y-auto">
       <button onClick={() => setOpen((v) => !v)} className="w-full text-left px-3 py-1.5 text-[11px] flex items-center gap-2 hover:bg-gray-800/40">
-        {everyone.length > 0 && <span className="text-amber-300">📌 {everyone.length} pinned for everyone</span>}
-        {mine.length > 0 && <span className="text-sky-300">🔖 {mine.length} pinned for you</span>}
+        {everyone.length > 0 && <span className="text-amber-300 flex items-center gap-1"><PinIcon size={12} />{everyone.length} pinned for everyone</span>}
+        {mine.length > 0 && <span className="text-sky-300 flex items-center gap-1"><PinIcon size={12} />{mine.length} pinned for you</span>}
         <span className="ml-auto text-gray-500">{open ? '▾' : '▸'}</span>
       </button>
       {open && (

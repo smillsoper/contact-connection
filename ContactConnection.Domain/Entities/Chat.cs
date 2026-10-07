@@ -330,7 +330,7 @@ public class ChatReaction
     public static ChatReaction Create(Guid messageId, Guid agentId, string emoji)
     {
         var e = (emoji ?? "").Trim();
-        if (e.Length is 0 or > 16) throw new ArgumentException("Pick an emoji.", nameof(emoji));
+        if (e.Length is 0 or > 32) throw new ArgumentException("Pick an emoji.", nameof(emoji));   // ZWJ / skin-tone sequences run long
         return new ChatReaction { MessageId = messageId, AgentId = agentId, Emoji = e, CreatedAt = DateTimeOffset.UtcNow };
     }
 }

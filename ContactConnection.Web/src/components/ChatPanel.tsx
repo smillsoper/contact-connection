@@ -4,6 +4,7 @@ import { useChatStore, channelTitle } from '../stores/chatStore'
 import { useCallStore } from '../stores/callStore'
 import { startChat, messagePreview, canAskForNotifications, askForNotifications } from '../lib/chatConnection'
 import { Conversation, ThreadView, StateLine, Lightbox } from './chat/ChatConversation'
+import { SearchIcon, BrowseChannelsIcon, NewMessageIcon, AnnouncementIcon, PinIcon } from './chat/ChatIcons'
 
 /**
  * Team chat (S183) — the agent portal's right panel, and the body of the chat launcher on admin pages. Slack-like:
@@ -115,9 +116,9 @@ function ChannelList({ onClose }: { onClose?: () => void }) {
 
   const actions = (
     <>
-      <button onClick={() => setView({ kind: 'search' })} className="text-gray-500 hover:text-white text-xs" title="Search messages">⌕</button>
-      <button onClick={() => setView({ kind: 'browse' })} className="text-gray-500 hover:text-white text-xs" title="Browse channels">#</button>
-      <button onClick={() => setView({ kind: 'new-dm' })} className="text-gray-500 hover:text-white text-xs" title="New message">✎</button>
+      <button onClick={() => setView({ kind: 'search' })} className="text-gray-500 hover:text-white p-0.5" title="Search messages"><SearchIcon size={15} /></button>
+      <button onClick={() => setView({ kind: 'browse' })} className="text-gray-500 hover:text-white p-0.5" title="Browse channels"><BrowseChannelsIcon size={15} /></button>
+      <button onClick={() => setView({ kind: 'new-dm' })} className="text-gray-500 hover:text-white p-0.5" title="New message"><NewMessageIcon size={15} /></button>
     </>
   )
 
@@ -190,8 +191,8 @@ function ChannelRow({ c }: { c: ChatChannel }) {
       <span className={`text-xs truncate flex-1 ${bold ? 'text-white font-semibold' : c.retired ? 'text-gray-600' : 'text-gray-400'}`}>
         {channelTitle(c, users, me?.id)}
       </span>
-      {c.postingRestricted && !c.retired && <span className="text-[10px]" title="Only selected people can post">📣</span>}
-      {c.membershipLocked && <span className="text-[10px]" title="Assigned members can't leave">📌</span>}
+      {c.postingRestricted && !c.retired && <span className="text-gray-500" title="Announcement-only — selected people post"><AnnouncementIcon size={13} /></span>}
+      {c.membershipLocked && <span className="text-gray-500" title="Assigned members can't leave"><PinIcon size={13} /></span>}
       {c.mentions > 0 && <span className="text-[10px] bg-red-600 text-white rounded-full px-1.5">@{c.mentions}</span>}
       {c.unread > 0 && c.mentions === 0 && <span className="text-[10px] bg-indigo-600 text-white rounded-full px-1.5">{c.unread}</span>}
     </button>

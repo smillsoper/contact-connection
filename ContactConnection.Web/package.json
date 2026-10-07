@@ -26,6 +26,7 @@
     "@types/qrcode": "^1.5.6",
     "@xyflow/react": "^12.10.2",
     "dompurify": "^3.4.16",
+    "emoji-picker-react": "^4.22.3",
     "jssip": "^3.13.8",
     "qrcode": "^1.5.4",
     "react": "^19.1.0",
