@@ -95,6 +95,9 @@ export default function ChartWidget({ config }: { config: WidgetFilterConfig }) 
 
   const footer = <p className="text-[10px] text-gray-600 mt-1 shrink-0">Production calls · {data.total.callsOffered.toLocaleString()} calls · {data.total.interactions.toLocaleString()} interactions</p>
   const tooltipStyle = { backgroundColor: '#111827', border: '1px solid #374151', borderRadius: 6, fontSize: 11 }
+  // The library's tooltip heading (the x value) and pie item text default to black — unreadable on the dark card.
+  const tooltipLabel = { color: '#e5e7eb', fontWeight: 600, marginBottom: 2 }
+  const tooltipItem = { color: '#e5e7eb' }
 
   // ── Funnel: totals, step by step ──
   if (type === 'funnel') {
@@ -197,7 +200,7 @@ export default function ChartWidget({ config }: { config: WidgetFilterConfig }) 
                   label={({ percent }) => ((percent ?? 0) >= 0.05 ? `${((percent ?? 0) * 100).toFixed(0)}%` : '')} labelLine={false}>
                   {shown.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
                 </Pie>
-                <Tooltip contentStyle={tooltipStyle} formatter={(v) => [`${fmt(Number(v), d.format)} (${total ? ((Number(v) / total) * 100).toFixed(1) : 0}%)`, d.label]} />
+                <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabel} itemStyle={tooltipItem} formatter={(v) => [`${fmt(Number(v), d.format)} (${total ? ((Number(v) / total) * 100).toFixed(1) : 0}%)`, d.label]} />
                 <Legend wrapperStyle={{ fontSize: 11 }} layout="vertical" align="right" verticalAlign="middle" />
               </PieChart>
             </ResponsiveContainer>
@@ -276,7 +279,7 @@ export default function ChartWidget({ config }: { config: WidgetFilterConfig }) 
                 : <XAxis dataKey="x" tick={{ fill: '#9ca3af', fontSize: 10 }} stroke="#374151" minTickGap={12} />}
               {hasLeft && valueAxis('left', leftFmt)}
               {hasRight && valueAxis('right', rightFmt)}
-              <Tooltip contentStyle={tooltipStyle} cursor={{ fill: 'rgba(148,163,184,0.08)' }}
+              <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabel} cursor={{ fill: 'rgba(148,163,184,0.08)' }}
                 formatter={(v, name) => {
                   const s = series.find((x) => x.name === name)
                   return [fmt(v == null ? null : Number(v), s?.def.format ?? 'num'), name]
