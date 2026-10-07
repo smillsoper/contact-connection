@@ -190,6 +190,7 @@
 | 178 | 2026-10-04 | 5:07 PM PDT | 8:03 PM PDT | 176 min | ~21652 min |
 | 179 | 2026-10-05 | 7:38 AM PDT | 7:38 PM PDT | 720 min | ~22372 min |
 | 180 | 2026-10-05 | 7:38 PM PDT | 10:54 PM PDT | 196 min | ~22568 min |
+| 181 | 2026-10-06 | 9:21 AM PDT | 6:15 PM PDT | 534 min | ~23102 min |
 
 ---
 
@@ -11631,3 +11632,84 @@ Cannella LF / SF files.
   - `test_contact_center` tenant migrations;
   - LLC reinstatement → SignalWire proof.
 
+---
+## Session 181
+
+**Date:** 2026-10-06
+**Start:** 9:21 AM PDT
+**End:** 6:15 PM PDT
+**Duration:** 534 minutes
+**Total Duration:** ~23102 minutes
+
+### Focus
+
+Export delivery polish, then **Sprint 2 item 3 (KPI widgets)**, which turned dispositions into a managed catalog. Then all of
+**Sprint 3**: KPI builder (A), client users + client dashboards (B), records widget (C). Plus per-integration sandbox
+environments, caller history, and agent-group / DNIS widget filters. Everything below was live-verified by Stephen in the
+browser unless marked otherwise.
+
+### Done
+
+- **Exports** (`0422fa6` … `a49d410`):
+  - Worker User Secrets copied from the API (Key Vault, Resend).
+  - Delivery targets: a missing credential can be added to Key Vault inline.
+  - Local SFTP test server (`sftp-test`, 127.0.0.1:2222, password in `.env`).
+  - SFTP accept-new: the host key is fetched and pinned on first connect, so no vendor fingerprint is needed.
+  - Retry now with a live countdown; no duplicate sends; plain-English folder errors.
+- **Dispositions as a catalog** (`4d3b0f0` … `7579d6a`, plan in `docs/dispositions-kpi-plan.md`):
+  - tenant / client / campaign scope, aliases, export codes;
+  - reporting categories (sale, opportunity, CS, junk, test, custom);
+  - per-interaction disposition ids, and a compound call disposition;
+  - **the current mapping fixes history** (a relink runs on every change);
+  - Call Records filters, commissions per disposition / category, AI catalog, designer picker;
+  - **recording retention by disposition**: longest period wins, unmapped dispositions use the campaign's own period, 24 h grace, "conversation only" trim;
+  - **Set Disposition** flow step.
+- **KPI widget + custom KPIs** (`6e0b7fc`, `52c2f86`):
+  - interaction-based, production calls only;
+  - revenue gross / excl. tax / merchandise, plus net.
+- **Sprint 3 A: KPI builder** (`fa4b185`, `d96cb22`, `a165cab`, `c0ba5c1`):
+  - NCalc formula KPIs;
+  - targets (green / amber / red);
+  - two-level report breakdowns (agent, disposition, category, day, hour, agency, station, DNIS, custom fields) with subtotals and % of total;
+  - a tabbed settings modal with unit-aware targets;
+  - test calls are excluded from call handling.
+- **Sprint 3 B: client portal** (`b42a080`, `c81cd89`, `9a1b1d0`, `cf6af9d`, `ad699d6`):
+  - Client users, separate from agents:
+    - their own JWT audience / scheme, so agent and admin APIs reject client tokens;
+    - single-use hashed invite links;
+    - self-service two-step sign-in (the tenant can require it);
+    - recording access set per user;
+    - an audit trail;
+    - deactivating a user signs them out at once.
+  - Client dashboards:
+    - locked client (+ optional campaigns) scope, report widgets only;
+    - data computed server-side from the saved config;
+    - portal at `/client`, live refresh through data-free nudges.
+  - **Security fix:** the API used to accept any signed-in token for whatever tenant the `X-Tenant-Subdomain` header named. It
+    now refuses a token whose tenant differs.
+  - **Service level** counts each call's first answer per campaign. A take-over re-bridge had counted as a second, late answer:
+    50% / 0% for one call.
+- **Sprint 3 C: Call Records widget** (`141a5e0`, `9d979c6`, `1c2865e`):
+  - columns, search (including campaign and disposition), filters, sort, paging;
+  - **full tabbed call detail**: overview, customer, interactions / orders / carts / payments / confirmed summaries, captured data;
+  - client-safe: no audit history or actions, no gateway ids, auth codes or API payloads;
+  - recordings play only when the client user AND the widget allow it, and every play is audited.
+- **Per-integration sandbox environments** (`f273598`): a designer sandbox run chooses production / sandbox / simulated for each
+  integration the script reaches (sales tax, payment gateway, each client API). Life Seasons' checks need production tax with
+  sandbox payments.
+- **Caller history** (`87c7178`): agent-portal button → the caller's earlier calls by ANI (same client, production) → full call detail.
+- **Widget filters** (`95b15e9`, `bba59de`):
+  - agent group combines with client / campaign; numbers-dialed (DNIS) multi-select on the call widgets;
+  - reporting widgets match groups **as of the time of the call** (interaction snapshot + routed group, backfilled);
+  - live widgets use today's members.
+- **Tests:** 1683 / 1683 pass; the solution builds clean.
+
+### Next
+
+- **Stephen's idea:** a **Chart** dashboard widget.
+- Clint: Cannella SFTP details, Life Seasons figures.
+- **Carried:**
+  - keypad `#` (SIP INFO) after SignalWire vetting;
+  - `test_contact_center` tenant migrations;
+  - LLC reinstatement → SignalWire proof;
+  - `dotnet watch` hot reload keeps crashing on larger edits — restart instead.

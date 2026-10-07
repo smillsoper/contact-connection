@@ -70,6 +70,10 @@ doesn't fit. Business blockers (LLC reinstatement, letter of intent, Clint's fig
 
 **Sprint 3: client-facing (week of Oct 19)**
 1. **Client dashboards + client invite**: clients log in to see their assigned dashboards (TMS View as reference). (2)
+   **DONE S181 (ahead of schedule), live-verified:** KPI builder (formulas, targets, report breakdowns), client users
+   (separate from agents, per-user recording access, two-step), client dashboards with a locked scope at `/client`,
+   Call Records widget with full call detail, agent-group (as of the time of the call) and DNIS widget filters.
+   Plan: `docs/client-dashboards-plan.md`. Also S181: caller history in the agent portal; per-integration sandbox environments.
 2. **Agent Helpdesk CMS**, shaped by the SupportTier meeting. (2)
 3. **Recordings → compressed MP3** (code only; moving them to Azure Blob waits for hosting). (1)
 
@@ -694,7 +698,8 @@ immediately once calls are live, not deferrable.
           time zone the reported data window is measured in."
       - **UI/UX must be easy to understand** despite this complexity — this was called out
         explicitly by the user as a requirement, not just an implementation detail.
-- [ ] **Dashboard — KPI widgets + other useful widgets.** Beyond the supervisor call-control tools
+- [x] **Dashboard — KPI widgets + other useful widgets.** *(S181: KPI widget + builder, Call Records widget, client
+      dashboards; next idea from Stephen: a Chart widget.)* Beyond the supervisor call-control tools
       above:
       - A KPI metrics widget with a **settings** panel: group by client or campaign, filter to all
         clients or specific client(s), all campaigns or specific campaign(s).
