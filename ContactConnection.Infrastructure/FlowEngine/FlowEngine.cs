@@ -867,6 +867,9 @@ public class FlowEngine : IFlowEngine
         ctx.CallRecord["run_mode"] = record.RunMode;
         ctx.CallRecord["practice_run"] = record.IsProductionRun ? "false" : "true";
         ctx.CallRecord["credential_set"] = record.CredentialSet;
+        // S181: a designer sandbox run's per-API choice (production / sandbox / simulated), read by the api_call step.
+        foreach (var (key, env) in record.IntegrationEnvironments)
+            if (key.StartsWith("api:")) ctx.CallRecord[$"_env:{key}"] = env;
         ctx.CallRecord["record_type"] = record.RecordType;
         ctx.CallRecord["phone_number"] = record.Phone ?? string.Empty;
         ctx.CallRecord["dnis"] = record.Dnis ?? string.Empty;

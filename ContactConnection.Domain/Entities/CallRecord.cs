@@ -171,12 +171,37 @@ public class CallRecord
     public string CredentialSet { get; private set; } = CallCredentialSet.Production;
     public bool IsProductionRun => RunMode == CallRunMode.Production;
 
+    /// <summary>
+    /// Per-integration environments for a designer sandbox run (S181): "tax", "payment" and "api:{definitionId}" →
+    /// production / sandbox / simulated. Anything not listed follows <see cref="CredentialSet"/>. Always empty on live
+    /// and training calls.
+    /// </summary>
+    public Dictionary<string, string> IntegrationEnvironments { get; private set; } = [];
+
+    /// <summary>The environment one integration runs in on this call: its own choice on a designer sandbox run, else the
+    /// call's credential set. Training never reaches production.</summary>
+    public string EnvironmentFor(string integrationKey) =>
+        RunMode == CallRunMode.Sandbox && IntegrationEnvironments.TryGetValue(integrationKey, out var env) && IntegrationEnvironment.IsValid(env)
+            ? env
+            : CredentialSet == CallCredentialSet.Production ? IntegrationEnvironment.Production : IntegrationEnvironment.Sandbox;
+
+    /// <summary>The credential set a provider (tax, payment gateway) uses: production, or the sandbox set (which simulates
+    /// a provider with no sandbox account).</summary>
+    public string CredentialSetFor(string integrationKey) =>
+        EnvironmentFor(integrationKey) == IntegrationEnvironment.Production ? CallCredentialSet.Production : CallCredentialSet.Sandbox;
+
     public static CallRecord CreateManual(Guid tenantId, Guid agentId,
-        string runMode = CallRunMode.Sandbox, string credentialSet = CallCredentialSet.Sandbox)
+        string runMode = CallRunMode.Sandbox, string credentialSet = CallCredentialSet.Sandbox,
+        IReadOnlyDictionary<string, string>? integrationEnvironments = null)
     {
         var now = DateTimeOffset.UtcNow;
         return new CallRecord
         {
+            // Per-integration choices are a designer sandbox feature; training never touches production credentials.
+            IntegrationEnvironments = runMode == CallRunMode.Sandbox && integrationEnvironments is not null
+                ? integrationEnvironments.Where(kv => IntegrationEnvironment.IsValid(kv.Value) && kv.Key.Length <= 100)
+                    .Take(100).ToDictionary(kv => kv.Key, kv => kv.Value)
+                : [],
             RunMode = CallRunMode.IsValid(runMode) ? runMode : CallRunMode.Sandbox,
             // Training never touches production credentials; only a designer sandbox run may choose them.
             CredentialSet = runMode == CallRunMode.Training ? CallCredentialSet.Sandbox
@@ -656,6 +681,19 @@ public static class CallRunMode
     public const string Training = "training";
     public const string Sandbox = "sandbox";
     public static bool IsValid(string? m) => m is Production or Training or Sandbox;
+}
+
+/// <summary>Where one integration runs on a designer sandbox run (S181). "simulated" = not called at all (API steps return
+/// their Training response; providers simulate).</summary>
+public static class IntegrationEnvironment
+{
+    public const string Production = "production";
+    public const string Sandbox = "sandbox";
+    public const string Simulated = "simulated";
+    public const string Tax = "tax";
+    public const string Payment = "payment";
+    public static string Api(Guid definitionId) => $"api:{definitionId}";
+    public static bool IsValid(string? e) => e is Production or Sandbox or Simulated;
 }
 
 /// <summary>Provider credential set a call uses (S179).</summary>

@@ -197,7 +197,7 @@ public static class CallRecordsEndpoints
         if (!CallRunMode.IsValid(mode)) return Results.BadRequest(new { error = $"Unknown mode '{mode}'." });
 
         var record = CallRecord.CreateManual(tenantContext.Current.Id, agentId, mode,
-            req?.CredentialSet?.Trim().ToLowerInvariant() ?? CallCredentialSet.Sandbox);
+            req?.CredentialSet?.Trim().ToLowerInvariant() ?? CallCredentialSet.Sandbox, req?.Integrations);
         if (req?.FlowId is { } flowId
             && await flows.GetByIdAsync(flowId, ct) is { CampaignId: { } campaignId, ClientId: { } clientId } flow
             && flow.TenantId == tenantContext.Current.Id)
@@ -206,7 +206,7 @@ public static class CallRecordsEndpoints
         await callRecords.AddAsync(record, ct);
         await callRecords.SaveChangesAsync(ct);
 
-        return Results.Created($"/api/v1/call-records/{record.Id}", new { id = record.Id, record.RunMode, record.CredentialSet });
+        return Results.Created($"/api/v1/call-records/{record.Id}", new { id = record.Id, record.RunMode, record.CredentialSet, record.IntegrationEnvironments });
     }
 
     private static async Task<IResult> GetById(
@@ -492,4 +492,7 @@ public record AuthorizePaymentRequest(
 /// <param name="Mode">training (needs training.mode) or sandbox (needs flows.manage). Production scripts start on a live
 /// call's own record, never a manual stub.</param>
 /// <param name="CredentialSet">sandbox runs only: "production" to test against the real provider accounts.</param>
-public record CreateManualRequest(Guid? FlowId, string? Mode = null, string? CredentialSet = null);
+/// <param name="Integrations">designer sandbox runs only (S181): integration key ("tax", "payment", "api:{definitionId}")
+/// → production / sandbox / simulated. Integrations not listed follow <paramref name="CredentialSet"/>.</param>
+public record CreateManualRequest(Guid? FlowId, string? Mode = null, string? CredentialSet = null,
+    Dictionary<string, string>? Integrations = null);

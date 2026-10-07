@@ -90,6 +90,15 @@ public class ApiCallNodeHandler(
     /// </summary>
     private static RunEnvironment EnvironmentFor(CallTarget target, FlowExecutionContext ctx)
     {
+        // S181: a designer sandbox run can choose each API's environment at launch. Live calls never get here with a
+        // choice (the record only carries choices on sandbox runs).
+        if (target.IsClientApi && ctx.CallRecord.GetValueOrDefault($"_env:api:{target.DefinitionId}") is { } choice)
+            return choice switch
+            {
+                "production" => RunEnvironment.Production,
+                "sandbox" => string.IsNullOrWhiteSpace(target.SandboxBaseUrl) ? RunEnvironment.Simulated : RunEnvironment.Sandbox,
+                _ => RunEnvironment.Simulated,
+            };
         if (!target.IsClientApi || !SimulatesClientApis(ctx)) return RunEnvironment.Production;
         if (string.IsNullOrWhiteSpace(target.SandboxBaseUrl)) return RunEnvironment.Simulated;
         var designerSandbox = ctx.CallRecord.GetValueOrDefault("run_mode") == "sandbox";

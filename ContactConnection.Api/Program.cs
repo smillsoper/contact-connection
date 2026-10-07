@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.Json.Serialization;
 using ContactConnection.Api.Endpoints;
 using ContactConnection.Api.Hubs;
@@ -312,6 +312,7 @@ app.MapExportKeysEndpoints();
 app.MapDispositionsEndpoints();
 app.MapKpiEndpoints();
 app.MapRecordsWidgetEndpoints();
+app.MapScriptIntegrationsEndpoints();
 app.MapClientPortalAuthEndpoints();
 app.MapClientPortalEndpoints();
 app.MapAdminClientUsersEndpoints();

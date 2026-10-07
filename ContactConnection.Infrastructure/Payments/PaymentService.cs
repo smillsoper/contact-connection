@@ -33,7 +33,8 @@ public class PaymentService(
         // credentials, its order number. A legacy record with no interactions behaves as before.
         var ix = record.CommerceInteraction(interactionId);
         // Launch modes (S179): a training / sandbox run uses the campaign's sandbox credentials, never production.
-        using var credentialScope = Credentials.CredentialSetScope.Use(record.CredentialSet);
+        // S181: a designer sandbox run can choose the gateway's environment on its own (e.g. production tax, sandbox payments).
+        using var credentialScope = Credentials.CredentialSetScope.Use(record.CredentialSetFor(IntegrationEnvironment.Payment));
         var cart = ix?.Cart;
         var campaignId = ix?.CampaignId ?? record.CampaignId;
         var amount = fixedAmount ?? cart?.CartTotal ?? 0m;
@@ -168,7 +169,7 @@ public class PaymentService(
             return new PaymentVoidResult(true, "Simulated authorization voided.");
         }
         var voidRecord = await callRecords.GetByIdAsync(callRecordId, ct);
-        using var credentialScope = Credentials.CredentialSetScope.Use(voidRecord?.CredentialSet);
+        using var credentialScope = Credentials.CredentialSetScope.Use(voidRecord?.CredentialSetFor(IntegrationEnvironment.Payment));
 
         var client = gatewayClients.Resolve(transaction.Gateway);
         var result = await client.VoidAsync(transaction.CampaignId, transaction.ClientId, transaction.GatewayTransactionId!, ct);

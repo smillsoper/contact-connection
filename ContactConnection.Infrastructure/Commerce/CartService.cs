@@ -164,11 +164,12 @@ public class CartService : ICartService
         => await _callRecords.GetByIdWithInteractionsAsync(callRecordId, ct)
             ?? throw new InvalidOperationException($"Call record {callRecordId} not found");
 
-    /// <summary>Prices a cart under the call's credential set (S179 launch modes: a sandbox run taxes with the campaign's
-    /// sandbox Avalara account, or simulated tax when there is none).</summary>
+    /// <summary>Prices a cart under the call's tax environment (S179 launch modes: a sandbox run taxes with the campaign's
+    /// sandbox Avalara account, or simulated tax when there is none; S181: a designer sandbox run can choose production
+    /// tax on its own, e.g. a client whose sandbox order checks need real tax).</summary>
     private async Task<CartDocument> PriceAsync(CallRecord record, CartDocument cart, TaxContext tax, CancellationToken ct)
     {
-        using var scope = Credentials.CredentialSetScope.Use(record.CredentialSet);
+        using var scope = Credentials.CredentialSetScope.Use(record.CredentialSetFor(IntegrationEnvironment.Tax));
         return await _pricing.CalculateTotalsAsync(cart, tax, ct);
     }
 

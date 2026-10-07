@@ -13,6 +13,10 @@ import type { FlowNodeState } from '../types/flow'
 import NodeDisplay from './NodeDisplay'
 import AddressValidationModal from './AddressValidationModal'
 
+/** One integration a script reaches, for the designer sandbox launch (S181). */
+interface ScriptIntegration { key: string; kind: 'tax' | 'payment' | 'api'; name: string; detail: string | null; options: string[]; defaultEnvironment: string }
+const ENV_LABEL: Record<string, string> = { sandbox: 'Sandbox', production: 'Production', simulated: 'Simulated (not called)' }
+
 // ── Per-session view ──────────────────────────────────────────────────────────
 // Encapsulates all session machinery for one flow tab. Closes itself (via onEnd)
 // when the flow reaches its end node — the only valid exit path.
@@ -553,8 +557,23 @@ export default function FlowPanel() {
   const canTrain = useAuthStore((s) => s.hasPermission('training.mode'))
   const canSandbox = useAuthStore((s) => s.hasPermission('flows.manage'))
   const [launchMode, setLaunchMode] = useState<'training' | 'sandbox'>(canSandbox ? 'sandbox' : 'training')
-  const [sandboxCreds, setSandboxCreds] = useState<'sandbox' | 'production'>('sandbox')
   const practiceAllowed = canTrain || canSandbox
+  // Designer sandbox (S181): each integration the script reaches runs where the designer chooses — e.g. production tax
+  // with the sandbox payment gateway for a client's sandbox order checks.
+  const [integrations, setIntegrations] = useState<ScriptIntegration[]>([])
+  const [envChoices, setEnvChoices] = useState<Record<string, string>>({})
+  useEffect(() => {
+    if (!selectedFlowId || launchMode !== 'sandbox' || callRecordId) { setIntegrations([]); return }
+    let live = true
+    api.get<ScriptIntegration[]>(`/api/v1/flows/${selectedFlowId}/integrations`)
+      .then((list) => {
+        if (!live) return
+        setIntegrations(list)
+        setEnvChoices(Object.fromEntries(list.map((i) => [i.key, i.defaultEnvironment])))
+      })
+      .catch(() => { if (live) setIntegrations([]) })
+    return () => { live = false }
+  }, [selectedFlowId, launchMode, callRecordId])
 
   async function handleStartSession() {
     if (!selectedFlowId || starting) return
@@ -569,7 +588,8 @@ export default function FlowPanel() {
         // credentials and campaign-scoped fields behave like a real call on that campaign.
         // Launch modes (S179): with no live call it's always a practice run — training or a designer sandbox.
         const stub = await api.post<{ id: string }>('/api/v1/call-records/manual',
-          { flowId: selectedFlowId, mode: launchMode, credentialSet: launchMode === 'sandbox' ? sandboxCreds : 'sandbox' })
+          { flowId: selectedFlowId, mode: launchMode, credentialSet: 'sandbox',
+            integrations: launchMode === 'sandbox' ? envChoices : undefined })
         recordId = stub.id
         setCallRecordId(recordId)
       }
@@ -622,14 +642,6 @@ export default function FlowPanel() {
                 {canTrain && <option value="training">Training</option>}
                 {canSandbox && <option value="sandbox">Sandbox (designer)</option>}
               </select>
-              {launchMode === 'sandbox' && (
-                <select value={sandboxCreds} onChange={(e) => setSandboxCreds(e.target.value as 'sandbox' | 'production')}
-                  className="bg-gray-800 text-white rounded-lg px-2 py-1.5 text-sm border border-gray-700"
-                  title="Which provider accounts the test uses">
-                  <option value="sandbox">Sandbox credentials</option>
-                  <option value="production">Production credentials</option>
-                </select>
-              )}
             </>
           ) : (
             <span className="text-xs text-gray-500">Scripts start when you're on a call</span>
@@ -642,6 +654,37 @@ export default function FlowPanel() {
           >
             {starting ? 'Starting…' : 'Start'}
           </button>
+        </div>
+      )}
+
+      {!hasSessions && !callRecordId && launchMode === 'sandbox' && integrations.length > 0 && (
+        <div className="px-4 py-3 border-b border-gray-800 shrink-0">
+          <div className="flex items-center gap-3 mb-2">
+            <span className="text-xs text-gray-400">Integrations for this run</span>
+            <button className="text-[11px] text-sky-300 hover:text-sky-200"
+              onClick={() => setEnvChoices(Object.fromEntries(integrations.map((i) => [i.key, i.options.includes('sandbox') ? 'sandbox' : i.options[0]])))}>
+              All sandbox
+            </button>
+            <button className="text-[11px] text-amber-300 hover:text-amber-200"
+              onClick={() => setEnvChoices(Object.fromEntries(integrations.map((i) => [i.key, 'production'])))}>
+              All production
+            </button>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-1.5">
+            {integrations.map((i) => (
+              <div key={i.key} className="flex items-center gap-2 min-w-0" title={i.detail ?? undefined}>
+                <span className="text-sm text-gray-200 truncate flex-1">{i.name}</span>
+                <select value={envChoices[i.key] ?? i.defaultEnvironment}
+                  onChange={(e) => setEnvChoices({ ...envChoices, [i.key]: e.target.value })}
+                  className={`rounded-lg px-2 py-1 text-xs border bg-gray-800 ${envChoices[i.key] === 'production' ? 'border-amber-600 text-amber-200' : 'border-gray-700 text-white'}`}>
+                  {i.options.map((o) => <option key={o} value={o}>{ENV_LABEL[o] ?? o}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+          {Object.values(envChoices).includes('production') && (
+            <p className="text-[11px] text-amber-300 mt-2">Production integrations are real — real tax lookups, real card charges, real orders in the client's system.</p>
+          )}
         </div>
       )}
 
