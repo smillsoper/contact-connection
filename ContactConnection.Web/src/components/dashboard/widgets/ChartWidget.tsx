@@ -129,11 +129,20 @@ export default function ChartWidget({ config }: { config: WidgetFilterConfig }) 
     return (
       <div className="h-full flex flex-col">
         <div className="flex-1 min-h-0 overflow-auto">
-          <table className="w-full border-separate" style={{ borderSpacing: 2 }}>
+          {/* Fixed layout: every hour gets an equal column (auto layout collapsed the unlabelled ones). */}
+          <table className="w-full border-separate table-fixed" style={{ borderSpacing: 2 }}>
+            <colgroup>
+              <col style={{ width: '2.5rem' }} />
+              {hours.map((h) => <col key={h} />)}
+            </colgroup>
             <thead>
               <tr>
                 <th />
-                {hours.map((h, i) => <th key={h} className="text-[9px] text-gray-500 font-normal">{i % 3 === 0 ? xLabel('hour', h, false) : ''}</th>)}
+                {hours.map((h, i) => (
+                  <th key={h} className="text-[9px] text-gray-500 font-normal text-left whitespace-nowrap overflow-visible">
+                    {i % 3 === 0 ? xLabel('hour', h, false) : ''}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -231,6 +240,8 @@ export default function ChartWidget({ config }: { config: WidgetFilterConfig }) 
   const hasLeft = series.some((s) => s.axis === 'left')
   const hasRight = series.some((s) => s.axis === 'right')
   const horizontal = type === 'hbar'
+  // Interval axes draw straight segments — a smoothed curve would show volume spilling into neighbouring periods.
+  const curve = xDim?.startsWith('interval') ? 'linear' : 'monotone'
   const stacked = type === 'stacked'
   const targets = config.showTargets
     ? defs.flatMap((d) => {
@@ -242,9 +253,9 @@ export default function ChartWidget({ config }: { config: WidgetFilterConfig }) 
 
   const valueAxis = (side: 'left' | 'right', f: Format) => horizontal
     ? <XAxis key={side} xAxisId={side} type="number" orientation={side === 'left' ? 'bottom' : 'top'} tick={{ fill: '#6b7280', fontSize: 10 }}
-        tickFormatter={(v) => tick(v, f)} stroke="#374151" />
+        tickFormatter={(v) => tick(v, f)} stroke="#374151" allowDecimals={f !== 'int'} />
     : <YAxis key={side} yAxisId={side} orientation={side} tick={{ fill: '#6b7280', fontSize: 10 }} tickFormatter={(v) => tick(v, f)}
-        stroke="#374151" width={48} />
+        stroke="#374151" width={48} allowDecimals={f !== 'int'} />
 
   return (
     <div className="h-full flex flex-col">
@@ -271,9 +282,9 @@ export default function ChartWidget({ config }: { config: WidgetFilterConfig }) 
                   return <Bar key={s.id} {...common} fill={s.color} fillOpacity={s.previous ? 0.35 : 0.9} stackId={stacked ? 'stack' : undefined}
                     radius={stacked ? 0 : horizontal ? [0, 3, 3, 0] : [3, 3, 0, 0]} maxBarSize={48} />
                 if (s.as === 'area')
-                  return <Area key={s.id} {...common} type="monotone" stroke={s.color} fill={s.color} fillOpacity={0.18} strokeWidth={2}
+                  return <Area key={s.id} {...common} type={curve} stroke={s.color} fill={s.color} fillOpacity={0.18} strokeWidth={2}
                     strokeDasharray={s.previous ? '4 4' : undefined} connectNulls />
-                return <Line key={s.id} {...common} type="monotone" stroke={s.color} strokeWidth={s.previous ? 1.5 : 2}
+                return <Line key={s.id} {...common} type={curve} stroke={s.color} strokeWidth={s.previous ? 1.5 : 2}
                   strokeOpacity={s.previous ? 0.55 : 1} strokeDasharray={s.previous ? '4 4' : undefined} dot={points.length <= 31} connectNulls />
               })}
               {targets.map((t, i) => horizontal
