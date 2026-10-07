@@ -12,6 +12,7 @@ import {
   type AudioFileRecord,
 } from '../../api/audioFiles'
 import { ttsServiceApi, type TtsServiceStatus } from '../../api/ttsService'
+import { CheckIcon, EditIcon, PlayIcon, SparkleIcon, StopIcon, UploadIcon } from '../icons/Icons'
 
 export type AudioAccent = 'teal' | 'indigo' | 'purple' | 'blue' | 'cyan' | 'amber'
 
@@ -169,7 +170,7 @@ export function PlatformPhrasePicker({
             disabled={previewLoading}
             className={`self-start text-xs text-${accent}-400 hover:text-${accent}-300 disabled:opacity-50`}
           >
-            {previewLoading ? 'Loading…' : '▶ Preview'}
+            {previewLoading ? 'Loading…' : <><PlayIcon size={11} className="inline -mt-0.5 mr-1" />Preview</>}
           </button>
         )
       )}
@@ -179,7 +180,7 @@ export function PlatformPhrasePicker({
           disabled={!phrase}
           className={`flex-1 text-xs bg-${accent}-700 hover:bg-${accent}-600 text-white rounded py-1.5 disabled:opacity-50`}
         >
-          ✓ Use this phrase
+          <CheckIcon size={12} className="inline -mt-0.5 mr-1" />Use this phrase
         </button>
         <button
           onClick={onCancel}
@@ -494,7 +495,7 @@ export function AudioPicker({
               disabled={previewLoading}
               className={`text-xs text-${accent}-400 hover:text-${accent}-300 disabled:opacity-50`}
             >
-              {previewLoading ? 'Loading…' : '▶ Preview selected file'}
+              {previewLoading ? 'Loading…' : <><PlayIcon size={11} className="inline -mt-0.5 mr-1" />Preview selected file</>}
             </button>
           )}
           {selectedFile?.isTtsGenerated && recordPhase === 'idle' && ttsPhase === 'idle' && (
@@ -502,7 +503,7 @@ export function AudioPicker({
               onClick={() => openTtsForm(selectedFile)}
               className={`block text-xs text-${accent}-400 hover:text-${accent}-300 mt-1`}
             >
-              ✎ Edit &amp; regenerate this TTS clip
+              <EditIcon size={12} className="inline -mt-0.5 mr-1" />Edit &amp; regenerate this TTS clip
             </button>
           )}
         </div>
@@ -514,7 +515,7 @@ export function AudioPicker({
             onClick={() => setPlatformOpen(true)}
             className={`text-xs text-${accent}-400 hover:text-${accent}-300`}
           >
-            ✦ Change platform phrase
+            <SparkleIcon size={12} className="inline -mt-0.5 mr-1" />Change platform phrase
           </button>
         </div>
       )}
@@ -530,7 +531,7 @@ export function AudioPicker({
               disabled={uploading}
             />
             <span className="block text-center text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-600 rounded px-2 py-1.5 transition-colors">
-              {uploading ? 'Uploading…' : '↑ Upload'}
+              {uploading ? 'Uploading…' : <><UploadIcon size={12} className="inline -mt-0.5 mr-1" />Upload</>}
             </span>
           </label>
           <button
@@ -543,14 +544,14 @@ export function AudioPicker({
             onClick={() => setPlatformOpen(true)}
             className="flex-1 min-w-[72px] text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-600 rounded px-2 py-1.5 transition-colors"
           >
-            ✦ Platform
+            <SparkleIcon size={12} className="inline -mt-0.5 mr-1" />Platform
           </button>
           {ttsStatus?.configured && (
             <button
               onClick={() => openTtsForm()}
               className="flex-1 min-w-[72px] text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 border border-gray-600 rounded px-2 py-1.5 transition-colors"
             >
-              ✦ Generate TTS
+              <SparkleIcon size={12} className="inline -mt-0.5 mr-1" />Generate TTS
             </button>
           )}
         </div>
@@ -570,7 +571,7 @@ export function AudioPicker({
             onClick={stopRecording}
             className="text-xs bg-red-900 hover:bg-red-800 text-red-200 rounded px-2 py-1"
           >
-            ■ Stop
+            <StopIcon size={11} className="inline -mt-0.5 mr-1" />Stop
           </button>
         </div>
       )}
@@ -596,7 +597,7 @@ export function AudioPicker({
               disabled={savingRecording}
               className={`flex-1 text-xs bg-${accent}-700 hover:bg-${accent}-600 text-white rounded py-1.5 disabled:opacity-50`}
             >
-              {savingRecording ? 'Saving…' : '✓ Save & Select'}
+              {savingRecording ? 'Saving…' : <><CheckIcon size={12} className="inline -mt-0.5 mr-1" />Save &amp; Select</>}
             </button>
             <button
               onClick={discardRecording}
@@ -641,7 +642,7 @@ export function AudioPicker({
               disabled={ttsGenerating || !ttsText.trim() || !ttsVoice.trim()}
               className={`flex-1 text-xs bg-${accent}-700 hover:bg-${accent}-600 text-white rounded py-1.5 disabled:opacity-50`}
             >
-              {ttsGenerating ? 'Generating…' : ttsEditingId ? '✓ Regenerate & Save' : '✓ Generate & Save'}
+              {ttsGenerating ? 'Generating…' : <><CheckIcon size={12} className="inline -mt-0.5 mr-1" />{ttsEditingId ? 'Regenerate & Save' : 'Generate & Save'}</>}
             </button>
             <button
               onClick={closeTtsForm}

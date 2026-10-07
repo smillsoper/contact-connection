@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon } from '../icons/Icons'
 
 // Recursive, click-a-leaf-to-copy-a-path JSON tree. Path convention matches the backend
 // ResolvePath helpers used throughout this codebase (AddressResponseMappingEvaluator,
@@ -46,7 +47,7 @@ export default function JsonTree({ name, value, path, depth, copiedPath, onCopy 
             onClick={() => setExpanded(e => !e)}
             className="flex items-center gap-1 py-0.5 flex-1 min-w-0 text-left hover:bg-gray-800/30 rounded-l px-0.5 overflow-hidden"
           >
-            <span className="text-gray-600 text-[10px] w-3 shrink-0">{expanded ? '▾' : '▸'}</span>
+            <span className="text-gray-600 text-[10px] w-3 shrink-0">{expanded ? <ChevronDownIcon size={11} /> : <ChevronRightIcon size={11} />}</span>
             <span className="font-mono text-gray-300 text-xs truncate">{name}</span>
             <span className="text-gray-600 text-[10px] ml-0.5 shrink-0">{isArr ? `[${(value as unknown[]).length}]` : `{}`}</span>
           </button>
@@ -56,7 +57,7 @@ export default function JsonTree({ name, value, path, depth, copiedPath, onCopy 
               title={`Copy array path: ${path}`}
               className={`shrink-0 px-1 py-0.5 text-[10px] transition-colors ${copiedPath === path ? 'text-emerald-400' : 'text-gray-700 group-hover/arr:text-gray-500 hover:text-gray-300'}`}
             >
-              {copiedPath === path ? '✓' : '⎘'}
+              {copiedPath === path ? <CheckIcon size={11} /> : <CopyIcon size={11} />}
             </button>
           )}
         </div>
@@ -86,7 +87,7 @@ export default function JsonTree({ name, value, path, depth, copiedPath, onCopy 
           {displayVal.length > 22 ? displayVal.slice(0, 22) + '…' : displayVal}
         </span>
         <span className={`text-[10px] shrink-0 ${copiedPath === path ? 'text-emerald-400' : 'text-gray-700 group-hover:text-gray-500'}`}>
-          {copiedPath === path ? '✓' : '⎘'}
+          {copiedPath === path ? <CheckIcon size={11} /> : <CopyIcon size={11} />}
         </span>
       </button>
     </div>

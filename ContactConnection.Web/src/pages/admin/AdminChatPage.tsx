@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import AdminShell from '../../components/admin/AdminShell'
 import { api } from '../../api/client'
 import { chatAdminApi, type AdminChatChannel, type SaveChatChannel } from '../../api/chat'
+import { AnnouncementIcon, CloseIcon, PinIcon } from '../../components/icons/Icons'
 
 /**
  * Team Chat configuration (S183, permission chat.manage) — the one place channels are created and configured:
@@ -124,11 +125,11 @@ function ChannelTable({ list, people, roles, onEdit, onRetire, retiredList }: {
                 {c.assignedRoleIds.length > 0 && <p>Roles: {c.assignedRoleIds.map(role).join(', ')}</p>}
                 {c.assignedIds.length > 0 && <p>People: {c.assignedIds.length <= 4 ? c.assignedIds.map(name).join(', ') : `${c.assignedIds.length} assigned`}</p>}
                 {c.assignedRoleIds.length === 0 && c.assignedIds.length === 0 && <p>{c.isPrivate ? 'Nobody assigned' : 'Anyone can join'}</p>}
-                {c.membershipLocked && <p className="text-amber-300/90">📌 Assigned members can't leave</p>}
+                {c.membershipLocked && <p className="text-amber-300/90 flex items-center gap-1"><PinIcon size={12} />Assigned members can't leave</p>}
               </td>
               <td className="px-4 py-3 text-xs">
                 {c.retired ? <span className="text-gray-500">Retired</span>
-                  : c.postingRestricted ? <span className="text-amber-300">📣 {
+                  : c.postingRestricted ? <span className="text-amber-300 inline-flex items-center gap-1"><AnnouncementIcon size={12} /> {
                       [...(c.posterRoleIds ?? []).map((r) => `${role(r)} (role)`), ...c.posterIds.map(name)].join(', ') || 'Chat managers only'}</span>
                   : <span className="text-gray-400">Everyone</span>}
               </td>
@@ -307,7 +308,7 @@ export function PeoplePicker({ people, chosen, onChange }: { people: Person[] | 
         <div className="flex flex-wrap gap-1.5 mb-1.5">
           {chosen.map((id) => (
             <button key={id} type="button" onClick={() => onChange(chosen.filter((x) => x !== id))}
-              className="text-xs rounded-full px-2.5 py-1 border border-indigo-500 bg-indigo-950/60 text-indigo-200">{nameOf(id)} ✕</button>
+              className="text-xs rounded-full px-2.5 py-1 border border-indigo-500 bg-indigo-950/60 text-indigo-200">{nameOf(id)} <CloseIcon size={11} className="inline -mt-0.5" /></button>
           ))}
         </div>
       )}

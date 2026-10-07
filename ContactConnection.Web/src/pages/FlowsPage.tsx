@@ -4,6 +4,7 @@ import { flowsApi, type FlowSummary } from '../api/flows'
 import { openCallTrace } from '../components/calltrace/openCallTrace'
 import FlowScopeSelect from '../components/FlowScopeSelect'
 import { listCampaigns, type Campaign } from '../api/telephony'
+import { CloseIcon } from '../components/icons/Icons'
 
 function designerPath(flow: FlowSummary): string {
   return flow.flow_type === 'telephony'
@@ -243,7 +244,7 @@ export default function FlowsPage() {
       {importError && (
         <div className="mx-6 mt-4 flex items-start gap-3 bg-red-950 border border-red-800 rounded-lg px-4 py-3">
           <span className="text-red-400 text-sm flex-1">Import failed: {importError}</span>
-          <button onClick={() => setImportError(null)} className="text-red-600 hover:text-red-400 text-xs shrink-0">✕</button>
+          <button onClick={() => setImportError(null)} className="text-red-600 hover:text-red-400 text-xs shrink-0" title="Dismiss"><CloseIcon size={13} /></button>
         </div>
       )}
 
@@ -259,7 +260,7 @@ export default function FlowsPage() {
                 ))}
               </ul>
             </div>
-            <button onClick={() => setImportWarnings([])} className="text-amber-600 hover:text-amber-400 text-xs shrink-0">✕</button>
+            <button onClick={() => setImportWarnings([])} className="text-amber-600 hover:text-amber-400 text-xs shrink-0" title="Dismiss"><CloseIcon size={13} /></button>
           </div>
         </div>
       )}

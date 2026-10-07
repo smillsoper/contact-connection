@@ -2,6 +2,7 @@ import type { NodeProps } from '@xyflow/react'
 import { useEdges, useNodeId } from '@xyflow/react'
 import NodeShell from './NodeShell'
 import type { NodeData } from '../../../types/designer'
+import { WarningIcon } from '../../icons/Icons'
 
 // Set Disposition (S181): records this interaction's disposition from the catalog.
 const EXIT_OPTIONS = ['success', 'error']
@@ -25,7 +26,7 @@ export default function SetDispositionNode({ data, selected }: NodeProps & { dat
         {name ? `→ ${name}` : fromVariable ? `→ ${fromVariable}` : '— no disposition chosen'}
       </p>
       {missing.length > 0 && (
-        <p className="text-[10px] text-amber-400 mt-0.5 font-medium">⚠ {missing.length} option{missing.length > 1 ? 's' : ''} not wired</p>
+        <p className="text-[10px] text-amber-400 mt-0.5 font-medium"><WarningIcon size={10} className="inline -mt-0.5 mr-0.5" />{missing.length} option{missing.length > 1 ? 's' : ''} not wired</p>
       )}
     </NodeShell>
   )

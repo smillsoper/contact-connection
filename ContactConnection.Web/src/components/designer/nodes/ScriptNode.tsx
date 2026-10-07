@@ -1,6 +1,7 @@
 import type { NodeProps } from '@xyflow/react'
 import NodeShell from './NodeShell'
 import type { NodeData } from '../../../types/designer'
+import { TimerIcon } from '../../icons/Icons'
 
 function stripHtml(html: string): string {
   return html.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim()
@@ -16,7 +17,7 @@ export default function ScriptNode({ data, selected }: NodeProps & { data: NodeD
         <p className="text-xs text-gray-500 mt-0.5 italic">No content</p>
       )}
       {data.waitForTelephonyEventName ? (
-        <p className="text-[10px] text-rose-400 mt-1">⏱ auto-advances on '{data.waitForTelephonyEventName as string}' end</p>
+        <p className="text-[10px] text-rose-400 mt-1"><TimerIcon size={10} className="inline -mt-0.5 mr-0.5" />auto-advances on '{data.waitForTelephonyEventName as string}' end</p>
       ) : null}
     </NodeShell>
   )

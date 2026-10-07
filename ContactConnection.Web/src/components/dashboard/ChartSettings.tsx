@@ -3,6 +3,7 @@ import type { CustomKpi } from '../../api/dashboardWidgets'
 import { KPI_CATALOG, KPI_DIMENSIONS, customFormat, type Format } from './widgets/KpiWidget'
 import { DEFAULT_CHART_METRICS, DEFAULT_FUNNEL, defaultAxis, isTimeDim } from './widgets/ChartWidget'
 import KpiTargetInput from './KpiTargetInput'
+import { ChevronDownIcon, ChevronUpIcon, DeleteIcon } from '../icons/Icons'
 
 // Chart widget settings (S182). The chart is a view of the KPI engine: an X axis (time or category), metrics on a left /
 // right axis, an optional series split, and extras (previous period, target lines).
@@ -158,12 +159,12 @@ export default function ChartSettings({ value, onChange, customKpis, fieldNames,
               )}
               {t === 'funnel' && (
                 <>
-                  <button className="text-gray-500 hover:text-white px-1 disabled:opacity-30" disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
-                  <button className="text-gray-500 hover:text-white px-1 disabled:opacity-30" disabled={i === metrics.length - 1} onClick={() => move(i, 1)}>↓</button>
+                  <button className="text-gray-500 hover:text-white px-1 disabled:opacity-30" disabled={i === 0} onClick={() => move(i, -1)} title="Move up"><ChevronUpIcon size={13} /></button>
+                  <button className="text-gray-500 hover:text-white px-1 disabled:opacity-30" disabled={i === metrics.length - 1} onClick={() => move(i, 1)} title="Move down"><ChevronDownIcon size={13} /></button>
                 </>
               )}
               {metrics.length > 1 && (
-                <button className="text-gray-500 hover:text-red-300 px-1" onClick={() => set({ chartMetrics: metrics.filter((_, j) => j !== i) })}>✕</button>
+                <button className="text-gray-500 hover:text-red-300 px-1" onClick={() => set({ chartMetrics: metrics.filter((_, j) => j !== i) })} title="Remove"><DeleteIcon size={13} /></button>
               )}
             </div>
           ))}

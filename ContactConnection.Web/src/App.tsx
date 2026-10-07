@@ -26,6 +26,7 @@ import AdminMediaAgenciesPage from './pages/admin/AdminMediaAgenciesPage'
 import AdminCommissionsPage from './pages/admin/AdminCommissionsPage'
 import BillingPage from './pages/admin/BillingPage'
 import AdminChatPage from './pages/admin/AdminChatPage'
+import AdminIconsPage from './pages/admin/AdminIconsPage'
 import CommissionReportPage from './pages/CommissionReportPage'
 import AdminExportsPage from './pages/admin/AdminExportsPage'
 import AdminDispositionsPage from './pages/admin/AdminDispositionsPage'
@@ -416,6 +417,14 @@ export default function App() {
           element={
             <RequireAdminAuth>
               <AdminBlockListPage />
+            </RequireAdminAuth>
+          }
+        />
+        <Route
+          path="/admin/icons"
+          element={
+            <RequireAdminAuth>
+              <AdminIconsPage />
             </RequireAdminAuth>
           }
         />

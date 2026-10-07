@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { exportKeysApi, exportsApi, newTarget, type ConnectionTest, type DeliveryTarget, type DeliveryType, type ExportDefinition } from '../../../api/exports'
 import { listAdminCredentials, setAdminCredential } from '../../../api/adminCredentials'
+import { CheckIcon, WarningIcon } from '../../icons/Icons'
 
 // Delivery targets (S180, session 2): where an export's files go — SFTP, FTPS, email — each optionally PGP / zip encrypted.
 // Passwords and keys live in Credentials (Key Vault); a target only names them. Test connection signs in and shows the
@@ -46,8 +47,8 @@ function CredentialInput({ value, onChange, names, placeholder, onAdd, multiline
           onChange={(e) => { onChange(e.target.value.trim() || null); setAddOpen(false) }} />
         {loaded && trimmed && (
           <span className="absolute right-2 top-1.5 text-xs select-none">
-            {isKnown ? <span className="text-green-400" title="Credential exists">✓</span>
-              : <span className="text-amber-400" title="Not found in the credential store">⚠</span>}
+            {isKnown ? <span className="text-green-400" title="Credential exists"><CheckIcon size={13} /></span>
+              : <span className="text-amber-400" title="Not found in the credential store"><WarningIcon size={13} /></span>}
           </span>
         )}
       </div>

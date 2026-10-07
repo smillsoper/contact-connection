@@ -5,6 +5,7 @@ import {
   AD_TYPES, MEDIA_TYPES, mediaApi,
   type BroadcastStation, type MediaAgency, type MediaAssignmentChange, type MediaAssignment, type MediaAssignmentList, type MediaMarketType,
 } from '../../api/media'
+import { ChevronDownIcon, ChevronRightIcon } from '../icons/Icons'
 
 // A phone number's media assignments (S171, Media Agency Phase A): what it's attributed to now, its
 // history, and adding/editing assignments. National: one at a time — a new one ends the previous one the
@@ -353,7 +354,7 @@ export default function MediaAssignmentsModal({ phoneNumberId, number, clientNum
             {changes.length > 0 && (
               <div className="mt-4">
                 <button onClick={() => setShowChanges((v) => !v)} className="text-xs font-semibold uppercase tracking-wide text-gray-500 hover:text-gray-300">
-                  {showChanges ? '▾' : '▸'} Change log ({changes.length})
+                  {showChanges ? <ChevronDownIcon size={12} className="inline -mt-0.5" /> : <ChevronRightIcon size={12} className="inline -mt-0.5" />} Change log ({changes.length})
                 </button>
                 {showChanges && (
                   <>

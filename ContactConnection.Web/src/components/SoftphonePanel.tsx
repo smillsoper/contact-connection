@@ -17,6 +17,7 @@ import Keypad from './softphone/Keypad'
 import { applySpeaker, getInputDeviceId, micConstraints, onAudioDevicesChanged } from '../utils/audioDevices'
 import { startRinging } from '../utils/ringtone'
 import { loadIceServers, rtcConfig } from '../utils/iceServers'
+import { HeadsetIcon, LockIcon, PhoneIcon as LinePhoneIcon } from './icons/Icons'
 
 // Local dev: connect directly to FreeSWITCH (no cert required, no tunnel overhead).
 // External: VITE_SIP_WS_URL must be set to the production WSS endpoint (e.g. the
@@ -868,7 +869,7 @@ export default function SoftphonePanel() {
       {intercom && (
         <div className={`rounded-lg px-3 py-2 border ${intercom.status === 'ringing' ? 'bg-emerald-950/60 border-emerald-700' : 'bg-violet-950/50 border-violet-800'}`}>
           <div className="flex items-center gap-2">
-            <span className="text-xs">📞</span>
+            <LinePhoneIcon size={14} className="text-violet-300" />
             <span className="text-xs font-medium text-gray-100 flex-1">
               {intercom.status === 'ringing' ? `${intercom.peerName} is calling`
                 : intercom.status === 'connecting' ? `Calling ${intercom.peerName}…`
@@ -892,7 +893,7 @@ export default function SoftphonePanel() {
       {monitor && (
         <div className="rounded-lg px-3 py-2 bg-sky-950/50 border border-sky-800">
           <div className="flex items-center gap-2">
-            <span className="text-xs">🎧</span>
+            <HeadsetIcon size={14} className="text-sky-300" />
             <span className="text-xs font-medium text-sky-200 flex-1">
               {MONITOR_MODE_LABEL[monitor.mode]} · {monitor.agentName}
             </span>
@@ -962,7 +963,7 @@ export default function SoftphonePanel() {
           return (
             <div className="rounded-lg px-3 py-2 bg-red-950/40 border border-red-900" title={lockMessage}>
               <div className="flex items-center gap-2">
-                <span className="text-xs">🔒</span>
+                <LockIcon size={14} />
                 <span className="text-xs font-medium text-red-300 flex-1">Unavailable — locked</span>
               </div>
               <p className="text-[10px] text-red-200/80 mt-1 leading-snug">{lockMessage}. Contact your supervisor.</p>

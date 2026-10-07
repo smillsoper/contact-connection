@@ -1,4 +1,5 @@
 import type { RecordColumn } from '../../api/dashboardWidgets'
+import { ChevronDownIcon, ChevronUpIcon, DeleteIcon } from '../icons/Icons'
 
 /** Pick and order the records widget's columns (S181). `available` = the server's catalog plus custom fields. */
 function ColumnPicker({ available, value, onChange }: { available: RecordColumn[]; value: string[]; onChange: (v: string[]) => void }) {
@@ -33,9 +34,9 @@ function ColumnPicker({ available, value, onChange }: { available: RecordColumn[
         {value.map((k, i) => (
           <div key={k} className="flex items-center gap-1 text-xs text-gray-200 py-0.5">
             <span className="flex-1 truncate">{byKey.get(k)?.label ?? k}</span>
-            <button className="px-1 text-gray-500 hover:text-white disabled:opacity-30" disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
-            <button className="px-1 text-gray-500 hover:text-white disabled:opacity-30" disabled={i === value.length - 1} onClick={() => move(i, 1)}>↓</button>
-            <button className="px-1 text-gray-500 hover:text-red-300" onClick={() => onChange(value.filter((x) => x !== k))}>✕</button>
+            <button className="px-1 text-gray-500 hover:text-white disabled:opacity-30" disabled={i === 0} onClick={() => move(i, -1)} title="Move up"><ChevronUpIcon size={13} /></button>
+            <button className="px-1 text-gray-500 hover:text-white disabled:opacity-30" disabled={i === value.length - 1} onClick={() => move(i, 1)} title="Move down"><ChevronDownIcon size={13} /></button>
+            <button className="px-1 text-gray-500 hover:text-red-300" onClick={() => onChange(value.filter((x) => x !== k))} title="Remove"><DeleteIcon size={13} /></button>
           </div>
         ))}
       </div>

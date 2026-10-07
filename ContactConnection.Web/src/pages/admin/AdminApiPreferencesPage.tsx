@@ -19,6 +19,7 @@ import {
   API_SUB_TYPES,
   TTS_PROVIDER_LABELS,
 } from '../../constants/apiTypes'
+import { ChevronDownIcon, ChevronUpIcon } from '../../components/icons/Icons'
 
 const TTS_SUB_TYPE = 'tts_streaming'
 const STT_SUB_TYPE = 'stt_streaming'
@@ -344,7 +345,7 @@ export default function AdminApiPreferencesPage() {
                         <span className="text-white text-sm font-medium">{sub.label}</span>
                         <div className="flex items-center gap-3">
                           {statusBadge(sub.value)}
-                          <span className="text-gray-600 text-xs">{expanded === sub.value ? '▲' : '▼'}</span>
+                          <span className="text-gray-600 text-xs">{expanded === sub.value ? <ChevronUpIcon size={13} /> : <ChevronDownIcon size={13} />}</span>
                         </div>
                       </button>
 

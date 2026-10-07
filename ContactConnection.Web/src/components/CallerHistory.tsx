@@ -4,6 +4,7 @@ import { api } from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { getSubdomainFromHostname } from '../utils/subdomain'
 import CallDetailModal, { type CallDetailData } from './dashboard/CallDetailModal'
+import { CloseIcon } from './icons/Icons'
 
 // Caller history (S181): the caller's earlier calls (same caller number, same client), one click from the script — so
 // "what did I order last time?" is answered without leaving the call.
@@ -73,7 +74,7 @@ export default function CallerHistoryButton({ callRecordId }: { callRecordId: st
                   {count > history.items.length ? ` — showing the newest ${history.items.length}` : ''}
                 </p>
               </div>
-              <button className="text-gray-400 hover:text-white text-lg leading-none" onClick={() => setOpen(false)}>✕</button>
+              <button className="text-gray-400 hover:text-white text-lg leading-none" onClick={() => setOpen(false)} title="Close"><CloseIcon size={18} /></button>
             </div>
             <div className="overflow-y-auto min-h-0 flex-1 p-3">
               {error && <p className="text-sm text-red-400 px-2">{error}</p>}

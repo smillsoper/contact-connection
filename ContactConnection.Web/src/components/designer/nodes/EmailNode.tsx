@@ -2,6 +2,7 @@ import type { NodeProps } from '@xyflow/react'
 import { Handle, Position } from '@xyflow/react'
 import NodeShell from './NodeShell'
 import type { NodeData } from '../../../types/designer'
+import { FileIcon } from '../../icons/Icons'
 
 export default function EmailNode({ data, selected }: NodeProps & { data: NodeData }) {
   const outputVariable  = (data.outputVariable as string) ?? ''
@@ -35,7 +36,7 @@ export default function EmailNode({ data, selected }: NodeProps & { data: NodeDa
     >
       {hasScript && (
         <p className="text-[10px] text-sky-400 mt-0.5 font-medium truncate">
-          📄 {scriptLabel || 'Script attached'}
+          <FileIcon size={11} className="inline -mt-0.5 mr-1" />{scriptLabel || 'Script attached'}
         </p>
       )}
       <p className="text-xs text-gray-400 mt-0.5">

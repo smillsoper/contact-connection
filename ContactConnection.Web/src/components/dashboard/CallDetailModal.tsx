@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { CartDocument } from '../../api/cart'
 import RecordingPlayer from './RecordingPlayer'
+import { CloseIcon } from '../icons/Icons'
 
 // A call's full details for dashboard viewers (S181) — the records widget's detail view on internal and client dashboards.
 // Read-only: no audit history, no actions, never card data.
@@ -200,7 +201,7 @@ export default function CallDetailModal({ data, canPlayRecording, loadRecording,
             </h3>
             {data && <p className="text-xs text-gray-400">{[data.campaignName, data.startedAt, data.compoundDisposition].filter(Boolean).join(' · ')}</p>}
           </div>
-          <button className="text-gray-400 hover:text-white text-lg leading-none" onClick={onClose}>✕</button>
+          <button className="text-gray-400 hover:text-white text-lg leading-none" onClick={onClose} title="Close"><CloseIcon size={18} /></button>
         </div>
         <div className="flex gap-1 border-b border-gray-800 px-5 mt-3 overflow-x-auto">
           {tabs.map((t) => (

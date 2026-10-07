@@ -19,6 +19,7 @@ import {
   TTS_PROVIDER_LABELS,
   authTypeBadge,
 } from '../../constants/apiTypes'
+import { CheckIcon, CopyIcon, DeleteIcon, PlayIcon, SendIcon, WarningIcon } from '../icons/Icons'
 
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 
@@ -632,8 +633,8 @@ function VarChip({ tag, label, example, copied, onCopy }: VarChipProps) {
     >
       <span className="font-mono text-xs text-orange-300 flex-1 min-w-0 break-all leading-relaxed">{tag}</span>
       {copied
-        ? <span className="text-emerald-400 text-xs shrink-0 mt-0.5">✓</span>
-        : <span className="text-gray-600 group-hover:text-gray-400 text-xs shrink-0 mt-0.5">⎘</span>
+        ? <span className="text-emerald-400 text-xs shrink-0 mt-0.5"><CheckIcon size={12} /></span>
+        : <span className="text-gray-600 group-hover:text-gray-400 text-xs shrink-0 mt-0.5"><CopyIcon size={12} /></span>
       }
     </button>
   )
@@ -1074,7 +1075,7 @@ function ResponseMappingPanel({ config, onChange, sourceContext, subType, testRu
                 disabled={testRunning || !hasTestData}
                 className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded-lg px-3 py-1.5 text-xs font-medium transition-colors flex items-center gap-1.5"
               >
-                {testRunning ? <span className="inline-block w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" /> : '▶'}
+                {testRunning ? <span className="inline-block w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" /> : <PlayIcon size={12} />}
                 {hasTestData ? 'Run & Capture' : 'Add test data first'}
               </button>
               <button onClick={() => {
@@ -1347,7 +1348,7 @@ function ResponseMappingPanel({ config, onChange, sourceContext, subType, testRu
                         className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white text-sm font-mono placeholder-gray-600 focus:outline-none focus:border-indigo-500"
                       />
                       <p className="text-gray-600 text-xs mt-1">
-                        Path to the array of address options. Click any array node <span className="font-mono">⎘</span> in the captured response tree to copy its path.
+                        Path to the array of address options. Click any array node's <CopyIcon size={11} className="inline -mt-0.5" /> in the captured response tree to copy its path.
                       </p>
                     </div>
                     <div>
@@ -1417,7 +1418,7 @@ function ResponseMappingPanel({ config, onChange, sourceContext, subType, testRu
                   title={hasTestData ? 'Capture using Source Test data' : 'Set source test data on the Source Test tab first'}
                   className="text-[10px] bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-white px-2 py-1 rounded transition-colors whitespace-nowrap"
                 >
-                  {testRunning ? '…' : '⇡ Source'}
+                  {testRunning ? '…' : <><SendIcon size={11} className="inline -mt-0.5 mr-1" />Source</>}
                 </button>
                 <button
                   onClick={() => onRunAndCaptureFromPayload(activeOutcome.id)}
@@ -1425,7 +1426,7 @@ function ResponseMappingPanel({ config, onChange, sourceContext, subType, testRu
                   title={hasPayload ? 'Capture using pasted payload' : 'Paste a payload on the Payload Test tab first'}
                   className="text-[10px] bg-violet-700 hover:bg-violet-600 disabled:opacity-40 text-white px-2 py-1 rounded transition-colors whitespace-nowrap"
                 >
-                  {testRunning ? '…' : '⇡ Payload'}
+                  {testRunning ? '…' : <><SendIcon size={11} className="inline -mt-0.5 mr-1" />Payload</>}
                 </button>
               </div>
             )}
@@ -1433,10 +1434,10 @@ function ResponseMappingPanel({ config, onChange, sourceContext, subType, testRu
           {!hasTestData && !hasPayload && activeOutcome && (
             <div className="flex gap-3">
               <button onClick={onGoToTest} className="text-[10px] text-amber-400 hover:text-amber-300 transition-colors">
-                ⚠ Source Test →
+                <WarningIcon size={10} className="inline -mt-0.5 mr-1" />Source Test →
               </button>
               <button onClick={onGoToPayload} className="text-[10px] text-amber-400 hover:text-amber-300 transition-colors">
-                ⚠ Payload Test →
+                <WarningIcon size={10} className="inline -mt-0.5 mr-1" />Payload Test →
               </button>
             </div>
           )}
@@ -2554,7 +2555,7 @@ export default function ApiDefinitionDetailContent({ definitionId, api }: Props)
                                 onClick={() => setEndpointForm((f) => ({ ...f, successRules: f.successRules.filter((_, j) => j !== i) }))}
                                 className="text-gray-500 hover:text-red-400 text-xs px-1.5"
                               >
-                                ✕
+                                <DeleteIcon size={13} />
                               </button>
                             </div>
                           )

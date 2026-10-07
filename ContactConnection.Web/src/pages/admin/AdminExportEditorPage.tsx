@@ -12,6 +12,7 @@ import ExportDeliveryCard from '../../components/admin/exports/ExportDeliveryCar
 import { listCampaigns, listClients, type Campaign, type Client } from '../../api/telephony'
 import { mediaApi, type MediaAgency } from '../../api/media'
 import { when } from './AdminExportsPage'
+import { CheckIcon, ChevronDownIcon, ChevronUpIcon, CloseIcon, DeleteIcon, RefreshIcon } from '../../components/icons/Icons'
 
 // Export editor (S180, Export Worker): what's in the file (calls, grain, condition), the layout (Columns: one Liquid
 // expression per column → CSV / fixed width / Excel; Document: one Liquid template over every call), the file name,
@@ -155,9 +156,9 @@ function ColumnsEditor({ spec, set }: { spec: ExportSpec; set: (s: ExportSpec) =
                   </td>
                 )}
                 <td className="py-1 whitespace-nowrap text-right">
-                  <button className="px-1.5 text-gray-400 hover:text-white disabled:opacity-30" disabled={i === 0} onClick={() => move(i, -1)} title="Move up">↑</button>
-                  <button className="px-1.5 text-gray-400 hover:text-white disabled:opacity-30" disabled={i === cols.length - 1} onClick={() => move(i, 1)} title="Move down">↓</button>
-                  <button className="px-1.5 text-red-400 hover:text-red-300" onClick={() => set({ ...spec, columns: cols.filter((_, j) => j !== i) })} title="Remove">✕</button>
+                  <button className="px-1.5 text-gray-400 hover:text-white disabled:opacity-30" disabled={i === 0} onClick={() => move(i, -1)} title="Move up"><ChevronUpIcon size={13} /></button>
+                  <button className="px-1.5 text-gray-400 hover:text-white disabled:opacity-30" disabled={i === cols.length - 1} onClick={() => move(i, 1)} title="Move down"><ChevronDownIcon size={13} /></button>
+                  <button className="px-1.5 text-red-400 hover:text-red-300" onClick={() => set({ ...spec, columns: cols.filter((_, j) => j !== i) })} title="Remove"><DeleteIcon size={13} /></button>
                 </td>
               </tr>
             ))}
@@ -646,7 +647,7 @@ export default function AdminExportEditorPage() {
                           {r.deliveries.map((d) => (
                             <span key={d.id} className="block text-xs mt-0.5">
                               <span className={DELIVERY_STYLE[d.status]}>
-                                {d.status === 'succeeded' ? '✓ Sent' : d.status === 'failed' ? '✕ Not sent' : d.attempts > 0 ? '↻ Retrying' : '… Sending'}
+                                {d.status === 'succeeded' ? <><CheckIcon size={11} className="inline -mt-0.5 mr-1" />Sent</> : d.status === 'failed' ? <><CloseIcon size={11} className="inline -mt-0.5 mr-1" />Not sent</> : d.attempts > 0 ? <><RefreshIcon size={11} className="inline -mt-0.5 mr-1" />Retrying</> : '… Sending'}
                               </span>
                               <span className="text-gray-300"> → {d.targetName}</span>
                               {d.deliveredAt && <span className="text-gray-500"> {when(d.deliveredAt)}</span>}

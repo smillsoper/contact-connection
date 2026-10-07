@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { customKpisApi, type CustomKpi, type KpiFormatName, type KpiVariable } from '../../api/dashboardWidgets'
 import type { DispositionCategory } from '../../api/dispositions'
+import { CheckIcon, ChevronDownIcon, ChevronRightIcon } from '../icons/Icons'
 
 // Custom KPIs (S181): a category ratio, or an NCalc formula over the KPI variables (calls, orders, revenue, time, every
 // category and disposition as a count) — click a variable to insert it, validated as you type. Shown in the KPI widget.
@@ -129,7 +130,7 @@ export default function CustomKpisTab({ categories }: { categories: DispositionC
                   placeholder="Disp_Saved / (Disp_Saved + Disp_Cancelled)" onChange={(e) => setEdit({ ...edit, formula: e.target.value })} />
                 {edit.formula.trim() && (formulaError
                   ? <p className="text-xs text-red-400 mt-1">{formulaError}</p>
-                  : <p className="text-xs text-emerald-400 mt-1">✓ Valid</p>)}
+                  : <p className="text-xs text-emerald-400 mt-1 flex items-center gap-1"><CheckIcon size={12} />Valid</p>)}
                 <p className="text-[11px] text-gray-500 mt-1">
                   + − × ÷ (<code>* /</code>) and parentheses; functions like <code>Round(x, 2)</code>, <code>Max(a, b)</code>, <code>if(cond, a, b)</code>.
                   Dividing by zero shows "—".
@@ -146,7 +147,7 @@ export default function CustomKpisTab({ categories }: { categories: DispositionC
                     <div key={group}>
                       <button type="button" className="w-full text-left px-2 py-1 text-xs font-medium text-gray-300 bg-gray-900 border-b border-gray-800"
                         onClick={() => setOpenGroup(openGroup === group ? '' : group)}>
-                        {openGroup === group ? '▾' : '▸'} {group} <span className="text-gray-600">({vars.length})</span>
+                        {openGroup === group ? <ChevronDownIcon size={12} className="inline -mt-0.5" /> : <ChevronRightIcon size={12} className="inline -mt-0.5" />} {group} <span className="text-gray-600">({vars.length})</span>
                       </button>
                       {openGroup === group && vars.map((v) => (
                         <button key={v.name} type="button" title={v.label} onClick={() => insert(v.name)}

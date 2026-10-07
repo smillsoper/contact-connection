@@ -16,6 +16,7 @@ import {
   type CallDetail,
   type CallSessionView,
 } from '../../api/callReview'
+import { ChevronDownIcon, ChevronRightIcon, LockIcon } from '../../components/icons/Icons'
 
 const inputCls = 'bg-gray-800 text-white rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-60 w-full'
 const btnPrimary = 'bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded-lg px-3 py-1.5 text-sm font-medium'
@@ -322,7 +323,7 @@ function InteractionSection({ call, ix, defaultOpen, canManage, onChanged }: {
     <div className="border border-gray-800 rounded-xl bg-gray-950/40">
       <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
         className="w-full flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-left hover:bg-gray-900/60 rounded-xl">
-        <span className="text-gray-500 text-xs w-4">{open ? '▾' : '▸'}</span>
+        <span className="text-gray-500 text-xs w-4">{open ? <ChevronDownIcon size={13} /> : <ChevronRightIcon size={13} />}</span>
         <span className="text-white font-medium">Interaction #{ix.interactionNumber}</span>
         <span className="text-gray-300 text-sm">{ix.campaignName ?? '—'}</span>
         <span className="text-gray-400 text-sm">{ix.agentName ?? '—'}</span>
@@ -409,7 +410,7 @@ function FinalizePanel({ call, canManage, onChanged }: { call: CallDetail; canMa
         {call.finalized.reason && <p className="text-gray-300 mt-1">{call.finalized.reason}</p>}
         {call.agentLock?.statusLocked && (
           <p className="text-red-300 text-xs mt-1">
-            🔒 {call.agentName ?? 'The agent'} is {call.agentLock.signInLocked ? 'signed out and sign-in locked' : 'status locked'} — unlock from Users or the dashboard's Agent List.
+            <LockIcon size={13} className="inline -mt-0.5 mr-1" />{call.agentName ?? 'The agent'} is {call.agentLock.signInLocked ? 'signed out and sign-in locked' : 'status locked'} — unlock from Users or the dashboard's Agent List.
           </p>
         )}
       </div>

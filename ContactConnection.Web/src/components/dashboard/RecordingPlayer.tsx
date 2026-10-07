@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { PlayIcon } from '../icons/Icons'
 
 /**
  * Plays a call recording fetched with the viewer's own sign-in (S181) — the bytes come back through an authenticated
@@ -43,7 +44,7 @@ export default function RecordingPlayer({ load }: { load: () => Promise<Response
     <div className="flex items-center gap-3">
       <button onClick={play} disabled={state === 'loading'}
         className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded disabled:opacity-50">
-        {state === 'loading' ? 'Loading…' : '▶ Play recording'}
+        {state === 'loading' ? 'Loading…' : <><PlayIcon size={11} className="inline -mt-0.5 mr-1" />Play recording</>}
       </button>
       {message && <span className="text-xs text-gray-400">{message}</span>}
     </div>

@@ -8,6 +8,7 @@ import { TIMEZONE_GROUPS } from '../../utils/timezones'
 import { api } from '../../api/client'
 import { chatAdminApi } from '../../api/chat'
 import { PeoplePicker } from './AdminChatPage'
+import { LockIcon } from '../../components/icons/Icons'
 
 export default function AdminAgentsPage() {
   const canUnlock = useAuthStore((s) => s.hasPermission('agents.manage'))
@@ -271,7 +272,7 @@ export default function AdminAgentsPage() {
                           <div className="mt-1 flex items-center gap-2 font-normal">
                             <span className="text-xs text-red-300"
                               title={`Locked by ${agent.statusLockedByName ?? 'a supervisor'}${agent.statusLockReason ? `: ${agent.statusLockReason}` : ''}`}>
-                              🔒 {agent.signInLocked ? 'Sign-in locked' : 'Status locked'}
+                              <LockIcon size={11} className="inline -mt-0.5 mr-1" />{agent.signInLocked ? 'Sign-in locked' : 'Status locked'}
                             </span>
                             {canUnlock && (
                               <button onClick={() => handleUnlock(agent)} disabled={updatingId === agent.id}

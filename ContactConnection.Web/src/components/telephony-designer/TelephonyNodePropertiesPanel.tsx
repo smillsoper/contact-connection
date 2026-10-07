@@ -13,6 +13,7 @@ import { listAgentGroups, listCampaigns, listSipGateways } from '../../api/telep
 import { api } from '../../api/client'
 import SearchableSelect from '../SearchableSelect'
 import EmailComposeFields from '../designer/EmailComposeFields'
+import { CheckIcon, ChevronDownIcon, ChevronUpIcon, DeleteIcon } from '../icons/Icons'
 
 // Node types that need one or more of the shared name→id dropdowns (agents, flows, campaigns, gateways).
 const NEEDS_PICKERS: TelephonyNodeType[] = [
@@ -965,10 +966,10 @@ export default function TelephonyNodePropertiesPanel({
           </button>
         )}
         {!isEventNode && isEntry && (
-          <span className="flex-1 text-xs text-center text-green-400 py-1.5">Entry node ✓</span>
+          <span className="flex-1 text-xs text-center text-green-400 py-1.5 flex items-center justify-center gap-1">Entry node <CheckIcon size={12} /></span>
         )}
         {isEventNode && (
-          <span className="flex-1 text-xs text-center text-violet-400 py-1.5">Event entry ✓</span>
+          <span className="flex-1 text-xs text-center text-violet-400 py-1.5 flex items-center justify-center gap-1">Event entry <CheckIcon size={12} /></span>
         )}
         <button
           onClick={() => onDelete(node.id)}
@@ -1090,7 +1091,7 @@ function TimeOfDayEditor({
                   />
                 </>
               )}
-              <button onClick={() => removeWindow(i)} className="text-red-400 hover:text-red-300 text-xs px-1 shrink-0">✕</button>
+              <button onClick={() => removeWindow(i)} className="text-red-400 hover:text-red-300 text-xs px-1 shrink-0" title="Remove"><DeleteIcon size={13} /></button>
             </div>
 
             {/* Date picker — date override only */}
@@ -2570,18 +2571,18 @@ function PeriodicAnnouncementEditor({
             disabled={i === 0}
             className="text-gray-500 hover:text-gray-300 disabled:opacity-30 text-xs px-1"
             title="Move up"
-          >▲</button>
+          ><ChevronUpIcon size={13} /></button>
           <button
             onClick={() => moveDown(i)}
             disabled={i === announcements.length - 1}
             className="text-gray-500 hover:text-gray-300 disabled:opacity-30 text-xs px-1"
             title="Move down"
-          >▼</button>
+          ><ChevronDownIcon size={13} /></button>
           <button
             onClick={() => removeItem(i)}
             className="text-red-500 hover:text-red-400 text-xs px-1"
             title="Remove"
-          >✕</button>
+          ><DeleteIcon size={13} /></button>
         </div>
       ))}
 
@@ -2709,7 +2710,7 @@ function SetVariableEditor({
             value={a.value}
             onChange={(e) => setRow(i, { value: e.target.value })}
           />
-          <button onClick={() => removeRow(i)} className="text-red-400 hover:text-red-300 text-xs px-1 shrink-0">✕</button>
+          <button onClick={() => removeRow(i)} className="text-red-400 hover:text-red-300 text-xs px-1 shrink-0" title="Remove"><DeleteIcon size={13} /></button>
         </div>
       ))}
       <button

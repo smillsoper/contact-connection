@@ -2,6 +2,7 @@ import type { NodeProps } from '@xyflow/react'
 import { useEdges, useNodeId } from '@xyflow/react'
 import NodeShell from './NodeShell'
 import type { NodeData } from '../../../types/designer'
+import { WarningIcon } from '../../icons/Icons'
 
 const EXIT_OPTIONS = ['scheduled', 'invalid_time', 'failed']
 
@@ -24,14 +25,14 @@ export default function ScheduledCallbackNode({ data, selected }: NodeProps & { 
   return (
     <NodeShell type="scheduled_callback" label={data.label as string} isEntry={data.isEntry as boolean} selected={selected}>
       <p className="text-xs text-cyan-300 mt-0.5 truncate">
-        {date || time ? `when: ${date} ${time}`.trim() : '⚠ no date/time set'}
+        {date || time ? `when: ${date} ${time}`.trim() : <><WarningIcon size={10} className="inline -mt-0.5 mr-0.5" />no date/time set</>}
       </p>
       <p className="text-[10px] text-gray-500 mt-0.5 truncate">
-        {hasTargetFlow ? 'target flow set' : '⚠ no target flow'}
+        {hasTargetFlow ? 'target flow set' : <><WarningIcon size={10} className="inline -mt-0.5 mr-0.5" />no target flow</>}
       </p>
       {missing.length > 0 && (
         <p className="text-[10px] text-amber-400 mt-0.5 font-medium">
-          ⚠ {missing.length} option{missing.length > 1 ? 's' : ''} not wired
+          <WarningIcon size={10} className="inline -mt-0.5 mr-0.5" />{missing.length} option{missing.length > 1 ? 's' : ''} not wired
         </p>
       )}
     </NodeShell>

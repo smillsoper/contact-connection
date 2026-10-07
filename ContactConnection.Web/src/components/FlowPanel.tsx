@@ -14,6 +14,7 @@ import { api } from '../api/client'
 import type { FlowNodeState } from '../types/flow'
 import NodeDisplay from './NodeDisplay'
 import AddressValidationModal from './AddressValidationModal'
+import { CloseIcon } from './icons/Icons'
 
 /** One integration a script reaches, for the designer sandbox launch (S181). */
 interface ScriptIntegration { key: string; kind: 'tax' | 'payment' | 'api'; name: string; detail: string | null; options: string[]; defaultEnvironment: string }
@@ -267,7 +268,7 @@ function FlowSessionView({ entry, hub, onEnd }: FlowSessionViewProps) {
       {liveNotice && (
         <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 max-w-[90%] bg-sky-950/95 border border-sky-700 text-sky-100 text-xs rounded-lg px-3 py-2 shadow-lg flex items-start gap-3">
           <span className="break-words">{liveNotice}</span>
-          <button onClick={() => setLiveNotice(null)} className="text-sky-400 hover:text-white shrink-0" aria-label="Dismiss">✕</button>
+          <button onClick={() => setLiveNotice(null)} className="text-sky-400 hover:text-white shrink-0" aria-label="Dismiss"><CloseIcon size={14} /></button>
         </div>
       )}
       {validationModal && (
@@ -699,7 +700,7 @@ export default function FlowPanel() {
           <span className="flex-1">
             Reopened {restoredCount === 1 ? 'the script' : `${restoredCount} scripts`} you had open — each is on the step you left it.
           </span>
-          <button onClick={() => setRestoredCount(0)} className="text-sky-300 hover:text-white">✕</button>
+          <button onClick={() => setRestoredCount(0)} className="text-sky-300 hover:text-white" title="Dismiss"><CloseIcon size={14} /></button>
         </div>
       )}
 

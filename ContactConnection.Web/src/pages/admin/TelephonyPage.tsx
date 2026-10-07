@@ -24,6 +24,7 @@ import { listAdminAgents, type AgentRecord } from '../../api/adminAgents'
 import { flowsApi, type FlowSummary } from '../../api/flows'
 import { api } from '../../api/client'
 import { openCallTrace } from '../../components/calltrace/openCallTrace'
+import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CloseIcon } from '../../components/icons/Icons'
 
 type Tab = 'clients' | 'campaigns' | 'phone-numbers' | 'providers' | 'agent-groups' | 'assignments' | 'test-call'
 
@@ -1550,7 +1551,7 @@ function AgentGroupsTab() {
                 className={`flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-gray-800/30 transition-colors ${i < visibleGroups.length - 1 || expandedId === g.id ? 'border-b border-gray-800' : ''}`}
                 onClick={() => handleExpand(g)}
               >
-                <span className="text-gray-400 text-xs w-4">{expandedId === g.id ? '▾' : '▸'}</span>
+                <span className="text-gray-400 text-xs w-4">{expandedId === g.id ? <ChevronDownIcon size={13} /> : <ChevronRightIcon size={13} />}</span>
                 <span className="text-white font-medium text-sm flex-1">{g.name}</span>
                 <span className="text-gray-500 font-mono text-xs">{g.slug}</span>
                 <span className="text-gray-500 text-xs">{g.memberCount} member{g.memberCount !== 1 ? 's' : ''}</span>
@@ -1744,7 +1745,7 @@ function TestCallTab() {
         <div className={`mt-4 bg-gray-900 border rounded-xl p-5 space-y-3 ${result?.success ? 'border-emerald-800' : 'border-red-900'}`}>
           <div className="flex items-center gap-2">
             <span className={`text-sm font-semibold ${result?.success ? 'text-emerald-400' : 'text-red-400'}`}>
-              {result?.success ? '✓ Originated successfully' : '✗ Origination failed'}
+              {result?.success ? <><CheckIcon size={12} className="inline -mt-0.5 mr-1" />Originated successfully</> : <><CloseIcon size={12} className="inline -mt-0.5 mr-1" />Origination failed</>}
             </span>
           </div>
           {result?.result && (

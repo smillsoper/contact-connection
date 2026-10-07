@@ -9,6 +9,7 @@ import {
   type CompleteOnboardingRequest,
 } from '../api/onboarding'
 import { TIMEZONES } from '../utils/timezones'
+import { CheckIcon, DeleteIcon } from '../components/icons/Icons'
 
 const STEPS = [
   'Your Account',
@@ -207,7 +208,7 @@ export default function OnboardingPage() {
                     : 'bg-gray-800 text-gray-500'
                 }`}
               >
-                {i < step ? '✓' : i + 1}
+                {i < step ? <CheckIcon size={14} /> : i + 1}
               </div>
               <span className={`text-xs hidden sm:block ${i === step ? 'text-indigo-400' : 'text-gray-600'}`}>
                 {label}
@@ -490,7 +491,7 @@ export default function OnboardingPage() {
                       onClick={() => removeAdminEmail(i)}
                       className="text-gray-500 hover:text-red-400 px-2 transition-colors text-sm"
                     >
-                      ✕
+                      <DeleteIcon size={14} />
                     </button>
                   )}
                 </div>

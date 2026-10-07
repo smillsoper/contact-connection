@@ -2,6 +2,7 @@
 // Credentials are stored as key references (names pointing to the credential store),
 // not as plain-text values — matching the "safe storage" intent.
 import { useState, useEffect } from 'react'
+import { BoltIcon, CheckIcon, CloseIcon, WarningIcon } from '../icons/Icons'
 
 export type AuthType = 'none' | 'api_key' | 'basic' | 'bearer' | 'oauth2' | 'hmac' | 'aws_sigv4' | 'mtls'
 
@@ -403,8 +404,8 @@ function CredentialKeyField({
         {loaded && trimmed && (
           <span className="absolute right-2.5 top-2.5 text-xs select-none">
             {isKnown
-              ? <span className="text-green-400" title="Credential exists">✓</span>
-              : <span className="text-amber-400" title="Not found in credential store">⚠</span>
+              ? <span className="text-green-400" title="Credential exists"><CheckIcon size={13} /></span>
+              : <span className="text-amber-400" title="Not found in credential store"><WarningIcon size={13} /></span>
             }
           </span>
         )}
@@ -482,7 +483,7 @@ function TestResultPanel({ result }: { result: AuthTestResult }) {
       {/* Status */}
       <div className="flex items-center gap-2 flex-wrap">
         <span className={`font-semibold ${result.success ? 'text-green-400' : 'text-red-400'}`}>
-          {result.success ? '✓ Connected' : '✗ Failed'}
+          {result.success ? <><CheckIcon size={12} className="inline -mt-0.5 mr-1" />Connected</> : <><CloseIcon size={12} className="inline -mt-0.5 mr-1" />Failed</>}
         </span>
         {result.statusCode !== undefined && (
           <span className="text-gray-500">HTTP {result.statusCode}</span>
@@ -499,7 +500,7 @@ function TestResultPanel({ result }: { result: AuthTestResult }) {
           <div className="space-y-1">
             {result.credentials.map((c) => (
               <div key={c.key} className="flex items-center gap-2">
-                <span className={c.found ? 'text-green-400' : 'text-red-400'}>{c.found ? '✓' : '✗'}</span>
+                <span className={c.found ? 'text-green-400' : 'text-red-400'}>{c.found ? <CheckIcon size={12} className="inline -mt-0.5" /> : <CloseIcon size={12} className="inline -mt-0.5" />}</span>
                 <span className="font-mono text-gray-300">{c.key}</span>
                 {!c.found && <span className="text-red-400">— not found in Key Vault</span>}
               </div>
@@ -515,7 +516,7 @@ function TestResultPanel({ result }: { result: AuthTestResult }) {
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <span className={result.fieldMapping.token.found ? 'text-green-400' : 'text-red-400'}>
-                {result.fieldMapping.token.found ? '✓' : '✗'}
+                {result.fieldMapping.token.found ? <CheckIcon size={12} className="inline -mt-0.5" /> : <CloseIcon size={12} className="inline -mt-0.5" />}
               </span>
               <span className="font-mono text-gray-300">{result.fieldMapping.token.name}</span>
               {result.fieldMapping.token.found
@@ -526,7 +527,7 @@ function TestResultPanel({ result }: { result: AuthTestResult }) {
             {result.fieldMapping.tokenType && (
               <div className="flex items-center gap-2">
                 <span className={result.fieldMapping.tokenType.found ? 'text-green-400' : 'text-amber-400'}>
-                  {result.fieldMapping.tokenType.found ? '✓' : '—'}
+                  {result.fieldMapping.tokenType.found ? <CheckIcon size={12} className="inline -mt-0.5" /> : '—'}
                 </span>
                 <span className="font-mono text-gray-300">{result.fieldMapping.tokenType.name}</span>
                 {result.fieldMapping.tokenType.found
@@ -537,7 +538,7 @@ function TestResultPanel({ result }: { result: AuthTestResult }) {
             )}
             <div className="flex items-center gap-2">
               <span className={result.fieldMapping.expiresIn.found ? 'text-green-400' : 'text-amber-400'}>
-                {result.fieldMapping.expiresIn.found ? '✓' : '—'}
+                {result.fieldMapping.expiresIn.found ? <CheckIcon size={12} className="inline -mt-0.5" /> : '—'}
               </span>
               <span className="font-mono text-gray-300">{result.fieldMapping.expiresIn.name}</span>
               {result.fieldMapping.expiresIn.found
@@ -1036,7 +1037,7 @@ export default function AuthConfigForm({ state, onChange, knownCredentials, onAd
           >
             {testing
               ? <><span className="inline-block w-3 h-3 border border-gray-400 border-t-transparent rounded-full animate-spin" />Testing…</>
-              : '⚡ Test Authentication'
+              : <><BoltIcon size={12} className="inline -mt-0.5 mr-1" />Test Authentication</>
             }
           </button>
           {testResult && (

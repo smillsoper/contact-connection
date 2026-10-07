@@ -5,6 +5,7 @@ import { offersApi, type OfferFlag, type OfferSummary } from '../../api/offers'
 import { productsApi, type ProductSearchResult } from '../../api/products'
 import { listClients, type Client } from '../../api/telephony'
 import ScopePicker, { scopeLabel } from '../../components/admin/ScopePicker'
+import { DeleteIcon } from '../../components/icons/Icons'
 
 interface EditorState {
   name: string
@@ -188,7 +189,7 @@ function OfferEditorModal({
                         onChange={(e) => set({ autoShipDays: s.autoShipDays.map((x, j) => (j === i ? Number(e.target.value) || 0 : x)) })}
                         className="w-20 bg-gray-800 border border-gray-600 rounded-lg px-2 py-1.5 text-white text-sm" />
                       <button type="button" onClick={() => set({ autoShipDays: s.autoShipDays.filter((_, j) => j !== i) })}
-                        className="text-gray-500 hover:text-red-400 text-xs px-1" title="Remove interval">✕</button>
+                        className="text-gray-500 hover:text-red-400 text-xs px-1" title="Remove interval"><DeleteIcon size={13} /></button>
                     </div>
                   ))}
                   <button type="button" onClick={() => set({ autoShipDays: [...s.autoShipDays, 30] })}

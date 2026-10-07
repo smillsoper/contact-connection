@@ -7,6 +7,7 @@ import type { WidgetFilterConfig } from '../../../types/dashboard'
 import {
   useDashboardLiveAgentSessions, useDashboardLiveAgentState, useDashboardLiveCallState, useDashboardLiveRegistration,
 } from '../DashboardLiveContext'
+import { CloseIcon, HeadsetIcon } from '../../icons/Icons'
 
 // Active Calls (S180, Sprint 2 item 1): every call an agent is on right now. Click a call for the detail view with the
 // supervisor tools (Monitor / Coach / Barge / Take over) — the same server actions the Agent List widget uses.
@@ -145,7 +146,7 @@ function CallDetail({ call, sup, onClose }: { call: ActiveCallRow; sup: Supervis
             </p>
           </div>
           <span className="text-white font-mono text-lg">{elapsed(call.connectedAt)}</span>
-          <button onClick={onClose} className="text-gray-500 hover:text-white">✕</button>
+          <button onClick={onClose} className="text-gray-500 hover:text-white" title="Close"><CloseIcon size={14} /></button>
         </div>
 
         <dl className="grid grid-cols-[7rem_1fr] gap-y-1.5 text-xs">
@@ -249,7 +250,7 @@ function useSupervisorTools(): SupervisorTools {
 
   const monitorBar = monitoring && (
     <div className="mb-2 rounded-lg bg-sky-950/50 border border-sky-800 px-2 py-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
-      <span className="text-sky-200 font-medium mr-1">🎧 {MONITOR_MODE_LABEL[monitoring.mode]} {monitoring.agentName}</span>
+      <span className="text-sky-200 font-medium mr-1"><HeadsetIcon size={13} className="inline -mt-0.5 mr-1" />{MONITOR_MODE_LABEL[monitoring.mode]} {monitoring.agentName}</span>
       {(['listen', 'coach', 'barge'] as MonitorMode[]).map((m) => (
         <button key={m} disabled={busy || monitoring.mode === m || (m === 'barge' && !canOverride)}
           onClick={() => run(() => supervisorApi.setMode(m))}

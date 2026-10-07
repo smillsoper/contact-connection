@@ -15,6 +15,7 @@ import { useTenantTimezone } from '../../hooks/useTenantTimezone'
 import { timezoneLabel } from '../../utils/timezones'
 import ApiRequestPreviewModal from './ApiRequestPreviewModal'
 import { useParams } from 'react-router-dom'
+import { CheckIcon } from '../icons/Icons'
 
 const PRESET_MASKS = [
   { label: 'None', value: '' },
@@ -1708,7 +1709,7 @@ export default function NodePropertiesPanel({
           </button>
         )}
         {isEntry && (
-          <p className="text-xs text-center text-emerald-400 font-medium">✓ Entry Node</p>
+          <p className="text-xs text-center text-emerald-400 font-medium flex items-center justify-center gap-1"><CheckIcon size={12} />Entry Node</p>
         )}
         <button
           className="w-full text-sm text-red-400 hover:text-red-300 border border-red-900 hover:border-red-700 rounded py-1.5 transition-colors"

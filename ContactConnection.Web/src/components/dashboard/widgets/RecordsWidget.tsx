@@ -7,6 +7,7 @@ import { useRecordsSource } from '../RecordsSource'
 import CallDetailModal from '../CallDetailModal'
 import { useAuthStore } from '../../../stores/authStore'
 import { getSubdomainFromHostname } from '../../../utils/subdomain'
+import { ChevronDownIcon, ChevronUpIcon } from '../../icons/Icons'
 
 // Records widget (S181, docs/client-dashboards-plan.md §C): call records in the widget's window and scope — search, sort,
 // per-column filters, paging, and a detail drawer with recording playback where allowed.
@@ -107,7 +108,7 @@ export default function RecordsWidget({ config }: { config: WidgetFilterConfig }
             <tr className="text-gray-500 text-left">
               {data.columns.map((c) => (
                 <th key={c.key} className="px-2 py-1 font-medium cursor-pointer select-none hover:text-gray-300" onClick={() => toggleSort(c.key)}>
-                  {c.label}{sort === c.key ? (desc ? ' ↓' : ' ↑') : ''}
+                  {c.label}{sort === c.key ? (desc ? <ChevronDownIcon size={11} className="inline -mt-0.5 ml-0.5" /> : <ChevronUpIcon size={11} className="inline -mt-0.5 ml-0.5" />) : null}
                 </th>
               ))}
             </tr>

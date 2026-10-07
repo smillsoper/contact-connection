@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api/client'
 import { deleteAdminCredential, setAdminCredential } from '../../api/adminCredentials'
+import { CheckIcon, CloseIcon } from '../icons/Icons'
 
 // Campaign settings credential cards (S169) — shared by Payment Gateways and Sales Tax. Tenants enter vendor
 // credentials here instead of guessing key names on the Credentials page: each field shows where its value
@@ -89,11 +90,11 @@ function CredentialSetTabs({ campaignId, section, gateway, sandbox, onChanged }:
     <div className="border border-gray-800 rounded-lg p-4">
       <div className="flex gap-1 mb-3">
         <button className={tabCls('production')} onClick={() => setTab('production')}>
-          Production {isConfigured(gateway) ? '✓' : ''}
+          Production {isConfigured(gateway) ? <CheckIcon size={11} className="inline -mt-0.5" /> : null}
         </button>
         {sandbox && (
           <button className={tabCls('sandbox')} onClick={() => setTab('sandbox')}>
-            Sandbox {isConfigured(sandbox) ? '✓' : ''}
+            Sandbox {isConfigured(sandbox) ? <CheckIcon size={11} className="inline -mt-0.5" /> : null}
           </button>
         )}
       </div>
@@ -222,7 +223,7 @@ function CredentialCard({ campaignId, section, gateway, set, onChanged }: { camp
       </div>
       {test && (
         <p className={`text-sm mt-3 ${test.succeeded ? 'text-emerald-300' : 'text-red-300'}`}>
-          {test.succeeded ? '✓ ' : '✗ '}{test.message}
+          {test.succeeded ? <CheckIcon size={12} className="inline -mt-0.5 mr-1" /> : <CloseIcon size={12} className="inline -mt-0.5 mr-1" />}{test.message}
         </p>
       )}
     </div>

@@ -3,6 +3,7 @@ import type { FlowNodeState } from '../types/flow'
 import type { ZipLookupResult, AutocompleteSuggestion, AutocompleteSelectionResult } from '../api/flows'
 import { COUNTRIES } from '../data/countries'
 import { useCallStore } from '../stores/callStore'
+import { LockIcon, WarningIcon } from './icons/Icons'
 
 // ── Address form constants ────────────────────────────────────────────────────
 
@@ -537,7 +538,7 @@ export default function NodeDisplay({ node, onAdvance, onJump, advancing, valida
       {/* Commit point passed — earlier sections are closed (engine-enforced) */}
       {node.commitLabel && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-950/50 border border-amber-700 text-amber-200 text-sm">
-          <span>🔒</span>
+          <LockIcon size={14} />
           <span className="font-medium">{node.commitLabel}</span>
         </div>
       )}
@@ -1117,7 +1118,7 @@ export default function NodeDisplay({ node, onAdvance, onJump, advancing, valida
               )}
               {zipCityMismatch && (
                 <p className="text-[10px] text-amber-400 mt-0.5 leading-snug">
-                  ⚠ The entered city was not found for this ZIP. Select the correct city or keep your entry.
+                  <WarningIcon size={13} className="inline -mt-0.5 mr-1" />The entered city was not found for this ZIP. Select the correct city or keep your entry.
                 </p>
               )}
             </div>

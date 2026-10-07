@@ -1,6 +1,7 @@
 import { type NodeProps } from '@xyflow/react'
 import TelNodeShell from '../TelNodeShell'
 import type { TelNodeData } from '../../../types/telephony-designer'
+import { HeadsetIcon, MicIcon, WarningIcon } from '../../icons/Icons'
 
 export default function IvrMenuNode({ data, selected }: NodeProps & { data: TelNodeData }) {
   const options = (data.options as { digit: string; transition: string; phrases?: string[] }[] | undefined) ?? []
@@ -16,10 +17,10 @@ export default function IvrMenuNode({ data, selected }: NodeProps & { data: TelN
       selected={selected}
     >
       {isAsync ? (
-        <p className="text-[11px] text-indigo-300 mt-0.5">🎧 always listening</p>
+        <p className="text-[11px] text-indigo-300 mt-0.5"><HeadsetIcon size={11} className="inline -mt-0.5 mr-1" />always listening</p>
       ) : (
         <p className="text-[11px] text-teal-300 mt-0.5 truncate">
-          {hasPrompt ? 'audio prompt' : '⚠ no prompt set'}{hasVoice ? ' · 🎙 voice' : ''}
+          {hasPrompt ? 'audio prompt' : <><WarningIcon size={10} className="inline -mt-0.5 mr-0.5" />no prompt set</>}{hasVoice ? <> · <MicIcon size={10} className="inline -mt-0.5" /> voice</> : ''}
         </p>
       )}
       <p className="text-[10px] text-gray-500 mt-0.5">

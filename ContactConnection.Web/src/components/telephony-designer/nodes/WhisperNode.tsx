@@ -1,6 +1,7 @@
 import { type NodeProps } from '@xyflow/react'
 import TelNodeShell from '../TelNodeShell'
 import type { TelNodeData } from '../../../types/telephony-designer'
+import { WarningIcon } from '../../icons/Icons'
 
 export default function WhisperNode({ data, selected }: NodeProps & { data: TelNodeData }) {
   const audioSource = (data.audioSource as string) ?? 'file'
@@ -11,10 +12,10 @@ export default function WhisperNode({ data, selected }: NodeProps & { data: TelN
     audioSource === 'tts'
       ? ttsText.trim()
         ? `“${ttsText.trim().slice(0, 32)}${ttsText.trim().length > 32 ? '…' : ''}”`
-        : '⚠ no TTS text'
+        : <><WarningIcon size={10} className="inline -mt-0.5 mr-0.5" />no TTS text</>
       : fileId
         ? 'agent ear only'
-        : '⚠ no file selected'
+        : <><WarningIcon size={10} className="inline -mt-0.5 mr-0.5" />no file selected</>
 
   return (
     <TelNodeShell type="tf_whisper" label={data.label as string} isEntry={data.isEntry as boolean} selected={selected}>

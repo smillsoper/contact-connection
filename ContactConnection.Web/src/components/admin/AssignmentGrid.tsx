@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getAssignmentMatrix, bulkAssign, type AssignmentMatrix } from '../../api/telephony'
+import { CheckIcon, CloseIcon, DeleteIcon } from '../icons/Icons'
 
 /**
  * Bulk campaign assignment (S182): agents and agent groups down the side, campaigns across the top. Click a cell to assign,
@@ -74,12 +75,12 @@ export default function AssignmentGrid() {
               onChange={(e) => setEditing({ ...editing, value: e.target.value })}
               onKeyDown={(e) => { if (e.key === 'Enter') void saveCell(); if (e.key === 'Escape') setEditing(null) }}
               className="w-14 bg-gray-800 text-white rounded px-1 py-0.5 text-xs text-center outline-none focus:ring-1 focus:ring-indigo-500" />
-            <button disabled={busy} onClick={() => void saveCell()} className="text-emerald-400 hover:text-emerald-300 text-xs" title="Save">✓</button>
+            <button disabled={busy} onClick={() => void saveCell()} className="text-emerald-400 hover:text-emerald-300 text-xs" title="Save"><CheckIcon size={13} /></button>
             {value !== undefined && (
               <button disabled={busy} onClick={() => { void apply('remove', [rowKey], [campaignId], null); setEditing(null) }}
-                className="text-red-400 hover:text-red-300 text-xs" title="Remove from campaign">✕</button>
+                className="text-red-400 hover:text-red-300 text-xs" title="Remove from campaign"><DeleteIcon size={13} /></button>
             )}
-            <button onClick={() => setEditing(null)} className="text-gray-500 hover:text-white text-xs" title="Cancel">↺</button>
+            <button onClick={() => setEditing(null)} className="text-gray-500 hover:text-white text-xs" title="Cancel"><CloseIcon size={13} /></button>
           </div>
         </td>
       )

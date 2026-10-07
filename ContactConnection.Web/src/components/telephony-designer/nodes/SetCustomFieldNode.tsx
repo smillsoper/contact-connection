@@ -2,6 +2,7 @@ import type { NodeProps } from '@xyflow/react'
 import { useEdges, useNodeId } from '@xyflow/react'
 import TelNodeShell from '../TelNodeShell'
 import type { TelNodeData } from '../../../types/telephony-designer'
+import { WarningIcon } from '../../icons/Icons'
 
 const EXIT_OPTIONS = ['success', 'invalid_value', 'error']
 
@@ -27,7 +28,7 @@ export default function SetCustomFieldNode({ data, selected }: NodeProps & { dat
 
       {missingOptions.length > 0 && (
         <p className="text-[10px] text-amber-400 mt-0.5 font-medium">
-          ⚠ {missingOptions.length} option{missingOptions.length > 1 ? 's' : ''} not wired
+          <WarningIcon size={10} className="inline -mt-0.5 mr-0.5" />{missingOptions.length} option{missingOptions.length > 1 ? 's' : ''} not wired
         </p>
       )}
     </TelNodeShell>

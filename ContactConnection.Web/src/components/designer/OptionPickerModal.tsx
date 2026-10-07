@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { RefreshIcon } from '../icons/Icons'
 
 interface OptionPickerModalProps {
   options: string[]
@@ -67,7 +68,7 @@ export default function OptionPickerModal({ options, wiredMap, formatLabel, onCo
                 </span>
                 <span className="flex-1">{formatLabel ? formatLabel(opt) : opt}</span>
                 {isWired && (
-                  <span className="text-[10px] text-amber-500 font-medium">↺ re-wire</span>
+                  <span className="text-[10px] text-amber-500 font-medium inline-flex items-center gap-0.5"><RefreshIcon size={10} />re-wire</span>
                 )}
               </button>
             )

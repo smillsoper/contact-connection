@@ -22,6 +22,7 @@ import {
 import { flowsApi, type FlowSummary } from '../../api/flows'
 import { listAdminAgents, type AgentRecord } from '../../api/adminAgents'
 import { US_STATES } from '../../constants/usStates'
+import { CloseIcon, EditIcon } from '../../components/icons/Icons'
 
 const STATUS_COLORS: Record<string, string> = {
   active:   'bg-emerald-900/50 text-emerald-400',
@@ -1550,7 +1551,7 @@ function AgentsSection({ campaignId, assignments, allAgents, onChanged }: Agents
                             onClick={() => setEditingId(null)}
                             className="text-xs text-gray-500 hover:text-white"
                           >
-                            ✕
+                            <CloseIcon size={13} />
                           </button>
                         </div>
                       ) : (
@@ -1559,7 +1560,7 @@ function AgentsSection({ campaignId, assignments, allAgents, onChanged }: Agents
                           className="text-gray-300 hover:text-white text-xs"
                         >
                           {a.proficiency} <span className="text-gray-600">/ 100</span>
-                          <span className="text-gray-600 ml-1 hover:text-gray-400"> ✎</span>
+                          <EditIcon size={11} className="inline -mt-0.5 ml-1 text-gray-600" />
                         </button>
                       )}
                     </td>

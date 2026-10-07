@@ -6,13 +6,14 @@ import { useDashboardLiveAgentState, useDashboardLiveRegistration, useDashboardL
 import { useAuthStore } from '../../../stores/authStore'
 import { agentLockApi } from '../../../api/agentLock'
 import { supervisorApi, MONITOR_MODE_LABEL, type MonitorMode, type MonitorState } from '../../../api/supervisor'
+import { ChevronDownIcon, ChevronUpIcon, CloseIcon, ExternalLinkIcon, HeadsetIcon, LockIcon, PhoneIcon } from '../../icons/Icons'
 
 type SortColumn = 'name' | 'state' | 'time'
 type SortDirection = 'asc' | 'desc'
 
 function SortArrow({ active, direction }: { active: boolean; direction: SortDirection }) {
   if (!active) return null
-  return <span className="ml-1 text-gray-400">{direction === 'asc' ? '▲' : '▼'}</span>
+  return <span className="ml-1 text-gray-400">{direction === 'asc' ? <ChevronUpIcon size={11} className="inline -mt-0.5" /> : <ChevronDownIcon size={11} className="inline -mt-0.5" />}</span>
 }
 
 const STATE_DOT: Record<string, string> = {
@@ -233,7 +234,7 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
 
   const monitorBar = monitoring && (
     <div className="mb-2 rounded-lg bg-sky-950/50 border border-sky-800 px-2 py-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
-      <span className="text-sky-200 font-medium mr-1">🎧 {MONITOR_MODE_LABEL[monitoring.mode]} {monitoring.agentName}</span>
+      <span className="text-sky-200 font-medium mr-1"><HeadsetIcon size={13} className="inline -mt-0.5 mr-1" />{MONITOR_MODE_LABEL[monitoring.mode]} {monitoring.agentName}</span>
       {(['listen', 'coach', 'barge'] as MonitorMode[]).map((m) => (
         <button key={m} disabled={supBusy || monitoring.mode === m || (m === 'barge' && !canOverride)}
           onClick={() => supervise(() => supervisorApi.setMode(m))}
@@ -253,7 +254,7 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
     <div className="h-full overflow-auto">
       {monitorBar}
       {supNote && <p className="text-[11px] text-sky-300 mb-1">{supNote}</p>}
-      {supError && <p className="text-[11px] text-red-400 mb-1">{supError} <button className="text-gray-500 hover:text-gray-300 ml-1" onClick={() => setSupError(null)}>✕</button></p>}
+      {supError && <p className="text-[11px] text-red-400 mb-1">{supError} <button className="text-gray-500 hover:text-gray-300 ml-1" onClick={() => setSupError(null)}><CloseIcon size={11} className="inline -mt-0.5" /></button></p>}
       <table className="w-full text-xs">
         <thead>
           <tr className="text-left text-gray-500 border-b border-gray-800">
@@ -279,7 +280,7 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
                 {r.status_locked && (
                   <span className="flex items-center gap-1.5 text-[10px] text-red-300"
                     title={`Locked by ${r.locked_by ?? 'a supervisor'}${r.lock_reason ? `: ${r.lock_reason}` : ''}`}>
-                    🔒 {r.sign_in_locked ? 'sign-in locked' : 'locked'}
+                    <LockIcon size={11} className="inline -mt-0.5 mr-1" />{r.sign_in_locked ? 'sign-in locked' : 'locked'}
                     {canUnlock && (
                       <button onClick={() => unlock(r.agent_id)} disabled={unlocking === r.agent_id}
                         className="text-indigo-400 hover:text-indigo-300 disabled:opacity-50">Unlock</button>
@@ -321,7 +322,7 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
                       title={`${c.flow_name ?? 'Script'} · open ${formatDuration(c.started_at)} — review / correct this call (new tab)`}
                       className="text-indigo-400 hover:text-indigo-300 mr-2"
                     >
-                      {(r.live_calls ?? []).length > 1 ? `Call ${i + 1}` : 'Open'} ↗
+                      {(r.live_calls ?? []).length > 1 ? `Call ${i + 1}` : 'Open'} <ExternalLinkIcon size={11} className="inline -mt-0.5" />
                     </a>
                   ))}
                 </td>
@@ -332,7 +333,7 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
                     <button onClick={() => callAgent(r.agent_id, r.name)} disabled={supBusy}
                       className="text-violet-300 hover:text-violet-200 disabled:opacity-50 mr-2"
                       title={`Call ${r.name} (internal — QA review, training)${myRegistered ? '' : ' — opens your agent portal'}`}>
-                      📞
+                      <PhoneIcon size={15} />
                     </button>
                   )}
                   {r.agent_id !== myId && (r.on_live_call || (canOverride && (r.live_calls ?? []).length > 0)) && (
@@ -343,7 +344,7 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
                         setMenuFor(menuFor === r.agent_id ? null : r.agent_id)
                       }}
                       className="text-sky-400 hover:text-sky-300 disabled:opacity-50" title={r.on_live_call ? 'On a live call' : 'Script open (no phone call)'}>
-                      🎧 ▾
+                      <span className="inline-flex items-center gap-0.5"><HeadsetIcon size={15} /><ChevronDownIcon size={11} /></span>
                     </button>
                   )}
                   {menuFor === r.agent_id && menuPos && createPortal(
