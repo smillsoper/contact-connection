@@ -155,7 +155,8 @@ export default function KpiWidget({ config }: { config: WidgetFilterConfig }) {
     </p>
   )
 
-  if ((config.groupBy ?? 'none') === 'none' || data.rows.length === 0) {
+  // A breakdown always shows its table — an empty one (nothing matches the filters) says so rather than switching to tiles.
+  if ((config.groupBy ?? 'none') === 'none') {
     return (
       <div className="h-full flex flex-col">
         <div className="flex-1 min-h-0 overflow-y-auto grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(118px, 1fr))' }}>
@@ -206,6 +207,13 @@ export default function KpiWidget({ config }: { config: WidgetFilterConfig }) {
             </tr>
           </thead>
           <tbody>
+            {data.rows.length === 0 && (
+              <tr className="border-b border-gray-800/60">
+                <td colSpan={(twoLevel ? 2 : 1) + defs.reduce((n, d) => n + (pct(d) ? 2 : 1), 0)} className="py-3 text-center text-gray-500">
+                  No calls match these filters in this time window.
+                </td>
+              </tr>
+            )}
             {data.rows.map((r) => {
               const showGroup = r.label !== lastGroup
               lastGroup = r.label
