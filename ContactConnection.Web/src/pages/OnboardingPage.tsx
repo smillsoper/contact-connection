@@ -10,6 +10,7 @@ import {
 } from '../api/onboarding'
 import { TIMEZONES } from '../utils/timezones'
 import { CheckIcon, DeleteIcon } from '../components/icons/Icons'
+import { ExtensionExplainer, ExtensionInstallButton } from '../components/ExtensionInfo'
 
 const STEPS = [
   'Your Account',
@@ -18,6 +19,7 @@ const STEPS = [
   'Communication',
   'Security',
   'Features',
+  'Agent Extension',
   'Additional Admins',
 ]
 
@@ -469,8 +471,20 @@ export default function OnboardingPage() {
             </div>
           )}
 
-          {/* Step 6 — Additional Admins */}
+          {/* Step 6 — Agent browser extension (S183) */}
           {step === 6 && (
+            <div className="flex flex-col gap-4">
+              <ExtensionExplainer forAdmins />
+              <div className="rounded-lg bg-gray-800/60 px-4 py-3">
+                <p className="text-gray-300 text-sm mb-2">Install it on this computer too:</p>
+                <ExtensionInstallButton />
+              </div>
+              <p className="text-gray-500 text-xs">Agents are also asked to install it the first time they open the agent portal. You can carry on without it.</p>
+            </div>
+          )}
+
+          {/* Step 7 — Additional Admins */}
+          {step === 7 && (
             <div className="flex flex-col gap-4">
               <p className="text-gray-400 text-sm">
                 Optionally invite additional administrators now. Each person will receive a setup email

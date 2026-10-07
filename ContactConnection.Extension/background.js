@@ -6,9 +6,29 @@
 //   2. Input relay — while the portal is screen recording, every page's content script reports the agent's clicks and
 //      keys; forward them to the portal tab, which places them on the recording's timeline.
 //
+// Only the real agent portal may act as one: a tab is accepted as a portal — and may ask for focus or switch input
+// capture on — only when its address (sender.url, set by the browser, not by the page) is a ContactConnection site.
+// Without that, any website could claim to be the portal and receive the agent's keystrokes from other tabs.
+//
 // MV3 workers sleep between events, so state lives in chrome.storage.session (survives the worker, not the browser).
 
 const STATE_KEY = 'ccState'   // { portalTabIds: number[], capturing: boolean }
+
+/** ContactConnection portal addresses. Development hosts are included so local builds work unchanged. */
+function isPortalUrl(url) {
+  try {
+    const u = new URL(url)
+    const host = u.hostname.toLowerCase()
+    if (u.protocol === 'https:' && (
+      host === 'contactconnection.io' || host.endsWith('.contactconnection.io') ||
+      host === 'contactconnection.cc' || host.endsWith('.contactconnection.cc'))) return true
+    // Local development (Vite / preview, hosts-file tenants).
+    return (u.protocol === 'http:' || u.protocol === 'https:')
+      && (host === 'localhost' || host === '127.0.0.1' || host.endsWith('.hubion.local'))
+  } catch {
+    return false
+  }
+}
 
 async function getState() {
   const s = (await chrome.storage.session.get(STATE_KEY))[STATE_KEY]
@@ -17,7 +37,15 @@ async function getState() {
 async function setState(patch) {
   const next = { ...(await getState()), ...patch }
   await chrome.storage.session.set({ [STATE_KEY]: next })
+  await showBadge(next.capturing)
   return next
+}
+
+/** A red REC on the toolbar icon whenever clicks and keys are being reported — the agent can always see it. */
+async function showBadge(capturing) {
+  await chrome.action.setBadgeText({ text: capturing ? 'REC' : '' })
+  if (capturing) await chrome.action.setBadgeBackgroundColor({ color: '#DC2626' })
+  await chrome.action.setTitle({ title: capturing ? 'ContactConnection Agent — recording this call (clicks and keys)' : 'ContactConnection Agent' })
 }
 
 async function focusTab(tab) {
@@ -44,19 +72,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || typeof msg.cc !== 'string') return
   ;(async () => {
     const state = await getState()
+    const fromPortalSite = sender.frameId === 0 && !!sender.tab?.id && isPortalUrl(sender.url ?? sender.tab?.url ?? '')
+    const fromKnownPortal = fromPortalSite && state.portalTabIds.includes(sender.tab.id)
     switch (msg.cc) {
       case 'portal-hello': {
-        // The page announcing itself is the agent portal — remember its tab (top frame only).
-        if (sender.tab?.id && sender.frameId === 0 && !state.portalTabIds.includes(sender.tab.id))
+        if (!fromPortalSite) { sendResponse({ ok: false }); return }
+        if (!state.portalTabIds.includes(sender.tab.id))
           await setState({ portalTabIds: [...state.portalTabIds, sender.tab.id] })
         sendResponse({ ok: true, version: chrome.runtime.getManifest().version, capturing: state.capturing })
         return
       }
       case 'focus':
-        await focusTab(sender.tab)
-        sendResponse({ ok: true })
+        if (fromKnownPortal) await focusTab(sender.tab)
+        sendResponse({ ok: fromKnownPortal })
         return
       case 'capture': {
+        if (!fromKnownPortal) { sendResponse({ ok: false }); return }
         const next = await setState({ capturing: !!msg.on })
         await broadcastCapture(next.capturing)
         sendResponse({ ok: true })
@@ -76,11 +107,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true   // async sendResponse
 })
 
-chrome.tabs.onRemoved.addListener(async (tabId) => {
+/** A portal tab that navigates away from the portal stops being one. */
+chrome.tabs.onUpdated.addListener(async (tabId, info) => {
+  if (!info.url) return
+  const state = await getState()
+  if (state.portalTabIds.includes(tabId) && !isPortalUrl(info.url)) await dropPortal(tabId)
+})
+
+chrome.tabs.onRemoved.addListener((tabId) => { void dropPortal(tabId) })
+
+async function dropPortal(tabId) {
   const state = await getState()
   if (!state.portalTabIds.includes(tabId)) return
   const portalTabIds = state.portalTabIds.filter((id) => id !== tabId)
   // The last portal closed — nothing is recording any more.
   const next = await setState({ portalTabIds, capturing: portalTabIds.length > 0 && state.capturing })
   if (!next.capturing) await broadcastCapture(false)
-})
+}
+
+// A fresh browser session starts with nothing recording.
+chrome.runtime.onStartup.addListener(() => { void setState({ portalTabIds: [], capturing: false }) })
+chrome.runtime.onInstalled.addListener(() => { void setState({ portalTabIds: [], capturing: false }) })

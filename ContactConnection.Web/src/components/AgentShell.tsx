@@ -15,6 +15,7 @@ import CartPanel from './cart/CartPanel'
 import MyCommissions from './MyCommissions'
 import WrapUpSummaries from './WrapUpSummaries'
 import ScreenRecordingBar from './ScreenRecordingBar'
+import ExtensionSetupPrompt from './ExtensionSetupPrompt'
 import { requestPortalFocus } from '../lib/extensionBridge'
 
 export default function AgentShell() {
@@ -130,6 +131,7 @@ export default function AgentShell() {
         </div>
       </header>
       <ScreenRecordingBar />
+      <ExtensionSetupPrompt />
 
       {/* 3-panel body */}
       <div className="flex flex-1 overflow-hidden">

@@ -26,9 +26,11 @@
       if (e.source !== window || !e.data || e.data.source !== FROM_PAGE) return
       const { type } = e.data
       if (type === 'hello') {
-        isPortal = true
+        // The background decides from the tab's real address — only a ContactConnection portal is accepted.
         const r = await send({ cc: 'portal-hello' })
-        window.postMessage({ source: FROM_EXT, type: 'ready', version: r?.version ?? null }, window.location.origin)
+        if (!r?.ok) return
+        isPortal = true
+        window.postMessage({ source: FROM_EXT, type: 'ready', version: r.version ?? null }, window.location.origin)
       } else if (type === 'focus') {
         await send({ cc: 'focus', reason: e.data.reason ?? null })
       } else if (type === 'capture') {

@@ -27,6 +27,7 @@ import AdminCommissionsPage from './pages/admin/AdminCommissionsPage'
 import BillingPage from './pages/admin/BillingPage'
 import AdminChatPage from './pages/admin/AdminChatPage'
 import AdminIconsPage from './pages/admin/AdminIconsPage'
+import ExtensionPage from './pages/ExtensionPage'
 import CommissionReportPage from './pages/CommissionReportPage'
 import AdminExportsPage from './pages/admin/AdminExportsPage'
 import AdminDispositionsPage from './pages/admin/AdminDispositionsPage'
@@ -110,6 +111,7 @@ export default function App() {
         <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/terms" element={<TermsPage />} />
         <Route path="/acceptable-use" element={<AcceptableUsePage />} />
+        <Route path="/extension" element={<ExtensionPage />} />
 
         {/* ── Agent routes ── */}
         <Route path="/login" element={isAdminSubdomain ? <PortalLoginPage /> : <LoginPage />} />

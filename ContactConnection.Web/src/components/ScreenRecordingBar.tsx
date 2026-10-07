@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useCallStore } from '../stores/callStore'
 import { useIntercomStore } from '../stores/intercomStore'
 import { connectExtension, requestPortalFocus, useExtensionStore } from '../lib/extensionBridge'
+import { EXTENSION, versionAtLeast } from '../config/extension'
 import {
   campaignRecordsScreen, loadRecordingCampaigns, startScreenShare, startSegment, stopScreenShare, stopSegment,
   useScreenShareStore,
@@ -50,7 +51,7 @@ export default function ScreenRecordingBar() {
   }, [share.status, share.campaignIds, share.recordingCallId])
 
   const needed = (share.campaignIds?.length ?? 0) > 0
-  if (!needed && extension.installed) return null
+  if (!needed && extension.installed && versionAtLeast(extension.version, EXTENSION.minimumVersion)) return null
 
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-1.5 text-xs border-b border-gray-800 bg-gray-950 shrink-0">
@@ -78,7 +79,14 @@ export default function ScreenRecordingBar() {
       {share.lastProblem && <span className="text-red-400">{share.lastProblem}</span>}
       {!extension.installed && (
         <span className="text-gray-500 ml-auto">
-          The ContactConnection Agent extension isn't installed — calls won't bring this tab forward{needed ? ' and clicks won\'t be marked in recordings' : ''}.
+          The ContactConnection Agent extension isn't installed — calls won't bring this tab forward{needed ? ' and clicks won\'t be marked in recordings' : ''}.{' '}
+          <a href="/extension" target="_blank" rel="noreferrer" className="text-sky-400 hover:text-sky-300 underline">Install it</a>
+        </span>
+      )}
+      {extension.installed && !versionAtLeast(extension.version, EXTENSION.minimumVersion) && (
+        <span className="text-amber-300 ml-auto">
+          Your ContactConnection Agent extension is out of date.{' '}
+          <a href="/extension" target="_blank" rel="noreferrer" className="text-sky-400 hover:text-sky-300 underline">Update it</a>
         </span>
       )}
     </div>
