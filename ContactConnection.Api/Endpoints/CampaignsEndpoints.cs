@@ -172,6 +172,9 @@ public static class CampaignsEndpoints
         campaign.SetSensitiveDataRetentionMinutes(req.SensitiveDataRetentionMinutes);
         if (req.CardDataRetention is { } mode)
         {
+            // S182: holding card data for an export is a platform-enabled feature.
+            if (mode == CardDataRetentionMode.UntilExported && tenantContext.Current?.FeatureFlags.CardDataExports != true)
+                return Results.BadRequest(new { error = "Card-data exports aren't enabled for this account — contact ContactConnection support with your use case to enable them." });
             try { campaign.SetCardDataRetention(mode); }
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
         }

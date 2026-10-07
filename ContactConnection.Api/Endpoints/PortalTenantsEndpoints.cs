@@ -127,13 +127,25 @@ public static class PortalTenantsEndpoints
         Guid id,
         TenantFeatureFlags flags,
         ITenantRepository tenants,
+        ContactConnection.Infrastructure.Data.ITenantDbContextFactory tenantDbs,
         CancellationToken ct)
     {
         var tenant = await tenants.GetByIdAsync(id, ct);
         if (tenant is null) return Results.NotFound();
 
+        var cardExportsTurnedOff = tenant.FeatureFlags.CardDataExports && !flags.CardDataExports;
         tenant.UpdateFeatureFlags(flags);
         await tenants.SaveChangesAsync(ct);
+
+        // S182: with card-data exports switched off, campaigns stop holding card data for them — back to the default
+        // (wiped when the script ends), so anything already held falls to the normal retention timer.
+        if (cardExportsTurnedOff)
+        {
+            await using var db = tenantDbs.Create(tenant.SchemaName);
+            var campaigns = await db.Campaigns.Where(c => c.CardDataRetention == CardDataRetentionMode.UntilExported).ToListAsync(ct);
+            foreach (var c in campaigns) c.SetCardDataRetention(CardDataRetentionMode.UntilScriptEnds);
+            await db.SaveChangesAsync(ct);
+        }
         return Results.Ok(ToResponse(tenant));
     }
 

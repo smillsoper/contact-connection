@@ -2,6 +2,7 @@ import { api } from '../../api/client'
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import AdminShell from '../../components/admin/AdminShell'
+import { useTenantFeatures, CARD_EXPORTS_OFF_NOTE } from '../../api/tenant'
 import SearchableSelect from '../../components/SearchableSelect'
 import PaymentGatewaysForm from '../../components/admin/PaymentGatewaysForm'
 import CampaignCredentialCards from '../../components/admin/CampaignCredentialCards'
@@ -684,6 +685,12 @@ function SensitiveDataRetentionForm({ campaign, onSaved }: SensitiveDataRetentio
   const [useOverride, setUseOverride] = useState(campaign.sensitiveDataRetentionMinutes != null)
   const [minutes, setMinutes] = useState(campaign.sensitiveDataRetentionMinutes ?? 1440)
   const [cardMode, setCardMode] = useState(campaign.cardDataRetention ?? 'until_script_ends')
+  // S182: "until exported" is a platform-enabled feature — forced off and disabled while the account doesn't have it.
+  const features = useTenantFeatures()
+  const cardExportsOn = features?.cardDataExports === true
+  useEffect(() => {
+    if (features && !cardExportsOn && cardMode === 'until_exported') setCardMode('until_script_ends')
+  }, [features, cardExportsOn, cardMode])
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
@@ -725,15 +732,20 @@ function SensitiveDataRetentionForm({ campaign, onSaved }: SensitiveDataRetentio
               desc: 'Kept past the script until an API Call node marked "Order submission — release card data" succeeds — in the CRM flow, the telephony flow, or a resubmit from Call Records — so a reviewer can re-authorize a corrected order. The retention period below still wipes it if the order is never submitted; set it long enough for your review turnaround.' },
             { value: 'until_exported', title: 'When a card-data export delivers it',
               desc: 'For campaigns whose orders go out only as files to a fulfillment center that runs the cards: kept until a Data Export that includes card data delivers the file to every target (FTPS + PGP), then wiped. The retention period below does not apply; Data Exports warns about card data waiting more than 2 days. The security code is still wiped after any authorization done here.' },
-          ].map((o) => (
-            <label key={o.value} className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer ${cardMode === o.value ? 'border-indigo-600 bg-indigo-950/30' : 'border-gray-800 hover:border-gray-700'}`}>
-              <input type="radio" name="cardDataRetention" className="mt-1" checked={cardMode === o.value} onChange={() => setCardMode(o.value)} />
-              <span>
-                <span className="text-sm text-gray-200 font-medium">{o.title}</span>
-                <span className="block text-xs text-gray-500 mt-0.5 leading-snug">{o.desc}</span>
-              </span>
-            </label>
-          ))}
+          ].map((o) => {
+            const locked = o.value === 'until_exported' && !cardExportsOn
+            return (
+              <label key={o.value} className={`flex items-start gap-3 rounded-lg border p-3 ${locked ? 'opacity-50 cursor-not-allowed border-gray-800' : `cursor-pointer ${cardMode === o.value ? 'border-indigo-600 bg-indigo-950/30' : 'border-gray-800 hover:border-gray-700'}`}`}>
+                <input type="radio" name="cardDataRetention" className="mt-1" disabled={locked}
+                  checked={cardMode === o.value && !locked} onChange={() => setCardMode(o.value)} />
+                <span>
+                  <span className="text-sm text-gray-200 font-medium">{o.title}</span>
+                  <span className="block text-xs text-gray-500 mt-0.5 leading-snug">{o.desc}</span>
+                  {locked && <span className="block text-xs text-amber-300 mt-1">{CARD_EXPORTS_OFF_NOTE}</span>}
+                </span>
+              </label>
+            )
+          })}
         </div>
       </div>
 

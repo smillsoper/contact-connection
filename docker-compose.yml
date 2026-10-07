@@ -161,6 +161,28 @@ services:
       - ./sftp-test/host-keys:/tmp/host-keys:ro
       - ./sftp-test/init/host-keys.sh:/etc/sftp.d/host-keys.sh:ro
 
+  # Local FTPS test server for card-data exports (S182) — card-data files go by FTPS only. 127.0.0.1 only. User "tester",
+  # password FTPS_TEST_PASSWORD from .env; TLS required (explicit FTPS, self-signed certificate: pin its fingerprint with
+  # Test connection). Uploaded files appear in ./ftps-test/upload. Passive data ports 30000-30009.
+  ftps-test:
+    image: stilliard/pure-ftpd:latest
+    container_name: cc_ftps_test
+    ports:
+      - "127.0.0.1:2121:21"
+      - "127.0.0.1:30000-30009:30000-30009"
+    environment:
+      PUBLICHOST: "127.0.0.1"
+      FTP_PASSIVE_PORTS: "30000:30009"
+      FTP_USER_NAME: tester
+      FTP_USER_PASS: ${FTPS_TEST_PASSWORD}
+      FTP_USER_HOME: /home/tester
+      ADDED_FLAGS: "--tls=2"
+      TLS_CN: "localhost"
+      TLS_ORG: "ContactConnection Dev"
+      TLS_C: "US"
+    volumes:
+      - ./ftps-test/upload:/home/tester
+
 volumes:
   cc_pgdata:
   cc_redisdata:

@@ -71,3 +71,6 @@ sftp-test/*
 !sftp-test/keys/
 sftp-test/keys/*
 !sftp-test/keys/README.pub
+
+# Local FTPS test server (S182) — uploads stay local
+ftps-test/

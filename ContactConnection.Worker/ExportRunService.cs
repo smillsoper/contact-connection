@@ -293,6 +293,12 @@ public sealed class ExportRunService : BackgroundService
         IServiceProvider services, CancellationToken ct)
     {
         var protector = services.GetRequiredService<ISensitiveDataProtector>();
+        if (services.GetRequiredService<TenantContext>().Current?.FeatureFlags.CardDataExports != true)
+        {
+            run.Fail("Card-data exports are switched off for this account.", _retryBackoff, permanent: true);
+            await db.SaveChangesAsync(CancellationToken.None);
+            return;
+        }
         if (!protector.IsConfigured)
         {
             run.Fail("Card-data files need the platform's data key (SensitiveData:MasterKey), which isn't configured.", _retryBackoff, permanent: true);

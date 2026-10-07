@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import AdminShell from '../../components/admin/AdminShell'
 import { rolesApi, PERMISSION_GROUPS, PERMISSION_LABELS, LANDING_PAGE_LABELS, type Role } from '../../api/roles'
 import { api } from '../../api/client'
+import { useTenantFeatures, CARD_EXPORTS_OFF_NOTE } from '../../api/tenant'
 
 interface UnavailableCode { id: string; name: string; roles: string[]; isActive: boolean }
 
@@ -111,14 +112,23 @@ function RoleEditorModal({
   const [landingPage, setLandingPage] = useState(role?.defaultLandingPage ?? 'agent_portal')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // S182: permissions for features the platform hasn't enabled are forced off and disabled.
+  const features = useTenantFeatures()
+  const locked = (perm: string) => perm === 'exports.card_data' && features?.cardDataExports !== true
+  useEffect(() => {
+    if (features && features.cardDataExports !== true) setPermissions((prev) => prev.filter((p) => p !== 'exports.card_data'))
+  }, [features])
 
   function togglePermission(perm: string) {
+    if (locked(perm)) return
     setPermissions(prev =>
       prev.includes(perm) ? prev.filter(p => p !== perm) : [...prev, perm]
     )
   }
 
-  function toggleGroup(perms: string[]) {
+  function toggleGroup(allPerms: string[]) {
+    const perms = allPerms.filter((p) => !locked(p))
+    if (perms.length === 0) return
     const allOn = perms.every(p => permissions.includes(p))
     setPermissions(prev =>
       allOn ? prev.filter(p => !perms.includes(p)) : [...new Set([...prev, ...perms])]
@@ -195,15 +205,19 @@ function RoleEditorModal({
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {perms.map(perm => (
-                        <label key={perm} className="flex items-center gap-3 cursor-pointer group">
+                        <label key={perm} className={`flex items-start gap-3 group ${locked(perm) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
                           <button
                             type="button"
+                            disabled={locked(perm)}
                             onClick={() => togglePermission(perm)}
-                            className={`inline-flex h-5 w-10 flex-shrink-0 cursor-pointer rounded-full p-0.5 transition-colors duration-200 ${permissions.includes(perm) ? 'bg-indigo-600' : 'bg-gray-600'}`}
+                            className={`inline-flex h-5 w-10 flex-shrink-0 rounded-full p-0.5 transition-colors duration-200 ${locked(perm) ? 'cursor-not-allowed' : 'cursor-pointer'} ${permissions.includes(perm) ? 'bg-indigo-600' : 'bg-gray-600'}`}
                           >
                             <span className={`block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${permissions.includes(perm) ? 'translate-x-5' : 'translate-x-0'}`} />
                           </button>
-                          <span className="text-sm text-gray-300 group-hover:text-white">{PERMISSION_LABELS[perm] ?? perm}</span>
+                          <span className="text-sm text-gray-300 group-hover:text-white">
+                            {PERMISSION_LABELS[perm] ?? perm}
+                            {locked(perm) && <span className="block text-xs text-amber-300 mt-0.5">{CARD_EXPORTS_OFF_NOTE}</span>}
+                          </span>
                         </label>
                       ))}
                     </div>

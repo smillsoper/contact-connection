@@ -271,8 +271,14 @@ public sealed class ExportGenerator(ScopedTenantDbContextFactory dbFactory, ISen
         }
     }
 
-    private static Dictionary<string, object?> Model(IReadOnlyDictionary<string, object?> context, Dictionary<string, object?> call) =>
-        new(context) { ["call"] = call };
+    /// <summary>A row's model. A card-data export's card is also top-level (<c>card.number</c>) for row layouts; document
+    /// layouts loop over calls and read <c>call.card.number</c>.</summary>
+    private static Dictionary<string, object?> Model(IReadOnlyDictionary<string, object?> context, Dictionary<string, object?> call)
+    {
+        var m = new Dictionary<string, object?>(context) { ["call"] = call };
+        if (call.TryGetValue("card", out var card)) m["card"] = card;
+        return m;
+    }
 
     private static async Task<bool> Passes(ExportTemplateEngine engine, ExportSpec spec, Dictionary<string, object?> model) =>
         string.IsNullOrWhiteSpace(spec.Condition) || await engine.TestAsync(spec.Condition, model);

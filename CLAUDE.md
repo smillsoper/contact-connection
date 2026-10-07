@@ -410,6 +410,7 @@ dotnet ef database update --context ContactConnectionDbContext --project Contact
 pgAdmin: http://localhost:5050
 MailHog: http://localhost:8025
 Local SFTP test server (export deliveries, S181): `sftp-test` service — host 127.0.0.1, port 2222, user `tester`, password `SFTP_TEST_PASSWORD` in `.env`, remote folder `/upload` → files land in `./sftp-test/upload` (git-ignored). Host keys persist in `./sftp-test/host-keys`; vendor public keys for key sign-in go in `./sftp-test/keys/*.pub` + `docker compose restart sftp-test`.
+Local FTPS test server (card-data exports, S182 — card-data files go by FTPS only): `ftps-test` service — host 127.0.0.1, port 2121 (explicit TLS required; pin the self-signed certificate with Test connection), passive ports 30000-30009, user `tester`, password `FTPS_TEST_PASSWORD` in `.env`; files land in `./ftps-test/upload` (git-ignored). The Worker needs `SensitiveData:MasterKey` in its User Secrets to build card-data files.
 
 ---
 
@@ -424,7 +425,7 @@ Set `KeyVault:VaultUri` (an App Service/Container App setting — not a secret, 
 | `ConnectionStrings--Redis` | `ConnectionStrings:Redis` | Api, Worker |
 | `Resend--ApiKey` | `Resend:ApiKey` | Api |
 | `FreeSWITCH--EslPassword` | `FreeSWITCH:EslPassword` | Api, Worker |
-| `SensitiveData--MasterKey` | `SensitiveData:MasterKey` | Api |
+| `SensitiveData--MasterKey` | `SensitiveData:MasterKey` | Api, Worker (card-data export files, S182) |
 
 `SensitiveData--MasterKey` = base64 of 32 random bytes (`openssl rand -base64 32`). AES-256-GCM key for the tf_secure_collect PCI blob on `call_records.sensitive_data`. Local dev: set via `dotnet user-secrets set "SensitiveData:MasterKey" "<base64>" --project ContactConnection.Api`. If unset, tf_secure_collect nodes take their `failed` path rather than capturing card data.
 

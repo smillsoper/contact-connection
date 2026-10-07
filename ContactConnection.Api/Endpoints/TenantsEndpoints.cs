@@ -39,6 +39,8 @@ public static class TenantsEndpoints
             t.Timezone,
             t.Settings,
             t.OnboardingComplete,
+            // S182: what the platform has enabled — gates options like card-data exports in the UI.
+            features = t.FeatureFlags,
         });
     }
 

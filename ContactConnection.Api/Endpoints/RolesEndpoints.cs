@@ -28,6 +28,10 @@ public static class RolesEndpoints
         return app;
     }
 
+    /// <summary>Permissions for features the platform hasn't enabled for the account are dropped (S182: exports.card_data).</summary>
+    private static List<string> Allowed(IEnumerable<string> permissions, TenantContext tc) =>
+        permissions.Where(p => p != Permission.ExportsCardData || tc.Current?.FeatureFlags.CardDataExports == true).ToList();
+
     private static async Task<IResult> GetAll(IRoleRepository roles, TenantContext tenantContext, CancellationToken ct)
     {
         if (!tenantContext.HasTenant) return Results.Unauthorized();
@@ -53,7 +57,7 @@ public static class RolesEndpoints
         var role = Role.Create(
             tenantContext.Current!.Id,
             request.Name.Trim(),
-            request.Permissions,
+            Allowed(request.Permissions, tenantContext),
             request.DefaultLandingPage);
 
         await roles.AddAsync(role, ct);
@@ -75,7 +79,7 @@ public static class RolesEndpoints
 
         // Built-in roles: allow permission + landing page changes, but keep the original name.
         var name = role.IsBuiltIn ? role.Name : request.Name.Trim();
-        role.Update(name, request.Permissions, request.DefaultLandingPage);
+        role.Update(name, Allowed(request.Permissions, tenantContext), request.DefaultLandingPage);
         await roles.SaveChangesAsync(ct);
         return Results.Ok(ToResponse(role));
     }
