@@ -5,6 +5,7 @@ import type { KpiWidgetConfig, TimeWindowConfig, WidgetFilterConfig, WidgetFilte
 import { KPI_CATALOG, DEFAULT_KPIS, KPI_DIMENSIONS, customFormat, type Format } from './widgets/KpiWidget'
 import KpiTargetInput from './KpiTargetInput'
 import RecordsColumnsEditor from './RecordsColumnsEditor'
+import DnisPicker from './DnisPicker'
 import { dashboardWidgetsApi, type RecordColumn } from '../../api/dashboardWidgets'
 import { customFieldsApi } from '../../api/customFields'
 import type { KpiTarget } from '../../types/dashboard'
@@ -24,11 +25,10 @@ interface Props {
 const DEFAULT_HOURS = 1
 const DEFAULT_MINUTES = 30
 
-// Exactly one of client/campaign/group scopes a widget at a time — picking one clears the
-// others, since the backend's agent-set resolution only honors a single filter dimension.
+// Client OR campaign (a campaign implies its client); agent group and numbers dialed narrow on top of either (S181).
 export default function WidgetConfigModal({ title, fields: rawFields, initial, initialWidgetTitle, onSave, onClose, scope }: Props) {
   // On a client dashboard the client is fixed by the dashboard, so the widget can't pick one.
-  const fields = scope ? { ...rawFields, client: false, group: false } : rawFields
+  const fields = scope ? { ...rawFields, client: false } : rawFields
   const [clients, setClients] = useState<{ id: string; name: string }[]>([])
   const [campaigns, setCampaigns] = useState<{ id: string; name: string }[]>([])
   const [groups, setGroups] = useState<{ id: string; name: string }[]>([])
@@ -36,6 +36,7 @@ export default function WidgetConfigModal({ title, fields: rawFields, initial, i
   const [clientId, setClientId] = useState(initial.clientId ?? '')
   const [campaignId, setCampaignId] = useState(initial.campaignId ?? '')
   const [groupId, setGroupId] = useState(initial.groupId ?? '')
+  const [dnis, setDnis] = useState<string[]>(initial.dnis ?? [])
   const [loggedInOnly, setLoggedInOnly] = useState(initial.loggedInOnly ?? false)
   const [timeWindowMode, setTimeWindowMode] = useState<TimeWindowConfig['mode']>(initial.timeWindow?.mode ?? 'today')
   const [groupBy, setGroupBy] = useState<string>(initial.groupBy ?? 'none')
@@ -75,7 +76,8 @@ export default function WidgetConfigModal({ title, fields: rawFields, initial, i
     onSave({
       clientId: clientId || undefined,
       campaignId: campaignId || undefined,
-      groupId: groupId || undefined,
+      groupId: fields.group ? groupId || undefined : undefined,
+      dnis: fields.dnis && dnis.length ? dnis : undefined,
       loggedInOnly: loggedInOnly || undefined,
       timeWindow: fields.timeWindow
         ? (timeWindowMode === 'hours' || timeWindowMode === 'minutes' ? { mode: timeWindowMode, value: timeWindowValue } : { mode: timeWindowMode })
@@ -115,7 +117,7 @@ export default function WidgetConfigModal({ title, fields: rawFields, initial, i
           <SearchableSelect
             options={clients.map((c) => ({ value: c.id, label: c.name }))}
             value={clientId}
-            onChange={(v) => { setClientId(v); if (v) { setCampaignId(''); setGroupId('') } }}
+            onChange={(v) => { setClientId(v); if (v) setCampaignId('') }}
             allLabel="All clients"
             className="w-full"
           />
@@ -127,7 +129,7 @@ export default function WidgetConfigModal({ title, fields: rawFields, initial, i
           <SearchableSelect
             options={campaigns.map((c) => ({ value: c.id, label: c.name }))}
             value={campaignId}
-            onChange={(v) => { setCampaignId(v); if (v) { setClientId(''); setGroupId('') } }}
+            onChange={(v) => { setCampaignId(v); if (v) setClientId('') }}
             allLabel="All campaigns"
             className="w-full"
           />
@@ -139,11 +141,14 @@ export default function WidgetConfigModal({ title, fields: rawFields, initial, i
           <SearchableSelect
             options={groups.map((g) => ({ value: g.id, label: g.name }))}
             value={groupId}
-            onChange={(v) => { setGroupId(v); if (v) { setClientId(''); setCampaignId('') } }}
+            onChange={setGroupId}
             allLabel="All groups"
             className="w-full"
           />
         </div>
+      )}
+      {fields.dnis && (
+        <DnisPicker clientId={clientId || scope?.clientId} campaignId={campaignId || undefined} value={dnis} onChange={setDnis} />
       )}
       {fields.loggedInOnly && (
         <label className="flex items-center gap-2 text-sm text-gray-300 pt-1">
@@ -324,7 +329,7 @@ export default function WidgetConfigModal({ title, fields: rawFields, initial, i
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-sm font-semibold text-white mb-1">{title}</h3>
-        <p className="text-xs text-gray-500 mb-3">Filter which data this widget shows. Pick one — the most specific wins.</p>
+        <p className="text-xs text-gray-500 mb-3">Filter which data this widget shows — every filter you set applies.</p>
 
         {tabbed && (
           <div className="flex gap-1 border-b border-gray-800 mb-4">

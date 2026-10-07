@@ -45,7 +45,7 @@ export default function RecordsWidget({ config }: { config: WidgetFilterConfig }
       .then((d) => { setData(d); setError(null) })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize, appliedSearch, sort, desc, appliedFilters, source, config.campaignId, config.clientId,
+  }, [page, pageSize, appliedSearch, sort, desc, appliedFilters, source, config.campaignId, config.clientId, config.groupId, (config.dnis ?? []).join(','),
     config.timeWindow?.mode, config.timeWindow?.value, (config.columns ?? []).join(',')])
 
   useEffect(() => { load() }, [load])

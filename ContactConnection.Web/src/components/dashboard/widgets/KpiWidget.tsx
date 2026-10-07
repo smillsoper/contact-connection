@@ -110,7 +110,7 @@ export default function KpiWidget({ config }: { config: WidgetFilterConfig }) {
     fetchData().then((d) => { setData(d); setError(null) })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.campaignId, config.clientId, config.groupBy, config.groupBy2, config.timeWindow?.mode, config.timeWindow?.value])
+  }, [config.campaignId, config.clientId, config.groupId, (config.dnis ?? []).join(','), config.groupBy, config.groupBy2, config.timeWindow?.mode, config.timeWindow?.value])
 
   useEffect(() => { load() }, [load])
 

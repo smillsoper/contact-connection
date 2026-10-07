@@ -43,7 +43,7 @@ export default function QueuedCallsWidget({ config }: { config: WidgetFilterConf
       .then((r) => { setRows(r); setError(null) })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.campaignId, config.clientId])
+  }, [config.campaignId, config.clientId, config.groupId, (config.dnis ?? []).join(',')])
 
   useEffect(() => { load() }, [load])
 

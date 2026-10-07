@@ -314,6 +314,7 @@ app.MapKpiEndpoints();
 app.MapRecordsWidgetEndpoints();
 app.MapScriptIntegrationsEndpoints();
 app.MapCallerHistoryEndpoints();
+app.MapWidgetFilterOptions();
 app.MapClientPortalAuthEndpoints();
 app.MapClientPortalEndpoints();
 app.MapAdminClientUsersEndpoints();

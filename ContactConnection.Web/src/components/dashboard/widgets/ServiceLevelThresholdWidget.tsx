@@ -21,7 +21,7 @@ export default function ServiceLevelThresholdWidget({ config }: { config: Widget
       .then(setData)
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.campaignId, config.clientId, config.timeWindow?.mode, config.timeWindow?.value])
+  }, [config.campaignId, config.clientId, config.groupId, (config.dnis ?? []).join(','), config.timeWindow?.mode, config.timeWindow?.value])
 
   useEffect(() => { load() }, [load])
 

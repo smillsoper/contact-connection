@@ -12,8 +12,11 @@ namespace ContactConnection.Infrastructure.Kpis;
 /// again (with a subtotal row per first-level group). <paramref name="TimeZone"/>: the zone day / hour rows are in.
 /// <paramref name="CampaignIds"/>: when set, only these campaigns (a client dashboard's locked scope, S181) — applied on top
 /// of <paramref name="ClientId"/> / <paramref name="CampaignId"/>; an empty set matches nothing.</param>
+/// <paramref name="AgentIds"/>: an agent group's members (S181) — interactions those agents handled, calls they answered.
+/// <paramref name="DnisKeys"/>: only calls to these numbers (<see cref="PhoneKey"/> keys).</param>
 public sealed record KpiQuery(DateTimeOffset Since, DateTimeOffset Until, Guid? ClientId, Guid? CampaignId, string GroupBy,
-    string? GroupBy2 = null, string TimeZone = "UTC", IReadOnlySet<Guid>? CampaignIds = null);
+    string? GroupBy2 = null, string TimeZone = "UTC", IReadOnlySet<Guid>? CampaignIds = null,
+    IReadOnlySet<Guid>? AgentIds = null, IReadOnlySet<string>? DnisKeys = null);
 
 /// <param name="Label2">The second-level value (two-dimension reports).</param>
 /// <param name="Subtotal">A first-level group's subtotal row (two-dimension reports).</param>
@@ -107,6 +110,8 @@ public sealed class KpiService(ScopedTenantDbContextFactory dbFactory)
             var campaignId = x.IxCampaign is { } c && c != Guid.Empty ? c : x.RecordCampaign;
             var clientId = campaignClient.GetValueOrDefault(campaignId, x.ClientId);
             if (!InScope(campaignId, clientId)) continue;
+            if (q.AgentIds is not null && (x.AgentId is not { } ia || !q.AgentIds.Contains(ia))) continue;
+            if (!PhoneKey.Matches(q.DnisKeys, x.Dnis)) continue;
 
             var category = x.DispositionId is { } d && dispositionCategory.TryGetValue(d, out var catId) ? categories.GetValueOrDefault(catId) : null;
             if (category?.ExcludedFromKpis == true) continue;
@@ -159,7 +164,11 @@ public sealed class KpiService(ScopedTenantDbContextFactory dbFactory)
         {
             var clientId = campaignClient.GetValueOrDefault(r.CampaignId, r.ClientId);
             if (!InScope(r.CampaignId, clientId) || testCalls.Contains(r.Id)) continue;
+            if (!PhoneKey.Matches(q.DnisKeys, r.Dnis)) continue;
             var history = states.GetValueOrDefault(r.Id) ?? [];
+            // Agent group (S181): the agent who answered the call; an unanswered call has none, so it's left out.
+            if (q.AgentIds is not null && (history.FirstOrDefault(st => st.State == "active")?.AgentId is not { } answeredBy
+                                          || !q.AgentIds.Contains(answeredBy))) continue;
             double talk = 0;
             for (var i = 0; i < history.Count; i++)
                 if (history[i].State == "active" && i + 1 < history.Count)

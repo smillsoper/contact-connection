@@ -24,7 +24,7 @@ public static class ActiveCallsWidgetEndpoint
     }
 
     private static async Task<IResult> Get(
-        Guid? campaignId, Guid? clientId,
+        Guid? campaignId, Guid? clientId, Guid? groupId, string? dnis, IAgentGroupRepository agentGroups,
         ICampaignRepository campaigns, IAgentRepository agents, ITelephonyCallSessionStore sessions, IFlowEngine flowEngine,
         ScopedTenantDbContextFactory dbFactory, TenantContext tenantContext, CancellationToken ct)
     {
@@ -34,6 +34,9 @@ public static class ActiveCallsWidgetEndpoint
         HashSet<Guid>? scope = null;
         if (campaignId is { } cid) scope = [cid];
         else if (clientId is { } clid) scope = (await campaigns.GetAllAsync(clid, ct)).Select(c => c.Id).ToHashSet();
+        // S181: the agent on the call in this group; the number the caller dialed.
+        var groupAgents = await WidgetFilters.GroupAgentsAsync(groupId, agentGroups, ct);
+        var dnisKeys = WidgetFilters.Dnis(dnis);
 
         // Inbound / callback calls with an agent on the line.
         var live = (await sessions.GetAllAsync(ct))
@@ -66,6 +69,8 @@ public static class ActiveCallsWidgetEndpoint
             var interaction = record?.Interactions.Where(i => i.AgentId == agentId).OrderByDescending(i => i.InteractionNumber).FirstOrDefault();
             var campaign = interaction?.CampaignId is { } ic && ic != Guid.Empty ? ic : s.CampaignId;
             if (scope is not null && !scope.Contains(campaign)) continue;
+            if (groupAgents is not null && !groupAgents.Contains(agentId)) continue;
+            if (!Domain.ValueObjects.PhoneKey.Matches(dnisKeys, s.DestinationNumber)) continue;
             rows.Add(new ActiveCallRow(
                 s.CallRecordId, s.Vars.GetValueOrDefault("_queue_callback") == "true" ? "callback" : "inbound",
                 s.CallerNumber, s.DestinationNumber, campaign, campaignNames.GetValueOrDefault(campaign), agentId,
@@ -80,6 +85,8 @@ public static class ActiveCallsWidgetEndpoint
         foreach (var r in records.Where(r => r.Source == CallSource.Outbound && !liveRecordIds.Contains(r.Id)))
         {
             if (scope is not null && !scope.Contains(r.CampaignId)) continue;
+            if (groupAgents is not null && !groupAgents.Contains(r.AgentId!.Value)) continue;
+            if (dnisKeys is not null) continue;   // a manual outbound call has no dialed-in number
             rows.Add(new ActiveCallRow(
                 r.Id, "outbound", r.CallerId, r.Dnis, r.CampaignId == Guid.Empty ? null : r.CampaignId,
                 r.CampaignId == Guid.Empty ? "Direct dial" : campaignNames.GetValueOrDefault(r.CampaignId),

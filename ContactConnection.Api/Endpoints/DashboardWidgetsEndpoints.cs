@@ -171,6 +171,7 @@ public static class DashboardWidgetsEndpoints
         group.MapGet("/queued-calls", async (
             Guid? campaignId,
             Guid? clientId,
+            string? dnis,
             ICampaignRepository campaigns,
             IAgentGroupRepository agentGroups,
             ITelephonyCallSessionStore sessions,
@@ -184,11 +185,13 @@ public static class DashboardWidgetsEndpoints
             if (campaignId is { } cid) scope = [cid];
             else if (clientId is { } clid)
                 scope = (await campaigns.GetAllAsync(clid, ct)).Select(c => c.Id).ToHashSet();
+            var dnisKeys = WidgetFilters.Dnis(dnis);
 
             var queued = (await sessions.GetAllAsync(ct))
                 .Where(s => s.TenantId == tenantId
                             && s.Vars.GetValueOrDefault("_queued") == "true"
-                            && (scope is null || scope.Contains(s.CampaignId)))
+                            && (scope is null || scope.Contains(s.CampaignId))
+                            && Domain.ValueObjects.PhoneKey.Matches(dnisKeys, s.DestinationNumber))
                 .ToList();
             if (queued.Count == 0) return Results.Ok(Array.Empty<object>());
 
@@ -233,6 +236,7 @@ public static class DashboardWidgetsEndpoints
         group.MapGet("/call-state-by-campaign", async (
             Guid? campaignId,
             Guid? clientId,
+            string? dnis,
             ICampaignRepository campaigns,
             ICallStateHistoryRepository callStateHistory,
             TenantContext tenantContext,
@@ -253,7 +257,7 @@ public static class DashboardWidgetsEndpoints
             }
 
             var campaignIds = scopedCampaigns.Select(c => c.Id).ToList();
-            var counts = await callStateHistory.GetActiveStateCountsAsync(tenant.SchemaName, campaignIds, ct);
+            var counts = await callStateHistory.GetActiveStateCountsAsync(tenant.SchemaName, campaignIds, ct, WidgetFilters.Dnis(dnis));
             var countsByCampaign = counts.ToLookup(row => row.CampaignId);
 
             var result = scopedCampaigns
@@ -304,10 +308,13 @@ public static class DashboardWidgetsEndpoints
         group.MapGet("/service-level-threshold", async (
             Guid? campaignId,
             Guid? clientId,
+            Guid? groupId,
+            string? dnis,
             string? timeWindowMode,
             int? timeWindowValue,
             ICampaignRepository campaigns,
             ICallStateHistoryRepository callStateHistory,
+            IAgentGroupRepository agentGroups,
             TenantContext tenantContext,
             CancellationToken ct) =>
         {
@@ -325,7 +332,8 @@ public static class DashboardWidgetsEndpoints
             }
 
             var sinceUtc = ComputeSinceUtc(tenant.Timezone, timeWindowMode, timeWindowValue);
-            var stats = await callStateHistory.GetServiceLevelStatsAsync(tenant.SchemaName, campaignIds, sinceUtc, ct);
+            var stats = await callStateHistory.GetServiceLevelStatsAsync(tenant.SchemaName, campaignIds, sinceUtc, ct,
+                await WidgetFilters.GroupAgentsAsync(groupId, agentGroups, ct), WidgetFilters.Dnis(dnis));
 
             var total = stats.Met + stats.Missed;
             return Results.Ok(new
@@ -399,17 +407,15 @@ public static class DashboardWidgetsEndpoints
             foreach (var c in clientCampaigns)
                 await AddCampaignAgentsAsync(c.Id, ids, campaigns, agentGroups, ct);
         }
-        else if (groupId.HasValue)
-        {
-            var grp = await agentGroups.GetByIdWithMembersAsync(groupId.Value, ct);
-            if (grp is not null)
-                foreach (var m in grp.Members) ids.Add(m.AgentId);
-        }
         else
         {
             var all = await agents.GetAllAsync(ct);
             foreach (var a in all.Where(a => a.IsActive)) ids.Add(a.Id);
         }
+
+        // Agent group (S181) narrows on top of the client / campaign — "this campaign's agents in this group".
+        if (await WidgetFilters.GroupAgentsAsync(groupId, agentGroups, ct) is { } members)
+            ids.IntersectWith(members);
 
         return ids.ToList();
     }

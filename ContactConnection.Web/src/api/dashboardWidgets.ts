@@ -83,6 +83,7 @@ function buildQuery(params: WidgetFilterConfig): string {
   if (params.clientId) parts.push(`clientId=${params.clientId}`)
   if (params.groupId) parts.push(`groupId=${params.groupId}`)
   if (params.loggedInOnly) parts.push('loggedInOnly=true')
+  if (params.dnis?.length) parts.push(`dnis=${encodeURIComponent(params.dnis.join(','))}`)
   if (params.timeWindow) {
     parts.push(`timeWindowMode=${params.timeWindow.mode}`)
     if (params.timeWindow.value != null) parts.push(`timeWindowValue=${params.timeWindow.value}`)

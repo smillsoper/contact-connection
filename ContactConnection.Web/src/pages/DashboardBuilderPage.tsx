@@ -140,7 +140,7 @@ export default function DashboardBuilderPage() {
     const ids = scope.scopeCampaignIds
     const campaignId = config.campaignId && (ids.length === 0 || ids.includes(config.campaignId)) ? config.campaignId
       : ids.length === 1 ? ids[0] : undefined
-    return { ...config, groupId: undefined, clientId: campaignId ? undefined : scope.scopeClientId, campaignId }
+    return { ...config, clientId: campaignId ? undefined : scope.scopeClientId, campaignId }
   }, [scope])
 
   const handleCancelEdit = useCallback(() => {

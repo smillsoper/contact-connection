@@ -41,7 +41,10 @@ export interface RecordsWidgetConfig {
 export interface WidgetFilterConfig extends KpiWidgetConfig, RecordsWidgetConfig {
   campaignId?: string
   clientId?: string
+  /** Agent group (S181): the agents shown, or the agent who handled / answered the call. Combines with client / campaign. */
   groupId?: string
+  /** Numbers dialed (S181) — only calls to these; empty = all. */
+  dnis?: string[]
   loggedInOnly?: boolean
   timeWindow?: TimeWindowConfig
 }
@@ -144,18 +147,21 @@ export interface WidgetFilterFields {
   kpi?: boolean
   /** Records widget: columns, detail columns, page size, recordings (S181). */
   records?: boolean
+  /** Multi-select of numbers dialed (S181) — call widgets only. */
+  dnis?: boolean
 }
 
 export const WIDGET_FILTER_FIELDS: Record<DashboardWidgetType, WidgetFilterFields> = {
   agent_state_counter: { client: true, campaign: true, group: true, loggedInOnly: true, timeWindow: false },
   agent_list: { client: true, campaign: true, group: true, loggedInOnly: true, timeWindow: false },
-  call_state_by_campaign: { client: true, campaign: true, group: false, loggedInOnly: false, timeWindow: false },
+  // Agent group = the agent who handled / answered (not offered on widgets about calls that haven't reached an agent).
+  call_state_by_campaign: { client: true, campaign: true, group: false, loggedInOnly: false, timeWindow: false, dnis: true },
   callbacks: { client: true, campaign: true, group: false, loggedInOnly: false, timeWindow: false },
-  service_level_threshold: { client: true, campaign: true, group: false, loggedInOnly: false, timeWindow: true },
-  queued_calls: { client: true, campaign: true, group: false, loggedInOnly: false, timeWindow: false },
-  active_calls: { client: true, campaign: true, group: false, loggedInOnly: false, timeWindow: false },
-  kpi: { client: true, campaign: true, group: false, loggedInOnly: false, timeWindow: true, kpi: true },
-  records: { client: true, campaign: true, group: false, loggedInOnly: false, timeWindow: true, records: true },
+  service_level_threshold: { client: true, campaign: true, group: true, loggedInOnly: false, timeWindow: true, dnis: true },
+  queued_calls: { client: true, campaign: true, group: false, loggedInOnly: false, timeWindow: false, dnis: true },
+  active_calls: { client: true, campaign: true, group: true, loggedInOnly: false, timeWindow: false, dnis: true },
+  kpi: { client: true, campaign: true, group: true, loggedInOnly: false, timeWindow: true, kpi: true, dnis: true },
+  records: { client: true, campaign: true, group: true, loggedInOnly: false, timeWindow: true, records: true, dnis: true },
 }
 
 export function newWidgetId(): string {

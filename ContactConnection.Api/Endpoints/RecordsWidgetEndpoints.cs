@@ -34,13 +34,15 @@ public static class RecordsWidgetEndpoints
         (csv ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Where(RecordColumns.IsValid).ToList();
 
     private static async Task<IResult> Query(Guid? clientId, Guid? campaignId, string? timeWindowMode, int? timeWindowValue, string? columns,
+        Guid? groupId, string? dnis, Application.Interfaces.Repositories.IAgentGroupRepository agentGroups,
         HttpRequest request, CallRecordsReport report, TenantContext tc, CancellationToken ct)
     {
         if (tc.Current is not { } tenant) return Results.Unauthorized();
         var (since, until) = KpiEndpoints.Window(tenant.Timezone, timeWindowMode, timeWindowValue, DateTimeOffset.UtcNow);
         var p = Paging(request, 25);
         return Results.Ok(await report.QueryAsync(new RecordsQuery(since, until, campaignId is null ? clientId : null, campaignId, null,
-            Columns(columns), p.Search, p.Filters, p.Sort, p.Desc, p.Page, p.PageSize, tenant.Timezone), ct));
+            Columns(columns), p.Search, p.Filters, p.Sort, p.Desc, p.Page, p.PageSize, tenant.Timezone,
+            await WidgetFilters.GroupAgentsAsync(groupId, agentGroups, ct), WidgetFilters.Dnis(dnis)), ct));
     }
 
     private static async Task<IResult> Detail(Guid id, Guid? clientId, Guid? campaignId, bool? allowRecordings, CallRecordsReport report,

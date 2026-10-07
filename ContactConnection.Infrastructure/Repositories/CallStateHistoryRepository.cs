@@ -24,7 +24,7 @@ public class CallStateHistoryRepository(ITenantDbContextFactory factory) : ICall
     /// query pipeline and reads directly off the underlying Npgsql connection.
     /// </summary>
     public async Task<List<CampaignStateCount>> GetActiveStateCountsAsync(
-        string tenantSchemaName, List<Guid>? campaignIds, CancellationToken ct = default)
+        string tenantSchemaName, List<Guid>? campaignIds, CancellationToken ct = default, IReadOnlySet<string>? dnisKeys = null)
     {
         await using var db = factory.Create(tenantSchemaName);
         var conn = (NpgsqlConnection)db.Database.GetDbConnection();
@@ -32,6 +32,10 @@ public class CallStateHistoryRepository(ITenantDbContextFactory factory) : ICall
             await conn.OpenAsync(ct);
 
         var campaignFilterSql = campaignIds is not null ? "AND campaign_id = ANY(@campaignIds)" : "";
+        // DNIS filter (S181): the call's dialed number, compared on its last 10 digits (see PhoneKey).
+        var dnisFilterSql = dnisKeys is not null
+            ? @"AND EXISTS (SELECT 1 FROM call_records r WHERE r.id = latest.call_record_id AND right(regexp_replace(coalesce(r.dnis, ''), '\D', '', 'g'), 10) = ANY(@dnisKeys))"
+            : "";
         var sql = $"""
             WITH latest AS (
                 SELECT DISTINCT ON (call_record_id) call_record_id, campaign_id, state
@@ -42,6 +46,7 @@ public class CallStateHistoryRepository(ITenantDbContextFactory factory) : ICall
             FROM latest
             WHERE state NOT IN (@completed, @abandoned)
             {campaignFilterSql}
+            {dnisFilterSql}
             GROUP BY campaign_id, state
             """;
 
@@ -50,6 +55,8 @@ public class CallStateHistoryRepository(ITenantDbContextFactory factory) : ICall
         cmd.Parameters.AddWithValue("abandoned", CallHistoryState.Abandoned);
         if (campaignIds is not null)
             cmd.Parameters.Add(new NpgsqlParameter("campaignIds", NpgsqlDbType.Array | NpgsqlDbType.Uuid) { Value = campaignIds.ToArray() });
+        if (dnisKeys is not null)
+            cmd.Parameters.Add(new NpgsqlParameter("dnisKeys", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = dnisKeys.ToArray() });
 
         var results = new List<CampaignStateCount>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -106,7 +113,8 @@ public class CallStateHistoryRepository(ITenantDbContextFactory factory) : ICall
     }
 
     public async Task<ServiceLevelStats> GetServiceLevelStatsAsync(
-        string tenantSchemaName, List<Guid>? campaignIds, DateTimeOffset sinceUtc, CancellationToken ct = default)
+        string tenantSchemaName, List<Guid>? campaignIds, DateTimeOffset sinceUtc, CancellationToken ct = default,
+        IReadOnlySet<Guid>? agentIds = null, IReadOnlySet<string>? dnisKeys = null)
     {
         await using var db = factory.Create(tenantSchemaName);
         var query = db.CallStateHistory.Where(e => e.MetServiceLevel != null && e.EnteredAt >= sinceUtc);
@@ -115,8 +123,16 @@ public class CallStateHistoryRepository(ITenantDbContextFactory factory) : ICall
 
         // Each call counts once per campaign — its first stamped answer. Rows stamped before S181 could carry a second
         // stamp for a re-bridge of the same queue entry (take-over / transfer), which isn't a second answer.
-        var rows = await query.Select(e => new { e.CallRecordId, e.CampaignId, e.Sequence, e.MetServiceLevel }).ToListAsync(ct);
-        var firsts = rows.GroupBy(e => (e.CallRecordId, e.CampaignId)).Select(g => g.OrderBy(e => e.Sequence).First().MetServiceLevel).ToList();
-        return new ServiceLevelStats(firsts.Count(m => m == true), firsts.Count(m => m == false));
+        var rows = await query.Select(e => new { e.CallRecordId, e.CampaignId, e.Sequence, e.MetServiceLevel, e.AgentId }).ToListAsync(ct);
+        var firsts = rows.GroupBy(e => (e.CallRecordId, e.CampaignId)).Select(g => g.OrderBy(e => e.Sequence).First()).ToList();
+        // Agent group (S181): the agent who answered. DNIS: the number the caller dialed.
+        if (agentIds is not null) firsts = firsts.Where(f => f.AgentId is { } a && agentIds.Contains(a)).ToList();
+        if (dnisKeys is not null)
+        {
+            var ids = firsts.Select(f => f.CallRecordId).Distinct().ToList();
+            var dnis = await db.CallRecords.AsNoTracking().Where(r => ids.Contains(r.Id)).Select(r => new { r.Id, r.Dnis }).ToDictionaryAsync(r => r.Id, r => r.Dnis, ct);
+            firsts = firsts.Where(f => Domain.ValueObjects.PhoneKey.Matches(dnisKeys, dnis.GetValueOrDefault(f.CallRecordId))).ToList();
+        }
+        return new ServiceLevelStats(firsts.Count(f => f.MetServiceLevel == true), firsts.Count(f => f.MetServiceLevel == false));
     }
 }

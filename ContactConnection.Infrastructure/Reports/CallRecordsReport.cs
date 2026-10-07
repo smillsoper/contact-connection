@@ -50,9 +50,11 @@ public static class RecordColumns
 /// <param name="CampaignIds">When set, only these campaigns (a client dashboard's locked scope); an empty set matches nothing.</param>
 /// <param name="Filters">Column key → text the column's value must contain (case-insensitive).</param>
 /// <param name="Sort">A column key; newest call first when unset.</param>
+/// <param name="AgentIds">An agent group's members (S181): calls any of them handled.</param>
+/// <param name="DnisKeys">Only calls to these numbers (PhoneKey keys).</param>
 public sealed record RecordsQuery(DateTimeOffset Since, DateTimeOffset Until, Guid? ClientId, Guid? CampaignId, IReadOnlySet<Guid>? CampaignIds,
     IReadOnlyList<string> Columns, string? Search, IReadOnlyDictionary<string, string>? Filters, string? Sort, bool Descending,
-    int Page, int PageSize, string TimeZone);
+    int Page, int PageSize, string TimeZone, IReadOnlySet<Guid>? AgentIds = null, IReadOnlySet<string>? DnisKeys = null);
 
 public sealed record RecordsRow(Guid Id, IReadOnlyDictionary<string, string?> Values);
 public sealed record RecordsPage(int Total, int Page, int PageSize, bool Truncated, IReadOnlyList<RecordColumn> Columns, IReadOnlyList<RecordsRow> Rows);
@@ -158,7 +160,11 @@ public sealed class CallRecordsReport(ScopedTenantDbContextFactory dbFactory)
         var calls = await Project(query.OrderByDescending(c => c.CreatedAt).Take(MaxRows + 1)).ToListAsync(ct);
         var truncated = calls.Count > MaxRows;
         if (truncated) calls.RemoveAt(calls.Count - 1);
+        if (q.DnisKeys is not null) calls = calls.Where(c => Domain.ValueObjects.PhoneKey.Matches(q.DnisKeys, c.Dnis)).ToList();
         var interactions = await InteractionsAsync(db, calls.Select(c => c.Id).ToList(), ct);
+        if (q.AgentIds is not null)
+            calls = calls.Where(c => (c.AgentId is { } a && q.AgentIds.Contains(a))
+                || (interactions.GetValueOrDefault(c.Id) ?? []).Any(i => i.AgentId is { } ia && q.AgentIds.Contains(ia))).ToList();
 
         // Values for the shown columns, plus any column being filtered or sorted on.
         var needed = columns.Select(c => c.Key)

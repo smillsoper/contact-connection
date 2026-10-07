@@ -24,13 +24,7 @@ public static class CallerHistoryEndpoints
         return app;
     }
 
-    /// <summary>The last 10 digits of a phone number (drops +1 / formatting); null when too short to match on.</summary>
-    internal static string? PhoneKey(string? phone)
-    {
-        var digits = new string((phone ?? "").Where(char.IsDigit).ToArray());
-        if (digits.Length < 7) return null;
-        return digits.Length > 10 ? digits[^10..] : digits;
-    }
+    internal static string? PhoneKey(string? phone) => Domain.ValueObjects.PhoneKey.Of(phone);
 
     private static async Task<(CallRecord Current, string Key, IQueryable<CallRecord> Past)?> QueryAsync(TenantDbContext db, Guid id, CancellationToken ct)
     {
