@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { chatApi, stateStyle, type BrowseChannel, type ChatChannel, type ChatMessage, type ChatUser, type HelpRequest } from '../api/chat'
 import { useChatStore, channelTitle } from '../stores/chatStore'
 import { useCallStore } from '../stores/callStore'
@@ -10,10 +10,15 @@ import { Conversation, ThreadView, StateLine } from './chat/ChatConversation'
  * channels (set up on the Team Chat admin page), direct and group messages, threads, reactions, @mentions, live status
  * for everyone, and a raise-hand path to the agent's own supervisors.
  */
+/** At this width and up the conversation list stays on the left beside the open conversation. */
+const TWO_PANE_MIN = 560
+
 export default function ChatPanel({ onClose }: { onClose?: () => void }) {
   const status = useChatStore((s) => s.status)
   const disabledMessage = useChatStore((s) => s.disabledMessage)
   const view = useChatStore((s) => s.view)
+  const wide = useChatStore((s) => s.wide)
+  const root = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     void startChat()
@@ -21,19 +26,44 @@ export default function ChatPanel({ onClose }: { onClose?: () => void }) {
     return () => useChatStore.getState().setVisible(false)
   }, [])
 
-  if (status === 'disabled') {
-    return <Shell onClose={onClose}><p className="p-4 text-xs text-gray-500 text-center">{disabledMessage}</p></Shell>
-  }
-  if (status !== 'ready') {
-    return <Shell onClose={onClose}><p className="p-4 text-xs text-gray-500">{status === 'error' ? 'Chat is unavailable right now.' : 'Loading chat…'}</p></Shell>
-  }
+  useEffect(() => {
+    const el = root.current
+    if (!el) return
+    const ro = new ResizeObserver(([e]) => {
+      const w = e.contentRect.width >= TWO_PANE_MIN
+      if (w !== useChatStore.getState().wide) useChatStore.setState({ wide: w })
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
-  if (view.kind === 'channel') return <div className="flex flex-col h-full"><Conversation channelId={view.channelId} /></div>
-  if (view.kind === 'thread') return <div className="flex flex-col h-full"><ThreadView channelId={view.channelId} parentId={view.parentId} /></div>
-  if (view.kind === 'new-dm') return <NewDirect />
-  if (view.kind === 'browse') return <Browse />
-  if (view.kind === 'search') return <Search />
-  return <ChannelList onClose={onClose} />
+  let body: React.ReactNode
+  if (status === 'disabled') {
+    body = <Shell onClose={onClose}><p className="p-4 text-xs text-gray-500 text-center">{disabledMessage}</p></Shell>
+  } else if (status !== 'ready') {
+    body = <Shell onClose={onClose}><p className="p-4 text-xs text-gray-500">{status === 'error' ? 'Chat is unavailable right now.' : 'Loading chat…'}</p></Shell>
+  } else {
+    const detail =
+      view.kind === 'channel' ? <div className="flex flex-col h-full"><Conversation channelId={view.channelId} /></div>
+      : view.kind === 'thread' ? <div className="flex flex-col h-full"><ThreadView channelId={view.channelId} parentId={view.parentId} /></div>
+      : view.kind === 'new-dm' ? <NewDirect />
+      : view.kind === 'browse' ? <Browse />
+      : view.kind === 'search' ? <Search />
+      : null
+    body = wide ? (
+      <div className="flex h-full min-h-0">
+        <div className="w-60 shrink-0 border-r border-gray-800 flex flex-col min-h-0"><ChannelList onClose={onClose} /></div>
+        <div className="flex-1 min-w-0 flex flex-col min-h-0">
+          {detail ?? (
+            <div className="flex-1 flex items-center justify-center p-6">
+              <p className="text-xs text-gray-500 text-center">Pick a channel or a person on the left to start chatting.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    ) : (detail ?? <ChannelList onClose={onClose} />)
+  }
+  return <div ref={root} className="h-full min-h-0 flex flex-col">{body}</div>
 }
 
 function Shell({ children, onClose, actions }: { children: React.ReactNode; onClose?: () => void; actions?: React.ReactNode }) {
@@ -50,9 +80,10 @@ function Shell({ children, onClose, actions }: { children: React.ReactNode; onCl
 }
 
 function Header({ title, onBack }: { title: string; onBack: () => void }) {
+  const wide = useChatStore((s) => s.wide)
   return (
     <div className="px-3 py-2 border-b border-gray-800 flex items-center gap-2 shrink-0">
-      <button onClick={onBack} className="text-gray-400 hover:text-white text-sm" title="Back">←</button>
+      {!wide && <button onClick={onBack} className="text-gray-400 hover:text-white text-sm" title="Back">←</button>}
       <p className="text-sm text-white font-medium">{title}</p>
     </div>
   )
@@ -151,9 +182,10 @@ function ChannelRow({ c }: { c: ChatChannel }) {
   const others = c.memberIds.filter((id) => id !== me?.id)
   const single = c.kind === 'dm' && others.length === 1 ? users[others[0]] : null
   const bold = c.unread > 0 || c.mentions > 0
+  const active = useChatStore((s) => s.wide && 'channelId' in s.view && s.view.channelId === c.id)
   return (
     <button onClick={() => setView({ kind: 'channel', channelId: c.id })}
-      className="w-full text-left px-4 py-1 flex items-center gap-2 hover:bg-gray-800/60">
+      className={`w-full text-left px-4 py-1 flex items-center gap-2 ${active ? 'bg-indigo-900/40' : 'hover:bg-gray-800/60'}`}>
       {single && <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${stateStyle(single.state).dot}`} />}
       <span className={`text-xs truncate flex-1 ${bold ? 'text-white font-semibold' : c.retired ? 'text-gray-600' : 'text-gray-400'}`}>
         {channelTitle(c, users, me?.id)}

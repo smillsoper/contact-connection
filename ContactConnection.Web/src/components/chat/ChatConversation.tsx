@@ -14,6 +14,7 @@ export function Conversation({ channelId }: { channelId: string }) {
   const me = useChatStore((s) => s.me)
   const visible = useChatStore((s) => s.visible)
   const setView = useChatStore((s) => s.setView)
+  const wide = useChatStore((s) => s.wide)
   const [error, setError] = useState<string | null>(null)
   const [loadingOlder, setLoadingOlder] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -65,7 +66,7 @@ export function Conversation({ channelId }: { channelId: string }) {
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="px-3 py-2 border-b border-gray-800 flex items-center gap-2 shrink-0">
-        <button onClick={() => setView({ kind: 'list' })} className="text-gray-400 hover:text-white text-sm" title="Back">←</button>
+        {!wide && <button onClick={() => setView({ kind: 'list' })} className="text-gray-400 hover:text-white text-sm" title="Back">←</button>}
         <div className="min-w-0 flex-1">
           <p className="text-sm text-white font-medium truncate" title={title}>{title}</p>
           {single ? <StateLine user={single} /> : (

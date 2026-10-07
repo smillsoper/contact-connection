@@ -22,7 +22,7 @@ export default function ChatLauncher() {
   return (
     <>
       {open && (
-        <div className="fixed bottom-20 right-4 z-40 w-[380px] max-w-[calc(100vw-2rem)] h-[70vh] bg-gray-950 border border-gray-700 rounded-xl shadow-2xl overflow-hidden flex flex-col">
+        <div className="fixed bottom-20 right-4 z-40 w-[760px] max-w-[calc(100vw-2rem)] h-[75vh] bg-gray-950 border border-gray-700 rounded-xl shadow-2xl overflow-hidden flex flex-col">
           <ChatPanel onClose={() => setOpen(false)} />
         </div>
       )}

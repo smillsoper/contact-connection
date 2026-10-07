@@ -148,7 +148,7 @@ export default function AgentShell() {
         </div>
 
         {/* Right — Chat (~300px) */}
-        <div className="w-75 shrink-0 border-l border-gray-800 flex flex-col overflow-hidden">
+        <div className="w-75 xl:w-[600px] 2xl:w-[680px] shrink-0 border-l border-gray-800 flex flex-col overflow-hidden">
           <ChatPanel />
         </div>
       </div>
