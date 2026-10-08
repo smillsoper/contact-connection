@@ -95,6 +95,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IPlatformTokenService, PlatformJwtTokenService>();
         services.AddScoped<SupportSessionReader>();
         services.AddScoped<ContactConnection.Infrastructure.Health.HealthRecorder>();
+        services.AddSingleton<ContactConnection.Infrastructure.Health.IIntegrationHealth, ContactConnection.Infrastructure.Health.RedisIntegrationHealth>();
         services.AddSingleton<IEntraIdTokenValidator, EntraIdTokenValidator>();
         services.AddSingleton<IMfaService, MfaService>();
 

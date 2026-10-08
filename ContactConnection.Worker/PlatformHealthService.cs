@@ -96,6 +96,11 @@ public sealed class PlatformHealthService(IServiceScopeFactory scopes, IConnecti
 
         // ── Calls and queued work, across tenants ──
         results.AddRange(await MeasureTenantsAsync(now, ct));
+
+        // ── Integrations + things that expire (phase 2) ──
+        results.AddRange(await MeasureIntegrationsAsync(ct));
+        results.Add(await MeasureCredentialsAsync(ct));
+        results.Add(await MeasureTlsAsync(ct));
         return results;
     }
 
@@ -225,7 +230,8 @@ public sealed class PlatformHealthService(IServiceScopeFactory scopes, IConnecti
 
     private async Task<List<HealthResult>> MeasureTenantsAsync(DateTimeOffset now, CancellationToken ct)
     {
-        int queued = 0, abandoned = 0, exportsFailed = 0, callbacksLate = 0, mergesWaiting = 0;
+        int queued = 0, abandoned = 0, exportsFailed = 0, callbacksLate = 0, mergesWaiting = 0, payTotal = 0, payErrors = 0;
+        string? payLastError = null;
         DateTimeOffset? oldestWaiting = null;
         string? oldestTenant = null;
         var since = now.AddMinutes(-15);
@@ -248,6 +254,11 @@ public sealed class PlatformHealthService(IServiceScopeFactory scopes, IConnecti
                 callbacksLate += await db.ScheduledCallbacks.CountAsync(c => c.Status == ScheduledCallbackStatus.Scheduled
                     && c.ScheduledFor < now.AddMinutes(-5) && c.ExpiresAt > now, ct);
                 mergesWaiting += await db.RecordingMergeJobs.CountAsync(j => j.Status == RecordingMergeJobStatus.Pending && j.CreatedAt < now.AddMinutes(-30), ct);
+                var pays = await db.PaymentTransactions.AsNoTracking().Where(x => x.CreatedAt >= now.AddHours(-1))
+                    .Select(x => new { x.Status, x.ResponseReasonText }).ToListAsync(ct);
+                payTotal += pays.Count;
+                payErrors += pays.Count(x => x.Status == PaymentTransactionStatus.Error);
+                payLastError ??= pays.LastOrDefault(x => x.Status == PaymentTransactionStatus.Error)?.ResponseReasonText;
             }
             catch (Exception ex) { logger.LogWarning(ex, "Health: couldn't measure tenant {Schema}", t.SchemaName); }
         }
@@ -261,7 +272,150 @@ public sealed class PlatformHealthService(IServiceScopeFactory scopes, IConnecti
             new("exports_failed", exportsFailed, exportsFailed == 0 ? "None" : "See the tenant's Data Exports page"),
             new("callbacks_late", callbacksLate, callbacksLate == 0 ? "None" : "Scheduled callbacks past due"),
             new("recordings_backlog", mergesWaiting, mergesWaiting == 0 ? "None" : "Recording merges waiting over 30 minutes"),
+            payTotal < 5
+                ? new("payments", payTotal == 0 ? null : Math.Round(100.0 * payErrors / payTotal), $"{payErrors} error(s) in {payTotal} attempt(s) (judged at 5+)", HealthStatus.Unknown)
+                : new("payments", Math.Round(100.0 * payErrors / payTotal), payErrors == 0 ? $"{payTotal} attempts, no gateway errors" : $"{payErrors} of {payTotal}; last: {payLastError}"),
         ];
+    }
+
+    /// <summary>Error rates from the integrations' own reports (RedisIntegrationHealth) over the last hour.</summary>
+    private async Task<List<HealthResult>> MeasureIntegrationsAsync(CancellationToken ct)
+    {
+        var hour = await RedisIntegrationHealth.ReadHourAsync(redis);
+        var results = new List<HealthResult>();
+
+        // Client APIs: the worst one with enough calls to judge.
+        var apis = hour.Where(h => h.Source.StartsWith("api:") && h.Ok + h.Fail > 0).ToList();
+        var judged = apis.Where(a => a.Ok + a.Fail >= 5).OrderByDescending(a => (double)a.Fail / (a.Ok + a.Fail)).ToList();
+        var names = apis.Count == 0 ? new Dictionary<string, string>() : await ApiNamesAsync(apis.Select(a => a.Source[4..]).ToList(), ct);
+        string Name(string source) => names.GetValueOrDefault(source[4..]) ?? "an API";
+        if (judged.Count == 0)
+            results.Add(new("client_apis", null, apis.Count == 0 ? "No API calls in the last hour"
+                : $"{apis.Sum(a => a.Ok + a.Fail)} call(s), {apis.Sum(a => a.Fail)} failed (judged per API at 5+)", HealthStatus.Unknown));
+        else
+        {
+            var w = judged[0];
+            var pct = Math.Round(100.0 * w.Fail / (w.Ok + w.Fail));
+            results.Add(new("client_apis", pct, w.Fail == 0 ? $"{apis.Sum(a => a.Ok + a.Fail)} calls across {apis.Count} API(s), none failed"
+                : $"{Name(w.Source)}: {w.Fail} of {w.Ok + w.Fail} failed — {w.LastError}"));
+        }
+        var open = await RedisIntegrationHealth.OpenCircuitsAsync(redis);
+        results.Add(open.Count == 0
+            ? new("api_circuits", 0, "All closed", HealthStatus.Ok)
+            : new("api_circuits", open.Count, $"Refusing calls to {string.Join(", ", open.Select(id => names.GetValueOrDefault(id) ?? id))}", HealthStatus.Critical));
+
+        HealthResult Rate(string key, string prefix, string noun)
+        {
+            var rows = hour.Where(h => h.Source.StartsWith(prefix)).ToList();
+            long ok = rows.Sum(r => r.Ok), fail = rows.Sum(r => r.Fail);
+            var last = rows.Where(r => r.Fail > 0).Select(r => r.LastError).FirstOrDefault(e => e is not null);
+            if (ok + fail < 5)
+                return new(key, ok + fail == 0 ? null : Math.Round(100.0 * fail / (ok + fail)),
+                    ok + fail == 0 ? $"No {noun} in the last hour" : $"{fail} of {ok + fail} {noun} failed (judged at 5+)", HealthStatus.Unknown);
+            return new(key, Math.Round(100.0 * fail / (ok + fail)), fail == 0 ? $"{ok} {noun}, none failed" : $"{fail} of {ok + fail} {noun} failed — {last}");
+        }
+        results.Add(Rate("tax", "tax:", "tax calls"));
+        results.Add(Rate("tts", "tts:", "prompts"));
+        results.Add(Rate("stt", "stt:", "voice captures"));
+
+        HealthResult Count(string key, string source, string none)
+        {
+            var row = hour.FirstOrDefault(h => h.Source == source);
+            return row.Source is null || row.Fail == 0
+                ? new(key, 0, row.Source is null ? none : $"{row.Ok} in the last hour, none failed")
+                : new(key, row.Fail, $"{row.Fail} of {row.Ok + row.Fail} — {row.LastError}");
+        }
+        results.Add(Count("email", "email", "No email sent in the last hour"));
+        results.Add(Count("stripe_webhooks", "stripe-webhook", "No webhooks in the last hour"));
+        return results;
+    }
+
+    /// <summary>Client API definitions' names, platform-wide and per tenant.</summary>
+    private async Task<Dictionary<string, string>> ApiNamesAsync(List<string> ids, CancellationToken ct)
+    {
+        var guids = ids.Select(i => Guid.TryParse(i, out var g) ? g : Guid.Empty).Where(g => g != Guid.Empty).ToList();
+        using var scope = scopes.CreateScope();
+        var master = scope.ServiceProvider.GetRequiredService<ContactConnectionDbContext>();
+        var names = await master.PortalApiDefinitions.AsNoTracking().Where(d => guids.Contains(d.Id)).ToDictionaryAsync(d => d.Id.ToString(), d => d.Name, ct);
+        if (names.Count == guids.Count) return names;
+        var tenantDbs = scope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
+        foreach (var t in await master.Tenants.AsNoTracking().Where(t => t.IsActive).Select(t => new { t.Name, t.SchemaName }).ToListAsync(ct))
+        {
+            try
+            {
+                await using var db = tenantDbs.Create(t.SchemaName);
+                foreach (var d in await db.TenantApiDefinitions.AsNoTracking().Where(d => guids.Contains(d.Id)).Select(d => new { d.Id, d.Name }).ToListAsync(ct))
+                    names[d.Id.ToString()] = $"{d.Name} ({t.Name})";
+            }
+            catch (Exception ex) { logger.LogDebug(ex, "Health: API names for {Schema}", t.SchemaName); }
+        }
+        return names;
+    }
+
+    private (DateTimeOffset At, HealthResult Result)? _credentials, _tls;
+
+    /// <summary>Soonest expiry among Key Vault secrets that have one set (names only — values are never read). Hourly.</summary>
+    private async Task<HealthResult> MeasureCredentialsAsync(CancellationToken ct)
+    {
+        if (_credentials is { } c && DateTimeOffset.UtcNow - c.At < TimeSpan.FromHours(1)) return c.Result;
+        HealthResult result;
+        using var scope = scopes.CreateScope();
+        var client = scope.ServiceProvider.GetService<Azure.Security.KeyVault.Secrets.SecretClient>();
+        if (client is null) result = new("credentials", null, "No Key Vault configured", HealthStatus.Unknown);
+        else
+        {
+            try
+            {
+                var now = DateTimeOffset.UtcNow;
+                (string Name, DateTimeOffset Expires)? soonest = null;
+                var withExpiry = 0;
+                await foreach (var props in client.GetPropertiesOfSecretsAsync(ct))
+                {
+                    if (props.Enabled == false || props.ExpiresOn is not { } exp) continue;
+                    withExpiry++;
+                    if (soonest is null || exp < soonest.Value.Expires) soonest = (props.Name, exp);
+                }
+                result = soonest is { } s
+                    ? new("credentials", Math.Floor((s.Expires - now).TotalDays), $"{s.Name} expires {s.Expires:yyyy-MM-dd} ({withExpiry} with expiry dates)")
+                    : new("credentials", null, "No credentials have an expiry date set", HealthStatus.Ok);
+            }
+            catch (Exception ex) { result = new("credentials", null, $"Couldn't read Key Vault: {ex.Message}", HealthStatus.Unknown); }
+        }
+        _credentials = (DateTimeOffset.UtcNow, result);
+        return result;
+    }
+
+    /// <summary>Days left on the TLS certificates of the configured hosts (Health:TlsHosts, comma-separated). Hourly.</summary>
+    private async Task<HealthResult> MeasureTlsAsync(CancellationToken ct)
+    {
+        if (_tls is { } c && DateTimeOffset.UtcNow - c.At < TimeSpan.FromHours(1)) return c.Result;
+        var hosts = (config["Health:TlsHosts"] ?? "contactconnection.io").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        (string Host, DateTime NotAfter)? soonest = null;
+        var errors = new List<string>();
+        foreach (var host in hosts)
+        {
+            try
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeout.CancelAfter(TimeSpan.FromSeconds(10));
+                using var tcp = new TcpClient();
+                await tcp.ConnectAsync(host, 443, timeout.Token);
+                System.Security.Cryptography.X509Certificates.X509Certificate2? cert = null;
+                await using var ssl = new System.Net.Security.SslStream(tcp.GetStream(), false, (_, cer, _, _) =>
+                {
+                    if (cer is not null) cert = new System.Security.Cryptography.X509Certificates.X509Certificate2(cer);
+                    return true;   // only reading the expiry
+                });
+                await ssl.AuthenticateAsClientAsync(new System.Net.Security.SslClientAuthenticationOptions { TargetHost = host }, timeout.Token);
+                if (cert is not null && (soonest is null || cert.NotAfter < soonest.Value.NotAfter)) soonest = (host, cert.NotAfter.ToUniversalTime());
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested) { errors.Add($"{host}: {ex.Message}"); }
+        }
+        HealthResult result = soonest is { } s
+            ? new("tls", Math.Floor((s.NotAfter - DateTime.UtcNow).TotalDays), $"{s.Host} valid until {s.NotAfter:yyyy-MM-dd}{(errors.Count > 0 ? $"; couldn't check {string.Join(", ", errors)}" : "")}")
+            : new("tls", null, $"Couldn't read the certificate — {string.Join("; ", errors)}", HealthStatus.Warning);
+        _tls = (DateTimeOffset.UtcNow, result);
+        return result;
     }
 
     /// <summary>When the longest-waiting caller now in queue entered it (latest state per call = in queue).</summary>

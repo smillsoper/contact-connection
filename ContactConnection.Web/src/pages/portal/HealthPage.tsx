@@ -18,7 +18,7 @@ const DOT: Record<HealthStatus, string> = { ok: 'bg-emerald-400', warning: 'bg-a
 const TEXT: Record<HealthStatus, string> = { ok: 'text-emerald-300', warning: 'text-amber-300', critical: 'text-red-400', unknown: 'text-gray-400' }
 const LABEL: Record<HealthStatus, string> = { ok: 'OK', warning: 'Warning', critical: 'Critical', unknown: 'Not judged' }
 const SLOT: Record<HealthStatus, string> = { ok: 'bg-emerald-500/70', warning: 'bg-amber-400', critical: 'bg-red-500', unknown: 'bg-gray-600' }
-const AREAS = ['Core services', 'Telephony', 'Background jobs', 'Background work']
+const AREAS = ['Core services', 'Telephony', 'Integrations', 'Background jobs', 'Background work', 'Expiring']
 
 const ago = (iso: string | null, now: number) => {
   if (!iso) return ''

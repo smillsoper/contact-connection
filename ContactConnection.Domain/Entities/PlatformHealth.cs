@@ -34,6 +34,8 @@ public static class HealthCatalog
     public const string Telephony = "Telephony";
     public const string Jobs = "Background jobs";
     public const string Work = "Background work";
+    public const string Integrations = "Integrations";
+    public const string Expiring = "Expiring";
 
     public static readonly IReadOnlyList<HealthCheckDefinition> Checks =
     [
@@ -56,6 +58,18 @@ public static class HealthCatalog
         new("exports_failed", Work, "Failed export deliveries (24 h)", "", true, 1, 3, "Data export files that could not be delivered."),
         new("callbacks_late", Work, "Scheduled callbacks running late", "", true, 1, 5, "Callbacks more than 5 minutes past due and not yet dialed."),
         new("recordings_backlog", Work, "Recording merges waiting", "", true, 5, 25, "Recordings waiting over 30 minutes to be merged."),
+
+        new("client_apis", Integrations, "Client APIs (1 h)", "% failed", true, 10, 25, "The worst client / vendor API's failures (5xx, no answer) — judged per API once it has 5+ calls."),
+        new("api_circuits", Integrations, "Client API circuit breakers", "", true, null, null, "An API that kept failing gets its calls refused for 30 s at a time."),
+        new("payments", Integrations, "Payment gateway errors (1 h)", "%", true, 5, 15, "Gateway errors, not declines — judged at 5+ payment attempts."),
+        new("tax", Integrations, "Tax service errors (1 h)", "% failed", true, 10, 25, "Avalara unreachable or refusing our credentials — judged at 5+ calls."),
+        new("tts", Integrations, "Text-to-speech errors (1 h)", "% failed", true, 10, 25, "Streaming TTS that failed or returned no audio — judged at 5+ prompts."),
+        new("stt", Integrations, "Speech recognition errors (1 h)", "% failed", true, 10, 25, "Voice capture that failed — judged at 5+ captures."),
+        new("email", Integrations, "Email send failures (1 h)", "", true, 1, 5, "Emails Resend couldn't send (invites, receipts, alerts, exports)."),
+        new("stripe_webhooks", Integrations, "Stripe webhooks rejected (1 h)", "", true, 1, 3, "Usually means our webhook secret no longer matches Stripe's."),
+
+        new("credentials", Expiring, "Soonest credential expiry", "days", false, 30, 7, "Credentials in Key Vault that have an expiry date set."),
+        new("tls", Expiring, "TLS certificate", "days", false, 21, 7, "Days left on the website's certificate."),
     ];
 
     /// <summary>The Worker's background jobs (each reports a heartbeat every loop).</summary>

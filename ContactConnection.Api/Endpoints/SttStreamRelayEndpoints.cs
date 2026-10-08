@@ -45,6 +45,7 @@ public static class SttStreamRelayEndpoints
         IDataCollectResolutionCoordinator dataCollectCoordinator,
         IConfiguration config,
         ILoggerFactory loggerFactory,
+        ContactConnection.Infrastructure.Health.IIntegrationHealth health,
         CancellationToken ct)
     {
         var logger = loggerFactory.CreateLogger("SttStreamRelay");
@@ -120,6 +121,7 @@ public static class SttStreamRelayEndpoints
                 logger.LogWarning(
                     "STT relay: tenant {Tenant} has no '{Field}' credential for provider {Provider}",
                     request.TenantSubdomain, field, request.ProviderKey);
+                health.Record($"stt:{request.ProviderKey}", false, $"{request.TenantSubdomain} has no '{field}' credential");
                 await CloseAsync(socket, "no credentials", ct);
                 return;
             }
@@ -132,6 +134,7 @@ public static class SttStreamRelayEndpoints
         string? matchedPhrase = null;
         string? capturedValue = null;
         var heardTranscripts = new List<string>();
+        var sttFailed = false;
         using (var cts = CancellationTokenSource.CreateLinkedTokenSource(ct))
         {
             cts.CancelAfter(TimeSpan.FromMilliseconds(Math.Max(request.TimeoutMs, 1000)));
@@ -176,9 +179,12 @@ public static class SttStreamRelayEndpoints
             }
             catch (Exception ex)
             {
+                sttFailed = true;
+                health.Record($"stt:{request.ProviderKey}", false, $"{ex.GetType().Name}: {ex.Message}");
                 logger.LogError(ex, "STT relay [{Uuid}]: transcription failed for provider {Provider}",
                     request.ChannelUuid, request.ProviderKey);
             }
+            if (!sttFailed) health.Record($"stt:{request.ProviderKey}", true);   // S184 platform health
         }
 
         // Surfaced in the call trace (ICallTraceRecorder, via the coordinator) rather than only

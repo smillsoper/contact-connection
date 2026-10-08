@@ -12,12 +12,15 @@ public class ResendEmailService : IEmailService
     private readonly ILogger<ResendEmailService> _logger;
     private readonly string _apiKey;
     private readonly string _fromAddress;
+    private readonly ContactConnection.Infrastructure.Health.IIntegrationHealth? _health;
 
     public ResendEmailService(
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
-        ILogger<ResendEmailService> logger)
+        ILogger<ResendEmailService> logger,
+        ContactConnection.Infrastructure.Health.IIntegrationHealth? health = null)
     {
+        _health = health;
         _httpClientFactory = httpClientFactory;
         _logger = logger;
         _apiKey = configuration["Resend:ApiKey"]
@@ -57,14 +60,22 @@ public class ResendEmailService : IEmailService
                 })
                 .ToArray();
 
-        var response = await client.PostAsJsonAsync("https://api.resend.com/emails", payload, ct);
+        HttpResponseMessage response;
+        try { response = await client.PostAsJsonAsync("https://api.resend.com/emails", payload, ct); }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _health?.Record("email", false, $"Couldn't reach Resend: {ex.Message}");   // S184 platform health
+            throw;
+        }
         var responseBody = await response.Content.ReadAsStringAsync(ct);
 
         if (!response.IsSuccessStatusCode)
         {
+            _health?.Record("email", false, $"Resend returned HTTP {(int)response.StatusCode}");
             _logger.LogError("Resend API returned {StatusCode}: {Body}", (int)response.StatusCode, responseBody);
             response.EnsureSuccessStatusCode();
         }
+        _health?.Record("email", true);
 
         _logger.LogInformation(
             "Email sent via Resend to [{To}] cc [{Cc}] bcc [{Bcc}] — subject: {Subject}{Attach} — response: {Body}",

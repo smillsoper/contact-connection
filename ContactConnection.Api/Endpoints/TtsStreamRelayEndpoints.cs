@@ -50,6 +50,7 @@ public static class TtsStreamRelayEndpoints
         ITelephonyCallSessionStore cache,
         IConfiguration config,
         ILoggerFactory loggerFactory,
+        ContactConnection.Infrastructure.Health.IIntegrationHealth health,
         CancellationToken ct)
     {
         var logger = loggerFactory.CreateLogger("TtsMp3Relay");
@@ -102,6 +103,7 @@ public static class TtsStreamRelayEndpoints
                 logger.LogWarning(
                     "TTS relay: tenant {Tenant} has no '{Field}' credential for provider {Provider}",
                     request.TenantSubdomain, field, request.ProviderKey);
+                health.Record($"tts:{request.ProviderKey}", false, $"{request.TenantSubdomain} has no '{field}' credential");
                 context.Response.StatusCode = StatusCodes.Status502BadGateway;
                 return;
             }
@@ -124,6 +126,7 @@ public static class TtsStreamRelayEndpoints
         try
         {
             await StreamMp3Async(synthesisRequest, provider, ffmpegExe, leadInMs, context, logger, ct);
+            health.Record($"tts:{request.ProviderKey}", true);   // S184 platform health
         }
         catch (OperationCanceledException)
         {
@@ -131,6 +134,7 @@ public static class TtsStreamRelayEndpoints
         }
         catch (Exception ex)
         {
+            health.Record($"tts:{request.ProviderKey}", false, $"{ex.GetType().Name}: {ex.Message}");
             logger.LogError(ex, "TTS relay [{Token}]: synthesis/encode failed", token);
         }
         finally
@@ -156,10 +160,7 @@ public static class TtsStreamRelayEndpoints
         await using var enumerator = provider.SynthesizeAsync(request, ct).GetAsyncEnumerator(ct);
 
         if (!await enumerator.MoveNextAsync())
-        {
-            logger.LogWarning("TTS relay: provider yielded no audio");
-            return;
-        }
+            throw new InvalidOperationException("The TTS provider returned no audio.");   // counted as a failure (S184)
 
         var firstChunk = enumerator.Current;
         var rate = firstChunk.SampleRateHz;

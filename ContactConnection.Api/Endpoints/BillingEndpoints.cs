@@ -70,17 +70,21 @@ public static class BillingEndpoints
         return await invoices.RenderHtmlAsync(id, ct) is { } html ? Results.Content(html, "text/html") : Results.NotFound();
     }
 
-    private static async Task<IResult> Webhook(HttpContext http, IStripeBillingService stripe, ILoggerFactory logs, CancellationToken ct)
+    private static async Task<IResult> Webhook(HttpContext http, IStripeBillingService stripe, ILoggerFactory logs,
+        ContactConnection.Infrastructure.Health.IIntegrationHealth health, CancellationToken ct)
     {
         using var reader = new StreamReader(http.Request.Body);
         var json = await reader.ReadToEndAsync(ct);
         try
         {
             var ok = await stripe.HandleWebhookAsync(json, http.Request.Headers["Stripe-Signature"].ToString(), ct);
+            // S184 health: a bad signature usually means our webhook secret no longer matches Stripe's.
+            health.Record("stripe-webhook", ok, ok ? null : "Signature did not match - check Stripe:WebhookSecret");
             return ok ? Results.Ok() : Results.BadRequest(new { error = "Invalid signature." });
         }
         catch (InvalidOperationException ex)
         {
+            health.Record("stripe-webhook", false, ex.Message);
             logs.CreateLogger("StripeWebhook").LogWarning("Stripe webhook not processed: {Message}", ex.Message);
             return Results.StatusCode(503);
         }

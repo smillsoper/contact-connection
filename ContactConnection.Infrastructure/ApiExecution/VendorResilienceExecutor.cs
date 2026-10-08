@@ -15,19 +15,49 @@ namespace ContactConnection.Infrastructure.ApiExecution;
 /// given call is safe to retry depends on the specific endpoint/HTTP method of THIS call, not the
 /// vendor as a whole, so it's applied as a manual loop wrapping the circuit-breaker-protected send.
 /// </summary>
-internal class VendorResilienceExecutor : IVendorResilienceExecutor
+internal class VendorResilienceExecutor(ContactConnection.Infrastructure.Health.IIntegrationHealth? health = null) : IVendorResilienceExecutor
 {
     private const int MaxAttempts = 3;
     private static readonly TimeSpan[] BackoffDelays = [TimeSpan.FromMilliseconds(200), TimeSpan.FromMilliseconds(500)];
 
     private readonly ConcurrentDictionary<Guid, ResiliencePipeline<HttpResponseMessage>> _circuitBreakers = new();
 
+    /// <summary>Sends with retries + the definition's circuit breaker, and reports the outcome to platform health (S184):
+    /// a 5xx, a network failure or an open circuit counts as a failure; a 4xx is the vendor answering, so it doesn't.</summary>
     public async Task<HttpResponseMessage> SendAsync(
         Guid definitionId,
         HttpRequestMessage request,
         bool allowRetryOnAmbiguousFailure,
         HttpClient httpClient,
         CancellationToken ct = default)
+    {
+        var source = $"api:{definitionId}";
+        try
+        {
+            var response = await SendCoreAsync(definitionId, request, allowRetryOnAmbiguousFailure, httpClient, ct);
+            var status = (int)response.StatusCode;
+            health?.Record(source, status < 500, status >= 500 ? $"HTTP {status} from {request.RequestUri?.Host}" : null);
+            return response;
+        }
+        catch (BrokenCircuitException)
+        {
+            health?.Record(source, false, "Circuit open — the vendor kept failing, calls are being refused");
+            health?.CircuitOpen(definitionId.ToString());
+            throw;
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            health?.Record(source, false, $"{ex.GetType().Name}: {ex.Message}");
+            throw;
+        }
+    }
+
+    private async Task<HttpResponseMessage> SendCoreAsync(
+        Guid definitionId,
+        HttpRequestMessage request,
+        bool allowRetryOnAmbiguousFailure,
+        HttpClient httpClient,
+        CancellationToken ct)
     {
         var circuitBreaker = _circuitBreakers.GetOrAdd(definitionId, static _ => BuildCircuitBreakerPipeline());
 

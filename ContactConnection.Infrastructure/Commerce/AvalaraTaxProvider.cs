@@ -54,7 +54,8 @@ public record AvalaraFeeLine(string State, string TaxCode, string Description, s
 public class AvalaraTaxProvider(
     IHttpClientFactory httpClientFactory,
     ITenantCredentialStore credentials,
-    ILogger<AvalaraTaxProvider> logger) : ITaxProvider, ICampaignCredentialSet
+    ILogger<AvalaraTaxProvider> logger,
+    ContactConnection.Infrastructure.Health.IIntegrationHealth? health = null) : ITaxProvider, ICampaignCredentialSet
 {
     public string ProviderKey => TaxProviderKey.Avalara;
 
@@ -175,9 +176,13 @@ public class AvalaraTaxProvider(
             status = (int)response.StatusCode;
             var raw = await response.Content.ReadAsStringAsync(timeout.Token);
             json = string.IsNullOrWhiteSpace(raw) ? null : JsonNode.Parse(raw);
+            // S184 health: Avalara down (5xx) or our credentials refused (401/403) — not a bad address (other 4xx).
+            var failed = status >= 500 || status is 401 or 403;
+            health?.Record("tax:avalara", !failed, failed ? $"HTTP {status}" : null);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
+            health?.Record("tax:avalara", false, $"{ex.GetType().Name}: {ex.Message}");
             logger.LogWarning(ex, "Avalara tax request failed for campaign {CampaignId}.", context.CampaignId);
             return TaxResult.Zero(TaxCalculationStatus.Error, "Could not reach Avalara to calculate sales tax.");
         }
