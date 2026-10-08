@@ -267,8 +267,9 @@ public sealed class SupervisorCallService(
                 call.CallRecordId.ToString(), call.CallerNumber, call.CallerNumber, call.DestinationNumber,
                 call.CampaignId.ToString(), null);
 
+            // Labelled "takeover" so the supervisor's softphone answers it even if the push above is late or lost (S184).
             var (newLeg, error) = await esl.OriginateAndParkAsync(
-                supervisor.SipExtension!, tenant.Subdomain, call.CallerNumber, ct);
+                supervisor.SipExtension!, tenant.Subdomain, call.CallerNumber, ct, legLabel: "takeover", callRecordId: call.CallRecordId);
             if (newLeg is null)
             {
                 call.Vars.Remove("_takeover_in_progress");

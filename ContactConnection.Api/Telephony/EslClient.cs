@@ -323,7 +323,11 @@ public sealed class EslClient(ILogger<EslClient>? logger = null, IConfiguration?
         SendApiAsync($"uuid_audio_stream {uuid} stop", ct);
 
     /// <returns>(uuid, null) on success; (null, errorDetail) on failure so callers can log the cause.</returns>
-    public async Task<(string? Uuid, string? Error)> OriginateAndParkAsync(string extension, string domain, string callerNumber, CancellationToken ct = default)
+    /// <param name="legLabel">Sent as the INVITE's X-CC-Leg header (with X-CC-Call-Record) so the softphone knows what the
+    /// call is from the call itself — e.g. "takeover" (S184), answered automatically even when the SignalR push that
+    /// arms auto-answer is late or lost.</param>
+    public async Task<(string? Uuid, string? Error)> OriginateAndParkAsync(string extension, string domain, string callerNumber,
+        CancellationToken ct = default, string? legLabel = null, Guid? callRecordId = null)
     {
         var contact = await ResolveAgentContactAsync(extension, domain, ct);
         if (!IsResolvedContact(contact))
@@ -343,6 +347,8 @@ public sealed class EslClient(ILogger<EslClient>? logger = null, IConfiguration?
                    $"sip_h_Alert-Info=answer-after=0," +
                    $"origination_caller_id_number={callerNumber},origination_caller_id_name={callerNumber}," +
                    $"effective_caller_id_number={callerNumber},effective_caller_id_name={callerNumber}," +
+                   (legLabel is null ? "" : $"sip_h_X-CC-Leg={legLabel},") +
+                   (callRecordId is null ? "" : $"sip_h_X-CC-Call-Record={callRecordId},") +
                    $"cc_whisper=true}}";
         var response = await SendApiBodyAsync($"originate {vars}{contact} &park()", ct);
 

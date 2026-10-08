@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { reconnectForever } from '../../utils/hubRetry'
 import { dispositionsApi, type Disposition, type DispositionCategory } from '../../api/dispositions'
 import { Link, useParams } from 'react-router-dom'
 import * as signalR from '@microsoft/signalr'
@@ -123,7 +124,7 @@ export default function AdminCallDetailPage() {
     let timer: ReturnType<typeof setTimeout> | null = null
     const connection = new signalR.HubConnectionBuilder()
       .withUrl(`/hubs/flow?access_token=${token}`, { headers: { 'X-Tenant-Subdomain': tenantSubdomain ?? '' } })
-      .withAutomaticReconnect()
+      .withAutomaticReconnect(reconnectForever)
       .build()
     connection.on('receiveCallChanged', (callRecordId: string) => {
       if (callRecordId.toLowerCase() !== id.toLowerCase()) return

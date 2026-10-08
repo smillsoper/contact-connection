@@ -527,11 +527,21 @@ export default function SoftphonePanel() {
           const num  = session.remote_identity?.uri?.user ?? 'Unknown'
           const name = session.remote_identity?.display_name ?? ''
 
-          session.on('accepted', () => { setOnCall() })
+          // Supervisor take-over (S184): labelled by the server, so it's answered even if the push that arms
+          // auto-answer never arrived; once connected the portal pulls the script that moved with the call.
+          const takeover = ccLeg === 'takeover'
+          const takeoverRecord: string | null = takeover ? session.request?.getHeader?.('X-CC-Call-Record') || null : null
+          if (takeover && useCallStore.getState().callStatus !== 'auto-connecting')
+            useCallStore.getState().setAutoConnecting(num, name, takeoverRecord ?? '')
+
+          session.on('accepted', () => {
+            setOnCall()
+            if (takeover) window.dispatchEvent(new CustomEvent('cc:pull-my-sessions', { detail: takeoverRecord }))
+          })
           session.on('ended',    () => { sessionRef.current = null; reset() })
           session.on('failed',   () => { sessionRef.current = null; reset() })
 
-          if (autoAnswerBridgeRef.current) {
+          if (autoAnswerBridgeRef.current || takeover) {
             // This INVITE was triggered by our own Pick Up bridge request — answer immediately.
             autoAnswerBridgeRef.current = false
             try {

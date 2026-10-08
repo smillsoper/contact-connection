@@ -57,9 +57,10 @@ export default function CoachingNotesAgent() {
               Coaching from <b className="text-amber-200">{n.fromName}</b> · {new Date(n.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
             </p>
             <p className="text-amber-50 whitespace-pre-wrap break-words">{n.text}</p>
+            {/* Right under the message (William, S184) — at the far right edge of a wide screen it went unnoticed. */}
+            <button onClick={() => void gotIt(n.id)}
+              className="mt-1.5 bg-amber-500 hover:bg-amber-400 text-gray-950 rounded px-3 py-1 text-xs font-semibold">Got it</button>
           </div>
-          <button onClick={() => void gotIt(n.id)}
-            className="shrink-0 bg-amber-500 hover:bg-amber-400 text-gray-950 rounded px-3 py-1 text-xs font-semibold">Got it</button>
         </div>
       ))}
     </div>

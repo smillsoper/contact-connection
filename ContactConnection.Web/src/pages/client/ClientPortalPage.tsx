@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { reconnectForever } from '../../utils/hubRetry'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import ClientTwoStep from './ClientTwoStep'
 import GridLayout, { WidthProvider } from 'react-grid-layout/legacy'
@@ -105,7 +106,7 @@ export default function ClientPortalPage() {
     if (!token) return
     const connection = new signalR.HubConnectionBuilder()
       .withUrl(`/hubs/client?access_token=${token}`, { headers: { 'X-Tenant-Subdomain': clientSubdomain() ?? '' } })
-      .withAutomaticReconnect()
+      .withAutomaticReconnect(reconnectForever)
       .build()
     connection.on('receiveRefresh', () => {
       if (nudge.current) clearTimeout(nudge.current)

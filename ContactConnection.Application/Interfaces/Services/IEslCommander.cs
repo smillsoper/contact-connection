@@ -31,7 +31,9 @@ public interface IEslCommander
     /// <summary>uuid_bridge to connect two already-established parked channels.</summary>
     Task BridgeChannelsAsync(string uuid1, string uuid2, CancellationToken ct = default);
     /// <summary>Originate a call to an agent extension with auto-answer and park the channel. Returns (uuid, null) on success, (null, errorDetail) on failure.</summary>
-    Task<(string? Uuid, string? Error)> OriginateAndParkAsync(string extension, string domain, string callerNumber, CancellationToken ct = default);
+    /// <param name="legLabel">X-CC-Leg on the INVITE (e.g. "takeover") so the softphone recognises the call without a push.</param>
+    Task<(string? Uuid, string? Error)> OriginateAndParkAsync(string extension, string domain, string callerNumber,
+        CancellationToken ct = default, string? legLabel = null, Guid? callRecordId = null);
     /// <summary>Supervisor monitoring (S167): rings the supervisor's softphone (auto-answer) straight
     /// into FreeSWITCH's eavesdrop on <paramref name="targetUuid"/> (the agent's leg). Listen-only to
     /// start; <see cref="RecvDtmfAsync"/> on the returned leg switches modes (eavesdrop DTMF:

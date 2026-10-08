@@ -1,4 +1,5 @@
 import ChatLauncher from '../components/chat/ChatLauncher'
+import { reconnectForever } from '../utils/hubRetry'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import GridLayout, { WidthProvider, type Layout } from 'react-grid-layout/legacy'
@@ -177,7 +178,7 @@ export default function DashboardBuilderPage() {
       .withUrl(`/hubs/flow?access_token=${token}`, {
         headers: { 'X-Tenant-Subdomain': tenantSubdomain ?? '' },
       })
-      .withAutomaticReconnect()
+      .withAutomaticReconnect(reconnectForever)
       .build()
 
     connection.on('receiveAgentStateSnapshot', (agentId: string, stateCode: string, label: string, sinceIso: string) => {

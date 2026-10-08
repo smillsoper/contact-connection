@@ -72,6 +72,8 @@ public static class AuthEndpoints
         TenantContext tenantContext,
         CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(request?.Email) || string.IsNullOrWhiteSpace(request?.Password))
+            return Results.BadRequest(new { error = "Enter your email and password." });
         if (!tenantContext.HasTenant)
             return Results.Unauthorized();
 

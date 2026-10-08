@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { reconnectForever } from '../utils/hubRetry'
 import * as signalR from '@microsoft/signalr'
 import { useAuthStore } from '../stores/authStore'
 import { callTracesApi, type CaptureMode, type CallTraceStep, type StartTraceFilters } from '../api/callTraces'
@@ -41,7 +42,7 @@ export default function CallTraceWindowPage() {
       .withUrl(`/hubs/call-trace?access_token=${token}`, {
         headers: { 'X-Tenant-Subdomain': tenantSubdomain ?? '' },
       })
-      .withAutomaticReconnect()
+      .withAutomaticReconnect(reconnectForever)
       .build()
 
     function isOurs(subId: string) {

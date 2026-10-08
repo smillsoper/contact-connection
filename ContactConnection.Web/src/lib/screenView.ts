@@ -1,4 +1,5 @@
 import * as signalR from '@microsoft/signalr'
+import { reconnectForever } from '../utils/hubRetry'
 import { create } from 'zustand'
 import { useAuthStore } from '../stores/authStore'
 import { getSubdomainFromHostname } from '../utils/subdomain'
@@ -41,7 +42,7 @@ export function screenViewConnection() {
     .withUrl(`/hubs/screen-view?access_token=${token ?? ''}`, {
       headers: { 'X-Tenant-Subdomain': getSubdomainFromHostname() ?? tenantSubdomain ?? '' },
     })
-    .withAutomaticReconnect()
+    .withAutomaticReconnect(reconnectForever)
     .build()
 }
 

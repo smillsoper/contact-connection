@@ -1,4 +1,5 @@
 import * as signalR from '@microsoft/signalr'
+import { reconnectForever } from '../utils/hubRetry'
 import { chatApi, type ChatChannel, type ChatMessage, type ChatUserState, type HelpRequest } from '../api/chat'
 import { useAuthStore } from '../stores/authStore'
 import { useChatStore, channelTitle } from '../stores/chatStore'
@@ -68,7 +69,7 @@ export function startChat() {
       .withUrl(`/hubs/chat?access_token=${token}`, {
         headers: { 'X-Tenant-Subdomain': getSubdomainFromHostname() ?? tenantSubdomain ?? '' },
       })
-      .withAutomaticReconnect()
+      .withAutomaticReconnect(reconnectForever)
       .build()
     connection.on('receiveChatEvent', (type: string, json: string) => handle(type, JSON.parse(json)))
     connection.onreconnected(() => { void reloadChat() })

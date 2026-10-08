@@ -1,4 +1,5 @@
 import { requestPortalFocus } from '../lib/extensionBridge'
+import { reconnectForever } from '../utils/hubRetry'
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import CallerHistoryButton from './CallerHistory'
 import * as signalR from '@microsoft/signalr'
@@ -354,18 +355,41 @@ export default function FlowPanel() {
   // carry on with the caller, or finish the record if the caller is gone. addSession is idempotent,
   // so a tab that's already open (or a double-run effect) is never duplicated.
   const [restoredCount, setRestoredCount] = useState(0)
+  /** Open any of my scripts the server has that this tab doesn't — returns how many were added. */
+  const pullMySessions = useCallback(async () => {
+    const states = await flowsApi.mySessions()
+    const open = new Set(useFlowSessionsStore.getState().sessions.map((x) => x.id))
+    const fresh = states.filter((st) => !open.has(st.sessionId))
+    for (const st of fresh)
+      addSession({ id: st.sessionId, label: st.flowName ?? 'Script Flow', sessionId: st.sessionId, callRecordId: st.callRecordId, initialNode: st })
+    return { added: fresh.length, callRecordIds: states.map((s) => s.callRecordId) }
+  }, [addSession])
   useEffect(() => {
     let cancelled = false
-    flowsApi.mySessions().then((states) => {
-      if (cancelled || states.length === 0) return
-      const open = new Set(useFlowSessionsStore.getState().sessions.map((x) => x.id))
-      const fresh = states.filter((st) => !open.has(st.sessionId))
-      for (const st of fresh)
-        addSession({ id: st.sessionId, label: st.flowName ?? 'Script Flow', sessionId: st.sessionId, callRecordId: st.callRecordId, initialNode: st })
-      if (fresh.length > 0) setRestoredCount(fresh.length)
-    }).catch(() => { /* not fatal — the agent can still work; nothing to restore */ })
+    pullMySessions().then((r) => { if (!cancelled && r.added > 0) setRestoredCount(r.added) })
+      .catch(() => { /* not fatal — the agent can still work; nothing to restore */ })
     return () => { cancelled = true }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A take-over just connected (S184): the script moves to me a moment after the call does — fetch it rather than
+  // relying on the script-pop push alone. A few tries, stopping once the call's script is here.
+  useEffect(() => {
+    const on = (e: Event) => {
+      const recordId = (e as CustomEvent<string | null>).detail
+      let tries = 0
+      const attempt = () => {
+        tries++
+        pullMySessions().then((r) => {
+          const have = !recordId || useFlowSessionsStore.getState().sessions.some((s) => s.callRecordId === recordId)
+          if (!have && tries < 4) setTimeout(attempt, 1500 * tries)
+          else if (r.added > 0) requestPortalFocus('take over')
+        }).catch(() => { if (tries < 4) setTimeout(attempt, 1500 * tries) })
+      }
+      setTimeout(attempt, 1000)
+    }
+    window.addEventListener('cc:pull-my-sessions', on)
+    return () => window.removeEventListener('cc:pull-my-sessions', on)
+  }, [pullMySessions])
   useEffect(() => {
     if (!restoredCount) return
     const t = setTimeout(() => setRestoredCount(0), 8000)
@@ -411,7 +435,7 @@ export default function FlowPanel() {
       .withUrl(`/hubs/flow?access_token=${token}`, {
         headers: { 'X-Tenant-Subdomain': tenantSubdomain ?? '' },
       })
-      .withAutomaticReconnect()
+      .withAutomaticReconnect(reconnectForever)
       .build()
 
     // ESL screen pop — inbound call queued for this agent (DID route → telephony flow → tf_route_to_queue)
@@ -559,7 +583,9 @@ export default function FlowPanel() {
       for (const entry of useFlowSessionsStore.getState().sessions) {
         connection.invoke('JoinSession', entry.sessionId).catch(console.error)
       }
-      // Pushes may have been missed while disconnected — the personal queue and coaching notes catch up.
+      // Pushes may have been missed while disconnected — scripts popped meanwhile, the personal queue and
+      // coaching notes catch up.
+      void pullMySessions().catch(() => {})
       window.dispatchEvent(new Event('cc:dedication-changed'))
       window.dispatchEvent(new Event('cc:coaching-changed'))
     })

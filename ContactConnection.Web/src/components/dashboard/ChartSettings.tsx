@@ -1,4 +1,5 @@
 import type { ChartMetric, ChartType, KpiTarget, KpiWidgetConfig } from '../../types/dashboard'
+import ChartTypeIcon, { CHART_TYPE_COLOR } from './ChartTypeIcon'
 import type { CustomKpi } from '../../api/dashboardWidgets'
 import { KPI_CATALOG, KPI_DIMENSIONS, customFormat, type Format } from './widgets/KpiWidget'
 import { DEFAULT_CHART_METRICS, DEFAULT_FUNNEL, defaultAxis, isTimeDim } from './widgets/ChartWidget'
@@ -95,8 +96,11 @@ export default function ChartSettings({ value, onChange, customKpis, fieldNames,
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
           {TYPES.map((x) => (
             <button key={x.type} onClick={() => pickType(x.type)} title={x.hint}
-              className={`text-left rounded-lg border px-2.5 py-2 transition-colors ${t === x.type ? 'border-sky-500 bg-sky-500/10' : 'border-gray-700 hover:border-gray-500'}`}>
-              <div className="text-xs text-white">{x.label}</div>
+              style={t === x.type ? { borderColor: CHART_TYPE_COLOR[x.type], background: `${CHART_TYPE_COLOR[x.type]}1a` } : undefined}
+              className={`text-left rounded-lg border px-2.5 py-2 transition-colors ${t === x.type ? '' : 'border-gray-700 hover:border-gray-500'}`}>
+              {/* A miniature of the chart, colour-coded (William, S184) */}
+              <ChartTypeIcon type={x.type} active={t === x.type} size={44} />
+              <div className="text-xs text-white mt-1" style={t === x.type ? { color: CHART_TYPE_COLOR[x.type] } : undefined}>{x.label}</div>
               <div className="text-[10px] text-gray-500 leading-tight mt-0.5">{x.hint}</div>
             </button>
           ))}
