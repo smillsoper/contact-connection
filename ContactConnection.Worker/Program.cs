@@ -54,6 +54,7 @@ builder.Services.AddHostedService<CommissionRecalcService>();
 builder.Services.AddHostedService<InvoiceDraftService>();
 builder.Services.AddHostedService<ExportRunService>();
 builder.Services.AddHostedService<ChatFileCleanupService>();
+builder.Services.AddHostedService<PlatformHealthService>();   // S184 — platform health checks + alerts
 
 // Historical note: a legacy FreeSwitchEslService (CHANNEL_PARK→create-CallRecord translator)
 // once lived here. It predated ContactConnection.Api's EslBackgroundService, which now owns the

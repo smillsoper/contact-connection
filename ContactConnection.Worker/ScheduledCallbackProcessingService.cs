@@ -71,6 +71,7 @@ public sealed class ScheduledCallbackProcessingService : BackgroundService
         using var timer = new PeriodicTimer(Interval);
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
+            JobHeartbeats.Report("Scheduled callbacks", Interval);
             try
             {
                 await ProcessAllTenantsAsync(stoppingToken);

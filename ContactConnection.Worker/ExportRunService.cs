@@ -70,6 +70,7 @@ public sealed class ExportRunService : BackgroundService
         {
             try { await CycleAsync(stoppingToken); }
             catch (Exception ex) when (ex is not OperationCanceledException) { _logger.LogError(ex, "Export cycle failed."); }
+            JobHeartbeats.Report("Data exports", _interval);
             try { await Task.Delay(_interval, stoppingToken); }
             catch (OperationCanceledException) { break; }
         }

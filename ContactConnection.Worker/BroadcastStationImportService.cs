@@ -38,6 +38,7 @@ public sealed class BroadcastStationImportService(
                 // Stale stations are harmless for a day; retry on the next pass.
                 logger.LogWarning(ex, "FCC station import failed — will retry next hour");
             }
+            JobHeartbeats.Report("FCC station import", TimeSpan.FromHours(1));
             try { await Task.Delay(TimeSpan.FromHours(1), stoppingToken); }
             catch (OperationCanceledException) { break; }
         }

@@ -29,6 +29,7 @@ public sealed class InvoiceDraftService(IServiceScopeFactory scopeFactory, IConf
         {
             try { await RunCycleAsync(stoppingToken); }
             catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogError(ex, "Invoice draft pass failed."); }
+            JobHeartbeats.Report("Invoice drafts", _interval);
             try { await Task.Delay(_interval, stoppingToken); } catch (OperationCanceledException) { return; }
         }
     }

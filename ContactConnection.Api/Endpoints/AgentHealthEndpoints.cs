@@ -78,6 +78,14 @@ public class AgentHealthStore
         return push;
     }
 
+    /// <summary>Across all tenants: agents on a call with a fresh reading, and how many of them grade poor (S184 health).</summary>
+    public (int OnCall, int Poor) Summary()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var live = _latest.Values.Select(v => v.Health).Where(h => h.OnCall && now - h.At < Stale).ToList();
+        return (live.Count, live.Count(h => h.Grade == "poor"));
+    }
+
     /// <summary>Fresh readings only — an agent whose portal stopped reporting has no health shown.</summary>
     public AgentHealth? Get(Guid tenantId, Guid agentId) =>
         _latest.TryGetValue((tenantId, agentId), out var v) && DateTimeOffset.UtcNow - v.Health.At < Stale ? v.Health : null;

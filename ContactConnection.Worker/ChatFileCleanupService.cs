@@ -28,6 +28,7 @@ public sealed class ChatFileCleanupService(IServiceScopeFactory scopeFactory, IC
         {
             try { await RunCycleAsync(stoppingToken); }
             catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogError(ex, "Chat file cleanup cycle failed."); }
+            JobHeartbeats.Report("Chat file cleanup", _interval);
             try { await Task.Delay(_interval, stoppingToken); }
             catch (OperationCanceledException) { break; }
         }

@@ -84,6 +84,18 @@ public sealed class FreeSwitchEslClient : IAsyncDisposable
     public Task SendBgApiAsync(string command, CancellationToken ct) =>
         SendRawAsync($"bgapi {command}\n\n", ct);
 
+    /// <summary>A blocking <c>api</c> command and its text reply (S184 health checks). Use on a connection with no event
+    /// subscription, so the next block read is the reply.</summary>
+    public async Task<string> ApiAsync(string command, CancellationToken ct)
+    {
+        await SendRawAsync($"api {command}\n\n", ct);
+        while (true)
+        {
+            var block = await ReadBlockAsync(ct) ?? throw new IOException("FreeSWITCH closed the connection.");
+            if (block.ContentType == "api/response") return block.Body ?? "";
+        }
+    }
+
     // ── Internal ─────────────────────────────────────────────────────────────
 
     private async Task<EslEvent?> ReadBlockAsync(CancellationToken ct)

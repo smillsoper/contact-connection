@@ -64,6 +64,9 @@ public sealed class EslBackgroundService : BackgroundService
         _dataCollectCoordinator  = dataCollectCoordinator;
     }
 
+    /// <summary>Since when the API's event connection to FreeSWITCH has been up; null while it's down (S184 health).</summary>
+    public static DateTimeOffset? ConnectedSince { get; private set; }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
@@ -75,9 +78,11 @@ public sealed class EslBackgroundService : BackgroundService
             catch (OperationCanceledException) { break; }
             catch (Exception ex)
             {
+                ConnectedSince = null;
                 _logger.LogError(ex, "ESL connection lost. Reconnecting in 5s.");
                 await Task.Delay(5_000, stoppingToken);
             }
+            finally { ConnectedSince = null; }
         }
     }
 
@@ -101,6 +106,7 @@ public sealed class EslBackgroundService : BackgroundService
             "sofia::register sofia::unregister sofia::expire", ct);
 
         _logger.LogInformation("ESL connected to FreeSWITCH at {Host}:{Port}", host, port);
+        ConnectedSince = DateTimeOffset.UtcNow;
 
         // Resync agent SIP-registration presence to FreeSWITCH's own table on every (re)connect —
         // events only carry deltas from here on. Non-fatal: a failure just leaves the supervisor

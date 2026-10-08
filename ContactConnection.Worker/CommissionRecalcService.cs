@@ -26,6 +26,7 @@ public sealed class CommissionRecalcService(IServiceScopeFactory scopeFactory, I
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception ex) { logger.LogError(ex, "Commission recalculation cycle failed"); }
 
+            JobHeartbeats.Report("Commission recalculation", Interval);
             try { await Task.Delay(Interval, stoppingToken); }
             catch (OperationCanceledException) { break; }
         }

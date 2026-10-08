@@ -52,6 +52,7 @@ public class SubscriptionProcessingService : BackgroundService
                 _logger.LogError(ex, "Unhandled error in subscription processing cycle.");
             }
 
+            JobHeartbeats.Report("Subscriptions", Interval);
             await Task.Delay(Interval, stoppingToken);
         }
     }

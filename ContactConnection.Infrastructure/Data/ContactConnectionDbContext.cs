@@ -25,6 +25,11 @@ public class ContactConnectionDbContext : DbContext
     public DbSet<Invoice> Invoices => Set<Invoice>();
     public DbSet<InvoiceLine> InvoiceLines => Set<InvoiceLine>();
     public DbSet<SupportSession> SupportSessions => Set<SupportSession>();
+    public DbSet<PlatformHealthCheck> HealthChecks => Set<PlatformHealthCheck>();
+    public DbSet<HealthSample> HealthSamples => Set<HealthSample>();
+    public DbSet<HealthIncident> HealthIncidents => Set<HealthIncident>();
+    public DbSet<HealthSettings> HealthSettings => Set<HealthSettings>();
+    public DbSet<PlatformUser> PlatformUsers => Set<PlatformUser>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -45,6 +50,11 @@ public class ContactConnectionDbContext : DbContext
         modelBuilder.ApplyConfiguration(new InvoiceConfiguration());
         modelBuilder.ApplyConfiguration(new InvoiceLineConfiguration());
         modelBuilder.ApplyConfiguration(new SupportSessionConfiguration());
+        modelBuilder.ApplyConfiguration(new PlatformHealthCheckConfiguration());
+        modelBuilder.ApplyConfiguration(new HealthSampleConfiguration());
+        modelBuilder.ApplyConfiguration(new HealthIncidentConfiguration());
+        modelBuilder.ApplyConfiguration(new HealthSettingsConfiguration());
+        modelBuilder.ApplyConfiguration(new PlatformUserConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 }

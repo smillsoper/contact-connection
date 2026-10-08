@@ -180,6 +180,45 @@ export interface TenantAgentRecord {
   lastLoginAt: string | null
 }
 
+// ─── Platform health (S184) ─────────────────────────────────────────────────
+
+export type HealthStatus = 'ok' | 'warning' | 'critical' | 'unknown'
+
+export interface HealthCheckRow {
+  key: string; area: string; name: string; unit: string; description: string
+  status: HealthStatus; value: number | null; detail: string; checkedAt: string | null; statusSince: string | null
+  warn: number | null; crit: number | null; defaultWarn: number | null; defaultCrit: number | null; higherIsWorse: boolean
+  adjustable: boolean; mutedUntil: string | null; acknowledgedAt: string | null; acknowledgedBy: string | null
+  /** Worst status per 15-minute slot over the last 24 h, oldest first (null = no data). */
+  history: (HealthStatus | null)[] | null
+}
+
+export interface HealthIncidentRow {
+  id: string; key: string; name: string; severity: HealthStatus; detail: string | null; startedAt: string; resolvedAt: string | null
+}
+
+export interface HealthOverview {
+  checkedAt: string | null
+  checks: HealthCheckRow[]
+  incidents: HealthIncidentRow[]
+  /** Owner only. */
+  alerting: { owners: { entraOid: string; name: string; email: string; lastSignInAt: string }[]; extra: string[] } | null
+}
+
+export const getHealth = () => portalFetch<HealthOverview>('/api/v1/portal/health')
+export const acknowledgeHealth = (key: string) =>
+  portalFetch<void>('/api/v1/portal/health/acknowledge', { method: 'POST', body: JSON.stringify({ key }) })
+export const setHealthLevels = (key: string, warn: number | null, crit: number | null, reset = false) =>
+  portalFetch<void>('/api/v1/portal/health/levels', { method: 'PUT', body: JSON.stringify({ key, warn, crit, reset }) })
+export const muteHealth = (key: string, minutes: number) =>
+  portalFetch<void>('/api/v1/portal/health/mute', { method: 'POST', body: JSON.stringify({ key, minutes }) })
+export const setHealthRecipients = (extra: string[]) =>
+  portalFetch<void>('/api/v1/portal/health/recipients', { method: 'PUT', body: JSON.stringify({ extra }) })
+export const removeHealthPerson = (oid: string) =>
+  portalFetch<void>(`/api/v1/portal/health/people/${encodeURIComponent(oid)}`, { method: 'DELETE' })
+export const sendHealthTestAlert = () =>
+  portalFetch<{ sentTo: string[] }>('/api/v1/portal/health/test-alert', { method: 'POST' })
+
 // ─── Support sessions (S184) ────────────────────────────────────────────────
 
 export interface SupportSessionRecord {

@@ -64,6 +64,7 @@ public sealed class StoredValueRetentionService : BackgroundService
                 _logger.LogError(ex, "Unhandled error in stored-value-retention cycle.");
             }
 
+            JobHeartbeats.Report("Stored-value retention", _interval);
             try { await Task.Delay(_interval, stoppingToken); }
             catch (OperationCanceledException) { break; }
         }

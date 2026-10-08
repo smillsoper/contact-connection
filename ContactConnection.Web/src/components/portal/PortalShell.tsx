@@ -8,6 +8,7 @@ interface Props {
 // S184: Support sees Tenants only; the rest is the Owner's.
 const NAV_ITEMS = [
   { label: 'Tenants', path: '/portal/tenants', support: true },
+  { label: 'Health', path: '/portal/health', support: true },
   { label: 'API Definitions', path: '/portal/api-definitions', support: false },
   { label: 'Credentials', path: '/portal/credentials', support: false },
   { label: 'Maintenance', path: '/portal/maintenance', support: false },

@@ -20,6 +20,7 @@ public static class PortalAuthEndpoints
         IEntraIdTokenValidator validator,
         IPlatformTokenService tokens,
         IConfiguration configuration,
+        ContactConnection.Infrastructure.Data.ContactConnectionDbContext db,
         CancellationToken ct)
     {
         EntraIdentity identity;
@@ -38,6 +39,13 @@ public static class PortalAuthEndpoints
         if (role is null)
             return Results.Json(new { error = "Your account has no ContactConnection Portal role. Ask the account owner to assign one." },
                 statusCode: StatusCodes.Status403Forbidden);
+
+        // S184: remember who signs in to the Portal and with what role — Owners here get platform health alerts.
+        var name = $"{identity.FirstName} {identity.LastName}".Trim();
+        var seen = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(db.PlatformUsers, u => u.EntraOid == identity.Oid, ct);
+        if (seen is null) db.PlatformUsers.Add(PlatformUser.Seen(identity.Oid, identity.Email, name, role, DateTimeOffset.UtcNow));
+        else seen.SeenAgain(identity.Email, name, role, DateTimeOffset.UtcNow);
+        await db.SaveChangesAsync(ct);
 
         var token = tokens.GenerateToken(identity, role);
 

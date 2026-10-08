@@ -54,6 +54,7 @@ import AdminCallDetailPage from './pages/admin/AdminCallDetailPage'
 import PortalApiDefinitionsPage from './pages/portal/PortalApiDefinitionsPage'
 import PortalApiDefinitionDetailPage from './pages/portal/PortalApiDefinitionDetailPage'
 import PortalCredentialsPage from './pages/portal/PortalCredentialsPage'
+import HealthPage from './pages/portal/HealthPage'
 import MaintenancePage from './pages/portal/MaintenancePage'
 import LandingPage from './pages/public/LandingPage'
 import { PrivacyPage, TermsPage, AcceptableUsePage } from './pages/public/LegalPages'
@@ -233,6 +234,14 @@ export default function App() {
           element={
             <RequirePortalAuth>
               <PortalApiDefinitionDetailPage />
+            </RequirePortalAuth>
+          }
+        />
+        <Route
+          path="/portal/health"
+          element={
+            <RequirePortalAuth>
+              <HealthPage />
             </RequirePortalAuth>
           }
         />

@@ -86,6 +86,7 @@ public sealed class RecordingMergeService : BackgroundService
                 _logger.LogError(ex, "Unhandled error in recording-merge cycle.");
             }
 
+            JobHeartbeats.Report("Recording merge", _interval);
             try { await Task.Delay(_interval, stoppingToken); }
             catch (OperationCanceledException) { break; }
         }

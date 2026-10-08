@@ -94,6 +94,7 @@ public static class ServiceCollectionExtensions
         // Platform auth
         services.AddScoped<IPlatformTokenService, PlatformJwtTokenService>();
         services.AddScoped<SupportSessionReader>();
+        services.AddScoped<ContactConnection.Infrastructure.Health.HealthRecorder>();
         services.AddSingleton<IEntraIdTokenValidator, EntraIdTokenValidator>();
         services.AddSingleton<IMfaService, MfaService>();
 

@@ -88,6 +88,7 @@ public sealed class RecordingRetentionService : BackgroundService
                 _logger.LogError(ex, "Unhandled error in recording-retention cycle.");
             }
 
+            JobHeartbeats.Report("Recording retention", _interval);
             try { await Task.Delay(_interval, stoppingToken); }
             catch (OperationCanceledException) { break; }
         }

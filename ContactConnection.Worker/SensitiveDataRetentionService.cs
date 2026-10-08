@@ -75,6 +75,7 @@ public sealed class SensitiveDataRetentionService : BackgroundService
                 _logger.LogError(ex, "Unhandled error in sensitive-data-retention cycle.");
             }
 
+            JobHeartbeats.Report("Card-data retention", _interval);
             try { await Task.Delay(_interval, stoppingToken); }
             catch (OperationCanceledException) { break; }
         }

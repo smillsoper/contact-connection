@@ -100,6 +100,8 @@ builder.Services.AddHostedService<OrphanedCallReconciliationService>();
 // dashboard changes on (it has no SignalR hub) and re-emits them through this instance's real
 // IDashboardNotifier.
 builder.Services.AddHostedService<ContactConnection.Api.Realtime.DashboardRelaySubscriber>();
+// S184: platform health — the API's heartbeat + facts, the Worker watchdog, live updates to the Portal's Health page.
+builder.Services.AddHostedService<ContactConnection.Api.Health.HealthReporterService>();
 
 // JWT Bearer authentication
 var signingKey = builder.Configuration["Jwt:SigningKey"]
@@ -358,6 +360,7 @@ app.MapAgentHealthEndpoints();
 app.MapRemoteActionsEndpoints();
 app.MapHelpdeskEndpoints();
 app.MapSupportSessionEndpoints();
+ContactConnection.Api.Health.PlatformHealthEndpoints.MapPlatformHealthEndpoints(app);
 app.MapWidgetFilterOptions();
 app.MapClientPortalAuthEndpoints();
 app.MapClientPortalEndpoints();
@@ -404,5 +407,6 @@ app.MapHub<CallTraceHub>("/hubs/call-trace");
 app.MapHub<ClientDashboardHub>("/hubs/client");
 app.MapHub<ChatHub>("/hubs/chat");
 app.MapHub<ScreenViewHub>("/hubs/screen-view");
+app.MapHub<ContactConnection.Api.Health.PlatformHub>("/hubs/platform");
 
 app.Run();
