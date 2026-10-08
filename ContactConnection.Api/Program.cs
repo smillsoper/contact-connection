@@ -52,6 +52,8 @@ builder.Services.AddSignalR()
 builder.Services.AddScoped<IFlowNotifier, FlowNotifier>();
 // Live screen views (S183) -- in memory on this instance; the signalling itself rides the Redis backplane.
 builder.Services.AddSingleton<ContactConnection.Api.Hubs.ScreenViewRegistry>();
+// Connection health (S183) -- latest softphone call stats per agent, in memory.
+builder.Services.AddSingleton<ContactConnection.Api.Endpoints.AgentHealthStore>();
 builder.Services.AddScoped<ICallTraceNotifier, CallTraceNotifier>();
 builder.Services.AddScoped<ISecureCollectNotifier, SecureCollectNotifier>();
 builder.Services.AddScoped<ITelephonyEventNotifier, TelephonyEventNotifier>();
@@ -327,6 +329,7 @@ app.MapCallerHistoryEndpoints();
 app.MapAgentDedicationsEndpoints();
 app.MapFlowDocumentEndpoints();
 app.MapCoachingNotesEndpoints();
+app.MapAgentHealthEndpoints();
 app.MapWidgetFilterOptions();
 app.MapClientPortalAuthEndpoints();
 app.MapClientPortalEndpoints();

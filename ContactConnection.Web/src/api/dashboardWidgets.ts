@@ -25,6 +25,8 @@ export interface AgentListRow {
   sign_in_locked?: boolean
   lock_reason?: string | null
   locked_by?: string | null
+  /** Connection health (S183): the softphone's latest call stats while the portal is reporting. */
+  health?: import('../lib/callHealth').AgentHealth | null
   /** Current dedications (S183) — active_now false = a weekly schedule waiting for its next window. */
   dedications?: { id: string; active_now: boolean; campaigns: string[]; summary: string }[]
 }

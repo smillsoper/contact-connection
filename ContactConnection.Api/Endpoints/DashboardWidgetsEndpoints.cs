@@ -65,6 +65,7 @@ public static class DashboardWidgetsEndpoints
             IFlowEngine flowEngine,
             ITelephonyCallSessionStore telephonySessions,
             ScopedTenantDbContextFactory dbf,
+            AgentHealthStore health,
             TenantContext tenantContext,
             CancellationToken ct) =>
         {
@@ -136,6 +137,8 @@ public static class DashboardWidgetsEndpoints
                     sign_in_locked    = agent.SignInLocked,
                     lock_reason       = agent.StatusLockReason,
                     locked_by         = agent.StatusLockedByName,
+                    // Connection health (S183): the softphone's latest call stats, while the portal keeps reporting.
+                    health            = health.Get(tenantId, agent.Id),
                     dedications       = (dedications.GetValueOrDefault(agent.Id) ?? []).Select(d => new
                     {
                         id         = d.Id,

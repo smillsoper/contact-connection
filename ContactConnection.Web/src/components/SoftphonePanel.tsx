@@ -17,6 +17,8 @@ import Keypad from './softphone/Keypad'
 import { applySpeaker, getInputDeviceId, micConstraints, onAudioDevicesChanged } from '../utils/audioDevices'
 import { startRinging } from '../utils/ringtone'
 import { loadIceServers, rtcConfig } from '../utils/iceServers'
+import { setCallPeerProvider, setRegisteredProvider, startCallHealth } from '../lib/callHealth'
+import { CallHealthLine } from './HealthBars'
 import { HeadsetIcon, LockIcon, PhoneIcon as LinePhoneIcon } from './icons/Icons'
 
 // Local dev: connect directly to FreeSWITCH (no cert required, no tunnel overhead).
@@ -155,6 +157,12 @@ export default function SoftphonePanel() {
 
   // Primary call session
   const sessionRef          = useRef<any>(null)
+  // Connection health (S183): the live call's peer connection and registration, read every few seconds.
+  useEffect(() => {
+    setCallPeerProvider(() => sessionRef.current?.connection as RTCPeerConnection | undefined)
+    setRegisteredProvider(() => useSipStore.getState().registrationStatus === 'registered')
+    startCallHealth()
+  }, [])
   // Consultation leg (warm transfer target)
   const transferSessionRef  = useRef<any>(null)
   // Flags the next newRTCSession as a consultation leg, not a new primary call
@@ -934,6 +942,8 @@ export default function SoftphonePanel() {
           <span className="text-xs text-gray-400">{REG_LABEL[registrationStatus]}</span>
         </div>
       )}
+      {/* Connection health on a call (S183) */}
+      <CallHealthLine />
 
       {/* Extension badge */}
       {sipExtension && callStatus === 'idle' && (

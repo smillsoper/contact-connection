@@ -202,6 +202,8 @@ export default function DashboardBuilderPage() {
     })
 
     connection.on('receiveMonitorEnded', () => window.dispatchEvent(new Event('cc:monitor-ended')))
+    // Connection health (S183): an agent's call quality / mic changed — the Agent List badge updates.
+    connection.on('receiveAgentHealth', (agentId: string, health: unknown) => window.dispatchEvent(new CustomEvent('cc:agent-health', { detail: { agentId, health } })))
     // Coaching notes (S183): an agent's note was sent / seen / acknowledged / taken back — open coach windows refresh.
     connection.on('receiveCoachingNoteStatus', (agentId: string) => window.dispatchEvent(new CustomEvent('cc:coaching-status', { detail: agentId })))
 

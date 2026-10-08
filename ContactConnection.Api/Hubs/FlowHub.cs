@@ -128,6 +128,9 @@ public interface IFlowHubClient
     /// docs/design/parallel-queuing.md). The agent UI drops the pop for that callRecordId.</summary>
     Task ReceiveOfferWithdrawn(string callRecordId);
 
+    /// <summary>Supervisor dashboards: an agent's connection health changed (S183) — the Agent List badge updates.</summary>
+    Task ReceiveAgentHealth(string agentId, ContactConnection.Api.Endpoints.AgentHealth health);
+
     /// <summary>Coaching notes (S183): a supervisor sent / took back a note, or this agent's note changed — the portal
     /// reloads its pinned notes.</summary>
     Task ReceiveCoachingNotesChanged();

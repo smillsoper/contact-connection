@@ -10,6 +10,8 @@ import { ChevronDownIcon, ChevronUpIcon, CloseIcon, ExternalLinkIcon, HeadsetIco
 import ScreenViewModal from '../ScreenViewModal'
 import CoachModal from '../CoachComposer'
 import DedicationModal from '../DedicationModal'
+import { HealthBars } from '../../HealthBars'
+import type { AgentHealth } from '../../../lib/callHealth'
 
 type SortColumn = 'name' | 'state' | 'time'
 type SortDirection = 'asc' | 'desc'
@@ -196,6 +198,16 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
     refetchIfUnknown(liveEvent.agentId)
   }, [liveEvent, refetchIfUnknown])
 
+  // Connection health (S183) — pushed by the server as an agent's call quality changes.
+  useEffect(() => {
+    const on = (e: Event) => {
+      const { agentId, health } = (e as CustomEvent<{ agentId: string; health: AgentHealth }>).detail
+      setRows((prev) => prev.map((r) => (r.agent_id.toLowerCase() === agentId.toLowerCase() ? { ...r, health } : r)))
+    }
+    window.addEventListener('cc:agent-health', on)
+    return () => window.removeEventListener('cc:agent-health', on)
+  }, [])
+
   // Same, for SIP registration presence — pushed independently of agent status
   useEffect(() => {
     if (!liveReg) return
@@ -322,6 +334,7 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
                   >
                     <span className="w-2 h-2 rounded-full shrink-0 bg-green-500" />
                     <span className="text-[10px] uppercase tracking-wide">Reg</span>
+                    {r.health?.onCall && <span className="ml-1"><HealthBars health={r.health} size={13} /></span>}
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1 text-gray-600" title="Softphone not registered">
