@@ -395,11 +395,13 @@ export default function FlowPanel() {
 
   // CRM script flows only — a telephony flow needs a real call on the line, so it can't be
   // started from this manual test toolbar.
-  useEffect(() => {
-    // Designers also see unpublished drafts — they can run those in a sandbox (S183). Everyone else gets published flows.
+  // Designers also see unpublished drafts — they can run those in a sandbox (S183). Everyone else gets published flows.
+  // Reloaded whenever the picker opens, so a save or publish in the designer shows up without a page refresh.
+  const loadFlows = useCallback(() => {
     ;(useAuthStore.getState().hasPermission('flows.manage') ? flowsApi.listAllByType('crm') : flowsApi.list())
       .then((all) => setFlows(all.filter((f) => f.flow_type === 'crm'))).catch(console.error)
   }, [])
+  useEffect(loadFlows, [loadFlows])
 
   // SignalR connection — shared across all tabs
   useEffect(() => {
@@ -648,6 +650,8 @@ export default function FlowPanel() {
           <select
             value={selectedFlowId}
             onChange={(e) => setSelectedFlowId(e.target.value)}
+            onMouseDown={loadFlows}
+            onFocus={loadFlows}
             className="bg-gray-800 text-white rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 border border-gray-700"
           >
             <option value="">Select flow…</option>
