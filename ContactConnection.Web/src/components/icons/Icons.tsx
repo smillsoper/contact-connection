@@ -74,6 +74,8 @@ export const CoachIcon = (p: IconProps) => <Icon {...p}><path d="M21 12a8 8 0 0 
 /** Remote fixes (S184) — Stephen's supplied wrench.svg (path as supplied). */
 export const WrenchIcon = (p: IconProps) => <Icon {...p}><path d="M14.5 6.5a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.6-3.6a6 6 0 0 1-7.9 7.9l-6.8 6.8a2.1 2.1 0 0 1-3-3l6.8-6.8a6 6 0 0 1 7.9-7.9z" /></Icon>
 /** Follow-along script view (S184). */
+export const HelpDeskIcon = (p: IconProps) => <Icon {...p}><circle cx="12" cy="12" r="9" /><path d="M9.2 9a3 3 0 0 1 5.8 1c0 2-3 2.6-3 2.6" /><path d="M12 17h.01" /></Icon>
+export const LinkIcon = (p: IconProps) => <Icon {...p}><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></Icon>
 export const EyeIcon = (p: IconProps) => <Icon {...p}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></Icon>
 /** Point here (S183). */
 export const PointerIcon = (p: IconProps) => <Icon {...p}><path d="M5 3l14 7-6 2-2 6z" /><path d="M13 12l6 6" /></Icon>

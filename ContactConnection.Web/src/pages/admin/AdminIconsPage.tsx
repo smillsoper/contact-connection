@@ -52,6 +52,8 @@ const DRAWN_NEW: Entry[] = [
   { name: 'BoltIcon', meaning: 'Test now', where: 'API definition “Test Authentication”' },
   { name: 'RefreshIcon', meaning: 'Retrying · re-wire', where: 'Export delivery status · designer option picker “re-wire”' },
   { name: 'WrenchIcon', meaning: 'Remote fixes', where: 'Agent List widget · remote fixes window' },
+  { name: 'HelpDeskIcon', meaning: 'Help desk', where: 'Agent portal help desk button · help desk window · Help Desks admin page' },
+  { name: 'LinkIcon', meaning: 'Add / edit a link', where: 'Help desk topic editor' },
   { name: 'EyeIcon', meaning: 'Follow the script', where: 'Agent List widget · follow-along window' },
   { name: 'CoachIcon', meaning: 'Coaching note', where: 'Agent List widget · coach window · agent portal pinned notes' },
   { name: 'ScreenIcon', meaning: 'Live screen view', where: 'Agent List widget · screen view window' },

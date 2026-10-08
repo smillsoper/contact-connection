@@ -97,6 +97,9 @@ public static class Permission
     /// <summary>Team chat configuration (S183): create / configure / retire channels, assign members and posters.</summary>
     public const string ChatManage = "chat.manage";
 
+    /// <summary>Agent help desks (S184): create help desks, write topics, assign them to campaigns.</summary>
+    public const string HelpdeskManage = "helpdesk.manage";
+
     public static readonly IReadOnlyList<string> All = [
         AgentsView, AgentsManage, RolesManage,
         FlowsView, FlowsManage, FlowsPublish,
@@ -110,7 +113,8 @@ public static class Permission
         DirectDial, InternalDialList,
         BillingManage,
         ExportsCardData,
-        ChatManage
+        ChatManage,
+        HelpdeskManage
     ];
 
     // Permissions derived from legacy AgentRole strings (for agents without a custom RoleId)

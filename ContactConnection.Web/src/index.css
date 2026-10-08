@@ -152,6 +152,25 @@ html, body, #root {
 .chat-editor .tiptap img.ProseMirror-selectednode { outline: 2px solid #6366f1; }
 .chat-editor .tiptap mark { color: #111827; }
 
+/* ── Agent help desk topics (S184) ──────────────────────────────────────── */
+.helpdesk-rich { line-height: 1.55; }
+.helpdesk-rich p { margin: 0 0 0.5rem; min-height: 1em; }
+.helpdesk-rich h2 { font-size: 1.25rem; font-weight: 600; margin: 0.9rem 0 0.4rem; color: #fff; }
+.helpdesk-rich h3 { font-size: 1.08rem; font-weight: 600; margin: 0.8rem 0 0.35rem; color: #fff; }
+.helpdesk-rich h4 { font-size: 0.95rem; font-weight: 600; margin: 0.7rem 0 0.3rem; color: #e5e7eb; }
+.helpdesk-rich ul { list-style: disc; padding-left: 1.25rem; margin: 0.25rem 0 0.5rem; }
+.helpdesk-rich ol { list-style: decimal; padding-left: 1.25rem; margin: 0.25rem 0 0.5rem; }
+.helpdesk-rich li { margin: 0.15rem 0; }
+.helpdesk-rich li p { margin: 0; }
+.helpdesk-rich blockquote { border-left: 3px solid #4b5563; padding-left: 0.75rem; color: #d1d5db; margin: 0.5rem 0; }
+.helpdesk-rich hr { border: 0; border-top: 1px solid #374151; margin: 0.9rem 0; }
+.helpdesk-rich a { color: #7dd3fc; text-decoration: underline; word-break: break-word; cursor: pointer; }
+.helpdesk-rich mark { border-radius: 2px; padding: 0 1px; color: #111827; }
+.helpdesk-rich code { background: #1f2937; border-radius: 3px; padding: 0 3px; font-size: 0.9em; }
+.helpdesk-rich img { display: block; max-width: 100%; height: auto; border-radius: 6px; margin: 0.4rem 0; background: #1f2937; min-width: 40px; min-height: 30px; }
+.helpdesk-editor .tiptap { outline: none; min-height: 16rem; }
+.helpdesk-editor .tiptap img.ProseMirror-selectednode { outline: 2px solid #6366f1; }
+
 /* Default emoticon for an emoji the device can't draw (S183) */
 .emoji-missing { display: inline-flex; vertical-align: -0.2em; color: #9ca3af; cursor: help; }
 .emoji-missing svg { width: 1.15em; height: 1.15em; }

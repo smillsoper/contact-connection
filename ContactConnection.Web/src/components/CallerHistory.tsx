@@ -46,7 +46,7 @@ export default function CallerHistoryButton({ callRecordId }: { callRecordId: st
     <>
       <button onClick={() => { setOpen(true); load(callRecordId) }}
         title={count ? `${count} earlier call${count === 1 ? '' : 's'} from this caller` : 'No earlier calls from this caller'}
-        className={`ml-auto mb-1 shrink-0 flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md border transition-colors ${count
+        className={`mb-1 shrink-0 flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md border transition-colors ${count
           ? 'border-sky-600 text-sky-200 bg-sky-500/10 hover:bg-sky-500/20' : 'border-gray-700 text-gray-500 hover:text-gray-300'}`}>
         <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
           <path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /><path d="M12 7v5l3 2" />

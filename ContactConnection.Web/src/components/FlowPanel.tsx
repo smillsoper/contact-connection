@@ -2,6 +2,7 @@ import { requestPortalFocus } from '../lib/extensionBridge'
 import { reconnectForever } from '../utils/hubRetry'
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import CallerHistoryButton from './CallerHistory'
+import HelpdeskButton from './helpdesk/HelpdeskButton'
 import * as signalR from '@microsoft/signalr'
 import { useAuthStore } from '../stores/authStore'
 import { useCallStore } from '../stores/callStore'
@@ -327,7 +328,7 @@ interface TabBarProps {
   sessions: FlowSessionEntry[]
   activeSessionId: string | null
   onSelect: (id: string) => void
-  /** Right-aligned tools for the active call (S181: caller history). */
+  /** Right-aligned tools for the active call (S181: caller history; S184: help desk). */
   right?: ReactNode
 }
 
@@ -795,7 +796,12 @@ export default function FlowPanel() {
           sessions={sessions}
           activeSessionId={activeSessionId}
           onSelect={setActiveSession}
-          right={<CallerHistoryButton callRecordId={sessions.find((s) => s.id === activeSessionId)?.callRecordId ?? null} />}
+          right={
+            <div className="ml-auto flex items-end gap-2 pl-2">
+              <HelpdeskButton callRecordId={sessions.find((s) => s.id === activeSessionId)?.callRecordId ?? null} />
+              <CallerHistoryButton callRecordId={sessions.find((s) => s.id === activeSessionId)?.callRecordId ?? null} />
+            </div>
+          }
         />
       )}
 

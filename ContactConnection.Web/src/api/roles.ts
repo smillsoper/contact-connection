@@ -47,6 +47,7 @@ export const PERMISSION_LABELS: Record<string, string> = {
   'billing.manage':        'Manage Billing (pay ContactConnection invoices)',
   'exports.card_data':     'Create / change data exports that include card data (when enabled for the account)',
   'chat.manage':           'Manage Team Chat (channels, members, posting, retiring)',
+  'helpdesk.manage':       'Manage Help Desks (topics, files, which campaigns see them)',
 }
 
 export const PERMISSION_GROUPS: Record<string, string[]> = {
@@ -64,6 +65,7 @@ export const PERMISSION_GROUPS: Record<string, string[]> = {
   Billing:     ['billing.manage'],
   'Data Exports': ['exports.card_data'],
   'Team Chat':  ['chat.manage'],
+  'Help Desks': ['helpdesk.manage'],
 }
 
 export const LANDING_PAGE_LABELS: Record<string, string> = {
