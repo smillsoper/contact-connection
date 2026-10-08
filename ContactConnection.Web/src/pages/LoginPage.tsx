@@ -61,6 +61,7 @@ export default function LoginPage() {
         return
       }
       setAuth(res.token, res.agentId, subdomain, res.role, res.firstName, res.lastName, res.permissions ?? [], res.landingPage ?? undefined)
+      useAuthStore.getState().setSupportSession(null)
       if (res.sipExtension && res.sipPassword)
         setSipCredentials(res.sipExtension, res.sipPassword)
       navigate(getLandingRoute(res.landingPage ?? null), { replace: true })

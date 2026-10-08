@@ -3,6 +3,8 @@ import { useParams, Link } from 'react-router-dom'
 import PortalShell from '../../components/portal/PortalShell'
 import TenantUsageCard from '../../components/portal/TenantUsageCard'
 import TenantInvoicesCard from '../../components/portal/TenantInvoicesCard'
+import TenantSupportCard from '../../components/portal/TenantSupportCard'
+import { useIsPortalOwner } from '../../stores/portalAuthStore'
 import {
   getTenant,
   updateTenant,
@@ -29,6 +31,8 @@ const FLAG_LABELS: Record<keyof TenantFeatureFlags, string> = {
 
 export default function TenantDetailPage() {
   const { id } = useParams<{ id: string }>()
+  // S184: Support doesn't see billing, usage, invoices, trial dates, the card-data switch, reset or (de)activate.
+  const isOwner = useIsPortalOwner()
   const [tenant, setTenant] = useState<TenantRecord | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -94,7 +98,7 @@ export default function TenantDetailPage() {
     setSaving(true)
     try {
       const updated = await updateTenant(id, {
-        billingContact: billingContact || undefined,
+        billingContact: isOwner ? billingContact || undefined : undefined,
         customDomain: customDomain || undefined,
         inviteEmail: inviteEmail || undefined,
       })
@@ -242,6 +246,8 @@ export default function TenantDetailPage() {
           {tenant.subdomain}.contactconnection.local &nbsp;·&nbsp; schema: {tenant.schemaName}
         </p>
 
+        {id && <TenantSupportCard tenantId={id} tenantActive={tenant.isActive} />}
+
         {statusMsg && (
           <div className="mb-4 bg-indigo-900/40 border border-indigo-700 text-indigo-300 text-sm px-4 py-2 rounded-lg">
             {statusMsg}
@@ -272,13 +278,15 @@ export default function TenantDetailPage() {
             {!tenant.onboardingComplete && !tenant.inviteEmail && (
               <span className="text-gray-600 text-xs">Set an invite email in Details to resend.</span>
             )}
-            <button
-              onClick={handleResetOnboarding}
-              disabled={saving}
-              className="bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-amber-400 text-xs font-medium rounded-lg px-3 py-1.5 transition-colors"
-            >
-              {tenant.onboardingComplete ? 'Reset onboarding' : 'Clear agents & invites'}
-            </button>
+            {isOwner && (
+              <button
+                onClick={handleResetOnboarding}
+                disabled={saving}
+                className="bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-amber-400 text-xs font-medium rounded-lg px-3 py-1.5 transition-colors"
+              >
+                {tenant.onboardingComplete ? 'Reset onboarding' : 'Clear agents & invites'}
+              </button>
+            )}
           </div>
         </section>
 
@@ -368,7 +376,7 @@ export default function TenantDetailPage() {
         <section className="bg-gray-900 rounded-xl border border-gray-800 p-5 mb-4">
           <h2 className="text-white text-sm font-semibold mb-4">Details</h2>
           <div className="flex flex-col gap-4">
-            <div>
+            {isOwner && <div>
               <label className="block mb-1.5 text-sky-400 text-xs font-medium">Billing contact</label>
               <input
                 type="text"
@@ -377,7 +385,7 @@ export default function TenantDetailPage() {
                 placeholder="billing@example.com"
                 className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
               />
-            </div>
+            </div>}
             <div>
               <label className="block mb-1.5 text-sky-400 text-xs font-medium">Invite email</label>
               <input
@@ -406,7 +414,7 @@ export default function TenantDetailPage() {
               >
                 Save details
               </button>
-              <button
+              {isOwner && <button
                 onClick={handleToggleActive}
                 disabled={saving}
                 className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
@@ -416,7 +424,7 @@ export default function TenantDetailPage() {
                 }`}
               >
                 {tenant.isActive ? 'Deactivate tenant' : 'Activate tenant'}
-              </button>
+              </button>}
             </div>
           </div>
         </section>
@@ -425,11 +433,14 @@ export default function TenantDetailPage() {
         <section className="bg-gray-900 rounded-xl border border-gray-800 p-5">
           <h2 className="text-white text-sm font-semibold mb-4">Feature flags</h2>
           <div className="grid grid-cols-2 gap-3 mb-5">
-            {(Object.keys(FLAG_LABELS) as (keyof TenantFeatureFlags)[]).map((key) => (
+            {(Object.keys(FLAG_LABELS) as (keyof TenantFeatureFlags)[]).map((key) => {
+              const locked = key === 'cardDataExports' && !isOwner
+              return (
               <label
                 key={key}
-                className="flex items-center gap-3 cursor-pointer group"
-                onClick={() => toggleFlag(key)}
+                className={`flex items-center gap-3 group ${locked ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                title={locked ? 'Only the account owner can change this (PCI review).' : undefined}
+                onClick={() => { if (!locked) toggleFlag(key) }}
               >
                 <div
                   className={`w-9 h-5 rounded-full relative transition-colors ${
@@ -446,7 +457,8 @@ export default function TenantDetailPage() {
                   {FLAG_LABELS[key]}
                 </span>
               </label>
-            ))}
+              )
+            })}
           </div>
           <button
             onClick={handleSaveFlags}
@@ -457,8 +469,8 @@ export default function TenantDetailPage() {
           </button>
         </section>
 
-        {id && <TenantUsageCard tenantId={id} />}
-        {id && <TenantInvoicesCard tenantId={id} />}
+        {id && isOwner && <TenantUsageCard tenantId={id} />}
+        {id && isOwner && <TenantInvoicesCard tenantId={id} />}
       </div>
     </PortalShell>
   )

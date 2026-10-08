@@ -2,5 +2,6 @@ namespace ContactConnection.Application.Interfaces.Services;
 
 public interface IPlatformTokenService
 {
-    string GenerateToken(EntraIdentity identity);
+    /// <param name="platformRole">owner or support (S184, <c>PlatformRole</c>).</param>
+    string GenerateToken(EntraIdentity identity, string platformRole);
 }

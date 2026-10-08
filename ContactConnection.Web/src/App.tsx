@@ -27,6 +27,9 @@ import AdminCommissionsPage from './pages/admin/AdminCommissionsPage'
 import BillingPage from './pages/admin/BillingPage'
 import AdminChatPage from './pages/admin/AdminChatPage'
 import AdminHelpdesksPage from './pages/admin/AdminHelpdesksPage'
+import AdminSupportAccessPage from './pages/admin/AdminSupportAccessPage'
+import SupportLoginPage from './pages/SupportLoginPage'
+import SupportSessionBanner from './components/support/SupportSessionBanner'
 import AdminIconsPage from './pages/admin/AdminIconsPage'
 import ExtensionPage from './pages/ExtensionPage'
 import CommissionReportPage from './pages/CommissionReportPage'
@@ -116,6 +119,8 @@ export default function App() {
 
         {/* ── Agent routes ── */}
         <Route path="/login" element={isAdminSubdomain ? <PortalLoginPage /> : <LoginPage />} />
+        {/* ContactConnection support opening this tenant's portal from the Platform Portal (S184) */}
+        <Route path="/support-login" element={<SupportLoginPage />} />
         {/* Client portal (S181) — client users, separate session from agents */}
         <Route path="/client/login" element={<ClientLoginPage />} />
         <Route path="/client/invite/:token" element={<ClientInvitePage />} />
@@ -299,6 +304,14 @@ export default function App() {
           element={
             <RequireAdminAuth>
               <AdminCustomFieldDefinitionsPage />
+            </RequireAdminAuth>
+          }
+        />
+        <Route
+          path="/admin/support-access"
+          element={
+            <RequireAdminAuth>
+              <AdminSupportAccessPage />
             </RequireAdminAuth>
           }
         />
@@ -506,6 +519,7 @@ export default function App() {
 
         <Route path="*" element={<Navigate to={isAdminSubdomain ? '/login' : '/agent'} replace />} />
       </Routes>
+      <SupportSessionBanner />
     </BrowserRouter>
   )
 }

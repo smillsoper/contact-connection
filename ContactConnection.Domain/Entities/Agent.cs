@@ -33,6 +33,13 @@ public class Agent
     public string? StatusLockedByName { get; private set; }
     public string? StatusLockReason { get; private set; }
     public bool SignInLocked { get; private set; }
+
+    /// <summary>A ContactConnection support person's account in this tenant (S184) — one per person, created when they
+    /// open the tenant's portal from the platform Portal. Hidden from every list, seat count and queue; never signs in
+    /// with a password.</summary>
+    public bool IsPlatformSupport { get; private set; }
+    /// <summary>The support person's Entra object id (which person this account is).</summary>
+    public string? PlatformSupportOid { get; private set; }
     public bool IsStatusLocked => StatusLockedAt is not null;
 
     // Required by EF Core
@@ -58,6 +65,24 @@ public class Agent
             IsActive = true,
             CreatedAt = DateTimeOffset.UtcNow
         };
+    }
+
+    /// <summary>A support person's account (S184): named "First Last (ContactConnection Support)", no usable password,
+    /// no extension.</summary>
+    public static Agent CreatePlatformSupport(Guid tenantId, string entraOid, string firstName, string lastName)
+    {
+        var a = Create(tenantId, "", "", $"support-{entraOid}@support.contactconnection.invalid", "!", AgentRole.Admin);
+        a.IsPlatformSupport = true;
+        a.PlatformSupportOid = entraOid;
+        a.NameSupport(firstName, lastName);
+        return a;
+    }
+
+    /// <summary>Keeps a support account's name in step with the person's Entra profile.</summary>
+    public void NameSupport(string firstName, string lastName)
+    {
+        FirstName = string.IsNullOrWhiteSpace(firstName) ? "ContactConnection" : firstName.Trim();
+        LastName = $"{lastName?.Trim()} (ContactConnection Support)".Trim();
     }
 
     public void RecordLogin() => LastLoginAt = DateTimeOffset.UtcNow;

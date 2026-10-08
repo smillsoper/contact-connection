@@ -37,6 +37,7 @@ public static class AuthEndpoints
         IRoleRepository roles,
         ITokenService tokens,
         TenantContext tenantContext,
+        ContactConnection.Infrastructure.Data.ContactConnectionDbContext master,
         CancellationToken ct)
     {
         if (tenantContext.Current is null) return Results.Unauthorized();
@@ -47,6 +48,19 @@ public static class AuthEndpoints
 
         var agent = await agents.GetByIdAsync(agentId, ct);
         if (agent is null) return Results.Unauthorized();
+
+        // S184: a support session refreshes as a support token — same permissions, never past the session's end, no
+        // softphone credentials.
+        if (Guid.TryParse(user.FindFirst("support_session")?.Value, out var supportSessionId))
+        {
+            var session = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(
+                master.SupportSessions, s => s.Id == supportSessionId && s.AgentId == agentId, ct);
+            if (session is null || !session.IsActive(DateTimeOffset.UtcNow)) return Results.Unauthorized();
+            var supportPermissions = ForPlatformSupport(tenantContext.Current.FeatureFlags.CardDataExports);
+            var supportToken = tokens.GenerateSupportToken(agent, tenantContext.Current, supportPermissions, session.Id, session.ExpiresAt);
+            return Results.Ok(new LoginResponse(false, supportToken, agent.Id, agent.Email, agent.FirstName, agent.LastName, "Administrator",
+                tenantContext.Current.Subdomain, null, null, null, null, supportPermissions.ToArray(), AdminDashboard));
+        }
 
         var role = agent.RoleId.HasValue ? await roles.GetByIdAsync(agent.RoleId.Value, ct) : null;
 

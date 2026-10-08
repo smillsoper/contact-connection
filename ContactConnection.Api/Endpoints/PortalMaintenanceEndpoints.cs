@@ -11,7 +11,7 @@ public static class PortalMaintenanceEndpoints
     public static IEndpointRouteBuilder MapPortalMaintenanceEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/v1/portal/maintenance")
-            .RequireAuthorization("PlatformAdmin");
+            .RequireAuthorization("PlatformOwner");
 
         group.MapPost("migrate-tenants", MigrateTenants);
 

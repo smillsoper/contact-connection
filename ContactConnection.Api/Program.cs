@@ -143,6 +143,20 @@ authBuilder
                 var principal = context.Principal;
                 var schema = principal?.FindFirst("tenant_schema")?.Value;
                 if (string.IsNullOrEmpty(schema) || !Guid.TryParse(principal?.FindFirst("sub")?.Value, out var agentId)) return;
+                // S184: a ContactConnection support session's token works only while the session is live, only in its
+                // own tenant, and makes that support account visible to its own requests.
+                if (principal?.FindFirst("support_session")?.Value is { } supportClaim)
+                {
+                    var sessions = context.HttpContext.RequestServices.GetRequiredService<ContactConnection.Infrastructure.Auth.SupportSessionReader>();
+                    var live = Guid.TryParse(supportClaim, out var sessionId) ? await sessions.GetLiveAsync(sessionId, context.HttpContext.RequestAborted) : null;
+                    if (live is null || live.Value.AgentId != agentId || live.Value.TenantId.ToString() != principal.FindFirst("tenant_id")?.Value)
+                    {
+                        context.Fail("This support session has ended.");
+                        return;
+                    }
+                    context.HttpContext.RequestServices.GetRequiredService<ContactConnection.Application.Services.TenantContext>().SupportAgentId = agentId;
+                    return;
+                }
                 var locks = context.HttpContext.RequestServices.GetRequiredService<ContactConnection.Application.Interfaces.Services.IAgentLockReader>();
                 if ((await locks.GetAsync(schema, agentId, context.HttpContext.RequestAborted))?.SignInLocked == true)
                     context.Fail(ContactConnection.Api.Endpoints.AgentLockEndpoints.SignInLockedMessage);
@@ -212,6 +226,12 @@ builder.Services.AddAuthorization(options =>
         .RequireClaim("role", ClientUserTokens.MfaPendingRole));
     options.AddPolicy("PlatformAdmin", policy =>
         policy.RequireClaim("role", "platform_admin"));
+    // S184: Portal Owner — everything outside Tenants, plus billing / usage / invoices / the card-data switch /
+    // provisioning / (de)activating on Tenants. A token from before platform roles counts as Owner until roles are enforced.
+    var enforcePlatformRoles = builder.Configuration.GetValue<bool>("PlatformAuth:EnforceRoles");
+    options.AddPolicy("PlatformOwner", policy =>
+        policy.RequireClaim("role", "platform_admin").RequireAssertion(ctx =>
+            ctx.User.FindFirst("platform_role")?.Value is { } r ? r == PlatformRole.Owner : !enforcePlatformRoles));
     options.AddPolicy("TenantAdmin", policy =>
         policy.RequireAssertion(ctx =>
         {
@@ -337,6 +357,7 @@ app.MapCoachingNotesEndpoints();
 app.MapAgentHealthEndpoints();
 app.MapRemoteActionsEndpoints();
 app.MapHelpdeskEndpoints();
+app.MapSupportSessionEndpoints();
 app.MapWidgetFilterOptions();
 app.MapClientPortalAuthEndpoints();
 app.MapClientPortalEndpoints();

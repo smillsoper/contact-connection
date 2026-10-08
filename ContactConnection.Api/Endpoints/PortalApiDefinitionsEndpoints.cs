@@ -11,7 +11,7 @@ public static class PortalApiDefinitionsEndpoints
     public static IEndpointRouteBuilder MapPortalApiDefinitionsEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/v1/portal/api-definitions")
-            .RequireAuthorization("PlatformAdmin");
+            .RequireAuthorization("PlatformOwner");
 
         group.MapGet("", GetAll);
         group.MapPost("", Create);

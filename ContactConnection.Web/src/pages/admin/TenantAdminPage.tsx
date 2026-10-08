@@ -53,6 +53,7 @@ const NAV_SECTIONS: NavSection[] = [
     cards: [
       { title: 'Billing', desc: 'Your ContactConnection invoices, payment method and autopay.', path: '/admin/billing', live: true, requiredPermission: 'billing.manage' },
       { title: 'Team Chat', desc: 'Channels, who is in them, who can post, and retiring old channels.', path: '/admin/chat', live: true, requiredPermission: 'chat.manage' },
+      { title: 'Support Access', desc: 'Every time ContactConnection support signed in to help — who, why and for how long.', path: '/admin/support-access', live: true },
       { title: 'Help Desks', desc: 'Reference topics agents open on a call — formatted text, images, files and links, by campaign.', path: '/admin/helpdesks', live: true, requiredPermission: 'helpdesk.manage' },
     ],
   },

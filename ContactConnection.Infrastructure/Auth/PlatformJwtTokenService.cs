@@ -13,7 +13,7 @@ public class PlatformJwtTokenService : IPlatformTokenService
 
     public PlatformJwtTokenService(IConfiguration configuration) => _configuration = configuration;
 
-    public string GenerateToken(EntraIdentity identity)
+    public string GenerateToken(EntraIdentity identity, string platformRole)
     {
         var signingKey = _configuration["Jwt:SigningKey"]
             ?? throw new InvalidOperationException("Jwt:SigningKey is not configured.");
@@ -32,7 +32,8 @@ public class PlatformJwtTokenService : IPlatformTokenService
             new Claim(JwtRegisteredClaimNames.GivenName, identity.FirstName),
             new Claim(JwtRegisteredClaimNames.FamilyName, identity.LastName),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-            new Claim("role", "platform_admin")
+            new Claim("role", "platform_admin"),
+            new Claim("platform_role", platformRole)
         };
 
         var token = new JwtSecurityToken(

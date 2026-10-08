@@ -85,6 +85,37 @@ public class JwtTokenService : ITokenService
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
+    public string GenerateSupportToken(Agent agent, Tenant tenant, IReadOnlyList<string> permissions, Guid supportSessionId, DateTimeOffset expiresAt)
+    {
+        var signingKey = _configuration["Jwt:SigningKey"]
+            ?? throw new InvalidOperationException("Jwt:SigningKey is not configured.");
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(signingKey));
+        var claims = new[]
+        {
+            new Claim(JwtRegisteredClaimNames.Sub, agent.Id.ToString()),
+            new Claim(JwtRegisteredClaimNames.Email, agent.Email),
+            new Claim(JwtRegisteredClaimNames.GivenName, agent.FirstName),
+            new Claim(JwtRegisteredClaimNames.FamilyName, agent.LastName),
+            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+            new Claim("tenant_id", tenant.Id.ToString()),
+            new Claim("tenant_schema", tenant.SchemaName),
+            new Claim("tenant_subdomain", tenant.Subdomain),
+            new Claim("role", "Administrator"),
+            new Claim("role_id", string.Empty),
+            new Claim("permissions", string.Join(",", permissions)),
+            new Claim("landing_page", Domain.Entities.LandingPage.AdminDashboard),
+            new Claim("support_session", supportSessionId.ToString()),
+        };
+        var token = new JwtSecurityToken(
+            issuer: _configuration["Jwt:Issuer"] ?? "contactconnection",
+            audience: _configuration["Jwt:Audience"] ?? "contactconnection-api",
+            claims: claims,
+            notBefore: DateTime.UtcNow,
+            expires: expiresAt.UtcDateTime,
+            signingCredentials: new SigningCredentials(key, SecurityAlgorithms.HmacSha256));
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
     public string GenerateClientUserToken(ClientUser user, Tenant tenant, bool mfaPending = false)
     {
         var signingKey = _configuration["Jwt:SigningKey"]

@@ -1,4 +1,5 @@
 using ContactConnection.Application.Interfaces.Services;
+using ContactConnection.Domain.Entities;
 using Microsoft.IdentityModel.Tokens;
 
 namespace ContactConnection.Api.Endpoints;
@@ -18,6 +19,7 @@ public static class PortalAuthEndpoints
         EntraLoginRequest request,
         IEntraIdTokenValidator validator,
         IPlatformTokenService tokens,
+        IConfiguration configuration,
         CancellationToken ct)
     {
         EntraIdentity identity;
@@ -30,14 +32,22 @@ public static class PortalAuthEndpoints
             return Results.Unauthorized();
         }
 
-        var token = tokens.GenerateToken(identity);
+        // S184: the Portal role comes from the app roles on the Portal's Entra app registration. Until
+        // PlatformAuth:EnforceRoles is on, a sign-in with no role is treated as Owner (no lock-out while roles are set up).
+        var role = PlatformRole.Resolve(identity.Roles ?? [], configuration.GetValue<bool>("PlatformAuth:EnforceRoles"));
+        if (role is null)
+            return Results.Json(new { error = "Your account has no ContactConnection Portal role. Ask the account owner to assign one." },
+                statusCode: StatusCodes.Status403Forbidden);
+
+        var token = tokens.GenerateToken(identity, role);
 
         return Results.Ok(new PortalLoginResponse(
             token,
             identity.Oid,
             identity.Email,
             identity.FirstName,
-            identity.LastName));
+            identity.LastName,
+            role));
     }
 }
 
@@ -48,4 +58,5 @@ public record PortalLoginResponse(
     string AdminId,
     string Email,
     string FirstName,
-    string LastName);
+    string LastName,
+    string PlatformRole);

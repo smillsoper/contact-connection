@@ -24,6 +24,7 @@ public class ContactConnectionDbContext : DbContext
     public DbSet<AreaCodeLocation> AreaCodes => Set<AreaCodeLocation>();
     public DbSet<Invoice> Invoices => Set<Invoice>();
     public DbSet<InvoiceLine> InvoiceLines => Set<InvoiceLine>();
+    public DbSet<SupportSession> SupportSessions => Set<SupportSession>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -43,6 +44,7 @@ public class ContactConnectionDbContext : DbContext
         modelBuilder.ApplyConfiguration(new AreaCodeLocationConfiguration());
         modelBuilder.ApplyConfiguration(new InvoiceConfiguration());
         modelBuilder.ApplyConfiguration(new InvoiceLineConfiguration());
+        modelBuilder.ApplyConfiguration(new SupportSessionConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 }

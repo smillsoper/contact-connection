@@ -18,7 +18,10 @@ async function portalFetch<T>(
   })
   if (!res.ok) {
     const body = await res.text()
-    throw new Error(body || res.statusText)
+    let message = body || res.statusText
+    try { message = JSON.parse(body).error ?? message } catch { /* not JSON */ }
+    if (res.status === 403 && !body) message = 'Only the account owner can do that.'
+    throw new Error(message)
   }
   if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
@@ -175,6 +178,26 @@ export interface TenantAgentRecord {
   roleName: string | null
   isActive: boolean
   lastLoginAt: string | null
+}
+
+// ─── Support sessions (S184) ────────────────────────────────────────────────
+
+export interface SupportSessionRecord {
+  id: string; name: string; email: string; platformRole: string; reason: string
+  startedAt: string; expiresAt: string; endedAt: string | null; active: boolean
+}
+
+export function startSupportSession(tenantId: string, reason: string) {
+  return portalFetch<{ sessionId: string; code: string; subdomain: string; expiresAt: string }>(
+    `/api/v1/portal/tenants/${tenantId}/support-sessions`, { method: 'POST', body: JSON.stringify({ reason }) })
+}
+
+export function listSupportSessions(tenantId: string) {
+  return portalFetch<SupportSessionRecord[]>(`/api/v1/portal/tenants/${tenantId}/support-sessions`)
+}
+
+export function endSupportSession(sessionId: string) {
+  return portalFetch<void>(`/api/v1/portal/support-sessions/${sessionId}/end`, { method: 'POST' })
 }
 
 export async function listTenantAgents(tenantId: string): Promise<TenantAgentRecord[]> {

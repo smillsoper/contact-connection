@@ -32,15 +32,15 @@ export default function PortalAuthCallbackPage() {
         })
 
         if (!res.ok) {
-          navigate('/portal/login?error=unauthorized', { replace: true })
+          navigate(`/portal/login?error=${res.status === 403 ? 'norole' : 'unauthorized'}`, { replace: true })
           return
         }
 
         const data = await res.json() as {
           token: string; adminId: string; email: string
-          firstName: string; lastName: string
+          firstName: string; lastName: string; platformRole: 'owner' | 'support'
         }
-        setAuth(data.token, data.adminId, data.email, data.firstName, data.lastName)
+        setAuth(data.token, data.adminId, data.email, data.firstName, data.lastName, data.platformRole)
         navigate('/portal/tenants', { replace: true })
       } catch (e) {
         console.error('Portal auth callback error:', e)

@@ -13,7 +13,7 @@ public static class SttProvidersEndpoints
     public static IEndpointRouteBuilder MapPortalSttProvidersEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/v1/portal/stt-providers", GetAll)
-            .RequireAuthorization("PlatformAdmin");
+            .RequireAuthorization("PlatformOwner");
         return app;
     }
 

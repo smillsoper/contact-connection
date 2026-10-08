@@ -12,7 +12,7 @@ public static class PortalInvoicesEndpoints
 {
     public static IEndpointRouteBuilder MapPortalInvoicesEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/v1/portal").RequireAuthorization("PlatformAdmin");
+        var group = app.MapGroup("/api/v1/portal").RequireAuthorization("PlatformOwner");
         group.MapGet("invoices", List);
         group.MapPost("tenants/{tenantId:guid}/invoices", Create);
         group.MapGet("invoices/{id:guid}", Get);

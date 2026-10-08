@@ -14,7 +14,7 @@ public static class TtsProvidersEndpoints
     public static IEndpointRouteBuilder MapPortalTtsProvidersEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/v1/portal/tts-providers", GetAll)
-            .RequireAuthorization("PlatformAdmin");
+            .RequireAuthorization("PlatformOwner");
         return app;
     }
 

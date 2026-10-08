@@ -117,6 +117,11 @@ public static class Permission
         HelpdeskManage
     ];
 
+    /// <summary>A ContactConnection support session (S184): every permission, except card-data exports when the tenant's
+    /// Card data exports switch is off.</summary>
+    public static IReadOnlyList<string> ForPlatformSupport(bool cardDataExportsEnabled) =>
+        All.Where(p => cardDataExportsEnabled || p != ExportsCardData).ToList();
+
     // Permissions derived from legacy AgentRole strings (for agents without a custom RoleId)
     public static IReadOnlyList<string> ForLegacyRole(string role) => role switch
     {

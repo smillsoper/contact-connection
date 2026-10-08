@@ -1,6 +1,8 @@
 namespace ContactConnection.Application.Interfaces.Services;
 
-public record EntraIdentity(string Oid, string Email, string FirstName, string LastName);
+/// <param name="Roles">The app roles assigned to the person on the Portal's app registration (S184: Platform.Owner,
+/// Platform.Support).</param>
+public record EntraIdentity(string Oid, string Email, string FirstName, string LastName, IReadOnlyList<string>? Roles = null);
 
 public interface IEntraIdTokenValidator
 {

@@ -15,6 +15,10 @@ public class TenantDbContext : DbContext
 {
     public TenantDbContext(DbContextOptions<TenantDbContext> options) : base(options) { }
 
+    /// <summary>The ContactConnection support account making this request, if any (S184). Support accounts are hidden from
+    /// every agent query except to themselves — so lists, seat counts, queues and pickers never show them.</summary>
+    public Guid? VisibleSupportAgentId { get; set; }
+
     public DbSet<Agent> Agents => Set<Agent>();
     // Team chat (S183)
     public DbSet<ChatChannel> ChatChannels => Set<ChatChannel>();
@@ -106,6 +110,7 @@ public class TenantDbContext : DbContext
     {
         modelBuilder.ApplyConfiguration(new RoleConfiguration());
         modelBuilder.ApplyConfiguration(new AgentConfiguration());
+        modelBuilder.Entity<Agent>().HasQueryFilter(a => !a.IsPlatformSupport || a.Id == VisibleSupportAgentId);
         modelBuilder.ApplyConfiguration(new CallRecordConfiguration());
         modelBuilder.ApplyConfiguration(new CallRecordAuditEntryConfiguration());
         modelBuilder.ApplyConfiguration(new CallInteractionConfiguration());

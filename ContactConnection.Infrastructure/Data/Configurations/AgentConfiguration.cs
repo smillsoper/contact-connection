@@ -55,6 +55,8 @@ public class AgentConfiguration : IEntityTypeConfiguration<Agent>
         builder.Property(a => a.StatusLockedByName).HasColumnName("status_locked_by_name").HasMaxLength(200);
         builder.Property(a => a.StatusLockReason).HasColumnName("status_lock_reason").HasMaxLength(500);
         builder.Property(a => a.SignInLocked).HasColumnName("sign_in_locked").HasDefaultValue(false);
+        builder.Property(a => a.IsPlatformSupport).HasColumnName("is_platform_support").HasDefaultValue(false);
+        builder.Property(a => a.PlatformSupportOid).HasColumnName("platform_support_oid").HasMaxLength(64);
         builder.Ignore(a => a.IsStatusLocked);
     }
 }

@@ -10,6 +10,9 @@ interface AuthState {
   lastName: string | null
   permissions: string[]
   landingPage: string | null
+  /** Set while this sign-in is a ContactConnection support session (S184) — drives the support banner. */
+  supportSession: { id: string; expiresAt: string; tenantName: string } | null
+  setSupportSession: (s: { id: string; expiresAt: string; tenantName: string } | null) => void
   setAuth: (
     token: string,
     agentId: string,
@@ -35,6 +38,8 @@ export const useAuthStore = create<AuthState>()(
       lastName: null,
       permissions: [],
       landingPage: null,
+      supportSession: null,
+      setSupportSession: (supportSession) => set({ supportSession }),
       setAuth: (token, agentId, tenantSubdomain, role, firstName, lastName, permissions, landingPage) =>
         set({
           token,
@@ -47,7 +52,7 @@ export const useAuthStore = create<AuthState>()(
           landingPage: landingPage ?? null,
         }),
       clearAuth: () =>
-        set({ token: null, agentId: null, tenantSubdomain: null, role: null, firstName: null, lastName: null, permissions: [], landingPage: null }),
+        set({ token: null, agentId: null, tenantSubdomain: null, role: null, firstName: null, lastName: null, permissions: [], landingPage: null, supportSession: null }),
       hasPermission: (permission: string) => get().permissions.includes(permission),
     }),
     { name: 'cc-auth' },

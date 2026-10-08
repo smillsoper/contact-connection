@@ -5,17 +5,19 @@ interface Props {
   children: React.ReactNode
 }
 
+// S184: Support sees Tenants only; the rest is the Owner's.
 const NAV_ITEMS = [
-  { label: 'Tenants', path: '/portal/tenants' },
-  { label: 'API Definitions', path: '/portal/api-definitions' },
-  { label: 'Credentials', path: '/portal/credentials' },
-  { label: 'Maintenance', path: '/portal/maintenance' },
+  { label: 'Tenants', path: '/portal/tenants', support: true },
+  { label: 'API Definitions', path: '/portal/api-definitions', support: false },
+  { label: 'Credentials', path: '/portal/credentials', support: false },
+  { label: 'Maintenance', path: '/portal/maintenance', support: false },
 ]
 
 export default function PortalShell({ children }: Props) {
   const navigate = useNavigate()
   const location = useLocation()
-  const { firstName, lastName, clearAuth } = usePortalAuthStore()
+  const { firstName, lastName, clearAuth, platformRole } = usePortalAuthStore()
+  const isSupport = platformRole === 'support'
 
   function handleLogout() {
     clearAuth()
@@ -34,7 +36,7 @@ export default function PortalShell({ children }: Props) {
         </div>
 
         <nav className="flex items-center gap-1 flex-1">
-          {NAV_ITEMS.map((item) => {
+          {NAV_ITEMS.filter((item) => !isSupport || item.support).map((item) => {
             const active = location.pathname.startsWith(item.path)
             return (
               <Link
@@ -53,6 +55,7 @@ export default function PortalShell({ children }: Props) {
         </nav>
 
         <div className="flex items-center gap-3">
+          {isSupport && <span className="text-[10px] uppercase tracking-wide text-sky-300 border border-sky-800 rounded px-1.5 py-0.5">Support</span>}
           <span className="text-gray-400 text-sm">{firstName} {lastName}</span>
           <button
             onClick={handleLogout}

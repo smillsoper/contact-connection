@@ -9,7 +9,7 @@ public static class PortalCredentialsEndpoints
     public static IEndpointRouteBuilder MapPortalCredentialsEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/v1/portal/credentials")
-            .RequireAuthorization("PlatformAdmin");
+            .RequireAuthorization("PlatformOwner");
 
         group.MapGet("", ListAll);
         group.MapPut("{keyName}", Upsert);

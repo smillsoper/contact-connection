@@ -60,6 +60,8 @@ public class ScopedTenantDbContextFactory
             throw new InvalidOperationException(
                 "No tenant resolved for this request. Ensure TenantResolutionMiddleware is registered.");
 
-        return _factory.Create(_tenantContext.Current.SchemaName);
+        var db = _factory.Create(_tenantContext.Current.SchemaName);
+        db.VisibleSupportAgentId = _tenantContext.SupportAgentId;
+        return db;
     }
 }

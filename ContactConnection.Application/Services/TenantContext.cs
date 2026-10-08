@@ -11,4 +11,7 @@ public class TenantContext
 {
     public Tenant? Current { get; set; }
     public bool HasTenant => Current is not null;
+    /// <summary>Set when the request comes from a ContactConnection support session (S184) — that support account is
+    /// visible to its own requests only.</summary>
+    public Guid? SupportAgentId { get; set; }
 }

@@ -62,6 +62,7 @@ public class EntraIdTokenValidator : IEntraIdTokenValidator
         var firstName = principal.FindFirst(JwtRegisteredClaimNames.GivenName)?.Value ?? string.Empty;
         var lastName  = principal.FindFirst(JwtRegisteredClaimNames.FamilyName)?.Value ?? string.Empty;
 
-        return new EntraIdentity(oid, email.ToLowerInvariant(), firstName, lastName);
+        var roles = principal.FindAll("roles").Select(c => c.Value).ToList();
+        return new EntraIdentity(oid, email.ToLowerInvariant(), firstName, lastName, roles);
     }
 }

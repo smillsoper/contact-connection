@@ -4,6 +4,7 @@ import { msalInitialized, msalInstance, portalLoginRequest } from '../../config/
 
 const ERROR_MESSAGES: Record<string, string> = {
   unauthorized: 'Your account is not authorized for portal access.',
+  norole: 'Your account has no ContactConnection Portal role yet — ask the account owner to assign one.',
   failed: 'Sign-in failed. Please try again.',
   token_exchange: 'Could not complete sign-in. Please try again.',
 }

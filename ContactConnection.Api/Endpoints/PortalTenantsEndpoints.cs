@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using ContactConnection.Application.Interfaces.Repositories;
 using ContactConnection.Application.Interfaces.Services;
 using ContactConnection.Application.Services;
@@ -17,39 +18,49 @@ public static class PortalTenantsEndpoints
         var group = app.MapGroup("/api/v1/portal/tenants")
             .RequireAuthorization("PlatformAdmin");
 
+        // S184: Support (PlatformRole.Support) works on tenants, but billing, usage, the card-data switch, trial dates,
+        // provisioning and activating / deactivating a tenant are the Owner's (PlatformOwner).
         group.MapGet("", List);
-        group.MapPost("", Provision);
+        group.MapPost("", Provision).RequireAuthorization("PlatformOwner");
         group.MapGet("{id:guid}", GetById);
         group.MapPatch("{id:guid}", Update);
         group.MapPatch("{id:guid}/feature-flags", UpdateFeatureFlags);
-        group.MapPost("{id:guid}/activate", Activate);
-        group.MapPost("{id:guid}/deactivate", Deactivate);
+        group.MapPost("{id:guid}/activate", Activate).RequireAuthorization("PlatformOwner");
+        group.MapPost("{id:guid}/deactivate", Deactivate).RequireAuthorization("PlatformOwner");
         group.MapPost("{id:guid}/resend-invite", ResendInvite);
-        group.MapPost("{id:guid}/reset-onboarding", ResetOnboarding);
+        group.MapPost("{id:guid}/reset-onboarding", ResetOnboarding).RequireAuthorization("PlatformOwner");   // deletes every user
         group.MapPost("{id:guid}/invite-admin", InviteAdmin);
         group.MapGet("{id:guid}/agents", ListTenantAgents);
-        group.MapGet("{id:guid}/usage", Usage);
-        group.MapPut("{id:guid}/billing-rates", UpdateBillingRates);
+        group.MapGet("{id:guid}/usage", Usage).RequireAuthorization("PlatformOwner");
+        group.MapPut("{id:guid}/billing-rates", UpdateBillingRates).RequireAuthorization("PlatformOwner");
         group.MapPost("{id:guid}/agents/{agentId:guid}/reset-password", ResetTenantAgentPassword);
 
         return app;
     }
 
+    /// <summary>Whether the signed-in Portal user is the Owner (S184) — Support doesn't see or change billing.</summary>
+    internal static async Task<bool> IsOwnerAsync(HttpContext http) =>
+        (await http.RequestServices.GetRequiredService<Microsoft.AspNetCore.Authorization.IAuthorizationService>()
+            .AuthorizeAsync(http.User, "PlatformOwner")).Succeeded;
+
     private static async Task<IResult> List(
         ITenantRepository tenants,
+        HttpContext http,
         CancellationToken ct)
     {
         var all = await tenants.GetAllAsync(ct);
-        return Results.Ok(all.Select(ToResponse));
+        var owner = await IsOwnerAsync(http);
+        return Results.Ok(all.Select(t => ToResponse(t, owner)));
     }
 
     private static async Task<IResult> GetById(
         Guid id,
         ITenantRepository tenants,
+        HttpContext http,
         CancellationToken ct)
     {
         var tenant = await tenants.GetByIdAsync(id, ct);
-        return tenant is null ? Results.NotFound() : Results.Ok(ToResponse(tenant));
+        return tenant is null ? Results.NotFound() : Results.Ok(ToResponse(tenant, await IsOwnerAsync(http)));
     }
 
     private static async Task<IResult> Provision(
@@ -105,10 +116,13 @@ public static class PortalTenantsEndpoints
         Guid id,
         UpdateTenantRequest request,
         ITenantRepository tenants,
+        HttpContext http,
         CancellationToken ct)
     {
         var tenant = await tenants.GetByIdAsync(id, ct);
         if (tenant is null) return Results.NotFound();
+        if ((request.BillingContact is not null || request.TrialExpiresAt.HasValue) && !await IsOwnerAsync(http))
+            return Results.Json(new { error = "Only the account owner can change billing details or trial dates." }, statusCode: StatusCodes.Status403Forbidden);
 
         if (request.BillingContact is not null)
             tenant.SetBillingContact(request.BillingContact);
@@ -120,7 +134,7 @@ public static class PortalTenantsEndpoints
             tenant.SetTrialExpiry(request.TrialExpiresAt.Value == DateTimeOffset.MinValue ? null : request.TrialExpiresAt.Value);
 
         await tenants.SaveChangesAsync(ct);
-        return Results.Ok(ToResponse(tenant));
+        return Results.Ok(ToResponse(tenant, await IsOwnerAsync(http)));
     }
 
     private static async Task<IResult> UpdateFeatureFlags(
@@ -128,10 +142,14 @@ public static class PortalTenantsEndpoints
         TenantFeatureFlags flags,
         ITenantRepository tenants,
         ContactConnection.Infrastructure.Data.ITenantDbContextFactory tenantDbs,
+        HttpContext http,
         CancellationToken ct)
     {
         var tenant = await tenants.GetByIdAsync(id, ct);
         if (tenant is null) return Results.NotFound();
+        // S184: the card-data exports switch follows a PCI review — the Owner's call only.
+        if (flags.CardDataExports != tenant.FeatureFlags.CardDataExports && !await IsOwnerAsync(http))
+            return Results.Json(new { error = "Only the account owner can change the card data exports switch." }, statusCode: StatusCodes.Status403Forbidden);
 
         var cardExportsTurnedOff = tenant.FeatureFlags.CardDataExports && !flags.CardDataExports;
         tenant.UpdateFeatureFlags(flags);
@@ -146,7 +164,7 @@ public static class PortalTenantsEndpoints
             foreach (var c in campaigns) c.SetCardDataRetention(CardDataRetentionMode.UntilScriptEnds);
             await db.SaveChangesAsync(ct);
         }
-        return Results.Ok(ToResponse(tenant));
+        return Results.Ok(ToResponse(tenant, await IsOwnerAsync(http)));
     }
 
     private static async Task<IResult> Activate(
@@ -414,7 +432,10 @@ public static class PortalTenantsEndpoints
         return Results.Ok(new { message = $"Password reset for {agent.Email}." });
     }
 
-    private static object ToResponse(Tenant t) => new
+    private static object ToResponse(Tenant t) => ToResponse(t, true);
+
+    /// <param name="owner">Support (S184) doesn't see the billing contact.</param>
+    private static object ToResponse(Tenant t, bool owner) => new
     {
         t.Id,
         t.Name,
@@ -427,7 +448,7 @@ public static class PortalTenantsEndpoints
         t.IsActive,
         t.OnboardingComplete,
         t.TrialExpiresAt,
-        t.BillingContact,
+        BillingContact = owner ? t.BillingContact : null,
         t.InviteEmail,
         t.FeatureFlags,
         t.Settings,
