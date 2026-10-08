@@ -51,6 +51,7 @@ const DRAWN_NEW: Entry[] = [
   { name: 'CartIcon', meaning: 'Cart', where: 'Agent portal cart bar' },
   { name: 'BoltIcon', meaning: 'Test now', where: 'API definition “Test Authentication”' },
   { name: 'RefreshIcon', meaning: 'Retrying · re-wire', where: 'Export delivery status · designer option picker “re-wire”' },
+  { name: 'WrenchIcon', meaning: 'Remote fixes', where: 'Agent List widget · remote fixes window' },
   { name: 'EyeIcon', meaning: 'Follow the script', where: 'Agent List widget · follow-along window' },
   { name: 'CoachIcon', meaning: 'Coaching note', where: 'Agent List widget · coach window · agent portal pinned notes' },
   { name: 'ScreenIcon', meaning: 'Live screen view', where: 'Agent List widget · screen view window' },

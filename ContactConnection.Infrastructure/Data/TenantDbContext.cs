@@ -28,6 +28,7 @@ public class TenantDbContext : DbContext
     public DbSet<AgentDedication> AgentDedications => Set<AgentDedication>();
     public DbSet<ScreenViewSession> ScreenViewSessions => Set<ScreenViewSession>();
     public DbSet<CoachingNote> CoachingNotes => Set<CoachingNote>();
+    public DbSet<RemoteAction> RemoteActions => Set<RemoteAction>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<CallRecord> CallRecords => Set<CallRecord>();
     public DbSet<CallInteraction> CallInteractions => Set<CallInteraction>();
@@ -181,6 +182,7 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new AgentDedicationConfiguration());
         modelBuilder.ApplyConfiguration(new ScreenViewSessionConfiguration());
         modelBuilder.ApplyConfiguration(new CoachingNoteConfiguration());
+        modelBuilder.ApplyConfiguration(new RemoteActionConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 

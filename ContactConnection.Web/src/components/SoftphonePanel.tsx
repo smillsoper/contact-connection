@@ -157,6 +157,34 @@ export default function SoftphonePanel() {
 
   // Primary call session
   const sessionRef          = useRef<any>(null)
+  // Remote fixes (S184): a supervisor re-registers this softphone or clears a stuck call screen — never during a call.
+  useEffect(() => {
+    const done = (id: string, ok: boolean, detail: string) =>
+      window.dispatchEvent(new CustomEvent('cc:softphone-remote-done', { detail: { id, ok, detail } }))
+    const on = (e: Event) => {
+      const { id, kind } = (e as CustomEvent<{ id: string; kind: 'reregister' | 'clear-call' }>).detail
+      const inCall = [sessionRef.current, transferSessionRef.current, intercomSessionRef.current, monitorSessionRef.current]
+        .some((s) => s && !s.isEnded?.())
+      if (inCall) { done(id, false, 'Not done — a call is connected on the softphone right now.'); return }
+      if (kind === 'clear-call') {
+        const was = useCallStore.getState().callStatus
+        useCallStore.getState().reset()
+        done(id, true, was === 'idle' ? 'The call screen was already clear.' : `Cleared a call screen stuck on "${was}".`)
+        return
+      }
+      const ua = uaRef.current
+      if (!ua) { done(id, false, 'The softphone isn\u2019t running in this portal.'); return }
+      let settled = false
+      const timer = setTimeout(() => { if (!settled) { settled = true; done(id, false, 'Re-registration didn\u2019t complete within 10 seconds.') } }, 10000)
+      ua.once('registered', () => { if (!settled) { settled = true; clearTimeout(timer); done(id, true, 'The softphone re-registered.') } })
+      ua.once('registrationFailed', () => { if (!settled) { settled = true; clearTimeout(timer); done(id, false, 'Registration failed — check the network and the phone server.') } })
+      try { ua.unregister(); setTimeout(() => { try { ua.register() } catch { /* reported by the timeout */ } }, 400) }
+      catch { /* reported by the timeout */ }
+    }
+    window.addEventListener('cc:softphone-remote', on)
+    return () => window.removeEventListener('cc:softphone-remote', on)
+  }, [])
+
   // Connection health (S183): the live call's peer connection and registration, read every few seconds.
   useEffect(() => {
     setCallPeerProvider(() => sessionRef.current?.connection as RTCPeerConnection | undefined)

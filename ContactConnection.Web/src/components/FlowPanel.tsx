@@ -556,6 +556,10 @@ export default function FlowPanel() {
     // Personal queue + dedications (S183) — MyQueuePanel listens for these.
     connection.on('receiveMyQueueChanged', () => { window.dispatchEvent(new Event('cc:my-queue-changed')) })
     connection.on('receiveDedicationChanged', () => { window.dispatchEvent(new Event('cc:dedication-changed')) })
+    // Remote fixes (S184) — RemoteFixesAgent does them.
+    connection.on('receiveRemoteAction', (id: string, action: string, by: string) => {
+      window.dispatchEvent(new CustomEvent('cc:remote-action', { detail: { id, action, by } }))
+    })
     // Coaching notes (S183) — CoachingNotesAgent listens.
     connection.on('receiveCoachingNotesChanged', () => { window.dispatchEvent(new Event('cc:coaching-changed')) })
 

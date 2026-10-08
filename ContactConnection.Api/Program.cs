@@ -330,6 +330,7 @@ app.MapAgentDedicationsEndpoints();
 app.MapFlowDocumentEndpoints();
 app.MapCoachingNotesEndpoints();
 app.MapAgentHealthEndpoints();
+app.MapRemoteActionsEndpoints();
 app.MapWidgetFilterOptions();
 app.MapClientPortalAuthEndpoints();
 app.MapClientPortalEndpoints();

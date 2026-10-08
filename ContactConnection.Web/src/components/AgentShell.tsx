@@ -18,6 +18,7 @@ import WrapUpSummaries from './WrapUpSummaries'
 import ScreenRecordingBar from './ScreenRecordingBar'
 import ScreenViewAgent from './ScreenViewAgent'
 import CoachingNotesAgent from './CoachingNotesAgent'
+import RemoteFixesAgent from './RemoteFixesAgent'
 import ExtensionSetupPrompt from './ExtensionSetupPrompt'
 import { requestPortalFocus } from '../lib/extensionBridge'
 
@@ -138,6 +139,8 @@ export default function AgentShell() {
       <ScreenViewAgent />
       {/* In-call coaching notes (S183), pinned until "Got it" */}
       <CoachingNotesAgent />
+      {/* Remote fixes from a supervisor (S184) */}
+      <RemoteFixesAgent />
       <ExtensionSetupPrompt />
 
       {/* 3-panel body */}

@@ -203,6 +203,9 @@ export default function DashboardBuilderPage() {
     })
 
     connection.on('receiveMonitorEnded', () => window.dispatchEvent(new Event('cc:monitor-ended')))
+    // Remote fixes (S184): an agent's portal reported a fix's result — the open fixes window shows it.
+    connection.on('receiveRemoteActionResult', (id: string, ok: boolean, detail: string | null) =>
+      window.dispatchEvent(new CustomEvent('cc:remote-result', { detail: { id, ok, detail } })))
     // Connection health (S183): an agent's call quality / mic changed — the Agent List badge updates.
     connection.on('receiveAgentHealth', (agentId: string, health: unknown) => window.dispatchEvent(new CustomEvent('cc:agent-health', { detail: { agentId, health } })))
     // Coaching notes (S183): an agent's note was sent / seen / acknowledged / taken back — open coach windows refresh.

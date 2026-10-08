@@ -6,7 +6,8 @@ import { useDashboardLiveAgentState, useDashboardLiveRegistration, useDashboardL
 import { useAuthStore } from '../../../stores/authStore'
 import { agentLockApi } from '../../../api/agentLock'
 import { supervisorApi, MONITOR_MODE_LABEL, type MonitorMode, type MonitorState } from '../../../api/supervisor'
-import { ChevronDownIcon, ChevronUpIcon, CloseIcon, ExternalLinkIcon, HeadsetIcon, LockIcon, PhoneIcon, ScreenIcon, CoachIcon, EyeIcon } from '../../icons/Icons'
+import { ChevronDownIcon, ChevronUpIcon, CloseIcon, ExternalLinkIcon, HeadsetIcon, LockIcon, PhoneIcon, ScreenIcon, CoachIcon, EyeIcon, WrenchIcon } from '../../icons/Icons'
+import RemoteFixesModal from '../RemoteFixesModal'
 import FollowScriptModal from '../FollowScriptModal'
 import ScreenViewModal from '../ScreenViewModal'
 import CoachModal from '../CoachComposer'
@@ -63,6 +64,8 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
   const [viewing, setViewing] = useState<{ id: string; name: string } | null>(null)
   // In-call coaching notes (S183)
   const [coaching, setCoaching] = useState<{ id: string; name: string } | null>(null)
+  // Remote fixes (S184)
+  const [fixing, setFixing] = useState<{ id: string; name: string } | null>(null)
   // Follow-along script view (S184)
   const [following, setFollowing] = useState<{ name: string; calls: AgentListRow['live_calls'] } | null>(null)
   const myId = useAuthStore((s) => s.agentId)
@@ -372,6 +375,12 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
                     </button>
                   )}
                   {r.agent_id !== myId && r.state_code !== 'logged_out' && (
+                    <button onClick={() => setFixing({ id: r.agent_id, name: r.name })}
+                      className="text-gray-400 hover:text-gray-200 mr-2" title={`Fix ${r.name}'s portal remotely — diagnostics, softphone, extension, refresh`}>
+                      <WrenchIcon size={15} />
+                    </button>
+                  )}
+                  {r.agent_id !== myId && r.state_code !== 'logged_out' && (
                     <button onClick={() => setCoaching({ id: r.agent_id, name: r.name })}
                       className="text-amber-300 hover:text-amber-200 mr-2" title={`Send ${r.name} a coaching note (pinned in their portal)`}>
                       <CoachIcon size={15} />
@@ -429,6 +438,7 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
           )}
         </tbody>
       </table>
+      {fixing && <RemoteFixesModal agentId={fixing.id} agentName={fixing.name} onClose={() => setFixing(null)} />}
       {following && <FollowScriptModal agentName={following.name} calls={following.calls} onClose={() => setFollowing(null)} />}
       {coaching && <CoachModal agentId={coaching.id} agentName={coaching.name} onClose={() => setCoaching(null)} />}
       {viewing && <ScreenViewModal agentId={viewing.id} agentName={viewing.name} onClose={() => setViewing(null)} />}

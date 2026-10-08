@@ -170,6 +170,13 @@ public interface IFlowHubClient
     /// docs/design/parallel-queuing.md). The agent UI drops the pop for that callRecordId.</summary>
     Task ReceiveOfferWithdrawn(string callRecordId);
 
+    /// <summary>Remote fixes (S184), to the agent's portal: do this fix (diagnostics / extension / reregister / clear-call /
+    /// refresh) and report back.</summary>
+    Task ReceiveRemoteAction(string actionId, string action, string requestedByName);
+
+    /// <summary>Remote fixes (S184), to the supervisor who asked: the agent's portal reported the result.</summary>
+    Task ReceiveRemoteActionResult(string actionId, bool ok, string? detail);
+
     /// <summary>Follow-along (S184): what the agent is typing / choosing on the current step, before they press Next.</summary>
     Task ReceiveDraftInput(string sessionId, string nodeId, string value);
 
