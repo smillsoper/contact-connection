@@ -11972,8 +11972,7 @@ desk, platform support access with Entra roles, platform health (two phases + Up
    provisioning + a Manage Tenant button for existing tenants; fills Tenant.SignalWireProjectId.
 2. **Porting Phase C:** configure ported numbers in the tenant's subproject via the API (confirm the parent token can
    manage subproject numbers).
-3. **Help desk gaps vs the checklist:** open as a slide-out that does NOT cover the script (today a centered modal);
-   client-level help desks (today campaign only).
+3. ~~Help desk gaps~~ — closed by Stephen: the modal stays, and multi-campaign assignment replaces client-level scoping.
 4. Browser tests not yet done: Number Porting tenant page / Portal queue screens end to end.
 5. **Carried:** LLC reactivation ($500) and its checklist; Clint's Cannella SFTP details; keypad retest after SignalWire
    vetting; production fonts (QuestPDF uses bundled Lato now); screen-view registry to Redis if the API scales out.
