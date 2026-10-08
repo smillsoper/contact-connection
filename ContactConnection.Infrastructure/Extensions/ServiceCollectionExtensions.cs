@@ -370,6 +370,9 @@ public static class ServiceCollectionExtensions
         // other per-request telephony services above, even though its only dependency
         // (IAgentStateStore) is itself a singleton.
         services.AddScoped<EligibleAgentRanker>();
+        // Flow document PDF (S183) — its logo fetch can't follow redirects or reach non-public addresses.
+        services.AddHttpClient("flow-doc-logo").ConfigurePrimaryHttpMessageHandler(ContactConnection.Infrastructure.FlowDocs.FlowDocumentService.CreateLogoHandler);
+        services.AddScoped<ContactConnection.Infrastructure.FlowDocs.FlowDocumentService>();
         services.AddScoped<ExternalRoutingService>();
 
         // Email

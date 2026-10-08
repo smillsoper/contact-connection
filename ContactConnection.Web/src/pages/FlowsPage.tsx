@@ -5,6 +5,7 @@ import { openCallTrace } from '../components/calltrace/openCallTrace'
 import FlowScopeSelect from '../components/FlowScopeSelect'
 import { listCampaigns, type Campaign } from '../api/telephony'
 import { CloseIcon } from '../components/icons/Icons'
+import FlowDocumentDialog from '../components/FlowDocumentDialog'
 
 function designerPath(flow: FlowSummary): string {
   return flow.flow_type === 'telephony'
@@ -28,6 +29,8 @@ export default function FlowsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [publishingId, setPublishingId] = useState<string | null>(null)
+  // Flow document PDF (S183)
+  const [documentFlow, setDocumentFlow] = useState<FlowSummary | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [exportingId, setExportingId] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
@@ -403,6 +406,13 @@ export default function FlowsPage() {
                           </button>
                         )}
                         <button
+                          onClick={() => setDocumentFlow(flow)}
+                          className="text-xs text-gray-400 hover:text-gray-200 border border-gray-700 hover:border-gray-500 rounded px-2.5 py-1 transition-colors"
+                          title="A PDF chart + full script, emailed to you or downloaded — for clients"
+                        >
+                          Document
+                        </button>
+                        <button
                           onClick={() => handleExport(flow)}
                           disabled={exportingId === flow.id}
                           className="text-xs text-gray-400 hover:text-gray-200 border border-gray-700 hover:border-gray-500 rounded px-2.5 py-1 disabled:opacity-50 transition-colors"
@@ -425,6 +435,7 @@ export default function FlowsPage() {
           </div>
         )}
       </div>
+      {documentFlow && <FlowDocumentDialog flow={documentFlow} onClose={() => setDocumentFlow(null)} />}
     </div>
   )
 }
