@@ -74,6 +74,8 @@ public class TenantConfiguration : IEntityTypeConfiguration<Tenant>
             .HasColumnName("billing_contact")
             .HasMaxLength(200);
 
+        builder.Property(t => t.SignalWireProjectId).HasColumnName("signalwire_project_id").HasMaxLength(100);
+
         builder.Property(t => t.InviteEmail)
             .HasColumnName("invite_email")
             .HasMaxLength(254);

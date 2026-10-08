@@ -36,6 +36,7 @@ const NAV_SECTIONS: NavSection[] = [
       { title: 'Clients / Telephony', desc: 'DIDs, campaigns, clients, and agent groups.', path: '/admin/telephony', live: true },
       { title: 'SIP Gateways', desc: 'Configure carrier gateways and SIP trunks.', path: '/admin/sip-gateways', live: true },
       { title: 'Block List', desc: 'Manage blocked phone numbers checked by telephony call flows.', path: '/admin/block-list', live: true },
+      { title: 'Number Porting', desc: 'Move numbers from another phone company — the account owner signs online, and you follow each step.', path: '/admin/porting', live: true, requiredPermission: 'numbers.port' },
     ],
   },
   {

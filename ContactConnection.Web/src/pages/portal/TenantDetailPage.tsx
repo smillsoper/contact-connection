@@ -56,6 +56,7 @@ export default function TenantDetailPage() {
 
   // Edit form state
   const [billingContact, setBillingContact] = useState('')
+  const [projectId, setProjectId] = useState('')
   const [customDomain, setCustomDomain] = useState('')
   const [inviteEmail, setInviteEmail] = useState('')
 
@@ -74,6 +75,7 @@ export default function TenantDetailPage() {
       .then((t) => {
         setTenant(t)
         setBillingContact(t.billingContact ?? '')
+        setProjectId(t.signalWireProjectId ?? '')
         setCustomDomain(t.customDomain ?? '')
         setInviteEmail(t.inviteEmail ?? '')
         setFlags(t.featureFlags)
@@ -100,6 +102,7 @@ export default function TenantDetailPage() {
     try {
       const updated = await updateTenant(id, {
         billingContact: isOwner ? billingContact || undefined : undefined,
+        signalWireProjectId: projectId,
         customDomain: customDomain || undefined,
         inviteEmail: inviteEmail || undefined,
       })
@@ -387,6 +390,16 @@ export default function TenantDetailPage() {
                 className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
               />
             </div>}
+            <div>
+              <label className="block mb-1.5 text-sky-400 text-xs font-medium">SignalWire Project ID</label>
+              <input
+                type="text"
+                value={projectId}
+                onChange={(e) => setProjectId(e.target.value)}
+                placeholder="The tenant's SignalWire project — port-in orders need it"
+                className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm font-mono outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
             <div>
               <label className="block mb-1.5 text-sky-400 text-xs font-medium">Invite email</label>
               <input

@@ -27,6 +27,9 @@ import AdminCommissionsPage from './pages/admin/AdminCommissionsPage'
 import BillingPage from './pages/admin/BillingPage'
 import AdminChatPage from './pages/admin/AdminChatPage'
 import AdminHelpdesksPage from './pages/admin/AdminHelpdesksPage'
+import AdminPortingPage from './pages/admin/AdminPortingPage'
+import PortSignPage from './pages/PortSignPage'
+import PortalPortingPage from './pages/portal/PortalPortingPage'
 import AdminSupportAccessPage from './pages/admin/AdminSupportAccessPage'
 import SupportLoginPage from './pages/SupportLoginPage'
 import SupportSessionBanner from './components/support/SupportSessionBanner'
@@ -74,7 +77,7 @@ function RequirePortalAuth({ children }: { children: React.ReactNode }) {
   return token ? <>{children}</> : <Navigate to={isAdminSubdomain ? '/login' : '/portal/login'} replace />
 }
 
-const ADMIN_PERMISSIONS = ['agents.view', 'agents.manage', 'roles.manage', 'flows.view', 'flows.manage', 'telephony.view', 'telephony.manage', 'integrations.view', 'integrations.manage', 'reports.view', 'supervisor.monitor', 'blocklist.view', 'blocklist.manage', 'calls.manage', 'billing.manage', 'chat.manage', 'helpdesk.manage']
+const ADMIN_PERMISSIONS = ['agents.view', 'agents.manage', 'roles.manage', 'flows.view', 'flows.manage', 'telephony.view', 'telephony.manage', 'integrations.view', 'integrations.manage', 'reports.view', 'supervisor.monitor', 'blocklist.view', 'blocklist.manage', 'calls.manage', 'billing.manage', 'chat.manage', 'helpdesk.manage', 'numbers.port']
 
 function RequireAdminAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -122,6 +125,8 @@ export default function App() {
         <Route path="/login" element={isAdminSubdomain ? <PortalLoginPage /> : <LoginPage />} />
         {/* ContactConnection support opening this tenant's portal from the Platform Portal (S184) */}
         <Route path="/support-login" element={<SupportLoginPage />} />
+        {/* Number porting (S184): the current phone account's owner signs the LOA — public, token in the URL fragment */}
+        <Route path="/port-sign" element={<PortSignPage />} />
         {/* Client portal (S181) — client users, separate session from agents */}
         <Route path="/client/login" element={<ClientLoginPage />} />
         <Route path="/client/invite/:token" element={<ClientInvitePage />} />
@@ -238,6 +243,22 @@ export default function App() {
           }
         />
         <Route
+          path="/portal/porting"
+          element={
+            <RequirePortalAuth>
+              <PortalPortingPage />
+            </RequirePortalAuth>
+          }
+        />
+        <Route
+          path="/portal/porting/:id"
+          element={
+            <RequirePortalAuth>
+              <PortalPortingPage />
+            </RequirePortalAuth>
+          }
+        />
+        <Route
           path="/portal/health"
           element={
             <RequirePortalAuth>
@@ -322,6 +343,14 @@ export default function App() {
             <RequireAdminAuth>
               <AdminSupportAccessPage />
             </RequireAdminAuth>
+          }
+        />
+        <Route
+          path="/admin/porting"
+          element={
+            <RequirePermission permission="numbers.port">
+              <AdminPortingPage />
+            </RequirePermission>
           }
         />
         <Route

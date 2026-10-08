@@ -16,6 +16,8 @@ public class Tenant
     public bool IsActive { get; private set; }
     public DateTimeOffset? TrialExpiresAt { get; private set; }
     public string? BillingContact { get; private set; }
+    /// <summary>The tenant's SignalWire project (one per tenant) — port-in orders ask for it (S184).</summary>
+    public string? SignalWireProjectId { get; private set; }
 
     // Per-minute billing (S175): every billed carrier minute at the rate, toll-free minutes plus the surcharge,
     // raised to the monthly minimum. Null = not set yet (platform defaults apply).
@@ -104,6 +106,9 @@ public class Tenant
     public void SetDisplayName(string? displayName) => DisplayName = displayName;
     public void SetLogoUrl(string? logoUrl) => LogoUrl = logoUrl;
     public void UpdateSettings(TenantSettings settings) => Settings = settings;
+
+    public void SetSignalWireProjectId(string? projectId) =>
+        SignalWireProjectId = string.IsNullOrWhiteSpace(projectId) ? null : projectId.Trim();
     public void CompleteOnboarding() => OnboardingComplete = true;
     public void ResetOnboarding() => OnboardingComplete = false;
     public void Deactivate() => IsActive = false;

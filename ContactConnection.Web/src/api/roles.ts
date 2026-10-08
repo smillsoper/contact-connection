@@ -48,6 +48,7 @@ export const PERMISSION_LABELS: Record<string, string> = {
   'exports.card_data':     'Create / change data exports that include card data (when enabled for the account)',
   'chat.manage':           'Manage Team Chat (channels, members, posting, retiring)',
   'helpdesk.manage':       'Manage Help Desks (topics, files, which campaigns see them)',
+  'numbers.port':          'Request number port-ins (send the LOA for signature, follow the port)',
 }
 
 export const PERMISSION_GROUPS: Record<string, string[]> = {
@@ -66,6 +67,7 @@ export const PERMISSION_GROUPS: Record<string, string[]> = {
   'Data Exports': ['exports.card_data'],
   'Team Chat':  ['chat.manage'],
   'Help Desks': ['helpdesk.manage'],
+  'Number Porting': ['numbers.port'],
 }
 
 export const LANDING_PAGE_LABELS: Record<string, string> = {

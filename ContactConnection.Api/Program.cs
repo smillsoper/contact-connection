@@ -273,6 +273,11 @@ builder.Services.AddAuthorization(options =>
             (ctx.User.FindFirst("permissions")?.Value ?? "")
                 .Split(',', StringSplitOptions.RemoveEmptyEntries)
                 .Contains(Permission.ChatManage)));
+    options.AddPolicy("NumbersPort", policy =>
+        policy.RequireAssertion(ctx =>
+            (ctx.User.FindFirst("permissions")?.Value ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Contains(Permission.NumbersPort)));
     options.AddPolicy("HelpdeskManage", policy =>
         policy.RequireAssertion(ctx =>
             (ctx.User.FindFirst("permissions")?.Value ?? "")
@@ -360,6 +365,7 @@ app.MapAgentHealthEndpoints();
 app.MapRemoteActionsEndpoints();
 app.MapHelpdeskEndpoints();
 app.MapSupportSessionEndpoints();
+app.MapPortingEndpoints();
 ContactConnection.Api.Health.PlatformHealthEndpoints.MapPlatformHealthEndpoints(app);
 app.MapWidgetFilterOptions();
 app.MapClientPortalAuthEndpoints();

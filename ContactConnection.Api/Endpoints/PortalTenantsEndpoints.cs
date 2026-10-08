@@ -130,6 +130,8 @@ public static class PortalTenantsEndpoints
             tenant.SetInviteEmail(request.InviteEmail == "" ? null : request.InviteEmail);
         if (request.CustomDomain is not null)
             tenant.SetCustomDomain(request.CustomDomain == "" ? null : request.CustomDomain);
+        if (request.SignalWireProjectId is not null)
+            tenant.SetSignalWireProjectId(request.SignalWireProjectId);
         if (request.TrialExpiresAt.HasValue)
             tenant.SetTrialExpiry(request.TrialExpiresAt.Value == DateTimeOffset.MinValue ? null : request.TrialExpiresAt.Value);
 
@@ -450,6 +452,7 @@ public static class PortalTenantsEndpoints
         t.TrialExpiresAt,
         BillingContact = owner ? t.BillingContact : null,
         t.InviteEmail,
+        t.SignalWireProjectId,
         t.FeatureFlags,
         t.Settings,
         t.CreatedAt
@@ -465,6 +468,7 @@ public record PortalProvisionTenantRequest(
 
 public record UpdateTenantRequest(
     string? BillingContact,
+    string? SignalWireProjectId,
     string? InviteEmail,
     string? CustomDomain,
     DateTimeOffset? TrialExpiresAt);

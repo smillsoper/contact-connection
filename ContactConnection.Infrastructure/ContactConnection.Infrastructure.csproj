@@ -40,6 +40,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- SignalWire's own port-in LOA forms (S184) — filled in and e-signed by the platform; SignalWire requires theirs. -->
+    <EmbeddedResource Include="Porting\Forms\*.pdf" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Lets ContactConnection.Infrastructure.Tests construct the internal service classes
          (VendorResilienceExecutor, TenantVersionHistoryService, etc.) directly instead of only
          through their public interfaces — see API_HARDENING_CHECKLIST.md Tier 2. -->

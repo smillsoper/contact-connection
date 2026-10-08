@@ -30,6 +30,7 @@ public class ContactConnectionDbContext : DbContext
     public DbSet<HealthIncident> HealthIncidents => Set<HealthIncident>();
     public DbSet<HealthSettings> HealthSettings => Set<HealthSettings>();
     public DbSet<PlatformUser> PlatformUsers => Set<PlatformUser>();
+    public DbSet<PortOrder> PortOrders => Set<PortOrder>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -55,6 +56,7 @@ public class ContactConnectionDbContext : DbContext
         modelBuilder.ApplyConfiguration(new HealthIncidentConfiguration());
         modelBuilder.ApplyConfiguration(new HealthSettingsConfiguration());
         modelBuilder.ApplyConfiguration(new PlatformUserConfiguration());
+        modelBuilder.ApplyConfiguration(new PortOrderConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 }

@@ -100,6 +100,9 @@ public static class Permission
     /// <summary>Agent help desks (S184): create help desks, write topics, assign them to campaigns.</summary>
     public const string HelpdeskManage = "helpdesk.manage";
 
+    /// <summary>Request number port-ins (S184): paste numbers, send the LOA to the carrier account's owner, follow the port.</summary>
+    public const string NumbersPort = "numbers.port";
+
     public static readonly IReadOnlyList<string> All = [
         AgentsView, AgentsManage, RolesManage,
         FlowsView, FlowsManage, FlowsPublish,
@@ -114,7 +117,8 @@ public static class Permission
         BillingManage,
         ExportsCardData,
         ChatManage,
-        HelpdeskManage
+        HelpdeskManage,
+        NumbersPort
     ];
 
     /// <summary>A ContactConnection support session (S184): every permission, except card-data exports when the tenant's

@@ -102,6 +102,7 @@ export interface TenantRecord {
   onboardingComplete: boolean
   trialExpiresAt: string | null
   billingContact: string | null
+  signalWireProjectId: string | null
   inviteEmail: string | null
   featureFlags: TenantFeatureFlags
   settings: TenantSettings
@@ -131,7 +132,7 @@ export async function provisionTenant(data: {
 
 export async function updateTenant(
   id: string,
-  data: { billingContact?: string; customDomain?: string; inviteEmail?: string; trialExpiresAt?: string | null },
+  data: { billingContact?: string; signalWireProjectId?: string; customDomain?: string; inviteEmail?: string; trialExpiresAt?: string | null },
 ): Promise<TenantRecord> {
   return portalFetch<TenantRecord>(`/api/v1/portal/tenants/${id}`, {
     method: 'PATCH',

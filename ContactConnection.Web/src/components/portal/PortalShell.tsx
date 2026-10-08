@@ -9,6 +9,7 @@ interface Props {
 const NAV_ITEMS = [
   { label: 'Tenants', path: '/portal/tenants', support: true },
   { label: 'Health', path: '/portal/health', support: true },
+  { label: 'Porting', path: '/portal/porting', support: true },
   { label: 'API Definitions', path: '/portal/api-definitions', support: false },
   { label: 'Credentials', path: '/portal/credentials', support: false },
   { label: 'Maintenance', path: '/portal/maintenance', support: false },
