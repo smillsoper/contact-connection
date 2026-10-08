@@ -34,6 +34,10 @@ public class Tenant
     // Required by EF Core
     private Tenant() { }
 
+    /// <summary>The tenant's PostgreSQL schema for a subdomain: "tenant_" + the subdomain with hyphens / spaces as underscores.</summary>
+    public static string SchemaNameFor(string subdomain) =>
+        $"tenant_{subdomain.Trim().ToLowerInvariant().Replace('-', '_').Replace(' ', '_')}";
+
     public static Tenant Create(
         string name,
         string subdomain,
@@ -41,14 +45,15 @@ public class Tenant
         TenantFeatureFlags? featureFlags = null,
         string? inviteEmail = null)
     {
-        // Replace hyphens/spaces with underscores so the schema name is a valid unquoted PG identifier.
-        var normalized = subdomain.ToLowerInvariant().Replace('-', '_').Replace(' ', '_');
+        // The subdomain is a host name, so it keeps its hyphens (S184 — underscores aren't valid in a host name and no TLS
+        // certificate covers them). Only the schema name swaps them for underscores, to be a plain PostgreSQL identifier.
+        var host = subdomain.Trim().ToLowerInvariant();
         return new Tenant
         {
             Id = Guid.NewGuid(),
             Name = name,
-            Subdomain = normalized,
-            SchemaName = $"tenant_{normalized}",
+            Subdomain = host,
+            SchemaName = SchemaNameFor(host),
             PlanTier = string.Empty,
             Timezone = timezone,
             IsActive = true,

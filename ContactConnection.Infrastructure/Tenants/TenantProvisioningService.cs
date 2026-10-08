@@ -37,6 +37,10 @@ public class TenantProvisioningService : ITenantProvisioningService
     {
         if (await _tenants.SubdomainExistsAsync(subdomain, ct))
             throw new InvalidOperationException($"Subdomain '{subdomain}' is already taken.");
+        // "a-b" and an older "a_b" would share one schema — never let a new tenant land in another's data.
+        var schema = Tenant.SchemaNameFor(subdomain);
+        if (await _db.Tenants.AnyAsync(t => t.SchemaName == schema, ct))
+            throw new InvalidOperationException($"Subdomain '{subdomain}' is too close to an existing tenant's — choose another.");
 
         var tenant = Tenant.Create(name, subdomain, timezone, featureFlags, inviteEmail);
 

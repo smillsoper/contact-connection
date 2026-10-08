@@ -5,6 +5,7 @@ import TenantUsageCard from '../../components/portal/TenantUsageCard'
 import TenantInvoicesCard from '../../components/portal/TenantInvoicesCard'
 import TenantSupportCard from '../../components/portal/TenantSupportCard'
 import { useIsPortalOwner } from '../../stores/portalAuthStore'
+import { tenantAddress } from '../../utils/tenantAddress'
 import {
   getTenant,
   updateTenant,
@@ -243,7 +244,7 @@ export default function TenantDetailPage() {
           </span>
         </div>
         <p className="text-gray-500 text-sm mb-6">
-          {tenant.subdomain}.contactconnection.local &nbsp;·&nbsp; schema: {tenant.schemaName}
+          {tenantAddress(tenant.subdomain, tenant.customDomain)} &nbsp;·&nbsp; schema: {tenant.schemaName}
         </p>
 
         {id && <TenantSupportCard tenantId={id} tenantActive={tenant.isActive} />}

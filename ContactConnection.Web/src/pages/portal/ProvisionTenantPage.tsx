@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import PortalShell from '../../components/portal/PortalShell'
 import { provisionTenant, type TenantFeatureFlags } from '../../api/portal'
 import { TIMEZONES } from '../../utils/timezones'
+import { currentPlatformDomain, DEFAULT_PLATFORM_DOMAIN } from '../../utils/tenantAddress'
 
 const FLAG_LABELS: Record<keyof TenantFeatureFlags, string> = {
   telephony: 'Telephony',
@@ -101,7 +102,7 @@ export default function ProvisionTenantPage() {
                   onChange={(e) => setSubdomain(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
                   className="flex-1 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
                 />
-                <span className="text-gray-500 text-sm whitespace-nowrap">.contactconnection.local</span>
+                <span className="text-gray-500 text-sm whitespace-nowrap">.{currentPlatformDomain() ?? DEFAULT_PLATFORM_DOMAIN}</span>
               </div>
               <p className="text-gray-500 text-xs mt-1">Lowercase letters, numbers, and hyphens only.</p>
             </div>

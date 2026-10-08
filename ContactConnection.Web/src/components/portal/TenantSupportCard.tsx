@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { endSupportSession, listSupportSessions, startSupportSession, type SupportSessionRecord } from '../../api/portal'
+import { currentPlatformDomain } from '../../utils/tenantAddress'
 
 /**
  * Open the tenant's portal (S184): give a reason, and the tenant's portal opens in a new tab signed in as your own
@@ -7,12 +8,9 @@ import { endSupportSession, listSupportSessions, startSupportSession, type Suppo
  * Every session is listed here and on the tenant's own Support Access page.
  */
 
-const PLATFORM_DOMAINS = ['contactconnection.cc', 'contactconnection.io', 'cc.local']
-
 /** The tenant's portal address: its own subdomain in production, ?subdomain= on localhost. */
 function tenantPortalUrl(subdomain: string, code: string) {
-  const host = window.location.hostname
-  const domain = PLATFORM_DOMAINS.find((d) => host === d || host.endsWith(`.${d}`))
+  const domain = currentPlatformDomain()
   const base = domain ? `${window.location.protocol}//${subdomain}.${domain}${window.location.port ? `:${window.location.port}` : ''}`
     : window.location.origin
   // The single-use code rides in the fragment, which never reaches a server or its logs.
