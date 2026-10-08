@@ -712,6 +712,9 @@ immediately once calls are live, not deferrable.
         widget must be wired to real-time SignalR push, never polling.
 - [ ] **Agent Helpdesk CMS.** Self-contained, doesn't block revenue, but supports script accuracy
       for a strictly-scripted client:
+      - **S184 BUILT** (`6243708`): Help Desks admin page, topics (rich text, images, files, links), per
+        campaign, yellow agent button + tabs. **Still open:** opens as a centered modal that covers the
+        script (needs the non-blocking slide-out below); client-level scoping not built (campaign only).
       - A CMS to build out each helpdesk's content.
       - Helpdesks can be scoped at **client level** or **campaign level**.
       - Agent-facing visibility in the CRM as a button or tab — top or bottom of the screen — opening

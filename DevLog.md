@@ -193,6 +193,7 @@
 | 181 | 2026-10-06 | 9:21 AM PDT | 6:15 PM PDT | 534 min | ~23102 min |
 | 182 | 2026-10-06 | 7:27 PM PDT | 9:52 PM PDT | 145 min | ~23247 min |
 | 183 | 2026-10-07 | 9:22 AM PDT | 9:38 PM PDT | 736 min | ~23983 min |
+| 184 | 2026-10-08 | 7:47 AM PDT | 3:22 PM PDT | 455 min | ~24438 min |
 
 ---
 
@@ -11901,3 +11902,78 @@ Finished bulk numbers / Reserve from S182. Then a long run of agent-portal and s
     retest) → Stripe live → Life Seasons LOI → Chrome/Edge store submission (extension 0.3.x) → bank;
   - Clint's Cannella SFTP details and figures;
   - production: Linux fonts for QuestPDF / libass, and moving the screen-view registry to Redis if the API scales out.
+
+## Session 184
+
+**Date:** 2026-10-08
+**Start:** 7:47 AM PDT
+**End:** 3:22 PM PDT
+**Duration:** 455 minutes
+**Total Duration:** ~24438 minutes
+
+### Focus
+
+Finished supervisor remote assist (#5 follow-along, #6 remote fixes; #7 waits for the AI tools work), then the agent help
+desk, platform support access with Entra roles, platform health (two phases + UptimeRobot), and number porting
+(phases A and B). All committed and pushed.
+
+### Done
+
+- **Take-over fixes** (`8d3f1f1`, `25fbaf4`): the take-over leg is labelled (`X-CC-Leg=takeover`) so the supervisor's
+  softphone auto-answers and pulls the script; every SignalR connection now reconnects forever (the default gave up
+  after ~40 s, which broke take-over after an API restart); AI wrap-up after a take-over goes to the supervisor who
+  finished the script (the original agent keeps the credit). William's items: Got it button placement, chart type icons.
+- **#5 Follow-along** (`b0f83a5`, `15f6030`): supervisors watch an agent's script live (eye button), see what the agent
+  types / picks as they do it (card/CVV/SSN/PIN fields masked), and can jump the script to a section; script sessions
+  locked to their agent. Live-verified.
+- **#6 Remote fixes** (`3b3bcd8`, `f43c2d0`): diagnostics, extension recheck, softphone re-register, clear stuck call
+  screen, refresh — pushed to the agent's portal, results back live, every action logged; Stephen's wrench icon.
+  Live-verified.
+- **Agent help desks** (`6243708`, `e258635`, `14aab30`): Help Desks admin page (helpdesk.manage) — topics with rich
+  text, headings, links, embedded images, attachments, by campaign; bright yellow Help desk button beside Caller history,
+  a tab per help desk. Fixes: links in rich content (help desk, chat, scripts) always open a new window (one had taken
+  over the portal and dropped a call); editors keep saved images (TipTap read only `img[src]`); React 19 rewrote innerHTML
+  on every re-render, wiping loaded images — memoized. Live-verified.
+- **Support access + Portal roles** (`9e4ec49`, `a38abad`): Entra app roles Platform.Owner / Platform.Support (created
+  and assigned by Stephen; enforcement on). Support can't see/change billing, usage, invoices, trial dates, the card-data
+  switch, provisioning, reset onboarding or (de)activation. "Open tenant portal" from Manage Tenant: reason, single-use
+  code, 60-minute session as the person's own hidden named account, all permissions except card data when the switch is
+  off; ending it stops the token at once; tenant admins see a Support Access log. Live-verified.
+- **Tenant addresses** (`c5e531e`): Manage Tenant shows the real address; new subdomains keep hyphens (the old code
+  turned them into underscores — invalid host names); provisioning refuses a subdomain that would share another
+  tenant's schema. Test Contact Center left as is (test-only).
+- **Platform health** (`781ae38`, `56d0f19`): Portal Health page; the Worker checks 38 things every minute (core
+  services, telephony incl. SignalWire trunk + TURN, each Worker job, queue/abandon, background work, client APIs +
+  circuit breakers, payments, tax, TTS/STT, email, Stripe webhooks, credential + TLS expiry); email alerts to Owners +
+  extras (critical repeats every 30 min until acknowledged; mute; levels editable by Owners); public `/api/v1/health`;
+  UptimeRobot monitoring it. Stephen verified page, alerts and UptimeRobot. SignalWire balance not built (needs a
+  space-admin token) — use SignalWire's own low-balance alert.
+- **Number porting Phase A** (`3e3dd1a`): tenant request (numbers.port) with scrub (format, dedupe, local/toll-free,
+  already yours / another account's / already porting / invalid; legacy 10-digit routing rows); signer's public page
+  fills and e-signs SignalWire's own LOA PDFs (overlay; toll-free ≤ 10 numbers + CSV; separate signature record);
+  platform-porting@ email in SignalWire form order (PIN only in the Portal); Portal Porting queue (Owner + Support):
+  copy-ready form fields, files, submitted → port date → completed, correction with a new link, cancel, notes. Voice only.
+- **Number porting Phase B** (`ffeae64`, `fdcb11a`): confirming the port date loads the numbers at once (label
+  "Port P-…", Reserve or pre-assigned campaign + script/call-flow overrides) so they work when the carrier switches;
+  cancelling afterwards removes them; PIN + bill deleted 30 days after closing; health check for signed ports waiting or
+  near SignalWire's 30-day signature limit. Stephen verified the signing link and P-1003's numbers loading.
+- **Ideas banked:** remote-control tray app (agent consent every time; needs signing certs → after LLC); SignalWire
+  subproject per tenant via API (next).
+
+### Tests / build
+
+1835 tests passing (Domain 396, Application 20, Api 170, Infrastructure 1249); `dotnet build ContactConnection.slnx`
+0 errors, 0 warnings. Migrations applied to public, tenant_test_tenant and tenant_test_contact_center.
+
+### Next
+
+1. **SignalWire subprojects:** create one per tenant (Compatibility API `POST /api/laml/2010-04-01/Accounts`,
+   Management-scope token stored in Portal Credentials as `SignalWire:ProjectId` / `SignalWire:ApiToken`) on
+   provisioning + a Manage Tenant button for existing tenants; fills Tenant.SignalWireProjectId.
+2. **Porting Phase C:** configure ported numbers in the tenant's subproject via the API (confirm the parent token can
+   manage subproject numbers).
+3. **Help desk gaps vs the checklist:** open as a slide-out that does NOT cover the script (today a centered modal);
+   client-level help desks (today campaign only).
+4. Browser tests not yet done: Number Porting tenant page / Portal queue screens end to end.
+5. **Carried:** LLC reactivation ($500) and its checklist; Clint's Cannella SFTP details; keypad retest after SignalWire
+   vetting; production fonts (QuestPDF uses bundled Lato now); screen-view registry to Redis if the API scales out.
