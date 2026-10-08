@@ -183,7 +183,10 @@ public class HelpRequestConfiguration : IEntityTypeConfiguration<HelpRequest>
         b.Property(h => h.ClosedAt).HasColumnName("closed_at");
         b.Property(h => h.ContextJson).HasColumnName("context").HasColumnType("jsonb");
         b.Property(h => h.SnapshotKey).HasColumnName("snapshot_key").HasMaxLength(200);
+        b.Property(h => h.ResolvedAt).HasColumnName("resolved_at");
+        b.Property(h => h.ResolvedById).HasColumnName("resolved_by_id");
         b.Ignore(h => h.IsOpen);
+        b.Ignore(h => h.IsBeingHelped);
         b.HasIndex(h => new { h.Status, h.CreatedAt }).HasDatabaseName("ix_help_requests_status_created");
     }
 }

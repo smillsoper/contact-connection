@@ -25,6 +25,8 @@ interface ChatState {
   supervisorIds: string[]
   myHelp: HelpRequest | null
   helpQueue: HelpRequest[]
+  /** Requests I picked up and am still helping with (S183) — their card stays open until I mark the agent helped. */
+  assisting: HelpRequest[]
   messages: Record<string, ChannelMessages>
   threads: Record<string, ChatMessage[]>       // parentId → replies
   pins: Record<string, ChatPins>               // channelId → pinned for everyone + my own pins
@@ -58,14 +60,14 @@ interface ChatState {
 const sortMsgs = (a: ChatMessage, b: ChatMessage) => a.createdAt.localeCompare(b.createdAt)
 
 export const useChatStore = create<ChatState>((set, get) => ({
-  status: 'idle', disabledMessage: null, me: null, users: {}, channels: {}, supervisorIds: [], myHelp: null, helpQueue: [],
+  status: 'idle', disabledMessage: null, me: null, users: {}, channels: {}, supervisorIds: [], myHelp: null, helpQueue: [], assisting: [],
   messages: {}, threads: {}, pins: {}, typing: {}, view: { kind: 'list' }, visible: false, wide: false, lightbox: null,
 
   load: (b) => set({
     status: 'ready', me: b.me,
     users: Object.fromEntries(b.users.map((u) => [u.id, u])),
     channels: Object.fromEntries(b.channels.map((c) => [c.id, c])),
-    supervisorIds: b.supervisorIds, myHelp: b.myHelp, helpQueue: b.helpQueue,
+    supervisorIds: b.supervisorIds, myHelp: b.myHelp, helpQueue: b.helpQueue, assisting: b.assisting ?? [],
   }),
   setDisabled: (message) => set({ status: 'disabled', disabledMessage: message }),
   setView: (view) => set({ view }),
@@ -142,10 +144,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setHelp: (h) => set((s) => {
     const meId = get().me?.id
-    const myHelp = h.agentId === meId ? (h.status === 'open' ? h : (s.myHelp?.id === h.id ? h : s.myHelp)) : s.myHelp
+    // My own request: shown while waiting or being helped; gone (ask button back) once resolved or cancelled.
+    const active = h.status === 'open' || h.status === 'claimed'
+    const myHelp = h.agentId === meId ? (active ? h : (s.myHelp?.id === h.id ? null : s.myHelp)) : s.myHelp
     const others = s.helpQueue.filter((x) => x.id !== h.id)
     const helpQueue = h.agentId !== meId && h.status === 'open' ? [...others, h] : others
-    return { myHelp, helpQueue }
+    // Requests I picked up stay as an "assisting" card until I mark the agent helped.
+    const rest = s.assisting.filter((x) => x.id !== h.id)
+    const assisting = h.status === 'claimed' && h.claimedById === meId ? [...rest, h] : rest
+    return { myHelp, helpQueue, assisting }
   }),
 }))
 

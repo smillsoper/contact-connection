@@ -77,7 +77,7 @@ export interface HelpRequest {
   id: string
   agentId: string
   agentName: string | null
-  status: 'open' | 'claimed' | 'cancelled'
+  status: 'open' | 'claimed' | 'cancelled' | 'resolved'
   note: string | null
   callRecordId: string | null
   callerNumber: string | null
@@ -96,6 +96,7 @@ export interface HelpRequest {
   } | null
   /** A picture of their shared screen at that moment. */
   hasSnapshot?: boolean
+  resolvedAt?: string | null
 }
 
 export interface ChatBootstrap {
@@ -107,6 +108,8 @@ export interface ChatBootstrap {
   supervisorIds: string[]
   myHelp: HelpRequest | null
   helpQueue: HelpRequest[]
+  /** Requests I picked up and haven't marked helped yet (S183). */
+  assisting?: HelpRequest[]
 }
 
 export interface BrowseChannel { id: string; name: string; description: string | null; retired: boolean; memberCount: number }
@@ -135,6 +138,7 @@ export const chatApi = {
   raiseHand: (note: string | null, callRecordId: string | null) => api.post<HelpRequest>('/api/v1/chat/help', { note, callRecordId }),
   claimHelp: (id: string) => api.post<HelpRequest>(`/api/v1/chat/help/${id}/claim`),
   cancelHelp: (id: string) => api.post<HelpRequest>(`/api/v1/chat/help/${id}/cancel`),
+  resolveHelp: (id: string) => api.post<HelpRequest>(`/api/v1/chat/help/${id}/resolve`),
   putHelpSnapshot: (id: string, jpeg: Blob) => api.putBinary<HelpRequest>(`/api/v1/chat/help/${id}/snapshot`, jpeg),
 }
 

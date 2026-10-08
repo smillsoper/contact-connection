@@ -48,6 +48,7 @@ public static class ChatEndpoints
         g.MapPost("help/{id:guid}/claim", ClaimHelp);
         g.MapPost("help/{id:guid}/cancel", CancelHelp);
         g.MapPut("help/{id:guid}/snapshot", PutHelpSnapshot);
+        g.MapPost("help/{id:guid}/resolve", ResolveHelp);
         g.MapGet("help/{id:guid}/snapshot", GetHelpSnapshot);
 
         var admin = app.MapGroup("/api/v1/chat/admin").RequireAuthorization("ChatManage");
@@ -186,6 +187,15 @@ public static class ChatEndpoints
         return messages.Select(m => MessageDto(m, by[m.Id])).ToList();
     }
 
+    /// <summary>One after another — a DbContext can't run queries in parallel (Task.WhenAll here broke the bootstrap as soon
+    /// as a supervisor had two requests).</summary>
+    private static async Task<List<object>> HelpDtosAsync(TenantDbContext db, IEnumerable<HelpRequest> list, CancellationToken ct)
+    {
+        var result = new List<object>();
+        foreach (var h in list) result.Add(await HelpDto(db, h, ct));
+        return result;
+    }
+
     private static async Task<object> HelpDto(TenantDbContext db, HelpRequest h, CancellationToken ct)
     {
         var names = await db.Agents.AsNoTracking().Where(a => a.Id == h.AgentId || a.Id == h.ClaimedById)
@@ -202,6 +212,7 @@ public static class ChatEndpoints
             h.ClaimedById, claimedByName = h.ClaimedById is { } s ? names.GetValueOrDefault(s) : null, h.ChannelId, h.CreatedAt, h.ClosedAt,
             context = h.ContextJson is { } cj ? System.Text.Json.JsonSerializer.Deserialize<HelpContext>(cj) : null,
             hasSnapshot = h.SnapshotKey is not null,
+            h.ResolvedAt,
         };
     }
 
@@ -234,11 +245,17 @@ public static class ChatEndpoints
         var counts = await UnreadAsync(db, memberships.Select(m => (m.ChannelId, m.LastReadAt)).ToList(), me.Id, ct);
 
         var supervisorIds = await db.AgentSupervisors.AsNoTracking().Where(s => s.AgentId == me.Id).Select(s => s.SupervisorId).ToListAsync(ct);
-        var myHelp = await db.HelpRequests.AsNoTracking().Where(h => h.AgentId == me.Id && h.Status == HelpRequestStatus.Open)
+        // Waiting, or picked up and still being helped (S183) — a picked-up request is only done when the supervisor says so.
+        var helpWindow = DateTimeOffset.UtcNow.AddHours(-12);
+        var myHelp = await db.HelpRequests.AsNoTracking()
+            .Where(h => h.AgentId == me.Id && (h.Status == HelpRequestStatus.Open || h.Status == HelpRequestStatus.Claimed) && h.CreatedAt > helpWindow)
             .OrderByDescending(h => h.CreatedAt).FirstOrDefaultAsync(ct);
         var queue = await db.HelpRequests.AsNoTracking()
             .Where(h => h.Status == HelpRequestStatus.Open && h.AgentId != me.Id && h.NotifiedIds.Contains(me.Id))   // same people the live alert went to
             .OrderBy(h => h.CreatedAt).Take(50).ToListAsync(ct);
+        var assisting = await db.HelpRequests.AsNoTracking()
+            .Where(h => h.Status == HelpRequestStatus.Claimed && h.ClaimedById == me.Id && h.CreatedAt > helpWindow)
+            .OrderBy(h => h.CreatedAt).Take(20).ToListAsync(ct);
 
         return Results.Ok(new
         {
@@ -257,7 +274,8 @@ public static class ChatEndpoints
             }),
             supervisorIds,
             myHelp = myHelp is null ? null : await HelpDto(db, myHelp, ct),
-            helpQueue = await Task.WhenAll(queue.Select(h => HelpDto(db, h, ct))),
+            helpQueue = await HelpDtosAsync(db, queue, ct),
+            assisting = await HelpDtosAsync(db, assisting, ct),
         });
     }
 
@@ -771,7 +789,9 @@ public static class ChatEndpoints
         if (!Enabled(tc)) return Results.NotFound(new { error = NotEnabled });
         await using var db = dbf.Create();
 
-        var open = await db.HelpRequests.FirstOrDefaultAsync(h => h.AgentId == me.Id && h.Status == HelpRequestStatus.Open, ct);
+        // Already waiting, or already being helped: that request, not a second one.
+        var open = await db.HelpRequests.FirstOrDefaultAsync(h => h.AgentId == me.Id
+            && (h.Status == HelpRequestStatus.Open || (h.Status == HelpRequestStatus.Claimed && h.CreatedAt > DateTimeOffset.UtcNow.AddHours(-12))), ct);
         if (open is not null) return Results.Ok(await HelpDto(db, open, ct));
 
         // Their own supervisors who are on duty; when none is, every on-duty supervisor; when nobody is on duty at all,
@@ -861,6 +881,34 @@ public static class ChatEndpoints
         await Push(hub, help.NotifiedIds.Append(help.AgentId).Append(me.Id), "help", dto);
         foreach (var m in new[] { me.Id, help.AgentId }) await Push(hub, [m], "channel", (await ChannelForAsync(db, channel.Id, me with { Id = m }, ct))!);
         await Push(hub, [me.Id, help.AgentId], "message", MessageDto(system, []));
+        return Results.Ok(dto);
+    }
+
+    /// <summary>Supervisor who picked it up (or any supervisor): the agent's been helped — their "ask" button comes back.</summary>
+    private static async Task<IResult> ResolveHelp(Guid id, HttpContext http, TenantContext tc, ScopedTenantDbContextFactory dbf,
+        IHubContext<ChatHub, IChatHubClient> hub, CancellationToken ct)
+    {
+        var me = WhoAmI(http, tc);
+        if (me is null) return Results.Unauthorized();
+        await using var db = dbf.Create();
+        var help = await db.HelpRequests.FirstOrDefaultAsync(h => h.Id == id, ct);
+        if (help is null) return Results.NotFound();
+        if (help.ClaimedById != me.Id && !me.IsSupervisor) return Results.Forbid();
+        if (help.Status != HelpRequestStatus.Claimed) return Results.Ok(await HelpDto(db, help, ct));
+        help.Resolve(me.Id);
+        // Close the loop in the conversation too.
+        if (help.ChannelId is { } channelId && await db.ChatChannels.FirstOrDefaultAsync(c => c.Id == channelId, ct) is { } channel)
+        {
+            var first = await db.Agents.AsNoTracking().Where(a => a.Id == me.Id).Select(a => a.FirstName).FirstOrDefaultAsync(ct);
+            var system = ChatMessage.Create(channel.Id, null, $"{first} marked this request for help as done.", null, ChatMessageKind.System);
+            db.ChatMessages.Add(system);
+            channel.Touch(system.CreatedAt);
+            await db.SaveChangesAsync(ct);
+            await Push(hub, [me.Id, help.AgentId], "message", MessageDto(system, []));
+        }
+        else await db.SaveChangesAsync(ct);
+        var dto = await HelpDto(db, help, ct);
+        await Push(hub, help.NotifiedIds.Append(help.AgentId).Append(me.Id).Distinct(), "help", dto);
         return Results.Ok(dto);
     }
 

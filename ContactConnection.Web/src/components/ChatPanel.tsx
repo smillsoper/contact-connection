@@ -10,7 +10,8 @@ import { captureShareFrame } from '../lib/screenRecorder'
 import { useAuthStore } from '../stores/authStore'
 import { getSubdomainFromHostname } from '../utils/subdomain'
 import ScreenViewModal from './dashboard/ScreenViewModal'
-import { ExternalLinkIcon, ScreenIcon } from './icons/Icons'
+import { CheckIcon, CoachIcon, ExternalLinkIcon, ScreenIcon } from './icons/Icons'
+import { CoachComposer } from './dashboard/CoachComposer'
 
 /**
  * Team chat (S183) — the agent portal's right panel, and the body of the chat launcher on admin pages. Slack-like:
@@ -236,6 +237,7 @@ function since(iso: string) {
 function HelpArea() {
   const myHelp = useChatStore((s) => s.myHelp)
   const queue = useChatStore((s) => s.helpQueue)
+  const assisting = useChatStore((s) => s.assisting)
   // Only people with an assigned supervisor can raise a hand (supervisors themselves usually have none).
   const hasSupervisors = useChatStore((s) => s.supervisorIds.length > 0)
   const [composing, setComposing] = useState(false)
@@ -244,7 +246,7 @@ function HelpArea() {
   const [, tick] = useState(0)
   useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t) }, [])
 
-  if (queue.length === 0 && myHelp?.status !== 'open' && !hasSupervisors) return null
+  if (queue.length === 0 && assisting.length === 0 && !myHelp && !hasSupervisors) return null
 
   async function raise() {
     setError(null)
@@ -261,6 +263,8 @@ function HelpArea() {
 
   return (
     <div className="border-b border-gray-800">
+      {/* Supervisor: requests I picked up stay here, with their tools, until I mark the agent helped (S183). */}
+      {assisting.map((h) => <AssistCard key={h.id} h={h} />)}
       {queue.map((h) => <HelpCard key={h.id} h={h} />)}
 
       {myHelp?.status === 'open' ? (
@@ -274,6 +278,15 @@ function HelpArea() {
           </p>
           <button onClick={() => chatApi.cancelHelp(myHelp.id).then((h) => useChatStore.getState().setHelp(h)).catch(() => {})}
             className="text-[11px] text-gray-400 hover:text-white mt-1">Cancel</button>
+        </div>
+      ) : myHelp?.status === 'claimed' ? (
+        // Agent: being helped — the ask button stays hidden until the supervisor marks it done.
+        <div className="m-2 rounded border border-emerald-700 bg-emerald-950/40 px-3 py-2">
+          <p className="text-xs text-emerald-200 font-medium">✋ {myHelp.claimedByName ?? 'A supervisor'} is helping you</p>
+          {myHelp.channelId && (
+            <button onClick={() => useChatStore.getState().setView({ kind: 'channel', channelId: myHelp.channelId! })}
+              className="text-[11px] text-emerald-300 hover:text-white mt-1">Open the conversation</button>
+          )}
         </div>
       ) : !hasSupervisors ? null : composing ? (
         <div className="m-2 rounded border border-gray-700 bg-gray-900 px-2 py-2">
@@ -315,15 +328,58 @@ function useHelpSnapshot(h: HelpRequest) {
   return url
 }
 
-function HelpCard({ h }: { h: HelpRequest }) {
-  const [error, setError] = useState<string | null>(null)
+/** What the supervisor sees about a raised hand — note, script position, caller, screen picture (S183). */
+function HelpDetails({ h, tone }: { h: HelpRequest; tone: 'red' | 'violet' }) {
   const snapshot = useHelpSnapshot(h)
-  const [viewing, setViewing] = useState(false)
-  const canWatch = useAuthStore((s) => s.hasPermission('supervisor.monitor') || s.hasPermission('supervisor.override'))
-  const canOpenCall = useAuthStore((s) => s.hasPermission('calls.view') || s.hasPermission('calls.manage'))
   const c = h.context
   const where = c ? [c.scriptName, c.sectionName, c.stepLabel].filter(Boolean).join(' › ') : ''
   const who = c ? [c.callerName, c.callerNumber ?? h.callerNumber, c.campaignName ?? h.campaignName].filter(Boolean).join(' · ') : ''
+  const label = tone === 'red' ? 'text-red-300/70' : 'text-violet-300/70'
+  const text = tone === 'red' ? 'text-red-100/90' : 'text-violet-100/90'
+  return (
+    <>
+      {h.note && <p className="text-[11px] text-gray-200 mt-0.5">“<EmojiText text={h.note} />”</p>}
+      {where && <p className={`text-[10px] ${text} mt-1`}><span className={label}>Script:</span> {where}</p>}
+      {(who || h.callerNumber) && (
+        <p className={`text-[10px] ${text}`}>
+          <span className={label}>Caller:</span> {who || `${h.callerNumber}${h.campaignName ? ` · ${h.campaignName}` : ''}`}
+          {c?.callStartedAt && <span className={label}> · on the call {since(c.callStartedAt)}</span>}
+        </p>
+      )}
+      {snapshot && (
+        <button onClick={() => useChatStore.setState({ lightbox: snapshot })} className="block mt-1.5 w-full cursor-zoom-in" title="Their screen when they asked — click to enlarge">
+          <img src={snapshot} alt="The agent's screen when they asked for help" className={`w-full rounded border ${tone === 'red' ? 'border-red-800/60' : 'border-violet-800/60'}`} />
+        </button>
+      )}
+    </>
+  )
+}
+
+/** Tools for helping: watch their screen, open the call (shared by the alert and the assisting card). */
+function HelpTools({ h, tone }: { h: HelpRequest; tone: 'red' | 'violet' }) {
+  const [viewing, setViewing] = useState(false)
+  const canWatch = useAuthStore((s) => s.hasPermission('supervisor.monitor') || s.hasPermission('supervisor.override'))
+  const canOpenCall = useAuthStore((s) => s.hasPermission('calls.view') || s.hasPermission('calls.manage'))
+  const cls = tone === 'red' ? 'border-red-700 text-red-100 hover:bg-red-900/40' : 'border-violet-700 text-violet-100 hover:bg-violet-900/40'
+  return (
+    <>
+      {canWatch && (
+        <button onClick={() => setViewing(true)} className={`inline-flex items-center gap-1 text-[11px] border rounded px-2 py-0.5 ${cls}`}>
+          <ScreenIcon size={11} />View screen
+        </button>
+      )}
+      {canOpenCall && h.callRecordId && (
+        <a href={`/admin/calls/${h.callRecordId}`} target="_blank" rel="noreferrer" className={`inline-flex items-center gap-1 text-[11px] border rounded px-2 py-0.5 ${cls}`}>
+          Open call <ExternalLinkIcon size={10} />
+        </a>
+      )}
+      {viewing && <ScreenViewModal agentId={h.agentId} agentName={h.agentName ?? 'Agent'} onClose={() => setViewing(false)} />}
+    </>
+  )
+}
+
+function HelpCard({ h }: { h: HelpRequest }) {
+  const [error, setError] = useState<string | null>(null)
   async function claim() {
     setError(null)
     try {
@@ -335,36 +391,48 @@ function HelpCard({ h }: { h: HelpRequest }) {
   return (
     <div className="m-2 rounded border border-red-700 bg-red-950/40 px-3 py-2 animate-[pulse_2s_ease-in-out_3]">
       <p className="text-xs text-red-100 font-medium">✋ {h.agentName ?? 'An agent'} needs help <span className="text-red-300/80 font-normal">{since(h.createdAt)}</span></p>
-      {h.note && <p className="text-[11px] text-gray-200 mt-0.5">“<EmojiText text={h.note} />”</p>}
-      {/* Where they are (S183) — help without asking "where are you?" */}
-      {where && <p className="text-[10px] text-red-100/90 mt-1"><span className="text-red-300/70">Script:</span> {where}</p>}
-      {(who || h.callerNumber) && (
-        <p className="text-[10px] text-red-100/90">
-          <span className="text-red-300/70">Caller:</span> {who || `${h.callerNumber}${h.campaignName ? ` · ${h.campaignName}` : ''}`}
-          {c?.callStartedAt && <span className="text-red-300/70"> · on the call {since(c.callStartedAt)}</span>}
-        </p>
-      )}
-      {snapshot && (
-        <button onClick={() => useChatStore.setState({ lightbox: snapshot })} className="block mt-1.5 w-full cursor-zoom-in" title="Their screen when they asked — click to enlarge">
-          <img src={snapshot} alt="The agent's screen when they asked for help" className="w-full rounded border border-red-800/60" />
-        </button>
-      )}
+      <HelpDetails h={h} tone="red" />
       <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
         <button onClick={() => void claim()} className="text-[11px] bg-red-600 hover:bg-red-500 text-white rounded px-2 py-0.5">Pick up</button>
-        {canWatch && (
-          <button onClick={() => setViewing(true)} className="inline-flex items-center gap-1 text-[11px] border border-red-700 text-red-100 hover:bg-red-900/40 rounded px-2 py-0.5">
-            <ScreenIcon size={11} />View screen
-          </button>
-        )}
-        {canOpenCall && h.callRecordId && (
-          <a href={`/admin/calls/${h.callRecordId}`} target="_blank" rel="noreferrer"
-            className="inline-flex items-center gap-1 text-[11px] border border-red-700 text-red-100 hover:bg-red-900/40 rounded px-2 py-0.5">
-            Open call <ExternalLinkIcon size={10} />
-          </a>
-        )}
+        <HelpTools h={h} tone="red" />
       </div>
       {error && <p className="text-[11px] text-red-300 mt-1">{error}</p>}
-      {viewing && <ScreenViewModal agentId={h.agentId} agentName={h.agentName ?? 'Agent'} onClose={() => setViewing(false)} />}
+    </div>
+  )
+}
+
+/**
+ * A request I picked up (S183): stays right where the alert popped up, with everything I need to help — the context,
+ * the conversation, their screen, a coaching note — until I mark the agent helped (which brings their ask button back).
+ */
+function AssistCard({ h }: { h: HelpRequest }) {
+  const [coaching, setCoaching] = useState(false)
+  const [busy, setBusy] = useState(false)
+  async function done() {
+    setBusy(true)
+    try { useChatStore.getState().setHelp(await chatApi.resolveHelp(h.id)) } catch { setBusy(false) }
+  }
+  return (
+    <div className="m-2 rounded border border-violet-700 bg-violet-950/40 px-3 py-2">
+      <p className="text-xs text-violet-100 font-medium">Assisting {h.agentName ?? 'an agent'} <span className="text-violet-300/80 font-normal">{since(h.createdAt)}</span></p>
+      <HelpDetails h={h} tone="violet" />
+      <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+        {h.channelId && (
+          <button onClick={() => useChatStore.getState().setView({ kind: 'channel', channelId: h.channelId! })}
+            className="text-[11px] border border-violet-700 text-violet-100 hover:bg-violet-900/40 rounded px-2 py-0.5">Message</button>
+        )}
+        <HelpTools h={h} tone="violet" />
+        <button onClick={() => setCoaching((c) => !c)}
+          className={`inline-flex items-center gap-1 text-[11px] border rounded px-2 py-0.5 ${coaching ? 'border-amber-500 text-amber-200' : 'border-violet-700 text-violet-100 hover:bg-violet-900/40'}`}>
+          <CoachIcon size={11} />Coach note
+        </button>
+      </div>
+      {coaching && <div className="mt-2"><CoachComposer agentId={h.agentId} agentName={h.agentName ?? 'the agent'} compact /></div>}
+      <button onClick={() => void done()} disabled={busy}
+        className="w-full mt-2 inline-flex items-center justify-center gap-1.5 text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded px-2 py-1 disabled:opacity-50"
+        title={`Done — ${h.agentName ?? 'the agent'} can ask for help again`}>
+        <CheckIcon size={12} />{busy ? 'Closing…' : 'Agent helped'}
+      </button>
     </div>
   )
 }

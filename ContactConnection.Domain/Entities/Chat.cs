@@ -464,6 +464,8 @@ public static class HelpRequestStatus
     public const string Open      = "open";
     public const string Claimed   = "claimed";
     public const string Cancelled = "cancelled";
+    /// <summary>The supervisor who picked it up marked the agent helped (S183) — the agent can ask again.</summary>
+    public const string Resolved  = "resolved";
 }
 
 /// <summary>
@@ -492,6 +494,12 @@ public class HelpRequest
     public string? ContextJson { get; private set; }
     /// <summary>A picture of the agent's shared screen at that moment (blob key); deleted after <see cref="SnapshotKeep"/>.</summary>
     public string? SnapshotKey { get; private set; }
+    /// <summary>When the supervisor marked the agent helped (claimed → resolved).</summary>
+    public DateTimeOffset? ResolvedAt { get; private set; }
+    public Guid? ResolvedById { get; private set; }
+
+    /// <summary>Picked up and still being worked — the agent's "ask" button stays hidden, the supervisor keeps the card.</summary>
+    public bool IsBeingHelped => Status == HelpRequestStatus.Claimed;
 
     public static readonly TimeSpan SnapshotKeep = TimeSpan.FromDays(7);
 
@@ -520,5 +528,11 @@ public class HelpRequest
     {
         if (!IsOpen) return;
         Status = HelpRequestStatus.Cancelled; ClosedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void Resolve(Guid byId)
+    {
+        if (Status != HelpRequestStatus.Claimed) return;
+        Status = HelpRequestStatus.Resolved; ResolvedAt = DateTimeOffset.UtcNow; ResolvedById = byId;
     }
 }

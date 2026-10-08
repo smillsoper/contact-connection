@@ -23,7 +23,7 @@ export function stopChat() {
   starting = null
   void old?.stop().catch(() => {})
   useChatStore.setState({
-    status: 'idle', disabledMessage: null, me: null, users: {}, channels: {}, supervisorIds: [], myHelp: null, helpQueue: [],
+    status: 'idle', disabledMessage: null, me: null, users: {}, channels: {}, supervisorIds: [], myHelp: null, helpQueue: [], assisting: [],
     messages: {}, threads: {}, pins: {}, typing: {}, view: { kind: 'list' }, lightbox: null,
   })
 }
