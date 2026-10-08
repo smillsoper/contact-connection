@@ -78,12 +78,12 @@ doesn't fit. Business blockers (LLC reinstatement, letter of intent, Clint's fig
 3. **Recordings → compressed MP3** (code only; moving them to Azure Blob waits for hosting). (1)
 
 **After the deal is signed (funds):** Azure hosting build-out, load test, number porting, PCI scans.
-**Post-launch (respecting the change freeze):** Team Chat, Chrome Extension (screen recording, raise agent tab).
+**Post-launch (respecting the change freeze):** ~~Team Chat, Chrome Extension (screen recording, raise agent tab)~~ **both DONE early, S183** (team chat browser-verified; extension 0.3.1 + per-campaign screen recording live-verified; store submission waits for the LLC).
 
 ## Tier 1 — Revenue-critical MVP
 
 - [ ] **BLOCKER — reinstate Call Center Solutions, LLC with the Oregon Secretary of State (added S175, 2026-10-03).**
-      The registry shows the LLC **inactive**: WLR Law withdrew as registered agent about 2 years ago. Reinstatement = $100 filing + $100 per lapsed year = **$300** (no back taxes; the LLC never had activity),
+      The registry shows the LLC **inactive**: WLR Law withdrew as registered agent about 2 years ago. Reinstatement = **$500** (Stephen's confirmed figure, 2026-10-07; earlier estimate $300) (no back taxes; the LLC never had activity),
       plus naming a new registered agent (Stephen can serve, with an Oregon street address). The name is protected for 5 years after the
       inactive date. **Must be active before any business with Life Seasons**: contract, setup-fee invoice, Stripe, and
       the business bank account. After reinstatement, tell SignalWire (their business verification asked for state and entity
@@ -654,6 +654,9 @@ immediately once calls are live, not deferrable.
         calculation reads.
 - [ ] **Dashboard — Supervisor tools.** A strictly-scripted CS client will want QC on live calls
       early, not as an afterthought:
+      - **S183 remote assist (Stephen approved 7):** live screen view + Point / Draw (`1b3b03f`, `4f5742e`), coaching notes
+        (`80b2bda`), raise hand with context + assisting card (`5593f65`, `58674f6`), connection health (`b12e60d`), plus agent
+        dedications + personal queue (`f3f6907`). Next: #5 follow-along script view, #6 remote fixes; #7 AI help detection later.
       - **Monitor** an agent's live call (listen-only).
       - **Coach** (whisper to the agent without the caller hearing).
       - **Barge in** (join the call, all three parties can hear each other).
@@ -732,7 +735,7 @@ immediately once calls are live, not deferrable.
       changes billing and the data-processing contract, NOT the guardrails — redaction, minimization, validation,
       human review and logging stay platform-side regardless of whose key is used.
 
-- [ ] **Move a phone number to another campaign (admin UI).** (Requested 2026-10-02 — done by hand in SQL for
+- [x] **Move a phone number to another campaign (admin UI).** **DONE S183** (`1e4e0b6`: bulk move / Reserve / assign-from-Reserve, both tables updated together). (Requested 2026-10-02 — done by hand in SQL for
       +15416413945 → Test Campaign 1.) A number's campaign lives in TWO places that must change together:
       `tenant_x.phone_numbers.campaign_id` and `public.phone_number_routing."CampaignId"` (what inbound routing reads).
       Build a "Move to campaign…" action on Telephony → Phone Numbers: one transaction for both, warn about a
@@ -910,7 +913,7 @@ ring-all → answer → script pop → disposition).
       stays "active"; complete it at script end / hangup so `DeriveOverallStatus` reports correctly.
       *Done S169: completed at script end with the flow's disposition; hang-up paths load interactions;
       script-less outbound dials end "complete". Live-verified.*
-- [ ] **Phone number management (added S168)** — remove (hard delete if never used, else archive +
+- [x] **Phone number management (added S168)** **DONE S183** (`1e4e0b6`: delete-if-never-used, release, move, bulk paste-add, Reserve with SIP reject, assignment grid). — remove (hard delete if never used, else archive +
       drop from routing), move between campaigns, bulk add / port-in import (paste/CSV, E.164
       validation, cross-tenant duplicate check). Typo +15416416898 on NeuroQ - LF TV to remove.
 - [ ] **SignalWire multi-tenancy + tenant billing (added S168)** — Life Seasons is leaving Dial800;

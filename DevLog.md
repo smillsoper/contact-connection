@@ -192,6 +192,7 @@
 | 180 | 2026-10-05 | 7:38 PM PDT | 10:54 PM PDT | 196 min | ~22568 min |
 | 181 | 2026-10-06 | 9:21 AM PDT | 6:15 PM PDT | 534 min | ~23102 min |
 | 182 | 2026-10-06 | 7:27 PM PDT | 9:52 PM PDT | 145 min | ~23247 min |
+| 183 | 2026-10-07 | 9:22 AM PDT | 9:38 PM PDT | 736 min | ~23983 min |
 
 ---
 
@@ -11791,3 +11792,112 @@ numbers**, a Life Seasons go-live requirement.
   - `test_contact_center` tenant migrations;
   - LLC reinstatement;
   - Clint's Cannella SFTP details and figures.
+
+## Session 183
+
+**Date:** 2026-10-07
+**Start:** 9:22 AM PDT
+**End:** 9:38 PM PDT
+**Duration:** 736 minutes
+**Total Duration:** ~23983 minutes
+
+### Focus
+
+Finished bulk numbers / Reserve from S182. Then a long run of agent-portal and supervisor features:
+- the Chrome extension with per-campaign screen recording;
+- team chat;
+- recording permission;
+- agent dedications and the personal queue;
+- flow drafts and published versions;
+- the flow document PDF;
+- the first four supervisor remote-assist tools (live screen view with point and draw, coaching notes, raise hand with
+  context, connection health).
+
+32 commits; all browser- or live-verified by Stephen except connection health (real-call stats pending).
+
+### Done
+
+- **Bulk numbers + Reserve + assignment grid** (`1e4e0b6`), live-verified:
+  - assigning from Reserve takes the oldest numbers first;
+  - release, move, and delete for numbers never used;
+  - calls to Reserve or inactive numbers get a SIP 404 reject (SignalWire plays a busy signal).
+  - `4f77280`: rejects now carry the real Q.850 cause (uuid_kill takes a bare number).
+- **Chrome extension + per-campaign screen recording** (`a6c1d47`, `30ec72b`), live-verified:
+  - once-per-shift screen share, start time taken from the server clock;
+  - libass click overlay burned into the recording;
+  - the right screen is detected by aspect ratio, and clicks are placed as a fraction of the screen.
+- **Extension hardening:**
+  - `17ad8ae`: only real portal URLs can drive it; REC badge; `/extension` install page; onboarding step; first-run
+    prompt; icons.
+  - `d3b2ae8` (0.3.0): **clicks on our domains only, never keystrokes, no `<all_urls>`**.
+  - `7aa1109` (0.3.1): an install or update reaches portal tabs that are already open (scripting + host access to our
+    domains only).
+  - Store submission waits for the LLC to be reactivated (see the memory checklist).
+- **Team chat**, browser-verified:
+  - core build `6cdecc3`: channels, DMs, threads, reactions, mentions, live status, raise hand, 3 channel locks;
+  - posting by role `bef3e6a`;
+  - pins and moderators `1e14180`;
+  - two-pane layout `6b41d11`;
+  - formatting and pasted images `27f6d0f`;
+  - Stephen's icon set and the emoji library `a24f801`;
+  - attachments, @channel, cleanup worker, mention suggestions `200893e`;
+  - help button only for people with a supervisor `9855727`;
+  - smaller fixes `f259849`, `cb3e3ab`.
+- **Platform icon pass** `63930d9`:
+  - one shared icon set and an `/admin/icons` gallery;
+  - toolbar icons `ab8e3dc`;
+  - a stand-in icon for emoji the device can't draw `de380dd`.
+- **Recordings** `925fb6a`:
+  - new `recordings.play` permission (granted to Admin, Supervisor and roles with `calls.manage`);
+  - **the recording download used to accept any signed-in user**; it now requires the permission;
+  - player added to the Call Records detail page.
+- **Agent dedications + personal queue** `f3f6907`, browser-verified:
+  - **Dedications** (built in `EligibleAgentRanker`):
+    - only the dedicated campaigns, including ones the agent isn't assigned to;
+    - for a period of time, until a date and time, or weekly windows;
+    - an Agent List badge, plus a banner on the agent's portal.
+  - **Personal queue:** pinned under the softphone with live wait timers.
+- **Flow drafts / published** `60ecece` (+ `8399f25`), browser-verified:
+  - Save changes only the draft;
+  - live calls, training runs and sub-flows run the published copy;
+  - the designer sandbox can run either;
+  - the migration published every flow that was live, so nothing running changed.
+- **Flow document** `380ca2c`, browser-verified ("fantastic"):
+  - client-ready PDF, emailed or downloaded: cover, auto-laid-out charts, every step numbered, sub-scripts as chapters;
+  - never shows URLs, credentials or card data;
+  - QuestPDF (Community licence) + AngleSharp;
+  - the real NeuroQ script: 174 steps → 51 pages in about 2 s, and it found 13 steps nothing leads to.
+- **Supervisor remote assist** (all 7 approved; 1–4 built):
+  1. **Live screen view + Point here** `1b3b03f`, **+ Draw** `4f5742e`, live-verified:
+     - WebRTC through the TURN relay, set up over `/hubs/screen-view`;
+     - the agent always sees a banner, and every view is audited;
+     - drawing in six colours, fading after 5 s, with Clear.
+  2. **In-call coaching notes** `80b2bda`, live-verified:
+     - pinned in the portal until the agent presses Got it;
+     - the supervisor sees Sent / Seen / Got it live;
+     - notes are kept on the call's record.
+  3. **Raise hand with context** `5593f65` + **assisting card** `58674f6`, live-verified:
+     - the request carries the script step, the caller and a screen snapshot (kept 7 days);
+     - the card stays as "Assisting X" with its tools until **Agent helped**;
+     - the agent's ask button stays hidden until then.
+  4. **Connection health** `b12e60d`: WebRTC stats scored as MOS → good / fair / poor plus "no mic audio", shown on the
+     Agent List and on the softphone.
+- **Bugs found and fixed along the way:**
+  - `4cb040c`: **sign-out did not reset the tab's chat and screen-view connections**, so the next user got the previous
+    user's chat, and screen-view requests could reach them;
+  - `58674f6`: the chat bootstrap crashed for supervisors with 2 or more help requests (`Task.WhenAll` over one
+    DbContext);
+  - the extension's update notice stuck until the page was reloaded (fixed in 0.3.1).
+- **Tests:** 1784 / 1784 passing (Domain 353, Application 20, Api 167, Infrastructure 1244).
+
+### Next
+
+- **Remote assist #5:** follow-along script view (mirror the agent's script live, send them to a section).
+- **Remote assist #6:** remote fixes (refresh the portal, re-register the softphone, re-check the extension).
+- **#7 (AI help detection)** waits until the AI tools work starts.
+- **Live-test connection health** on a real call: the bars, the hover numbers, and the muted-headset mic warning.
+- **Carried:**
+  - LLC reactivation ($500), followed by its checklist: proof + EIN → RMD → SignalWire vetting / A attestation (+ keypad
+    retest) → Stripe live → Life Seasons LOI → Chrome/Edge store submission (extension 0.3.x) → bank;
+  - Clint's Cannella SFTP details and figures;
+  - production: Linux fonts for QuestPDF / libass, and moving the screen-view registry to Redis if the API scales out.
