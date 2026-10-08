@@ -69,5 +69,7 @@ export const EMOJI_MISSING_SVG = '<svg viewBox="0 0 24 24" width="1.15em" height
 export const RefreshIcon = (p: IconProps) => <Icon {...p}><path d="M20 11a8 8 0 0 0-14.5-4.6L4 8" /><path d="M4 3v5h5" /><path d="M4 13a8 8 0 0 0 14.5 4.6L20 16" /><path d="M20 21v-5h-5" /></Icon>
 /** Live screen view (S183). */
 export const ScreenIcon = (p: IconProps) => <Icon {...p}><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8" /><path d="M12 16v4" /></Icon>
+/** In-call coaching note (S183): a speech bubble with an exclamation. */
+export const CoachIcon = (p: IconProps) => <Icon {...p}><path d="M21 12a8 8 0 0 1-11.8 7l-5.2 1.5 1.5-4.8A8 8 0 1 1 21 12z" /><path d="M12 8v4" /><path d="M12 15.5h.01" /></Icon>
 /** Point here (S183). */
 export const PointerIcon = (p: IconProps) => <Icon {...p}><path d="M5 3l14 7-6 2-2 6z" /><path d="M13 12l6 6" /></Icon>

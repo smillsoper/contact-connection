@@ -326,6 +326,7 @@ app.MapScriptIntegrationsEndpoints();
 app.MapCallerHistoryEndpoints();
 app.MapAgentDedicationsEndpoints();
 app.MapFlowDocumentEndpoints();
+app.MapCoachingNotesEndpoints();
 app.MapWidgetFilterOptions();
 app.MapClientPortalAuthEndpoints();
 app.MapClientPortalEndpoints();

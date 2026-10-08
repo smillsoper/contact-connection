@@ -6,6 +6,7 @@ import AdminShell from '../../components/admin/AdminShell'
 import CallCommissionsPanel from '../../components/admin/CallCommissionsPanel'
 import AiSummaryPanel from '../../components/admin/AiSummaryPanel'
 import RecordingPlayer, { fetchCallRecording } from '../../components/dashboard/RecordingPlayer'
+import { coachingApi, COACHING_STATUS_LABEL, type CoachingNote } from '../../api/coaching'
 import { useAuthStore } from '../../stores/authStore'
 import {
   abandonLabel,
@@ -282,6 +283,7 @@ export default function AdminCallDetailPage() {
         })()}
 
         <OtherPanel call={call} />
+        <CoachingPanel callId={call.id} />
         <AuditPanel call={call} />
       </div>
     </AdminShell>
@@ -1216,6 +1218,27 @@ function OtherPanel({ call }: { call: CallDetail }) {
           </div>
         ))}
       </div>
+    </Section>
+  )
+}
+
+/** Coaching notes a supervisor sent the agent during this call (S183) — for QA. Hidden when there were none. */
+function CoachingPanel({ callId }: { callId: string }) {
+  const [notes, setNotes] = useState<CoachingNote[] | null>(null)
+  useEffect(() => { coachingApi.forCall(callId).then(setNotes).catch(() => setNotes([])) }, [callId])
+  if (!notes || notes.length === 0) return null
+  return (
+    <Section title="Coaching during this call">
+      <ul className="space-y-2 text-sm">
+        {notes.map((n) => (
+          <li key={n.id} className="flex gap-3">
+            <span className="text-gray-500 text-xs whitespace-nowrap w-40 shrink-0">{fmtDate(n.createdAt)}</span>
+            <span className="text-gray-400 text-xs w-32 shrink-0 truncate">{n.fromName}</span>
+            <span className={`flex-1 whitespace-pre-wrap ${n.status === 'retracted' ? 'text-gray-500 line-through' : 'text-gray-200'}`}>{n.text}</span>
+            <span className={`text-xs shrink-0 ${n.status === 'acknowledged' ? 'text-emerald-400' : 'text-gray-500'}`}>{COACHING_STATUS_LABEL[n.status]}</span>
+          </li>
+        ))}
+      </ul>
     </Section>
   )
 }

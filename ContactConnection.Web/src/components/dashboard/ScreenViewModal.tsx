@@ -4,6 +4,7 @@ import type * as signalR from '@microsoft/signalr'
 import { screenViewConnection, STROKE_MS, type ScreenStroke } from '../../lib/screenView'
 import { loadIceServers, rtcConfig } from '../../utils/iceServers'
 import { CloseIcon, DeleteIcon, EditIcon, PointerIcon, ScreenIcon } from '../icons/Icons'
+import { CoachComposer } from './CoachComposer'
 
 /** Must match ScreenViewHub.DrawColors on the server. */
 const COLORS = ['#ef4444', '#f59e0b', '#22c55e', '#3b82f6', '#a855f7', '#ffffff']
@@ -252,9 +253,11 @@ export default function ScreenViewModal({ agentId, agentName, onClose }: { agent
             <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-400 px-8 text-center">{statusText}</div>
           )}
         </div>
-        <p className="px-4 py-1.5 text-[11px] text-gray-500 border-t border-gray-800">
-          {agentName} sees a banner while you're viewing. Each view is recorded in the audit log.
-        </p>
+        <div className="px-4 py-2 border-t border-gray-800 space-y-1">
+          {/* Coaching note while watching (S183) */}
+          <CoachComposer agentId={agentId} agentName={agentName} compact />
+          <p className="text-[11px] text-gray-600">{agentName} sees a banner while you're viewing. Each view is recorded in the audit log.</p>
+        </div>
       </div>
     </div>,
     document.body,

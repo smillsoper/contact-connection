@@ -17,6 +17,7 @@ import MyCommissions from './MyCommissions'
 import WrapUpSummaries from './WrapUpSummaries'
 import ScreenRecordingBar from './ScreenRecordingBar'
 import ScreenViewAgent from './ScreenViewAgent'
+import CoachingNotesAgent from './CoachingNotesAgent'
 import ExtensionSetupPrompt from './ExtensionSetupPrompt'
 import { requestPortalFocus } from '../lib/extensionBridge'
 
@@ -135,6 +136,8 @@ export default function AgentShell() {
       <ScreenRecordingBar />
       {/* Live screen view (S183): "X is viewing your screen" + the supervisor's pointer */}
       <ScreenViewAgent />
+      {/* In-call coaching notes (S183), pinned until "Got it" */}
+      <CoachingNotesAgent />
       <ExtensionSetupPrompt />
 
       {/* 3-panel body */}

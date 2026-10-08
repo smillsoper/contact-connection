@@ -27,6 +27,7 @@ public class TenantDbContext : DbContext
     public DbSet<HelpRequest> HelpRequests => Set<HelpRequest>();
     public DbSet<AgentDedication> AgentDedications => Set<AgentDedication>();
     public DbSet<ScreenViewSession> ScreenViewSessions => Set<ScreenViewSession>();
+    public DbSet<CoachingNote> CoachingNotes => Set<CoachingNote>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<CallRecord> CallRecords => Set<CallRecord>();
     public DbSet<CallInteraction> CallInteractions => Set<CallInteraction>();
@@ -179,6 +180,7 @@ public class TenantDbContext : DbContext
         modelBuilder.ApplyConfiguration(new HelpRequestConfiguration());
         modelBuilder.ApplyConfiguration(new AgentDedicationConfiguration());
         modelBuilder.ApplyConfiguration(new ScreenViewSessionConfiguration());
+        modelBuilder.ApplyConfiguration(new CoachingNoteConfiguration());
         base.OnModelCreating(modelBuilder);
     }
 

@@ -128,6 +128,13 @@ public interface IFlowHubClient
     /// docs/design/parallel-queuing.md). The agent UI drops the pop for that callRecordId.</summary>
     Task ReceiveOfferWithdrawn(string callRecordId);
 
+    /// <summary>Coaching notes (S183): a supervisor sent / took back a note, or this agent's note changed — the portal
+    /// reloads its pinned notes.</summary>
+    Task ReceiveCoachingNotesChanged();
+
+    /// <summary>Supervisor dashboards: an agent's coaching note changed (sent / seen / got it / taken back).</summary>
+    Task ReceiveCoachingNoteStatus(string agentId);
+
     /// <summary>Personal queue (S183): someone joined or left the tenant's queue — each agent portal refetches the
     /// callers waiting on its own campaigns.</summary>
     Task ReceiveMyQueueChanged();
