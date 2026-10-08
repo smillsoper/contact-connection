@@ -32,7 +32,7 @@ public static partial class DispositionCatalog
 
         var flowIds = await db.FlowSessions.AsNoTracking().Where(s => s.CallRecordId == callRecordId && (ix == null || s.InteractionId == ix))
             .Select(s => s.FlowId).Distinct().ToListAsync(ct);
-        var definitions = await db.Flows.AsNoTracking().Where(f => flowIds.Contains(f.Id)).Select(f => f.Definition).ToListAsync(ct);
+        var definitions = await db.Flows.AsNoTracking().Where(f => flowIds.Contains(f.Id)).Select(f => f.PublishedDefinition ?? f.Definition).ToListAsync(ct);
         return FromDefinitions(definitions);
     }
 

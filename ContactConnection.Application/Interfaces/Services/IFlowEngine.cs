@@ -137,6 +137,9 @@ public class StartFlowRequest
     public required Guid InteractionId { get; init; }
     public required Guid AgentId { get; init; }
     public required Guid TenantId { get; init; }
+    /// <summary>Run the flow's saved draft instead of its published script (S183) — designer sandbox runs only; the
+    /// endpoint checks that.</summary>
+    public bool UseDraft { get; init; }
 }
 
 public class AdvanceFlowRequest

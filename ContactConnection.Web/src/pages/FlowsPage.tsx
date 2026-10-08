@@ -350,10 +350,17 @@ export default function FlowsPage() {
                     </td>
                     <td className="px-4 py-3">
                       {flow.is_active ? (
-                        <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-400 bg-emerald-900/30 border border-emerald-700 px-2 py-0.5 rounded-full">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                          Published
-                        </span>
+                        <div className="flex flex-col items-start gap-1">
+                          <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-400 bg-emerald-900/30 border border-emerald-700 px-2 py-0.5 rounded-full">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                            Published
+                          </span>
+                          {flow.has_unpublished_changes && (
+                            <span className="text-[11px] text-amber-300" title="Saved changes agents don't have yet — publish to make them live">
+                              Unpublished changes
+                            </span>
+                          )}
+                        </div>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-400 bg-amber-900/30 border border-amber-700 px-2 py-0.5 rounded-full">
                           <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
@@ -361,17 +368,24 @@ export default function FlowsPage() {
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-gray-400">v{flow.version}</td>
+                    <td className="px-4 py-3 text-gray-400 whitespace-nowrap">
+                      {flow.is_active && flow.published_version != null ? (
+                        <span title={flow.has_unpublished_changes ? `Agents run version ${flow.published_version}; the draft is version ${flow.version}` : undefined}>
+                          v{flow.published_version}{flow.has_unpublished_changes && <span className="text-amber-300/80"> · draft v{flow.version}</span>}
+                        </span>
+                      ) : <>v{flow.version}</>}
+                    </td>
                     <td className="px-4 py-3 text-gray-500">{fmt(flow.updated_at)}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-2">
-                        {!flow.is_active && (
+                        {(!flow.is_active || flow.has_unpublished_changes) && (
                           <button
                             onClick={() => handlePublish(flow.id)}
                             disabled={publishingId === flow.id}
                             className="text-xs text-sky-400 hover:text-sky-300 border border-sky-800 hover:border-sky-600 rounded px-2.5 py-1 disabled:opacity-50 transition-colors"
+                            title={flow.is_active ? `Make draft version ${flow.version} live for agents and calls` : 'Make this flow live for agents and calls'}
                           >
-                            {publishingId === flow.id ? 'Publishing…' : 'Publish'}
+                            {publishingId === flow.id ? 'Publishing…' : flow.is_active ? 'Publish changes' : 'Publish'}
                           </button>
                         )}
                         <button

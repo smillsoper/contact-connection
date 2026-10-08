@@ -36,10 +36,11 @@ public class ExecuteFlowNodeHandler(IVariableResolver resolver, IFlowRepository 
         var subFlow = await flows.GetByIdAsync(flowId, ct)
             ?? throw new InvalidOperationException($"Sub-flow {flowId} not found.");
 
-        if (!subFlow.IsActive)
+        // A draft sandbox run uses the called flow's draft too; everything else needs it published (S183).
+        if (!ctx.UsesDraft && (!subFlow.IsActive || subFlow.PublishedDefinition is null))
             throw new InvalidOperationException($"Sub-flow '{subFlow.Name}' is not published.");
 
-        var subDefinition = JsonNode.Parse(subFlow.Definition)?.AsObject()
+        var subDefinition = JsonNode.Parse(subFlow.DefinitionFor(ctx.UsesDraft))?.AsObject()
             ?? throw new InvalidOperationException("Sub-flow definition is invalid JSON.");
 
         var subEntryNodeId = subDefinition["entry_node"]?.GetValue<string>()

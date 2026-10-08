@@ -16,6 +16,7 @@ public static class FlowSessionsEndpoints
         group.MapPost("/", async (
             StartSessionRequest req,
             IFlowEngine engine,
+            ICallRecordRepository callRecords,
             TenantContext tenantContext,
             HttpContext http,
             CancellationToken ct) =>
@@ -26,6 +27,17 @@ public static class FlowSessionsEndpoints
             if (!Guid.TryParse(agentIdClaim, out var agentId))
                 return Results.Unauthorized();
 
+            // Running a flow's unpublished draft (S183): designers only, and only on a designer-sandbox run — never on
+            // a live call or a training run.
+            if (req.UseDraft == true)
+            {
+                var perms = (http.User.FindFirst("permissions")?.Value ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries);
+                if (!perms.Contains(Permission.FlowsManage)) return Results.Forbid();
+                var record = await callRecords.GetByIdAsync(req.CallRecordId, ct);
+                if (record is null || record.RunMode != CallRunMode.Sandbox)
+                    return Results.BadRequest(new { error = "Drafts can only run in a designer sandbox." });
+            }
+
             try
             {
                 var state = await engine.StartAsync(new StartFlowRequest
@@ -34,7 +46,8 @@ public static class FlowSessionsEndpoints
                     CallRecordId  = req.CallRecordId,
                     InteractionId = req.InteractionId,
                     AgentId       = agentId,
-                    TenantId      = tenantContext.Current.Id
+                    TenantId      = tenantContext.Current.Id,
+                    UseDraft      = req.UseDraft == true,
                 }, ct);
 
                 return Results.Ok(state);
@@ -580,7 +593,8 @@ public static class FlowSessionsEndpoints
 public record StartSessionRequest(
     Guid FlowId,
     Guid CallRecordId,
-    Guid InteractionId);
+    Guid InteractionId,
+    bool? UseDraft = null);
 
 public record AdvanceSessionRequest(
     string? InputValue,

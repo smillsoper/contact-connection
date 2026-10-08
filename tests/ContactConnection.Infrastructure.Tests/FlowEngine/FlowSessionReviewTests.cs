@@ -71,6 +71,7 @@ public class FlowSessionReviewTests
     private Flow AddFlow(JsonObject definition)
     {
         var flow = Flow.Create(_tenantId, Guid.NewGuid(), "NeuroQ", FlowType.Crm, definition.ToJsonString());
+        flow.Publish();   // a reviewed call ran the published script (S183 draft / published)
         _flows.Setup(f => f.GetByIdAsync(flow.Id, It.IsAny<CancellationToken>())).ReturnsAsync(flow);
         return flow;
     }
@@ -484,6 +485,40 @@ public class FlowSessionReviewTests
         Assert.Equal(created.Id, saved!.InteractionId);
         Assert.Equal((agent, _record.CampaignId), (created.AgentId!.Value, created.CampaignId!.Value));
         _callRecords.Verify(r => r.AddInteractionAsync(created, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // ── S183: draft / published ───────────────────────────────────────────────────────────────
+
+    private static JsonObject LabeledEnd(string label) => new() { ["type"] = "end", ["label"] = label };
+
+    private Task<FlowNodeState> StartAsync(Flow flow, bool useDraft) =>
+        Engine(new Mock<IFlowNotifier>().Object, new EndNodeHandler(new VariableResolver())).StartAsync(new StartFlowRequest
+        {
+            FlowId = flow.Id, CallRecordId = _record.Id, InteractionId = Guid.Empty, AgentId = Guid.NewGuid(), TenantId = _tenantId,
+            UseDraft = useDraft,
+        });
+
+    [Fact]
+    public async Task Start_RunsThePublishedScript_UntilTheDraftIsPublished()
+    {
+        var flow = AddFlow(Definition(("end_1", LabeledEnd("Published wording"))));
+        flow.UpdateDefinition(Definition(("end_1", LabeledEnd("Draft wording"))).ToJsonString());   // saved, not published
+
+        Assert.Equal("Published wording", (await StartAsync(flow, useDraft: false)).Label);
+        Assert.Equal("Draft wording", (await StartAsync(flow, useDraft: true)).Label);
+
+        flow.Publish();
+        Assert.Equal("Draft wording", (await StartAsync(flow, useDraft: false)).Label);
+    }
+
+    [Fact]
+    public async Task Start_NeverPublishedFlow_RunsOnlyAsADraft()
+    {
+        var flow = Flow.Create(_tenantId, Guid.NewGuid(), "New script", FlowType.Crm, Definition(("end_1", LabeledEnd("Draft"))).ToJsonString());
+        _flows.Setup(f => f.GetByIdAsync(flow.Id, It.IsAny<CancellationToken>())).ReturnsAsync(flow);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => StartAsync(flow, useDraft: false));
+        Assert.Equal("Draft", (await StartAsync(flow, useDraft: true)).Label);
     }
 
     [Fact]

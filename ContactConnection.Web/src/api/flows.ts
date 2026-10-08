@@ -13,7 +13,13 @@ export interface FlowSummary {
   client_id?: string | null
   campaign_id?: string | null
   is_active: boolean
+  /** The draft's version — bumped on every save. */
   version: number
+  /** Draft / published (S183): the version agents and calls run; null = never published. */
+  published_version?: number | null
+  published_at?: string | null
+  /** Saved since last published (or never published). */
+  has_unpublished_changes?: boolean
   created_at: string
   updated_at: string
 }

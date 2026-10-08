@@ -9,7 +9,7 @@ import { useAgentStateStore } from '../stores/agentStateStore'
 import { useSupervisorMonitorStore } from '../stores/supervisorMonitorStore'
 import { useIntercomStore } from '../stores/intercomStore'
 import type { MonitorMode } from '../api/supervisor'
-import { flowsApi, type AddressValidationResult, type ZipLookupResult, type AutocompleteSuggestion, type AutocompleteSelectionResult } from '../api/flows'
+import { flowsApi, type FlowSummary, type AddressValidationResult, type ZipLookupResult, type AutocompleteSuggestion, type AutocompleteSelectionResult } from '../api/flows'
 import { api } from '../api/client'
 import type { FlowNodeState } from '../types/flow'
 import NodeDisplay from './NodeDisplay'
@@ -345,7 +345,7 @@ export default function FlowPanel() {
   const [hub, setHub] = useState<signalR.HubConnection | null>(null)
 
   // Manual flow selector (shown when no sessions are active)
-  const [flows, setFlows] = useState<{ id: string; name: string }[]>([])
+  const [flows, setFlows] = useState<FlowSummary[]>([])
   const [selectedFlowId, setSelectedFlowId] = useState('')
   const [starting, setStarting] = useState(false)
 
@@ -396,7 +396,9 @@ export default function FlowPanel() {
   // CRM script flows only — a telephony flow needs a real call on the line, so it can't be
   // started from this manual test toolbar.
   useEffect(() => {
-    flowsApi.list().then((all) => setFlows(all.filter((f) => f.flow_type === 'crm'))).catch(console.error)
+    // Designers also see unpublished drafts — they can run those in a sandbox (S183). Everyone else gets published flows.
+    ;(useAuthStore.getState().hasPermission('flows.manage') ? flowsApi.listAllByType('crm') : flowsApi.list())
+      .then((all) => setFlows(all.filter((f) => f.flow_type === 'crm'))).catch(console.error)
   }, [])
 
   // SignalR connection — shared across all tabs
@@ -570,6 +572,13 @@ export default function FlowPanel() {
   const canTrain = useAuthStore((s) => s.hasPermission('training.mode'))
   const canSandbox = useAuthStore((s) => s.hasPermission('flows.manage'))
   const [launchMode, setLaunchMode] = useState<'training' | 'sandbox'>(canSandbox ? 'sandbox' : 'training')
+  // Draft / published (S183): a designer sandbox can run either; a never-published flow only as its draft.
+  const [runDraft, setRunDraft] = useState(false)
+  const selectedFlow = flows.find((f) => f.id === selectedFlowId)
+  const selectedPublished = !!selectedFlow?.is_active && selectedFlow?.published_version != null
+  const sandboxing = !callRecordId && launchMode === 'sandbox'
+  const useDraft = sandboxing && (runDraft || !selectedPublished)
+  const canStartSelected = !selectedFlow || selectedPublished || sandboxing
   const practiceAllowed = canTrain || canSandbox
   // Designer sandbox (S181): each integration the script reaches runs where the designer chooses — e.g. production tax
   // with the sandbox payment gateway for a client's sandbox order checks.
@@ -610,6 +619,7 @@ export default function FlowPanel() {
       const node = await flowsApi.startSession({
         flowId: selectedFlowId,
         callRecordId: recordId,
+        useDraft: useDraft || undefined,
       })
       const flow = flows.find((f) => f.id === selectedFlowId)
       addSession({
@@ -642,9 +652,21 @@ export default function FlowPanel() {
           >
             <option value="">Select flow…</option>
             {flows.map((f) => (
-              <option key={f.id} value={f.id}>{f.name}</option>
+              <option key={f.id} value={f.id}>{f.name}{f.is_active && f.published_version != null ? '' : ' (draft)'}</option>
             ))}
           </select>
+
+          {sandboxing && selectedFlow && (
+            selectedPublished ? (
+              <select value={runDraft ? 'draft' : 'published'} onChange={(e) => setRunDraft(e.target.value === 'draft')}
+                className="bg-gray-800 text-white rounded-lg px-2 py-1.5 text-sm border border-gray-700" title="Which version of the script this sandbox run uses">
+                <option value="published">Published v{selectedFlow.published_version}</option>
+                <option value="draft">Draft v{selectedFlow.version}{selectedFlow.has_unpublished_changes ? '' : ' (same)'}</option>
+              </select>
+            ) : (
+              <span className="text-xs text-amber-300" title="Never published — it can only run as a draft in a sandbox">Draft v{selectedFlow.version}</span>
+            )
+          )}
 
           {callRecordId ? (
             <span className="text-xs text-emerald-300" title="Starts on the live call">On this call</span>
@@ -662,7 +684,8 @@ export default function FlowPanel() {
 
           <button
             onClick={handleStartSession}
-            disabled={!selectedFlowId || starting || (!callRecordId && !practiceAllowed)}
+            disabled={!selectedFlowId || starting || (!callRecordId && !practiceAllowed) || !canStartSelected}
+            title={canStartSelected ? undefined : 'Not published yet — run it in a designer sandbox, or publish it first'}
             className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded-lg px-4 py-1.5 text-sm font-medium transition-colors"
           >
             {starting ? 'Starting…' : 'Start'}

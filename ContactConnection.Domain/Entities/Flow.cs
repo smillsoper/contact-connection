@@ -27,6 +27,24 @@ public class Flow
     /// </summary>
     public string Definition { get; private set; } = "{}";
 
+    // ── Draft / published (S183) ──────────────────────────────────────────────
+    // Definition above is the DRAFT — what the designer saves. Agents, live calls and training runs get the published
+    // copy below; saving never changes what's live until Publish(). A designer sandbox can run either.
+
+    /// <summary>The live script — null until the flow is first published.</summary>
+    public string? PublishedDefinition { get; private set; }
+    /// <summary>Which draft <see cref="Version"/> was last published.</summary>
+    public int? PublishedVersion { get; private set; }
+    public DateTimeOffset? PublishedAt { get; private set; }
+
+    /// <summary>The draft has been saved since it was last published (or was never published).</summary>
+    public bool HasUnpublishedChanges => PublishedVersion != Version;
+
+    /// <summary>The script a run uses: the draft (designer sandbox only) or the published copy.</summary>
+    public string DefinitionFor(bool draft) => draft ? Definition : PublishedDefinition ?? "{}";
+    /// <summary>The version number that script carries.</summary>
+    public int VersionFor(bool draft) => draft ? Version : PublishedVersion ?? Version;
+
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
     public Guid CreatedByAgentId { get; private set; }
@@ -64,8 +82,12 @@ public class Flow
         };
     }
 
+    /// <summary>Make the current draft the live script (and the flow available to agents and calls).</summary>
     public void Publish()
     {
+        PublishedDefinition = Definition;
+        PublishedVersion = Version;
+        PublishedAt = DateTimeOffset.UtcNow;
         IsActive = true;
         UpdatedAt = DateTimeOffset.UtcNow;
     }

@@ -56,6 +56,11 @@ public class FlowConfiguration : IEntityTypeConfiguration<Flow>
             .IsRequired();
 
         // Flow definition JSON — stored as text, deserialized at engine load time
+        builder.Property(f => f.PublishedDefinition).HasColumnName("published_definition").HasColumnType("jsonb");
+        builder.Property(f => f.PublishedVersion).HasColumnName("published_version");
+        builder.Property(f => f.PublishedAt).HasColumnName("published_at");
+        builder.Ignore(f => f.HasUnpublishedChanges);
+
         builder.Property(f => f.Definition)
             .HasColumnName("definition")
             .HasColumnType("jsonb")

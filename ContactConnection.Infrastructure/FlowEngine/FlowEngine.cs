@@ -97,10 +97,11 @@ public class FlowEngine : IFlowEngine
         var flow = await _flows.GetByIdAsync(request.FlowId, ct)
             ?? throw new InvalidOperationException($"Flow {request.FlowId} not found.");
 
-        if (!flow.IsActive)
+        // Draft runs (designer sandbox) may run a flow that was never published; everything else runs the published script.
+        if (!request.UseDraft && (!flow.IsActive || flow.PublishedDefinition is null))
             throw new InvalidOperationException($"Flow {request.FlowId} is not published.");
 
-        var definition = JsonNode.Parse(flow.Definition)?.AsObject()
+        var definition = JsonNode.Parse(flow.DefinitionFor(request.UseDraft))?.AsObject()
             ?? throw new InvalidOperationException("Flow definition is invalid JSON.");
 
         var entryNodeId = definition["entry_node"]?.GetValue<string>()
@@ -114,7 +115,7 @@ public class FlowEngine : IFlowEngine
         var session = FlowSession.Create(
             tenantId:      request.TenantId,
             flowId:        flow.Id,
-            flowVersion:   flow.Version,
+            flowVersion:   flow.VersionFor(request.UseDraft),
             callRecordId:  request.CallRecordId,
             interactionId: interactionId,
             agentId:       request.AgentId,
@@ -124,6 +125,7 @@ public class FlowEngine : IFlowEngine
         await _sessions.SaveChangesAsync(ct);
 
         var ctx = BuildContext(session, definition, request);
+        ctx.UsesDraft = request.UseDraft;
 
         await PopulateAgentAndTenantAsync(ctx, request.AgentId, ct);
 
@@ -265,7 +267,7 @@ public class FlowEngine : IFlowEngine
         var (ctx, _, isLive) = loaded.Value;
 
         var apiCalls = new List<ApiCallNodeSummary>();
-        foreach (var (nodeId, node) in await CollectApiCallNodesAsync(ctx.FlowDefinition, ct))
+        foreach (var (nodeId, node) in await CollectApiCallNodesAsync(ctx.FlowDefinition, ctx.UsesDraft, ct))
         {
             var type = node["type"]?.GetValue<string>() ?? "api_call";
             var output = node["outputVariable"]?.GetValue<string>()?.Trim();
@@ -327,7 +329,7 @@ public class FlowEngine : IFlowEngine
         var (ctx, session, isLive) = await LoadForReviewAsync(sessionId, ct)
             ?? throw new InvalidOperationException($"Flow session {sessionId} not found.");
 
-        var (node, definition) = await FindNodeAsync(ctx.FlowDefinition, nodeId, ct)
+        var (node, definition) = await FindNodeAsync(ctx.FlowDefinition, nodeId, ctx.UsesDraft, ct)
             ?? throw new InvalidOperationException($"Node '{nodeId}' is not in this call's flow.");
         var nodeType = node["type"]?.GetValue<string>();
         if (nodeType is not ("api_call" or "authorize_payment"))
@@ -401,7 +403,7 @@ public class FlowEngine : IFlowEngine
             try { node = JsonNode.Parse(nodeJson) as JsonObject; }
             catch (System.Text.Json.JsonException) { throw new InvalidOperationException("The node settings sent for preview aren't valid JSON."); }
         }
-        node ??= (await FindNodeAsync(ctx.FlowDefinition, nodeId, ct))?.Node
+        node ??= (await FindNodeAsync(ctx.FlowDefinition, nodeId, ctx.UsesDraft, ct))?.Node
             ?? throw new InvalidOperationException($"Node '{nodeId}' is not in this session's flow.");
         if (node["type"]?.GetValue<string>() != "api_call")
             throw new InvalidOperationException("Only API Call nodes can be previewed.");
@@ -596,9 +598,12 @@ public class FlowEngine : IFlowEngine
         var ctx = FlowExecutionContext.Deserialize(
             sessionId, session.FlowId, session.FlowVersion,
             session.CallRecordId, session.InteractionId, session.AgentId, session.TenantId,
-            session.CurrentNodeId, flow?.Definition ?? "{}",
+            session.CurrentNodeId, flow?.PublishedDefinition ?? "{}",
             session.VariableStore, session.ExecutionHistory,
             callRecord: [], caller: [], agent: [], tenant: []);
+        // A draft sandbox run reloads the draft (the flag rides in the session's variable store).
+        if (ctx.UsesDraft && flow is not null && JsonNode.Parse(flow.Definition) is JsonObject draftDef)
+            ctx.FlowDefinition = draftDef;
         return (ctx, session, false);
     }
 
@@ -612,18 +617,18 @@ public class FlowEngine : IFlowEngine
     /// <summary>A node by id in the flow or any flow it calls (execute_flow / transition_to_flow),
     /// with the definition that holds it.</summary>
     private async Task<(JsonObject Node, JsonObject Definition)?> FindNodeAsync(
-        JsonObject definition, string nodeId, CancellationToken ct)
+        JsonObject definition, string nodeId, bool draft, CancellationToken ct)
     {
-        foreach (var def in await ReachableDefinitionsAsync(definition, ct))
+        foreach (var def in await ReachableDefinitionsAsync(definition, draft, ct))
             if (GetNode(def, nodeId) is { } node) return (node, def);
         return null;
     }
 
     private async Task<List<(string NodeId, JsonObject Node)>> CollectApiCallNodesAsync(
-        JsonObject definition, CancellationToken ct)
+        JsonObject definition, bool draft, CancellationToken ct)
     {
         var found = new List<(string, JsonObject)>();
-        foreach (var def in await ReachableDefinitionsAsync(definition, ct))
+        foreach (var def in await ReachableDefinitionsAsync(definition, draft, ct))
             if (def["nodes"] is JsonObject nodes)
                 foreach (var (id, n) in nodes)
                     if (n is JsonObject obj && obj["type"]?.GetValue<string>() is "api_call" or "authorize_payment")
@@ -633,7 +638,7 @@ public class FlowEngine : IFlowEngine
 
     /// <summary>The flow plus every flow reachable through execute_flow / transition_to_flow
     /// (capped — a guard against a pathological chain, not a real limit).</summary>
-    private async Task<List<JsonObject>> ReachableDefinitionsAsync(JsonObject root, CancellationToken ct)
+    private async Task<List<JsonObject>> ReachableDefinitionsAsync(JsonObject root, bool draft, CancellationToken ct)
     {
         var result = new List<JsonObject> { root };
         var seen = new HashSet<Guid>();
@@ -645,7 +650,7 @@ public class FlowEngine : IFlowEngine
                 if (n?["type"]?.GetValue<string>() is not ("execute_flow" or "transition_to_flow")) continue;
                 if (!Guid.TryParse(n["targetFlowId"]?.GetValue<string>(), out var flowId) || !seen.Add(flowId)) continue;
                 var flow = await _flows.GetByIdAsync(flowId, ct);
-                if (flow is not null && JsonNode.Parse(flow.Definition) is JsonObject def)
+                if (flow is not null && JsonNode.Parse(flow.DefinitionFor(draft)) is JsonObject def)
                     result.Add(def);
             }
         }

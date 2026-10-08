@@ -245,6 +245,10 @@ function DesignerCanvas({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [publishing, setPublishing] = useState(false)
+  // Draft / published (S183): what agents and calls run vs. the saved draft.
+  const [live, setLive] = useState<{ isActive: boolean; publishedVersion: number | null; version: number; hasUnpublished: boolean } | null>(null)
+  const trackLive = useCallback((d: { is_active: boolean; published_version?: number | null; version: number; has_unpublished_changes?: boolean }) =>
+    setLive({ isActive: d.is_active, publishedVersion: d.published_version ?? null, version: d.version, hasUnpublished: !!d.has_unpublished_changes }), [])
   const [statusMsg, setStatusMsg] = useState('')
   const [showHistory, setShowHistory] = useState(false)
   const [selectionModeOn, setSelectionModeOn] = useState(false)
@@ -270,6 +274,7 @@ function DesignerCanvas({
   // a version-history revert (the revert response carries the newly-active definition).
   const loadFlow = useCallback((id: string) => {
     return flowsApi.getDetail(id).then((detail) => {
+      trackLive(detail)
       setFlowName(detail.name)
       setFlowCampaignId(detail.campaign_id ?? null)
       if (detail.flow_type === 'telephony') setFlowType('telephony')
@@ -285,7 +290,7 @@ function DesignerCanvas({
         // definition not yet set — start with empty canvas
       }
     })
-  }, [setNodes, setEdges])
+  }, [setNodes, setEdges, trackLive])
 
   // Load existing flow
   useEffect(() => {
@@ -421,42 +426,45 @@ function DesignerCanvas({
     [setNodes, setEdges, entryNodeId],
   )
 
-  // Save
-  const onSave = async () => {
+  // Save — the DRAFT only (S183): agents and calls keep the published script until Publish. Returns the flow id
+  // (a new flow gets one here), or null when the save failed.
+  const onSave = async (quiet = false): Promise<string | null> => {
     setSaving(true)
-    setStatusMsg('')
+    if (!quiet) setStatusMsg('')
     try {
       const def = toContactConnectionDef(nodes as Node<NodeData>[], edges, entryNodeId, flowName)
       const dir = flowType === 'telephony' && flowDirection ? flowDirection : undefined
       const sub = flowType === 'telephony' && flowSubType   ? flowSubType   : undefined
-      if (flowId) {
-        await flowsApi.updateDefinition(flowId, flowName, def, dir, sub)
-        setStatusMsg('Saved')
+      let id = flowId
+      if (id) {
+        trackLive(await flowsApi.updateDefinition(id, flowName, def, dir, sub))
       } else {
         const detail = await flowsApi.create(flowName, flowType, def, dir, sub)
-        setFlowId(detail.id)
-        navigate(`/designer/${detail.id}`, { replace: true })
-        setStatusMsg('Saved')
+        trackLive(detail)
+        id = detail.id
+        setFlowId(id)
+        navigate(`/designer/${id}`, { replace: true })
       }
+      if (!quiet) setStatusMsg(live?.isActive ? 'Saved as a draft — agents keep the published version until you publish' : 'Saved as a draft')
+      return id
     } catch (err) {
       setStatusMsg(`Error: ${String(err)}`)
+      return null
     } finally {
       setSaving(false)
-      setTimeout(() => setStatusMsg(''), 3000)
+      if (!quiet) setTimeout(() => setStatusMsg(''), 4000)
     }
   }
 
-  // Publish
+  // Publish — saves what's on the canvas first, then makes that the live script.
   const onPublish = async () => {
-    if (!flowId) {
-      await onSave()
-    }
-    if (!flowId) return
+    const id = await onSave(true)
+    if (!id) return
     setPublishing(true)
     setStatusMsg('')
     try {
-      await flowsApi.publish(flowId)
-      setStatusMsg('Published — flow is now active')
+      trackLive(await flowsApi.publish(id))
+      setStatusMsg('Published — agents and calls now get this version')
     } catch (err) {
       setStatusMsg(`Error: ${String(err)}`)
     } finally {
@@ -538,6 +546,18 @@ function DesignerCanvas({
             <span className="text-sm text-gray-400 italic">{statusMsg}</span>
           )}
           <div className="ml-auto flex items-center gap-2">
+            {live && (
+              !live.isActive || live.publishedVersion == null ? (
+                <span className="text-xs text-amber-300 border border-amber-800 bg-amber-950/40 rounded-full px-2.5 py-0.5" title="Not live — agents and calls don't get this flow until it's published">Draft</span>
+              ) : live.hasUnpublished ? (
+                <span className="text-xs text-amber-300 border border-amber-800 bg-amber-950/40 rounded-full px-2.5 py-0.5"
+                  title={`Agents and calls run version ${live.publishedVersion}. Your saved draft (version ${live.version}) isn't live until you publish.`}>
+                  Live v{live.publishedVersion} · unpublished changes
+                </span>
+              ) : (
+                <span className="text-xs text-emerald-300 border border-emerald-800 bg-emerald-950/40 rounded-full px-2.5 py-0.5" title="What you see is what agents and calls run">Live v{live.publishedVersion}</span>
+              )
+            )}
             {flowId && (
               <button
                 className="px-4 py-1.5 text-sm border border-gray-700 rounded text-gray-300 hover:bg-gray-800 transition-colors"
@@ -548,10 +568,11 @@ function DesignerCanvas({
             )}
             <button
               className="px-4 py-1.5 text-sm border border-gray-700 rounded text-gray-300 hover:bg-gray-800 disabled:opacity-50 transition-colors"
-              onClick={onSave}
+              onClick={() => { void onSave() }}
               disabled={saving}
+              title="Save as a draft — doesn't change what agents and calls run"
             >
-              {saving ? 'Saving…' : 'Save'}
+              {saving ? 'Saving…' : 'Save draft'}
             </button>
             <button
               className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 transition-colors"

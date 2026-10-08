@@ -115,7 +115,7 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
             CallerNumber       = ctx.CallerNumber,
             DestinationNumber  = ctx.DestinationNumber,
             FlowId             = flow.Id,
-            FlowDefinitionJson = flow.Definition,
+            FlowDefinitionJson = flow.DefinitionFor(draft: false),
             EventHandlers      = eventHandlers,
         };
         await _sessionStore.SaveAsync(session, ct);
@@ -276,7 +276,7 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
             return false;
 
         session.FlowId             = flow.Id;
-        session.FlowDefinitionJson = flow.Definition;
+        session.FlowDefinitionJson = flow.DefinitionFor(draft: false);
         session.EventHandlers      = ScanEventHandlers(nodes);
         await _sessionStore.SaveAsync(session, ct);
 
@@ -613,7 +613,8 @@ public class TelephonyFlowEngine : ITelephonyFlowEngine
 
         try
         {
-            definition = JsonNode.Parse(flow.Definition)!.AsObject();
+            // Live calls always run the published script (S183) — the draft is the designer's.
+            definition = JsonNode.Parse(flow.DefinitionFor(draft: false))!.AsObject();
         }
         catch (Exception ex)
         {

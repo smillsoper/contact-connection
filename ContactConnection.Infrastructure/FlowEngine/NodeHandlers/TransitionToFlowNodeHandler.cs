@@ -35,10 +35,11 @@ public class TransitionToFlowNodeHandler(IVariableResolver resolver, IFlowReposi
         var targetFlow = await flows.GetByIdAsync(flowId, ct)
             ?? throw new InvalidOperationException($"Target flow {flowId} not found.");
 
-        if (!targetFlow.IsActive)
+        // A draft sandbox run uses the called flow's draft too; everything else needs it published (S183).
+        if (!ctx.UsesDraft && (!targetFlow.IsActive || targetFlow.PublishedDefinition is null))
             throw new InvalidOperationException($"Target flow '{targetFlow.Name}' is not published.");
 
-        var targetDefinition = JsonNode.Parse(targetFlow.Definition)?.AsObject()
+        var targetDefinition = JsonNode.Parse(targetFlow.DefinitionFor(ctx.UsesDraft))?.AsObject()
             ?? throw new InvalidOperationException("Target flow definition is invalid JSON.");
 
         var entryNodeId = targetDefinition["entry_node"]?.GetValue<string>()

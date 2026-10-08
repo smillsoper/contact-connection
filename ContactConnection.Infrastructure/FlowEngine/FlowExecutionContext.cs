@@ -13,6 +13,9 @@ public class FlowExecutionContext
     public Guid SessionId { get; init; }
     public Guid FlowId { get; init; }
     public int FlowVersion { get; init; }
+    /// <summary>A designer sandbox running the flow's DRAFT (S183) — sub-flows it calls run their drafts too. Every other
+    /// run uses published scripts.</summary>
+    public bool UsesDraft { get; set; }
     public Guid CallRecordId { get; init; }
     public Guid InteractionId { get; init; }
     public Guid AgentId { get; init; }
@@ -92,6 +95,7 @@ public class FlowExecutionContext
             EncounteredSectionNodeIds,
             CallStack,
             CommitEventName, CommitLabel, CommitAllowedSections,
+            UsesDraft,
         });
 
     public string SerializeExecutionHistory() =>
@@ -136,6 +140,7 @@ public class FlowExecutionContext
             CommitEventName           = varStore.CommitEventName,
             CommitLabel               = varStore.CommitLabel,
             CommitAllowedSections     = varStore.CommitAllowedSections ?? [],
+            UsesDraft                 = varStore.UsesDraft,
             CallRecord              = callRecord,
             Caller                  = caller,
             Agent                   = agent,
@@ -157,7 +162,9 @@ public class FlowExecutionContext
         // Added S164 — absent in sessions stored before; nullable so old JSON still deserializes.
         string? CommitEventName = null,
         string? CommitLabel = null,
-        HashSet<string>? CommitAllowedSections = null)
+        HashSet<string>? CommitAllowedSections = null,
+        // Added S183 — draft sandbox run.
+        bool UsesDraft = false)
     {
         public VariableStore() : this([], [], [], null, null, false, [], [], []) { }
     }

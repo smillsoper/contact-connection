@@ -59,6 +59,8 @@ export interface FlowNodeState {
 export interface StartSessionRequest {
   flowId: string
   callRecordId?: string
+  /** Designer sandbox only (S183): run the saved draft instead of the published script. */
+  useDraft?: boolean
 }
 
 export interface AdvanceSessionRequest {
