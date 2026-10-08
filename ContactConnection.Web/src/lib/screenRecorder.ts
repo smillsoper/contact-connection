@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { api } from '../api/client'
+import { useAuthStore } from '../stores/authStore'
 import { onExtensionInput, setInputCapture, type ExtensionInputEvent } from './extensionBridge'
 
 /**
@@ -125,6 +126,15 @@ export function stopScreenShare() {
   void stopSegment('share stopped')
   useScreenShareStore.setState({ status: 'none' })
 }
+
+// Sign-out / another user signing in on this tab: the share belonged to the previous user — stop it, so nothing of
+// theirs is recorded or shown under the next person.
+let shareUser = useAuthStore.getState().agentId
+useAuthStore.subscribe((s) => {
+  if (s.agentId === shareUser) return
+  shareUser = s.agentId
+  if (stream) stopScreenShare()
+})
 
 // ── Clock ────────────────────────────────────────────────────────────────────
 

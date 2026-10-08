@@ -47,6 +47,29 @@ export function screenViewConnection() {
 
 let connection: signalR.HubConnection | null = null
 const peers = new Map<string, { pc: RTCPeerConnection; pendingIce: RTCIceCandidateInit[] }>()
+let unsubscribeShare: (() => void) | null = null
+
+/** Sign-out / another user on this tab: end every view and drop the old user's connection (it was opened with their sign-in). */
+export function stopScreenViewAgent() {
+  for (const id of [...peers.keys()]) {
+    void connection?.invoke('Stop', id).catch(() => {})
+    peers.get(id)?.pc.close()
+  }
+  peers.clear()
+  unsubscribeShare?.()
+  unsubscribeShare = null
+  const old = connection
+  connection = null
+  void old?.stop().catch(() => {})
+  useScreenViewStore.setState({ views: [], point: null, strokes: [] })
+}
+
+let viewUser = useAuthStore.getState().agentId
+useAuthStore.subscribe((s) => {
+  if (s.agentId === viewUser) return
+  viewUser = s.agentId
+  stopScreenViewAgent()
+})
 
 function setView(sessionId: string, patch: Partial<ScreenViewRequest> | null, viewerName = '') {
   useScreenViewStore.setState((s) => {
@@ -112,7 +135,7 @@ export function startScreenViewAgent() {
   void c.start().catch(() => { /* no live view this session; everything else works */ })
 
   // The agent stopped sharing (browser bar, or the screen went away): every view ends.
-  useScreenShareStore.subscribe((s, prev) => {
+  unsubscribeShare = useScreenShareStore.subscribe((s, prev) => {
     if (prev.status === 'sharing' && s.status !== 'sharing')
       for (const id of [...peers.keys()]) {
         closePeer(id)

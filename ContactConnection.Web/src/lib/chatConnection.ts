@@ -13,6 +13,28 @@ import { getSubdomainFromHostname } from '../utils/subdomain'
 let connection: signalR.HubConnection | null = null
 let starting: Promise<void> | null = null
 
+/**
+ * Sign-out, or someone else signing in on this tab: drop the old user's connection and everything it loaded. Without
+ * this the next person got the previous user's chat (and their supervisors / help state) until a page reload.
+ */
+export function stopChat() {
+  const old = connection
+  connection = null
+  starting = null
+  void old?.stop().catch(() => {})
+  useChatStore.setState({
+    status: 'idle', disabledMessage: null, me: null, users: {}, channels: {}, supervisorIds: [], myHelp: null, helpQueue: [],
+    messages: {}, threads: {}, pins: {}, typing: {}, view: { kind: 'list' }, lightbox: null,
+  })
+}
+
+let chatUser = useAuthStore.getState().agentId
+useAuthStore.subscribe((s) => {
+  if (s.agentId === chatUser) return
+  chatUser = s.agentId
+  stopChat()
+})
+
 export async function reloadChat() {
   const store = useChatStore.getState()
   try {
