@@ -47,6 +47,8 @@ public static class ChatEndpoints
         g.MapPost("help", RaiseHand);
         g.MapPost("help/{id:guid}/claim", ClaimHelp);
         g.MapPost("help/{id:guid}/cancel", CancelHelp);
+        g.MapPut("help/{id:guid}/snapshot", PutHelpSnapshot);
+        g.MapGet("help/{id:guid}/snapshot", GetHelpSnapshot);
 
         var admin = app.MapGroup("/api/v1/chat/admin").RequireAuthorization("ChatManage");
         admin.MapGet("channels", AdminList);
@@ -198,6 +200,8 @@ public static class ChatEndpoints
             h.Id, h.AgentId, agentName = names.GetValueOrDefault(h.AgentId), h.Status, h.Note, h.CallRecordId,
             callerNumber = call?.CallerId, campaignName = call?.Campaign, h.WentToAllSupervisors, h.NotifiedIds,
             h.ClaimedById, claimedByName = h.ClaimedById is { } s ? names.GetValueOrDefault(s) : null, h.ChannelId, h.CreatedAt, h.ClosedAt,
+            context = h.ContextJson is { } cj ? System.Text.Json.JsonSerializer.Deserialize<HelpContext>(cj) : null,
+            hasSnapshot = h.SnapshotKey is not null,
         };
     }
 
@@ -731,8 +735,36 @@ public static class ChatEndpoints
 
     private static bool OnDuty(AgentStateEntry? s) => s is not null && s.Code != AgentStateCodes.LoggedOut;
 
+    /// <summary>Where the agent was when they raised their hand (S183).</summary>
+    public record HelpContext(string? ScriptName, string? SectionName, string? StepLabel, string? CallerName, string? CallerNumber,
+        string? CampaignName, DateTimeOffset? CallStartedAt);
+
+    /// <summary>The script step and the caller, read the moment the hand goes up.</summary>
+    private static async Task<HelpContext?> HelpContextAsync(TenantDbContext db, IFlowEngine flows, Guid agentId, Guid? callId, CancellationToken ct)
+    {
+        var sessions = await flows.GetLiveSessionsForAgentsAsync([agentId], ct);
+        var session = sessions.Where(s => callId is null || s.CallRecordId == callId).OrderByDescending(s => s.StartedAt).FirstOrDefault()
+            ?? sessions.OrderByDescending(s => s.StartedAt).FirstOrDefault();
+        string? step = null;
+        if (session is not null)
+            try { step = (await flows.GetCurrentStateAsync(session.SessionId, ct))?.Label; } catch { /* context is best effort */ }
+        var recordId = callId ?? session?.CallRecordId;
+        var call = recordId is { } rid
+            ? await db.CallRecords.AsNoTracking().Where(r => r.Id == rid)
+                .Select(r => new
+                {
+                    r.CallerId, r.FirstName, r.LastName, r.CallStartAt, r.CreatedAt,
+                    Campaign = db.Campaigns.Where(c => c.Id == r.CampaignId).Select(c => c.Name).FirstOrDefault(),
+                }).FirstOrDefaultAsync(ct)
+            : null;
+        if (session is null && call is null) return null;
+        var name = call is null ? null : string.Join(" ", new[] { call.FirstName, call.LastName }.Where(p => !string.IsNullOrWhiteSpace(p)));
+        return new HelpContext(session?.FlowName, session?.SectionName, step, string.IsNullOrWhiteSpace(name) ? null : name,
+            call?.CallerId, call?.Campaign, call?.CallStartAt ?? call?.CreatedAt);
+    }
+
     private static async Task<IResult> RaiseHand(RaiseHandRequest req, HttpContext http, TenantContext tc, ScopedTenantDbContextFactory dbf,
-        IAgentStateStore states, IHubContext<ChatHub, IChatHubClient> hub, CancellationToken ct)
+        IAgentStateStore states, IFlowEngine flows, IHubContext<ChatHub, IChatHubClient> hub, CancellationToken ct)
     {
         var me = WhoAmI(http, tc);
         if (me is null) return Results.Unauthorized();
@@ -762,6 +794,8 @@ public static class ChatEndpoints
 
         var callId = req.CallRecordId is { } cid && await db.CallRecords.AnyAsync(r => r.Id == cid, ct) ? cid : (Guid?)null;
         var help = HelpRequest.Create(me.TenantId, me.Id, req.Note, callId, notified, wentToAll);
+        if (await HelpContextAsync(db, flows, me.Id, callId, ct) is { } context)
+            help.SetContext(System.Text.Json.JsonSerializer.Serialize(context));
         db.HelpRequests.Add(help);
         await db.SaveChangesAsync(ct);
         var dto = await HelpDto(db, help, ct);
@@ -810,6 +844,14 @@ public static class ChatEndpoints
             .ToDictionaryAsync(a => a.Id, a => a.FirstName, ct);
         var text = $"{names.GetValueOrDefault(me.Id)} picked up {names.GetValueOrDefault(help.AgentId)}'s request for help."
                    + (help.Note is null ? "" : $" Note: “{help.Note}”");
+        // Where they were, so the conversation starts from there (S183).
+        if (help.ContextJson is { } cj && System.Text.Json.JsonSerializer.Deserialize<HelpContext>(cj) is { } hc)
+        {
+            var where = string.Join(" › ", new[] { hc.ScriptName, hc.SectionName, hc.StepLabel }.Where(x => !string.IsNullOrWhiteSpace(x)));
+            var who = string.Join(" · ", new[] { hc.CallerName, hc.CallerNumber, hc.CampaignName }.Where(x => !string.IsNullOrWhiteSpace(x)));
+            if (where.Length > 0) text += $" Script: {where}.";
+            if (who.Length > 0) text += $" Caller: {who}.";
+        }
         var system = ChatMessage.Create(channel.Id, null, text, null, ChatMessageKind.System);
         db.ChatMessages.Add(system);
         channel.Touch(system.CreatedAt);
@@ -820,6 +862,49 @@ public static class ChatEndpoints
         foreach (var m in new[] { me.Id, help.AgentId }) await Push(hub, [m], "channel", (await ChannelForAsync(db, channel.Id, me with { Id = m }, ct))!);
         await Push(hub, [me.Id, help.AgentId], "message", MessageDto(system, []));
         return Results.Ok(dto);
+    }
+
+    private const int MaxSnapshotBytes = 3_000_000;
+
+    /// <summary>Agent: attach a picture of their shared screen to their own raised hand (JPEG, ≤ 3 MB).</summary>
+    private static async Task<IResult> PutHelpSnapshot(Guid id, HttpContext http, TenantContext tc, ScopedTenantDbContextFactory dbf,
+        IBlobStorage blobs, IHubContext<ChatHub, IChatHubClient> hub, CancellationToken ct)
+    {
+        var me = WhoAmI(http, tc);
+        if (me is null) return Results.Unauthorized();
+        await using var db = dbf.Create();
+        var help = await db.HelpRequests.FirstOrDefaultAsync(h => h.Id == id && h.AgentId == me.Id, ct);
+        if (help is null) return Results.NotFound();
+        if (http.Request.ContentLength is > MaxSnapshotBytes) return Results.BadRequest(new { error = "That picture is too large." });
+        using var buffer = new MemoryStream();
+        await http.Request.Body.CopyToAsync(buffer, ct);
+        var bytes = buffer.ToArray();
+        // JPEG only — checked by its first bytes, not by what the request says it is.
+        if (bytes.Length is < 4 or > MaxSnapshotBytes || bytes[0] != 0xFF || bytes[1] != 0xD8 || bytes[2] != 0xFF)
+            return Results.BadRequest(new { error = "Send a JPEG picture." });
+        var key = $"help/{me.TenantId}/{help.Id}.jpg";
+        await blobs.PutAsync(key, new MemoryStream(bytes), "image/jpeg", ct);
+        help.SetSnapshot(key);
+        await db.SaveChangesAsync(ct);
+        var dto = await HelpDto(db, help, ct);
+        await Push(hub, help.NotifiedIds.Append(me.Id), "help", dto);
+        return Results.Ok(dto);
+    }
+
+    /// <summary>The snapshot — for the agent, the supervisors who were alerted, whoever picked it up, or any supervisor.</summary>
+    private static async Task<IResult> GetHelpSnapshot(Guid id, HttpContext http, TenantContext tc, ScopedTenantDbContextFactory dbf,
+        IBlobStorage blobs, CancellationToken ct)
+    {
+        var me = WhoAmI(http, tc);
+        if (me is null) return Results.Unauthorized();
+        await using var db = dbf.Create();
+        var help = await db.HelpRequests.AsNoTracking().FirstOrDefaultAsync(h => h.Id == id, ct);
+        if (help?.SnapshotKey is null) return Results.NotFound();
+        if (help.AgentId != me.Id && !help.NotifiedIds.Contains(me.Id) && help.ClaimedById != me.Id && !me.IsSupervisor) return Results.Forbid();
+        var stream = await blobs.OpenReadAsync(help.SnapshotKey, ct);
+        if (stream is null) return Results.NotFound();
+        http.Response.Headers.CacheControl = "private, no-store";
+        return Results.Stream(stream, "image/jpeg");
     }
 
     private static async Task<IResult> CancelHelp(Guid id, HttpContext http, TenantContext tc, ScopedTenantDbContextFactory dbf,

@@ -487,8 +487,18 @@ public class HelpRequest
     public Guid? ChannelId { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? ClosedAt { get; private set; }
+    /// <summary>What the agent was doing when they raised their hand (S183): script / section / step and the caller,
+    /// as JSON — so the supervisor can help without asking "where are you?".</summary>
+    public string? ContextJson { get; private set; }
+    /// <summary>A picture of the agent's shared screen at that moment (blob key); deleted after <see cref="SnapshotKeep"/>.</summary>
+    public string? SnapshotKey { get; private set; }
+
+    public static readonly TimeSpan SnapshotKeep = TimeSpan.FromDays(7);
 
     private HelpRequest() { }
+
+    public void SetContext(string? json) => ContextJson = json;
+    public void SetSnapshot(string? key) => SnapshotKey = key;
 
     public static HelpRequest Create(Guid tenantId, Guid agentId, string? note, Guid? callRecordId, IEnumerable<Guid> notifiedIds, bool wentToAll) =>
         new()

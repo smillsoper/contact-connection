@@ -89,6 +89,13 @@ export interface HelpRequest {
   channelId: string | null
   createdAt: string
   closedAt: string | null
+  /** Where the agent was when they raised their hand (S183). */
+  context?: {
+    scriptName: string | null; sectionName: string | null; stepLabel: string | null
+    callerName: string | null; callerNumber: string | null; campaignName: string | null; callStartedAt: string | null
+  } | null
+  /** A picture of their shared screen at that moment. */
+  hasSnapshot?: boolean
 }
 
 export interface ChatBootstrap {
@@ -128,6 +135,7 @@ export const chatApi = {
   raiseHand: (note: string | null, callRecordId: string | null) => api.post<HelpRequest>('/api/v1/chat/help', { note, callRecordId }),
   claimHelp: (id: string) => api.post<HelpRequest>(`/api/v1/chat/help/${id}/claim`),
   cancelHelp: (id: string) => api.post<HelpRequest>(`/api/v1/chat/help/${id}/cancel`),
+  putHelpSnapshot: (id: string, jpeg: Blob) => api.putBinary<HelpRequest>(`/api/v1/chat/help/${id}/snapshot`, jpeg),
 }
 
 // ── Configuration (chat.manage) ──────────────────────────────────────────────

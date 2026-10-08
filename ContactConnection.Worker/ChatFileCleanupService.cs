@@ -57,6 +57,21 @@ public sealed class ChatFileCleanupService(IServiceScopeFactory scopeFactory, IC
         var blobs = scope.ServiceProvider.GetRequiredService<IBlobStorage>();
         await using var db = scope.ServiceProvider.GetRequiredService<ScopedTenantDbContextFactory>().Create();
 
+        // Raised-hand screen pictures (S183) are kept a week.
+        var snapCutoff = DateTimeOffset.UtcNow - HelpRequest.SnapshotKeep;
+        var oldSnaps = await db.HelpRequests.Where(h => h.SnapshotKey != null && h.CreatedAt < snapCutoff).Take(BatchSize).ToListAsync(ct);
+        foreach (var h in oldSnaps)
+        {
+            try { await blobs.DeleteAsync(h.SnapshotKey!, ct); }
+            catch (Exception ex) { logger.LogWarning(ex, "Couldn't delete help snapshot {Key}.", h.SnapshotKey); }
+            h.SetSnapshot(null);
+        }
+        if (oldSnaps.Count > 0)
+        {
+            await db.SaveChangesAsync(ct);
+            logger.LogInformation("Chat cleanup: removed {Count} raised-hand screen picture(s) for {Subdomain}.", oldSnaps.Count, tenant.Subdomain);
+        }
+
         var cutoff = DateTimeOffset.UtcNow - ChatFile.OrphanGrace;
         var orphans = await db.ChatFiles
             .Where(f => f.CreatedAt < cutoff

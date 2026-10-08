@@ -181,6 +181,8 @@ public class HelpRequestConfiguration : IEntityTypeConfiguration<HelpRequest>
         b.Property(h => h.ChannelId).HasColumnName("channel_id");
         b.Property(h => h.CreatedAt).HasColumnName("created_at");
         b.Property(h => h.ClosedAt).HasColumnName("closed_at");
+        b.Property(h => h.ContextJson).HasColumnName("context").HasColumnType("jsonb");
+        b.Property(h => h.SnapshotKey).HasColumnName("snapshot_key").HasMaxLength(200);
         b.Ignore(h => h.IsOpen);
         b.HasIndex(h => new { h.Status, h.CreatedAt }).HasDatabaseName("ix_help_requests_status_created");
     }

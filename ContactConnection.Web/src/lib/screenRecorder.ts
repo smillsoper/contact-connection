@@ -89,6 +89,31 @@ export function getShareStream(): MediaStream | null {
   return stream && stream.getVideoTracks().some((t) => t.readyState === 'live') ? stream : null
 }
 
+/** One frame of the shared screen as a JPEG (raise hand with context, S183) — null when not sharing. */
+export async function captureShareFrame(maxWidth = 1600): Promise<Blob | null> {
+  const s = getShareStream()
+  if (!s) return null
+  const video = document.createElement('video')
+  video.muted = true
+  video.playsInline = true
+  video.srcObject = s
+  try {
+    await video.play()
+    if (!video.videoWidth) await new Promise((r) => video.addEventListener('loadeddata', r, { once: true }))
+    const scale = Math.min(1, maxWidth / video.videoWidth)
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.round(video.videoWidth * scale)
+    canvas.height = Math.round(video.videoHeight * scale)
+    canvas.getContext('2d')!.drawImage(video, 0, 0, canvas.width, canvas.height)
+    return await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/jpeg', 0.8))
+  } catch {
+    return null
+  } finally {
+    video.pause()
+    video.srcObject = null
+  }
+}
+
 /** The screen the share is of, for placing a supervisor's pointer: availLeft/Top/width/height in CSS pixels. */
 export function getShareScreen() {
   return shareScreen

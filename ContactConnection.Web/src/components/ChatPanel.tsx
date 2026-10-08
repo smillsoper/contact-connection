@@ -6,6 +6,11 @@ import { startChat, messagePreview, canAskForNotifications, askForNotifications 
 import { Conversation, ThreadView, StateLine, Lightbox } from './chat/ChatConversation'
 import EmojiText from './chat/EmojiText'
 import { SearchIcon, BrowseChannelsIcon, NewMessageIcon, AnnouncementIcon, PinIcon } from './chat/ChatIcons'
+import { captureShareFrame } from '../lib/screenRecorder'
+import { useAuthStore } from '../stores/authStore'
+import { getSubdomainFromHostname } from '../utils/subdomain'
+import ScreenViewModal from './dashboard/ScreenViewModal'
+import { ExternalLinkIcon, ScreenIcon } from './icons/Icons'
 
 /**
  * Team chat (S183) — the agent portal's right panel, and the body of the chat launcher on admin pages. Slack-like:
@@ -245,8 +250,12 @@ function HelpArea() {
     setError(null)
     try {
       const callRecordId = useCallStore.getState().callStatus === 'on-call' ? useCallStore.getState().callRecordId : null
-      useChatStore.getState().setHelp(await chatApi.raiseHand(note.trim() || null, callRecordId))
+      const help = await chatApi.raiseHand(note.trim() || null, callRecordId)
+      useChatStore.getState().setHelp(help)
       setComposing(false); setNote('')
+      // A picture of the shared screen goes with it (S183), when the screen is being shared.
+      void captureShareFrame().then((jpeg) => (jpeg ? chatApi.putHelpSnapshot(help.id, jpeg) : null))
+        .then((h) => { if (h) useChatStore.getState().setHelp(h) }).catch(() => {})
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not reach a supervisor.') }
   }
 
@@ -257,6 +266,7 @@ function HelpArea() {
       {myHelp?.status === 'open' ? (
         <div className="m-2 rounded border border-amber-700 bg-amber-950/40 px-3 py-2">
           <p className="text-xs text-amber-200 font-medium">✋ Waiting for a supervisor… <span className="text-amber-400/80 font-normal">{since(myHelp.createdAt)}</span></p>
+          {myHelp.hasSnapshot && <p className="text-[10px] text-amber-300/80 mt-0.5">A picture of your screen went with it, with where you are in the script.</p>}
           <p className="text-[10px] text-amber-300/80 mt-0.5">
             {myHelp.notifiedIds.length === 0 ? 'No supervisors are set up yet — ask an admin.'
               : myHelp.wentToAllSupervisors ? `None of your supervisors is on duty — sent to all ${myHelp.notifiedIds.length} on-duty supervisors.`
@@ -287,8 +297,33 @@ function HelpArea() {
   )
 }
 
+/** The help request's screen picture, fetched with the viewer's sign-in (never a token in an image URL). */
+function useHelpSnapshot(h: HelpRequest) {
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => {
+    if (!h.hasSnapshot) return
+    let objectUrl: string | null = null
+    let live = true
+    const { token, tenantSubdomain } = useAuthStore.getState()
+    const sub = getSubdomainFromHostname() ?? tenantSubdomain
+    fetch(`/api/v1/chat/help/${h.id}/snapshot`, { headers: { Authorization: `Bearer ${token ?? ''}`, ...(sub ? { 'X-Tenant-Subdomain': sub } : {}) } })
+      .then((r) => (r.ok ? r.blob() : null))
+      .then((b) => { if (b && live) { objectUrl = URL.createObjectURL(b); setUrl(objectUrl) } })
+      .catch(() => {})
+    return () => { live = false; if (objectUrl) URL.revokeObjectURL(objectUrl) }
+  }, [h.id, h.hasSnapshot])
+  return url
+}
+
 function HelpCard({ h }: { h: HelpRequest }) {
   const [error, setError] = useState<string | null>(null)
+  const snapshot = useHelpSnapshot(h)
+  const [viewing, setViewing] = useState(false)
+  const canWatch = useAuthStore((s) => s.hasPermission('supervisor.monitor') || s.hasPermission('supervisor.override'))
+  const canOpenCall = useAuthStore((s) => s.hasPermission('calls.view') || s.hasPermission('calls.manage'))
+  const c = h.context
+  const where = c ? [c.scriptName, c.sectionName, c.stepLabel].filter(Boolean).join(' › ') : ''
+  const who = c ? [c.callerName, c.callerNumber ?? h.callerNumber, c.campaignName ?? h.campaignName].filter(Boolean).join(' · ') : ''
   async function claim() {
     setError(null)
     try {
@@ -300,10 +335,36 @@ function HelpCard({ h }: { h: HelpRequest }) {
   return (
     <div className="m-2 rounded border border-red-700 bg-red-950/40 px-3 py-2 animate-[pulse_2s_ease-in-out_3]">
       <p className="text-xs text-red-100 font-medium">✋ {h.agentName ?? 'An agent'} needs help <span className="text-red-300/80 font-normal">{since(h.createdAt)}</span></p>
-      {h.callerNumber && <p className="text-[10px] text-red-200/80">On a call{h.campaignName ? ` · ${h.campaignName}` : ''} · {h.callerNumber}</p>}
       {h.note && <p className="text-[11px] text-gray-200 mt-0.5">“<EmojiText text={h.note} />”</p>}
-      <button onClick={() => void claim()} className="text-[11px] bg-red-600 hover:bg-red-500 text-white rounded px-2 py-0.5 mt-1">Pick up</button>
+      {/* Where they are (S183) — help without asking "where are you?" */}
+      {where && <p className="text-[10px] text-red-100/90 mt-1"><span className="text-red-300/70">Script:</span> {where}</p>}
+      {(who || h.callerNumber) && (
+        <p className="text-[10px] text-red-100/90">
+          <span className="text-red-300/70">Caller:</span> {who || `${h.callerNumber}${h.campaignName ? ` · ${h.campaignName}` : ''}`}
+          {c?.callStartedAt && <span className="text-red-300/70"> · on the call {since(c.callStartedAt)}</span>}
+        </p>
+      )}
+      {snapshot && (
+        <button onClick={() => useChatStore.setState({ lightbox: snapshot })} className="block mt-1.5 w-full cursor-zoom-in" title="Their screen when they asked — click to enlarge">
+          <img src={snapshot} alt="The agent's screen when they asked for help" className="w-full rounded border border-red-800/60" />
+        </button>
+      )}
+      <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+        <button onClick={() => void claim()} className="text-[11px] bg-red-600 hover:bg-red-500 text-white rounded px-2 py-0.5">Pick up</button>
+        {canWatch && (
+          <button onClick={() => setViewing(true)} className="inline-flex items-center gap-1 text-[11px] border border-red-700 text-red-100 hover:bg-red-900/40 rounded px-2 py-0.5">
+            <ScreenIcon size={11} />View screen
+          </button>
+        )}
+        {canOpenCall && h.callRecordId && (
+          <a href={`/admin/calls/${h.callRecordId}`} target="_blank" rel="noreferrer"
+            className="inline-flex items-center gap-1 text-[11px] border border-red-700 text-red-100 hover:bg-red-900/40 rounded px-2 py-0.5">
+            Open call <ExternalLinkIcon size={10} />
+          </a>
+        )}
+      </div>
       {error && <p className="text-[11px] text-red-300 mt-1">{error}</p>}
+      {viewing && <ScreenViewModal agentId={h.agentId} agentName={h.agentName ?? 'Agent'} onClose={() => setViewing(false)} />}
     </div>
   )
 }
