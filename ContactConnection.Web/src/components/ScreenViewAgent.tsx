@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { acceptScreenView, declineScreenView, pointInWindow, startScreenViewAgent, useScreenViewStore } from '../lib/screenView'
+import { acceptScreenView, declineScreenView, pointInWindow, startScreenViewAgent, STROKE_MS, useScreenViewStore, type ScreenStroke } from '../lib/screenView'
 import { getShareScreen, startScreenShare, useScreenShareStore } from '../lib/screenRecorder'
 import { PointerIcon, ScreenIcon } from './icons/Icons'
 
@@ -52,8 +52,55 @@ export default function ScreenViewAgent() {
       ))}
 
       {point && <PointMarker key={point.at} x={point.x} y={point.y} viewerName={point.viewerName} />}
+      <Drawing />
     </>
   )
+}
+
+/** The supervisor's free-hand drawing over this window; each stroke fades out a few seconds after the pen lifts. */
+function Drawing() {
+  const strokes = useScreenViewStore((s) => s.strokes)
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (strokes.length === 0) return
+    const t = setInterval(() => {
+      const at = Date.now()
+      setNow(at)
+      const live = useScreenViewStore.getState().strokes.filter((k) => at - k.updatedAt < STROKE_MS)
+      if (live.length !== useScreenViewStore.getState().strokes.length) useScreenViewStore.setState({ strokes: live })
+    }, 200)
+    return () => clearInterval(t)
+  }, [strokes.length])
+  if (strokes.length === 0) return null
+  const screen0 = getShareScreen()
+  const drawn = strokes.map((k) => ({ k, pts: toWindow(k, screen0) })).filter((d) => d.pts.length > 0)
+  const anyInside = drawn.some((d) => d.pts.some((p) => p.inside))
+  return createPortal(
+    <>
+      <svg className="fixed inset-0 z-[100] pointer-events-none" width="100%" height="100%">
+        {drawn.map(({ k, pts }) => (
+          <polyline key={k.id} points={pts.map((p) => `${p.x},${p.y}`).join(' ')} fill="none" stroke={k.color}
+            strokeWidth={4} strokeLinecap="round" strokeLinejoin="round"
+            style={{ opacity: Math.max(0, Math.min(1, (STROKE_MS - (now - k.updatedAt)) / 700)), filter: 'drop-shadow(0 0 2px rgba(0,0,0,.6))' }} />
+        ))}
+      </svg>
+      {!anyInside && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2 rounded-lg bg-violet-700 text-white text-sm px-4 py-2 shadow-xl">
+          <PointerIcon size={15} />Your supervisor is drawing on another part of your screen
+        </div>
+      )}
+    </>,
+    document.body,
+  )
+}
+
+function toWindow(k: ScreenStroke, screen0: ReturnType<typeof getShareScreen>) {
+  const out: { x: number; y: number; inside: boolean }[] = []
+  for (let i = 0; i + 1 < k.points.length; i += 2) {
+    const p = pointInWindow(k.points[i], k.points[i + 1], screen0)
+    if (p) out.push(p)
+  }
+  return out
 }
 
 /** A pulsing marker where the supervisor pointed (4 s) — or a note when it's outside this window. */

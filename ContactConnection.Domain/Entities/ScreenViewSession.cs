@@ -17,6 +17,8 @@ public class ScreenViewSession
     public DateTimeOffset? EndedAt { get; private set; }
     public string? EndReason { get; private set; }
     public int PointCount { get; private set; }
+    /// <summary>Strokes drawn on the agent's screen.</summary>
+    public int DrawCount { get; private set; }
 
     private ScreenViewSession() { }
 
@@ -28,6 +30,7 @@ public class ScreenViewSession
 
     public void Connected() => ConnectedAt ??= DateTimeOffset.UtcNow;
     public void Pointed() => PointCount++;
+    public void Drew() => DrawCount++;
 
     public void End(string reason)
     {

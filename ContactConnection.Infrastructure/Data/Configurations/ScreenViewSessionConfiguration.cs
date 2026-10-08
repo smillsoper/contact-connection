@@ -20,6 +20,7 @@ public class ScreenViewSessionConfiguration : IEntityTypeConfiguration<ScreenVie
         b.Property(s => s.EndedAt).HasColumnName("ended_at");
         b.Property(s => s.EndReason).HasColumnName("end_reason").HasMaxLength(120);
         b.Property(s => s.PointCount).HasColumnName("point_count");
+        b.Property(s => s.DrawCount).HasColumnName("draw_count");
         b.HasIndex(s => new { s.AgentId, s.RequestedAt }).HasDatabaseName("ix_screen_view_sessions_agent_requested");
     }
 }

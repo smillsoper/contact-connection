@@ -98,6 +98,28 @@ public class ScreenViewHub(ITenantDbContextFactory dbs, ScreenViewRegistry regis
         await AuditAsync(s, a => a.Pointed());
     }
 
+    /// <summary>The drawing colours the viewer offers — anything else is refused.</summary>
+    public static readonly string[] DrawColors = ["#ef4444", "#f59e0b", "#22c55e", "#3b82f6", "#a855f7", "#ffffff"];
+
+    /// <summary>Supervisor: part of a free-hand stroke — screen fractions as x,y pairs. A stroke arrives in pieces as it's
+    /// drawn (same <paramref name="strokeId"/>); the agent's portal shows it and fades it a few seconds after the last piece.</summary>
+    public async Task Draw(string sessionId, string strokeId, string color, double[] points, bool first)
+    {
+        var s = ViewerSession(sessionId);
+        if (s.AgentConnection is null || !DrawColors.Contains(color) || points.Length is 0 or > 800 || points.Length % 2 != 0
+            || points.Any(p => double.IsNaN(p) || p < 0 || p > 1) || strokeId.Length is 0 or > 40)
+            return;
+        await Clients.Client(s.AgentConnection).ScreenViewDraw(sessionId, strokeId, color, points);
+        if (first) await AuditAsync(s, a => a.Drew());
+    }
+
+    /// <summary>Supervisor: wipe everything drawn on the agent's screen.</summary>
+    public Task ClearDrawing(string sessionId)
+    {
+        var s = ViewerSession(sessionId);
+        return s.AgentConnection is { } a ? Clients.Client(a).ScreenViewClear(sessionId) : Task.CompletedTask;
+    }
+
     /// <summary>Agent portal: declined, or couldn't share.</summary>
     public async Task Decline(string sessionId, string reason)
     {
@@ -160,6 +182,8 @@ public interface IScreenViewClient
     Task ScreenViewAnswer(string sessionId, string sdp);
     Task ScreenViewIce(string sessionId, string candidate);
     Task ScreenViewPoint(string sessionId, double x, double y, string viewerName);
+    Task ScreenViewDraw(string sessionId, string strokeId, string color, double[] points);
+    Task ScreenViewClear(string sessionId);
     Task ScreenViewEnded(string sessionId, string reason);
 }
 

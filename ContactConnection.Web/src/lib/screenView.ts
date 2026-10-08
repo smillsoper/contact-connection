@@ -20,12 +20,19 @@ export interface ScreenViewRequest {
 
 export interface ScreenPoint { x: number; y: number; viewerName: string; at: number }
 
+/** A free-hand stroke: screen fractions as x,y pairs; fades a few seconds after its last piece arrived. */
+export interface ScreenStroke { id: string; color: string; points: number[]; updatedAt: number }
+
+/** How long a drawing stays up after the supervisor's pen lifts (the point marker lasts about the same). */
+export const STROKE_MS = 5000
+
 interface ScreenViewState {
   views: ScreenViewRequest[]
   point: ScreenPoint | null
+  strokes: ScreenStroke[]
 }
 
-export const useScreenViewStore = create<ScreenViewState>(() => ({ views: [], point: null }))
+export const useScreenViewStore = create<ScreenViewState>(() => ({ views: [], point: null, strokes: [] }))
 
 /** A hub connection to /hubs/screen-view with the signed-in user's token. */
 export function screenViewConnection() {
@@ -84,9 +91,23 @@ export function startScreenViewAgent() {
     if (!peers.has(sessionId)) return
     useScreenViewStore.setState({ point: { x, y, viewerName, at: Date.now() } })
   })
+  c.on('screenViewDraw', (sessionId: string, strokeId: string, color: string, points: number[]) => {
+    if (!peers.has(sessionId)) return
+    const id = `${sessionId}:${strokeId}`
+    useScreenViewStore.setState((s) => {
+      const existing = s.strokes.find((k) => k.id === id)
+      return existing
+        ? { strokes: s.strokes.map((k) => (k.id === id ? { ...k, points: [...k.points, ...points], updatedAt: Date.now() } : k)) }
+        : { strokes: [...s.strokes, { id, color, points, updatedAt: Date.now() }] }
+    })
+  })
+  c.on('screenViewClear', (sessionId: string) => {
+    useScreenViewStore.setState((s) => ({ strokes: s.strokes.filter((k) => !k.id.startsWith(`${sessionId}:`)) }))
+  })
   c.on('screenViewEnded', (sessionId: string) => {
     closePeer(sessionId)
     setView(sessionId, null)
+    useScreenViewStore.setState((s) => ({ strokes: s.strokes.filter((k) => !k.id.startsWith(`${sessionId}:`)) }))
   })
   void c.start().catch(() => { /* no live view this session; everything else works */ })
 
