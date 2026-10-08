@@ -255,6 +255,8 @@ public class FlowEngine : IFlowEngine
         var result = await handler.ExecuteAsync(node, ctx, agentInput: null, agentTransition: "default", ct);
         // The tab label when the agent portal reopens this script (S171) — same as the script pop's.
         result.State.FlowName ??= (await _flows.GetByIdAsync(ctx.FlowId, ct))?.Name;
+        // Section + jump list too (S184) — a reopened script (reload) or a supervisor following along lacked them.
+        AttachSectionInfo(ctx, result.State);
         return result.State;
     }
 

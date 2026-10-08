@@ -17,7 +17,11 @@ export interface AgentListRow {
   registered: boolean
   registered_since: string | null
   /** CRM scripts the agent has open right now (on a phone call or not), one per call record. */
-  live_calls: { call_record_id: string; flow_name: string | null; started_at: string }[]
+  live_calls: {
+    call_record_id: string; flow_name: string | null; started_at: string
+    /** Each open script on the call (follow-along, S184). */
+    sessions?: { session_id: string; flow_name: string | null; section: string | null }[]
+  }[]
   /** Bridged to a live caller right now — Monitor / Coach / Barge need one. */
   on_live_call?: boolean
   /** Supervisor lock (Call Records "Finalize"). */

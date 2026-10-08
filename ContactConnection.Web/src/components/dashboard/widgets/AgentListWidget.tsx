@@ -6,7 +6,8 @@ import { useDashboardLiveAgentState, useDashboardLiveRegistration, useDashboardL
 import { useAuthStore } from '../../../stores/authStore'
 import { agentLockApi } from '../../../api/agentLock'
 import { supervisorApi, MONITOR_MODE_LABEL, type MonitorMode, type MonitorState } from '../../../api/supervisor'
-import { ChevronDownIcon, ChevronUpIcon, CloseIcon, ExternalLinkIcon, HeadsetIcon, LockIcon, PhoneIcon, ScreenIcon, CoachIcon } from '../../icons/Icons'
+import { ChevronDownIcon, ChevronUpIcon, CloseIcon, ExternalLinkIcon, HeadsetIcon, LockIcon, PhoneIcon, ScreenIcon, CoachIcon, EyeIcon } from '../../icons/Icons'
+import FollowScriptModal from '../FollowScriptModal'
 import ScreenViewModal from '../ScreenViewModal'
 import CoachModal from '../CoachComposer'
 import DedicationModal from '../DedicationModal'
@@ -62,6 +63,8 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
   const [viewing, setViewing] = useState<{ id: string; name: string } | null>(null)
   // In-call coaching notes (S183)
   const [coaching, setCoaching] = useState<{ id: string; name: string } | null>(null)
+  // Follow-along script view (S184)
+  const [following, setFollowing] = useState<{ name: string; calls: AgentListRow['live_calls'] } | null>(null)
   const myId = useAuthStore((s) => s.agentId)
   const [monitoring, setMonitoring] = useState<MonitorState | null>(null)
   const [supBusy, setSupBusy] = useState(false)
@@ -362,6 +365,12 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
               )}
               {canMonitor && (
                 <td className="py-1.5 relative whitespace-nowrap">
+                  {r.agent_id !== myId && (r.live_calls ?? []).some((c) => (c.sessions ?? []).length > 0) && (
+                    <button onClick={() => setFollowing({ name: r.name, calls: r.live_calls })}
+                      className="text-sky-300 hover:text-sky-200 mr-2" title={`Follow ${r.name}'s script live`}>
+                      <EyeIcon size={15} />
+                    </button>
+                  )}
                   {r.agent_id !== myId && r.state_code !== 'logged_out' && (
                     <button onClick={() => setCoaching({ id: r.agent_id, name: r.name })}
                       className="text-amber-300 hover:text-amber-200 mr-2" title={`Send ${r.name} a coaching note (pinned in their portal)`}>
@@ -420,6 +429,7 @@ export default function AgentListWidget({ config }: { config: WidgetFilterConfig
           )}
         </tbody>
       </table>
+      {following && <FollowScriptModal agentName={following.name} calls={following.calls} onClose={() => setFollowing(null)} />}
       {coaching && <CoachModal agentId={coaching.id} agentName={coaching.name} onClose={() => setCoaching(null)} />}
       {viewing && <ScreenViewModal agentId={viewing.id} agentName={viewing.name} onClose={() => setViewing(null)} />}
       {dedicating && (

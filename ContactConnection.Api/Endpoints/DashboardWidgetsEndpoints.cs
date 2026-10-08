@@ -104,7 +104,12 @@ public static class DashboardWidgetsEndpoints
                 .GroupBy(s => s.AgentId)
                 .ToDictionary(g => g.Key, g => g
                     .GroupBy(s => s.CallRecordId)
-                    .Select(c => new { call_record_id = c.Key, flow_name = c.First().FlowName, started_at = c.Min(s => s.StartedAt) })
+                    .Select(c => new
+                    {
+                        call_record_id = c.Key, flow_name = c.First().FlowName, started_at = c.Min(s => s.StartedAt),
+                        // Follow-along (S184): each open script on the call, so a supervisor can mirror it.
+                        sessions = c.Select(s => new { session_id = s.SessionId, flow_name = s.FlowName, section = s.SectionName }),
+                    })
                     .ToList());
 
             var result = new List<object>();

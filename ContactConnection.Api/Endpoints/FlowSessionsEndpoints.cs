@@ -84,10 +84,42 @@ public static class FlowSessionsEndpoints
         group.MapGet("/{id:guid}", async (
             Guid id,
             IFlowEngine engine,
+            IFlowSessionRepository sessions,
+            HttpContext http,
             CancellationToken ct) =>
         {
+            // The session's own agent, or a supervisor following along (S184) — not anyone who knows the id.
+            if (await sessions.GetByIdAsync(id, ct) is not { } session || !(IsOwner(http, session) || IsSupervisor(http)))
+                return Results.NotFound();
             var state = await engine.GetCurrentStateAsync(id, ct);
             return state is null ? Results.NotFound() : Results.Ok(state);
+        });
+
+        // Follow-along (S184): a supervisor sends the agent's script to a section. The agent's screen moves with a
+        // notice saying who moved it. Needs override (it changes the agent's work, like Barge / Take over).
+        group.MapPost("/{id:guid}/supervisor-jump", async (
+            Guid id,
+            SupervisorJumpRequest req,
+            IFlowEngine engine,
+            IFlowSessionRepository sessions,
+            IFlowNotifier notifier,
+            IAgentRepository agents,
+            HttpContext http,
+            CancellationToken ct) =>
+        {
+            var perms = (http.User.FindFirst("permissions")?.Value ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries);
+            if (!perms.Contains(Permission.SupervisorOverride)) return Results.Forbid();
+            if (await sessions.GetByIdAsync(id, ct) is not { } session) return Results.NotFound();
+            if (string.IsNullOrWhiteSpace(req.SectionNodeId)) return Results.BadRequest(new { error = "Choose a section." });
+            try
+            {
+                var state = await engine.AdvanceAsync(new AdvanceFlowRequest { SessionId = id, JumpToSectionNodeId = req.SectionNodeId }, ct);
+                var me = Guid.TryParse(http.User.FindFirst("sub")?.Value, out var sid) ? await agents.GetByIdAsync(sid, ct) : null;
+                var where = state.CurrentSectionName ?? state.Label;
+                await notifier.PushSessionUpdatedAsync(id, state, $"{me?.FirstName ?? "Your supervisor"} moved you to {where}", ct);
+                return Results.Ok(state);
+            }
+            catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
         // Validate an address via the tenant's address_validation API definition
@@ -107,8 +139,14 @@ public static class FlowSessionsEndpoints
             Guid id,
             AdvanceSessionRequest req,
             IFlowEngine engine,
+            IFlowSessionRepository sessions,
+            HttpContext http,
             CancellationToken ct) =>
         {
+            // Only the agent working the script moves it on (S184: anyone signed in could, given the id). A supervisor
+            // uses supervisor-jump; a take-over hands the session to the supervisor first.
+            if (await sessions.GetByIdAsync(id, ct) is not { } owned || !IsOwner(http, owned))
+                return Results.NotFound();
             try
             {
                 var state = await engine.AdvanceAsync(new AdvanceFlowRequest
@@ -127,6 +165,13 @@ public static class FlowSessionsEndpoints
             }
         });
     }
+
+    private static bool IsOwner(HttpContext http, FlowSession s) =>
+        Guid.TryParse(http.User.FindFirst("sub")?.Value, out var me) && s.AgentId == me;
+
+    private static bool IsSupervisor(HttpContext http) =>
+        (http.User.FindFirst("permissions")?.Value ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Any(p => p is Permission.SupervisorMonitor or Permission.SupervisorOverride);
 
     private static async Task<IResult> ValidateAddress(
         Guid id,
@@ -595,6 +640,8 @@ public record StartSessionRequest(
     Guid CallRecordId,
     Guid InteractionId,
     bool? UseDraft = null);
+
+public record SupervisorJumpRequest(string? SectionNodeId);
 
 public record AdvanceSessionRequest(
     string? InputValue,

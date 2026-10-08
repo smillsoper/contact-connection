@@ -18,7 +18,7 @@ namespace ContactConnection.Api.Hubs;
 ///   Supervisor joins "supervisor:{tenantId}" to see all active sessions.
 /// </summary>
 [Authorize]
-public class FlowHub : Hub<IFlowHubClient>
+public class FlowHub(ContactConnection.Infrastructure.Data.ITenantDbContextFactory dbs) : Hub<IFlowHubClient>
 {
     /// <summary>Auto-join the agent's personal group on connect so ESL screen pops can reach them.</summary>
     public override async Task OnConnectedAsync()
@@ -33,9 +33,21 @@ public class FlowHub : Hub<IFlowHubClient>
         await base.OnConnectedAsync();
     }
 
-    /// <summary>Agent calls this after starting a flow session to receive node pushes.</summary>
+    /// <summary>Agent calls this after starting a flow session to receive node pushes; a supervisor following along
+    /// (S184) joins the same room. Anyone else is refused — before S184 any signed-in user could listen to any session.</summary>
     public async Task JoinSession(string sessionId)
     {
+        if (!Guid.TryParse(sessionId, out var sid)) throw new HubException("Not a session.");
+        var permissions = (Context.User?.FindFirst("permissions")?.Value ?? "").Split(',');
+        var supervisor = permissions.Contains("supervisor.monitor") || permissions.Contains("supervisor.override");
+        if (!supervisor)
+        {
+            var schema = Context.User?.FindFirst("tenant_schema")?.Value;
+            if (schema is null || !Guid.TryParse(Context.User?.FindFirst("sub")?.Value, out var me)) throw new HubException("Not signed in.");
+            await using var db = dbs.Create(schema);
+            if (!await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.AnyAsync(db.FlowSessions, s => s.Id == sid && s.AgentId == me))
+                throw new HubException("Not your session.");
+        }
         await Groups.AddToGroupAsync(Context.ConnectionId, $"session:{sessionId}");
     }
 

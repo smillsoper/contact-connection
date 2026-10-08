@@ -71,5 +71,7 @@ export const RefreshIcon = (p: IconProps) => <Icon {...p}><path d="M20 11a8 8 0 
 export const ScreenIcon = (p: IconProps) => <Icon {...p}><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8" /><path d="M12 16v4" /></Icon>
 /** In-call coaching note (S183): a speech bubble with an exclamation. */
 export const CoachIcon = (p: IconProps) => <Icon {...p}><path d="M21 12a8 8 0 0 1-11.8 7l-5.2 1.5 1.5-4.8A8 8 0 1 1 21 12z" /><path d="M12 8v4" /><path d="M12 15.5h.01" /></Icon>
+/** Follow-along script view (S184). */
+export const EyeIcon = (p: IconProps) => <Icon {...p}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></Icon>
 /** Point here (S183). */
 export const PointerIcon = (p: IconProps) => <Icon {...p}><path d="M5 3l14 7-6 2-2 6z" /><path d="M13 12l6 6" /></Icon>
