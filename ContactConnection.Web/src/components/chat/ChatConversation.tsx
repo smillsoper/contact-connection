@@ -433,7 +433,9 @@ const ALLOWED_ATTR = ['style', 'href', 'data-chat-file', 'data-mention', 'data-c
  *  mentions highlighted (amber when it's you) and links opened in a new tab. */
 function RichBody({ html, meId }: { html: string; meId?: string }) {
   const ref = useRef<HTMLDivElement>(null)
-  const clean = useMemo(() => DOMPurify.sanitize(html, { ALLOWED_TAGS, ALLOWED_ATTR, ALLOW_DATA_ATTR: false }), [html])
+  // The same object every render: React 19 rewrites innerHTML whenever this prop object changes, which would wipe the
+  // images and mention highlights applied below on any re-render.
+  const inner = useMemo(() => ({ __html: DOMPurify.sanitize(html, { ALLOWED_TAGS, ALLOWED_ATTR, ALLOW_DATA_ATTR: false }) }), [html])
   useEffect(() => {
     const el = ref.current
     if (!el) return
@@ -452,8 +454,8 @@ function RichBody({ html, meId }: { html: string; meId?: string }) {
         img.onclick = () => useChatStore.setState({ lightbox: url })
       }).catch(() => { img.alt = 'Image unavailable'; img.classList.add('missing') })
     })
-  }, [clean, meId])
-  return <div ref={ref} className="chat-rich" onClick={openLinkInNewWindow} onAuxClick={openLinkInNewWindow} dangerouslySetInnerHTML={{ __html: clean }} />
+  }, [inner, meId])
+  return <div ref={ref} className="chat-rich" onClick={openLinkInNewWindow} onAuxClick={openLinkInNewWindow} dangerouslySetInnerHTML={inner} />
 }
 
 export function Lightbox() {

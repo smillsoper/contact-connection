@@ -22,7 +22,9 @@ const ALLOWED_ATTR = ['style', 'href', 'data-hd-file', 'data-color']
 export function HelpdeskBody({ html }: { html: string }) {
   const ref = useRef<HTMLDivElement>(null)
   const [zoom, setZoom] = useState<string | null>(null)
-  const clean = useMemo(() => DOMPurify.sanitize(html, { ALLOWED_TAGS, ALLOWED_ATTR, ALLOW_DATA_ATTR: false }), [html])
+  // The same object every render: React 19 rewrites innerHTML whenever this prop object changes, which would wipe the
+  // images loaded in below on any re-render.
+  const inner = useMemo(() => ({ __html: DOMPurify.sanitize(html, { ALLOWED_TAGS, ALLOWED_ATTR, ALLOW_DATA_ATTR: false }) }), [html])
   useEffect(() => {
     const el = ref.current
     if (!el) return
@@ -35,11 +37,11 @@ export function HelpdeskBody({ html }: { html: string }) {
         img.onclick = () => setZoom(url)
       }).catch(() => { img.alt = 'Image unavailable' })
     })
-  }, [clean])
+  }, [inner])
   return (
     <>
       <div ref={ref} className="helpdesk-rich text-sm text-gray-200" onClick={openLinkInNewWindow} onAuxClick={openLinkInNewWindow}
-        dangerouslySetInnerHTML={{ __html: clean }} />
+        dangerouslySetInnerHTML={inner} />
       {zoom && (
         <div className="fixed inset-0 z-[70] bg-black/80 flex items-center justify-center p-6 cursor-zoom-out" onClick={() => setZoom(null)}>
           <img src={zoom} alt="" className="max-w-full max-h-full rounded shadow-2xl" />
