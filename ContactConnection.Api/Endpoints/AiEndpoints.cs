@@ -44,9 +44,11 @@ public static class AiEndpoints
     {
         if (Has(http, permission)) return true;
         if (ActorResolver.Resolve(http.User) is not { } actor) return false;
-        // The call's agent, or the agent of one of its interactions (S178: a CS agent's own wrap-up on a transferred call).
+        // The call's agent, or the agent of one of its interactions (S178: a CS agent's own wrap-up on a transferred call),
+        // or whoever has the call's script now — a supervisor who took the call over finishes its wrap-up (S184).
         return await db.CallRecords.AsNoTracking().AnyAsync(r => r.Id == callId
-            && (r.AgentId == actor.Id || r.Interactions.Any(i => i.AgentId == actor.Id)), ct);
+            && (r.AgentId == actor.Id || r.Interactions.Any(i => i.AgentId == actor.Id)), ct)
+            || await db.FlowSessions.AsNoTracking().AnyAsync(f => f.CallRecordId == callId && f.AgentId == actor.Id, ct);
     }
 
     /// <summary>The disposition currently recorded for an interaction: a transferred one's own field, else the record's.</summary>
@@ -242,11 +244,14 @@ public static class AiEndpoints
         await using var db = dbFactory.Create();
         var since = DateTimeOffset.UtcNow.AddHours(-12);
         // Per interaction (S178): the agent who worked the interaction reviews its summary — on a transferred call the CS
-        // agent gets theirs. Legacy rows (no interaction) go to the call's agent.
+        // agent gets theirs. Legacy rows (no interaction) go to the call's agent. Whoever has the interaction's script at
+        // the end owns the wrap-up (S184): after a take-over that's the supervisor, not the agent who was moved off it.
         var pending = await db.CallSummaries.AsNoTracking()
             .Where(s => s.Status == CallSummaryStatus.Suggested && s.CreatedAt >= since
                 && (s.InteractionId != null
-                    ? db.CallInteractions.Any(i => i.Id == s.InteractionId && i.AgentId == actor.Id)
+                    ? (db.FlowSessions.Where(f => f.InteractionId == s.InteractionId).OrderByDescending(f => f.StartedAt)
+                            .Select(f => (Guid?)f.AgentId).FirstOrDefault()
+                        ?? db.CallInteractions.Where(i => i.Id == s.InteractionId).Select(i => (Guid?)i.AgentId).FirstOrDefault()) == actor.Id
                     : db.CallRecords.Any(r => r.Id == s.CallRecordId && r.AgentId == actor.Id)))
             .GroupBy(s => new { s.CallRecordId, s.InteractionId })
             .Select(g => new { g.Key.CallRecordId, g.Key.InteractionId, CreatedAt = g.Max(s => s.CreatedAt) })
