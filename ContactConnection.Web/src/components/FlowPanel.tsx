@@ -70,6 +70,24 @@ function FlowSessionView({ entry, hub, onEnd }: FlowSessionViewProps) {
     return () => { hub.invoke('LeaveSession', entry.sessionId).catch(console.error) }
   }, [hub, entry.sessionId])
 
+  // Follow-along (S184): what I'm typing / choosing goes to a supervisor following this script, a few times a second.
+  // Never stored. A field labelled like card / CVV / security code / SSN / PIN goes as dots, just in case.
+  const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const draftPending = useRef<{ nodeId: string; value: string } | null>(null)
+  const sendDraft = useCallback((value: string) => {
+    if (!hub || state.phase !== 'running') return
+    const node = state.node
+    const sensitive = /card|cvv|cvc|security code|ssn|social security|\bpin\b/i.test(`${node.label} ${node.nodeScriptLabel ?? ''}`)
+    draftPending.current = { nodeId: node.nodeId, value: sensitive ? '•'.repeat(Math.min(value.length, 20)) : value }
+    if (draftTimer.current) return
+    draftTimer.current = setTimeout(() => {
+      draftTimer.current = null
+      const d = draftPending.current
+      if (d) void hub.invoke('DraftInput', entry.sessionId, d.nodeId, d.value).catch(() => {})
+    }, 250)
+  }, [hub, state, entry.sessionId])
+  useEffect(() => () => { if (draftTimer.current) clearTimeout(draftTimer.current) }, [])
+
   // Call Records (S165): a supervisor corrected this call's data (or resubmitted its order) while
   // the agent is still in the script — show the refreshed node, refetch the cart, and say who
   // changed what. Same nodeId keeps whatever the agent is typing in an input (NodeDisplay only
@@ -282,6 +300,7 @@ function FlowSessionView({ entry, hub, onEnd }: FlowSessionViewProps) {
       )}
       <NodeDisplay
         node={state.node}
+        onDraftChange={sendDraft}
         onAdvance={advance}
         onJump={jump}
         advancing={advancing}

@@ -51,6 +51,36 @@ public class FlowHub(ContactConnection.Infrastructure.Data.ITenantDbContextFacto
         await Groups.AddToGroupAsync(Context.ConnectionId, $"session:{sessionId}");
     }
 
+    /// <summary>Owner checks for DraftInput, cached per connection so keystrokes don't each hit the database.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string Conn, Guid Session), DateTimeOffset> DraftOwners = new();
+
+    /// <summary>
+    /// Follow-along (S184): the agent's in-progress answer on the current step (typed text, chosen option, address
+    /// fields as JSON), throttled by the portal, relayed to the others in the session room — the supervisors following
+    /// it. Only the session's own agent may send; nothing is stored.
+    /// </summary>
+    public async Task DraftInput(string sessionId, string nodeId, string value)
+    {
+        if (!Guid.TryParse(sessionId, out var sid) || nodeId.Length > 200) return;
+        var key = (Context.ConnectionId, sid);
+        if (!DraftOwners.TryGetValue(key, out var until) || until < DateTimeOffset.UtcNow)
+        {
+            var schema = Context.User?.FindFirst("tenant_schema")?.Value;
+            if (schema is null || !Guid.TryParse(Context.User?.FindFirst("sub")?.Value, out var me)) return;
+            await using var db = dbs.Create(schema);
+            if (!await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.AnyAsync(db.FlowSessions, s => s.Id == sid && s.AgentId == me))
+                return;
+            DraftOwners[key] = DateTimeOffset.UtcNow.AddMinutes(2);
+        }
+        await Clients.OthersInGroup($"session:{sessionId}").ReceiveDraftInput(sessionId, nodeId, value.Length > 4000 ? value[..4000] : value);
+    }
+
+    public override Task OnDisconnectedAsync(Exception? exception)
+    {
+        foreach (var k in DraftOwners.Keys.Where(k => k.Conn == Context.ConnectionId).ToList()) DraftOwners.TryRemove(k, out _);
+        return base.OnDisconnectedAsync(exception);
+    }
+
     public async Task LeaveSession(string sessionId)
     {
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"session:{sessionId}");
@@ -139,6 +169,9 @@ public interface IFlowHubClient
     /// higher routing tier, or this agent is no longer eligible for it (parallel queuing, see
     /// docs/design/parallel-queuing.md). The agent UI drops the pop for that callRecordId.</summary>
     Task ReceiveOfferWithdrawn(string callRecordId);
+
+    /// <summary>Follow-along (S184): what the agent is typing / choosing on the current step, before they press Next.</summary>
+    Task ReceiveDraftInput(string sessionId, string nodeId, string value);
 
     /// <summary>Supervisor dashboards: an agent's connection health changed (S183) — the Agent List badge updates.</summary>
     Task ReceiveAgentHealth(string agentId, ContactConnection.Api.Endpoints.AgentHealth health);

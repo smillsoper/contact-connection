@@ -28,6 +28,8 @@ export default function FollowScriptModal({ agentName, calls, onClose }: {
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null)
   const [lastMove, setLastMove] = useState<number | null>(null)
+  // The agent's answer in progress on their current step (S184), per session.
+  const [drafts, setDrafts] = useState<Record<string, { nodeId: string; value: string; at: number }>>({})
   const canMove = useAuthStore((s) => s.hasPermission('supervisor.override'))
   const ids = useRef(sessions.map((s) => s.session_id))
 
@@ -44,6 +46,10 @@ export default function FollowScriptModal({ agentName, calls, onClose }: {
     }
     conn.on('receiveNodeState', take)
     conn.on('receiveSessionUpdated', (state: FlowNodeState) => take(state))
+    conn.on('receiveDraftInput', (sessionId: string, nodeId: string, value: string) => {
+      if (!ids.current.includes(sessionId)) return
+      setDrafts((d) => ({ ...d, [sessionId]: { nodeId, value, at: Date.now() } }))
+    })
     const seed = () => Promise.all(ids.current.map((id) =>
       api.get<FlowNodeState>(`/api/v1/flow-sessions/${id}`)
         .then((s) => setNodes((n) => ({ ...n, [id]: s })))
@@ -104,6 +110,9 @@ export default function FollowScriptModal({ agentName, calls, onClose }: {
           <span className="text-gray-200">{current?.flow_name ?? 'Script'}</span>
           {node && node !== 'ended' && node.currentSectionName && <span>Section: <span className="text-gray-200">{node.currentSectionName}</span></span>}
           {ago !== null && <span className="text-gray-500">moved {ago < 5 ? 'just now' : `${ago}s ago`}</span>}
+          {active && drafts[active] && node && node !== 'ended' && drafts[active].nodeId === node.nodeId && Date.now() - drafts[active].at < 3000 && (
+            <span className="text-sky-300 animate-pulse">typing…</span>
+          )}
           {canMove && targets.length > 0 && (
             <div className="ml-auto flex items-center gap-2">
               <select value={jumpTo} onChange={(e) => setJumpTo(e.target.value)}
@@ -124,12 +133,13 @@ export default function FollowScriptModal({ agentName, calls, onClose }: {
             : (
               // The agent's own screen, read-only: same component, nothing clickable.
               <div className="pointer-events-none select-none p-4" aria-readonly>
-                <NodeDisplay node={node} onAdvance={() => {}} advancing={false} />
+                <NodeDisplay node={node} onAdvance={() => {}} advancing={false}
+                  mirror={active && drafts[active]?.nodeId === node.nodeId ? drafts[active].value : null} />
               </div>
             )}
         </div>
         <p className="px-4 py-1.5 text-[11px] text-gray-600 border-t border-gray-800">
-          You see each step as {agentName.split(' ')[0]} reaches it — not what they're typing before they press Next.
+          You see each step as {agentName.split(' ')[0]} reaches it, and what they type or choose as they do it.
         </p>
       </div>
     </div>,

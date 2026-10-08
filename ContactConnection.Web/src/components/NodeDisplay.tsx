@@ -138,6 +138,10 @@ function isZipCaComplete(value: string): boolean {
 
 interface Props {
   node: FlowNodeState
+  /** Follow-along (S184), agent side: the answer in progress on this step (address fields as JSON). */
+  onDraftChange?: (value: string) => void
+  /** Follow-along (S184), supervisor side: show this in-progress answer (read-only mirror). */
+  mirror?: string | null
   onAdvance: (input?: string) => void
   onJump?: (sectionNodeId: string) => void
   advancing: boolean
@@ -155,7 +159,7 @@ interface Props {
   onClearAutocomplete?: () => void
 }
 
-export default function NodeDisplay({ node, onAdvance, onJump, advancing, validating, onValidateAddress, zipLookupResult, zipLookupPending, onLookupZip, onClearZipLookup, autocompleteSuggestions, autocompletePending, autocompleteSelection, onAutocompleteSearch, onAutocompleteSelect, onClearAutocomplete }: Props) {
+export default function NodeDisplay({ node, onDraftChange, mirror, onAdvance, onJump, advancing, validating, onValidateAddress, zipLookupResult, zipLookupPending, onLookupZip, onClearZipLookup, autocompleteSuggestions, autocompletePending, autocompleteSelection, onAutocompleteSearch, onAutocompleteSelect, onClearAutocomplete }: Props) {
   const [inputValue, setInputValue] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
 
@@ -356,6 +360,21 @@ export default function NodeDisplay({ node, onAdvance, onJump, advancing, valida
     prevInputNodeId.current = node.nodeId
     setInputValue(node.defaultValue ?? '')
   }, [node.nodeId, node.nodeType, node.defaultValue])
+
+  // Follow-along (S184): report the answer in progress (agent) / apply the mirrored one (supervisor).
+  const isAddress = node.nodeType === 'address'
+  useEffect(() => {
+    if (!onDraftChange) return
+    if (isAddress) onDraftChange(JSON.stringify(addrForm))
+    else if (node.nodeType === 'input' || node.nodeType === 'email' || node.nodeType === 'phone') onDraftChange(inputValue)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inputValue, addrForm])
+  useEffect(() => {
+    if (mirror == null) return
+    if (isAddress) {
+      try { setAddrForm({ ...EMPTY_ADDR, ...(JSON.parse(mirror) as Partial<AddrForm>) }) } catch { /* not an address draft */ }
+    } else setInputValue(mirror)
+  }, [mirror, isAddress])
 
   // Auto-focus the primary input whenever the displayed node changes
   const focusRef = useRef<HTMLElement | null>(null)
