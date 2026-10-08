@@ -20,6 +20,9 @@ import { AddImageIcon, BulletListIcon, ClearFormattingIcon, LinkIcon, NumberedLi
 
 /** Images carry the uploaded file's id; src is only the local display copy (the server drops it). */
 const HelpdeskImage = Image.extend({
+  // Saved topics keep only the id (the server drops src) — the stock image reads only <img src>, so reopening a topic
+  // would silently drop its images.
+  parseHTML() { return [{ tag: 'img[data-hd-file]' }] },
   addAttributes() {
     return {
       ...this.parent?.(),
@@ -47,7 +50,7 @@ const HelpdeskEditor = forwardRef<HelpdeskEditorHandle, Props>(function Helpdesk
       setUploading((n) => n + 1); setError(null)
       try {
         const { id, url } = await uploadHelpdeskImage(helpdeskId, file)
-        editor.chain().focus().insertContent({ type: 'image', attrs: { src: url, hdFile: id } }).run()
+        editor.chain().focus().insertContent([{ type: 'image', attrs: { src: url, hdFile: id } }, { type: 'paragraph' }]).run()
       } catch (e) { setError(e instanceof Error ? e.message : 'Image upload failed.') }
       finally { setUploading((n) => n - 1) }
     }

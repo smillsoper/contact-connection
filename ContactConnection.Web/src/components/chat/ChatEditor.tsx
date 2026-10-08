@@ -41,6 +41,9 @@ const Mention = Node.create({
 
 /** Images carry the uploaded file's id; src is only the local display copy (the server drops it). */
 const ChatImage = Image.extend({
+  // Saved messages keep only the id (the server drops src) — the stock image reads only <img src>, so editing a message
+  // would silently drop its images.
+  parseHTML() { return [{ tag: 'img[data-chat-file]' }] },
   addAttributes() {
     return {
       ...this.parent?.(),

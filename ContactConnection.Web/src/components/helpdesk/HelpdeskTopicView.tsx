@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import DOMPurify from 'dompurify'
 import { downloadHelpdeskFile, loadHelpdeskImage } from '../../lib/helpdeskFiles'
 import { formatBytes } from '../../lib/chatImages'
+import { openLinkInNewWindow } from '../../lib/links'
 import { FileIcon } from '../icons/Icons'
 
 /** Help desk shapes (S184), as the API returns them. */
@@ -37,7 +38,8 @@ export function HelpdeskBody({ html }: { html: string }) {
   }, [clean])
   return (
     <>
-      <div ref={ref} className="helpdesk-rich text-sm text-gray-200" dangerouslySetInnerHTML={{ __html: clean }} />
+      <div ref={ref} className="helpdesk-rich text-sm text-gray-200" onClick={openLinkInNewWindow} onAuxClick={openLinkInNewWindow}
+        dangerouslySetInnerHTML={{ __html: clean }} />
       {zoom && (
         <div className="fixed inset-0 z-[70] bg-black/80 flex items-center justify-center p-6 cursor-zoom-out" onClick={() => setZoom(null)}>
           <img src={zoom} alt="" className="max-w-full max-h-full rounded shadow-2xl" />

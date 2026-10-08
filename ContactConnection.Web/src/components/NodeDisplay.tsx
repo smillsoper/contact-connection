@@ -4,6 +4,7 @@ import type { ZipLookupResult, AutocompleteSuggestion, AutocompleteSelectionResu
 import { COUNTRIES } from '../data/countries'
 import { useCallStore } from '../stores/callStore'
 import { LockIcon, WarningIcon } from './icons/Icons'
+import { openLinkInNewWindow } from '../lib/links'
 
 // ── Address form constants ────────────────────────────────────────────────────
 
@@ -577,6 +578,7 @@ export default function NodeDisplay({ node, onDraftChange, mirror, onAdvance, on
       {node.scriptContext && (
         <div
           className="script-content bg-gray-900 rounded-xl p-5 text-gray-100 text-sm leading-relaxed border border-gray-800"
+          onClick={openLinkInNewWindow} onAuxClick={openLinkInNewWindow}
           dangerouslySetInnerHTML={{ __html: node.scriptContext }}
         />
       )}
@@ -585,6 +587,7 @@ export default function NodeDisplay({ node, onDraftChange, mirror, onAdvance, on
       {node.content && (
         <div
           className="script-content bg-gray-900 rounded-xl p-5 text-gray-100 text-sm leading-relaxed border border-gray-800"
+          onClick={openLinkInNewWindow} onAuxClick={openLinkInNewWindow}
           dangerouslySetInnerHTML={{ __html: node.content }}
         />
       )}
@@ -598,6 +601,7 @@ export default function NodeDisplay({ node, onDraftChange, mirror, onAdvance, on
       {node.nodeType !== 'address' && node.nodeScriptContent && (
         <div
           className="script-content bg-gray-900 rounded-xl p-5 text-gray-100 text-sm leading-relaxed border border-gray-800"
+          onClick={openLinkInNewWindow} onAuxClick={openLinkInNewWindow}
           dangerouslySetInnerHTML={{ __html: node.nodeScriptContent }}
         />
       )}
@@ -827,6 +831,7 @@ export default function NodeDisplay({ node, onDraftChange, mirror, onAdvance, on
           {(activeFieldScript ?? node.nodeScriptContent) && (
             <div
               className="script-content bg-gray-900 rounded-xl p-5 text-gray-100 text-sm leading-relaxed border border-gray-800"
+          onClick={openLinkInNewWindow} onAuxClick={openLinkInNewWindow}
               dangerouslySetInnerHTML={{ __html: (activeFieldScript ?? node.nodeScriptContent)! }}
             />
           )}

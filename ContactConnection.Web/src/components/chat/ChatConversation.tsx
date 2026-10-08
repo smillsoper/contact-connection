@@ -7,6 +7,7 @@ import { loadChatImage, downloadChatFile, formatBytes } from '../../lib/chatImag
 import { supportedEmojiVersion } from '../../lib/emojiSupport'
 import EmojiText, { replaceMissingEmoji } from './EmojiText'
 import ChatEditor, { type ChatEditorHandle } from './ChatEditor'
+import { openLinkInNewWindow } from '../../lib/links'
 import { ACCENT, AddEmojiIcon, DeleteIcon, EditIcon, FileIcon, PinIcon, ReactIcon, ReplyThreadIcon } from './ChatIcons'
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '🎉', '👀', '✅']
@@ -452,7 +453,7 @@ function RichBody({ html, meId }: { html: string; meId?: string }) {
       }).catch(() => { img.alt = 'Image unavailable'; img.classList.add('missing') })
     })
   }, [clean, meId])
-  return <div ref={ref} className="chat-rich" dangerouslySetInnerHTML={{ __html: clean }} />
+  return <div ref={ref} className="chat-rich" onClick={openLinkInNewWindow} onAuxClick={openLinkInNewWindow} dangerouslySetInnerHTML={{ __html: clean }} />
 }
 
 export function Lightbox() {
