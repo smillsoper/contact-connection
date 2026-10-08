@@ -50,6 +50,8 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 builder.Services.AddSignalR()
     .AddStackExchangeRedis(builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379");
 builder.Services.AddScoped<IFlowNotifier, FlowNotifier>();
+// Live screen views (S183) -- in memory on this instance; the signalling itself rides the Redis backplane.
+builder.Services.AddSingleton<ContactConnection.Api.Hubs.ScreenViewRegistry>();
 builder.Services.AddScoped<ICallTraceNotifier, CallTraceNotifier>();
 builder.Services.AddScoped<ISecureCollectNotifier, SecureCollectNotifier>();
 builder.Services.AddScoped<ITelephonyEventNotifier, TelephonyEventNotifier>();
@@ -369,5 +371,6 @@ app.MapHub<FlowHub>("/hubs/flow");
 app.MapHub<CallTraceHub>("/hubs/call-trace");
 app.MapHub<ClientDashboardHub>("/hubs/client");
 app.MapHub<ChatHub>("/hubs/chat");
+app.MapHub<ScreenViewHub>("/hubs/screen-view");
 
 app.Run();

@@ -16,6 +16,7 @@ import CartPanel from './cart/CartPanel'
 import MyCommissions from './MyCommissions'
 import WrapUpSummaries from './WrapUpSummaries'
 import ScreenRecordingBar from './ScreenRecordingBar'
+import ScreenViewAgent from './ScreenViewAgent'
 import ExtensionSetupPrompt from './ExtensionSetupPrompt'
 import { requestPortalFocus } from '../lib/extensionBridge'
 
@@ -132,6 +133,8 @@ export default function AgentShell() {
         </div>
       </header>
       <ScreenRecordingBar />
+      {/* Live screen view (S183): "X is viewing your screen" + the supervisor's pointer */}
+      <ScreenViewAgent />
       <ExtensionSetupPrompt />
 
       {/* 3-panel body */}

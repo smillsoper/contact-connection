@@ -84,6 +84,16 @@ export async function startScreenShare() {
   }
 }
 
+/** The live shared screen (live screen view, S183) — null when the agent isn't sharing. */
+export function getShareStream(): MediaStream | null {
+  return stream && stream.getVideoTracks().some((t) => t.readyState === 'live') ? stream : null
+}
+
+/** The screen the share is of, for placing a supervisor's pointer: availLeft/Top/width/height in CSS pixels. */
+export function getShareScreen() {
+  return shareScreen
+}
+
 export function stopScreenShare() {
   stream?.getTracks().forEach((t) => t.stop())
   stream = null

@@ -67,3 +67,7 @@ export const EmojiMissingIcon = (p: IconProps) => <Icon {...p}><circle cx="12" c
 /** Same drawing as markup, for HTML rendered outside React (formatted chat messages). */
 export const EMOJI_MISSING_SVG = '<svg viewBox="0 0 24 24" width="1.15em" height="1.15em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke-dasharray="3 2.6"/><path d="M9 9.5h.01M15 9.5h.01"/><path d="M9 15h6"/></svg>'
 export const RefreshIcon = (p: IconProps) => <Icon {...p}><path d="M20 11a8 8 0 0 0-14.5-4.6L4 8" /><path d="M4 3v5h5" /><path d="M4 13a8 8 0 0 0 14.5 4.6L20 16" /><path d="M20 21v-5h-5" /></Icon>
+/** Live screen view (S183). */
+export const ScreenIcon = (p: IconProps) => <Icon {...p}><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8" /><path d="M12 16v4" /></Icon>
+/** Point here (S183). */
+export const PointerIcon = (p: IconProps) => <Icon {...p}><path d="M5 3l14 7-6 2-2 6z" /><path d="M13 12l6 6" /></Icon>

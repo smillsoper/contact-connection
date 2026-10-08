@@ -51,6 +51,8 @@ const DRAWN_NEW: Entry[] = [
   { name: 'CartIcon', meaning: 'Cart', where: 'Agent portal cart bar' },
   { name: 'BoltIcon', meaning: 'Test now', where: 'API definition “Test Authentication”' },
   { name: 'RefreshIcon', meaning: 'Retrying · re-wire', where: 'Export delivery status · designer option picker “re-wire”' },
+  { name: 'ScreenIcon', meaning: 'Live screen view', where: 'Agent List widget · screen view window' },
+  { name: 'PointerIcon', meaning: 'Point here', where: 'Screen view window · agent portal marker' },
   { name: 'BulletListIcon', meaning: 'Bulleted list', where: 'Script editor toolbar (Flow Designer) · chat composer toolbar' },
   { name: 'NumberedListIcon', meaning: 'Numbered list', where: 'Script editor toolbar · chat composer toolbar' },
   { name: 'ClearFormattingIcon', meaning: 'Clear formatting', where: 'Script editor toolbar · chat composer toolbar' },
