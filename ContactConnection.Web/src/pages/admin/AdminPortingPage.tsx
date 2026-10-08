@@ -15,7 +15,10 @@ interface Order {
   id: string; reference: string; kind: 'local' | 'toll_free'; numberCount: number; numbers: string[]; status: string; signerEmail: string
   requestedByName: string; createdAt: string; updatedAt: string; signedAt: string | null; signatureDaysLeft: number | null
   signalWireOrderNumber: string | null; focDate: string | null; completedAt: string | null; endUserName: string
+  label: string; preAssignCampaignId: string | null; preAssignFlowId: string | null; preAssignTelephonyFlowId: string | null
+  numbersLoadedAt: string | null
 }
+interface FlowOpt { id: string; name: string; type: 'crm' | 'telephony'; campaignId: string | null }
 interface OrderDetail {
   order: Order; events: { at: string; by: string; text: string }[]; accountType: string; currentProviderHint: string | null
   correctionMessage: string | null; hasLoa: boolean; hasCertificate: boolean
@@ -228,6 +231,62 @@ function ScrubSummary({ s, onKeepPortable }: { s: Scrub; onKeepPortable: () => v
   )
 }
 
+// ── Where the numbers go ─────────────────────────────────────────────────────
+
+/** Until the port date is confirmed: Reserve, or a campaign (with optional script / call-flow overrides) so the numbers
+ * take calls the moment the carrier switches. */
+function PreAssign({ order, onSaved }: { order: Order; onSaved: () => void }) {
+  const [campaigns, setCampaigns] = useState<{ id: string; name: string }[]>([])
+  const [flows, setFlows] = useState<FlowOpt[]>([])
+  const [campaignId, setCampaignId] = useState(order.preAssignCampaignId ?? '')
+  const [flowId, setFlowId] = useState(order.preAssignFlowId ?? '')
+  const [telFlowId, setTelFlowId] = useState(order.preAssignTelephonyFlowId ?? '')
+  const [msg, setMsg] = useState<string | null>(null)
+  useEffect(() => {
+    api.get<{ id: string; name: string }[]>('/api/v1/porting/campaigns').then(setCampaigns).catch(() => {})
+    api.get<FlowOpt[]>('/api/v1/porting/flows').then(setFlows).catch(() => {})
+  }, [])
+  const changed = campaignId !== (order.preAssignCampaignId ?? '') || flowId !== (order.preAssignFlowId ?? '') || telFlowId !== (order.preAssignTelephonyFlowId ?? '')
+
+  async function save() {
+    try {
+      await api.put(`/api/v1/porting/orders/${order.id}/pre-assign`, {
+        campaignId: campaignId || null, flowId: campaignId ? flowId || null : null, telephonyFlowId: campaignId ? telFlowId || null : null,
+      })
+      setMsg('Saved.'); onSaved()
+    } catch (e) { setMsg(e instanceof Error ? e.message : 'Save failed.') }
+  }
+
+  const sel = 'w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-xs text-white'
+  return (
+    <div className="border border-gray-800 rounded-lg p-3 space-y-2">
+      <p className="text-gray-300 text-xs">When the port date is confirmed, the numbers are added to your account labelled <b>{order.label}</b>. Put them:</p>
+      <select value={campaignId} onChange={(e) => { setCampaignId(e.target.value); setFlowId(''); setTelFlowId('') }} className={sel}>
+        <option value="">In the Reserve — I'll assign them myself</option>
+        {campaigns.map((c) => <option key={c.id} value={c.id}>On campaign: {c.name}</option>)}
+      </select>
+      {campaignId && (
+        <div className="grid grid-cols-2 gap-2">
+          <label className="text-[11px] text-gray-400">Script override
+            <select value={flowId} onChange={(e) => setFlowId(e.target.value)} className={`${sel} mt-0.5`}>
+              <option value="">Campaign's script</option>
+              {flows.filter((f) => f.type === 'crm').map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select>
+          </label>
+          <label className="text-[11px] text-gray-400">Call flow override
+            <select value={telFlowId} onChange={(e) => setTelFlowId(e.target.value)} className={`${sel} mt-0.5`}>
+              <option value="">Campaign's call flow</option>
+              {flows.filter((f) => f.type === 'telephony').map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select>
+          </label>
+        </div>
+      )}
+      {changed && <button onClick={() => void save()} className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs rounded-lg px-3 py-1.5">Save</button>}
+      {msg && <span className="text-xs text-gray-400 ml-2">{msg}</span>}
+    </div>
+  )
+}
+
 // ── One order ────────────────────────────────────────────────────────────────
 
 function OrderDrawer({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged: () => void }) {
@@ -266,6 +325,14 @@ function OrderDrawer({ id, onClose, onChanged }: { id: string; onClose: () => vo
               <p className="text-gray-400 text-xs mb-1">{o.numberCount} {o.kind === 'toll_free' ? 'toll-free' : 'local'} number(s) · {o.endUserName}</p>
               <p className="font-mono text-gray-200 text-xs leading-relaxed">{o.numbers.map(fmtNumber).join(', ')}</p>
             </div>
+            {o.numbersLoadedAt ? (
+              <p className="bg-emerald-950/40 border border-emerald-800 text-emerald-200 rounded-lg px-3 py-2 text-xs">
+                The numbers are in your account, labelled <b>{o.label}</b> — find them on Clients / Telephony → Numbers by searching that label.
+                {o.preAssignCampaignId ? ' They\'re already on the campaign you chose.' : ' They\'re in your Reserve, ready to assign.'}
+              </p>
+            ) : !['completed', 'cancelled'].includes(o.status) && (
+              <PreAssign order={o} onSaved={() => { load(); onChanged() }} />
+            )}
             {(d.hasLoa || d.hasCertificate) && (
               <div className="flex gap-2">
                 {d.hasLoa && <button onClick={() => void download(`/api/v1/porting/orders/${id}/files/loa`, `${o.reference} LOA.pdf`)} className="bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs rounded-lg px-3 py-1.5">Signed LOA</button>}

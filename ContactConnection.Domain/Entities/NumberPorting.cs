@@ -144,6 +144,9 @@ public class PortOrder
     public string EndUserName { get; private set; } = "";
     public string? CurrentProviderHint { get; private set; }
     public Guid? PreAssignCampaignId { get; private set; }
+    /// <summary>Per-number flow overrides to set when the numbers are loaded (null = the campaign's own flows).</summary>
+    public Guid? PreAssignFlowId { get; private set; }
+    public Guid? PreAssignTelephonyFlowId { get; private set; }
     public Guid RequestedById { get; private set; }
     public string RequestedByName { get; private set; } = "";
     public string RequestedByEmail { get; private set; } = "";
@@ -244,6 +247,18 @@ public class PortOrder
         BillFileKey = key; BillFileName = name; BillContentType = contentType;
     }
 
+    /// <summary>Where the numbers go once the port date is confirmed: a campaign (with optional flow overrides), or the
+    /// Reserve. Changeable until they're loaded — after that they're managed like any other number.</summary>
+    public void SetPreAssignment(Guid? campaignId, Guid? flowId, Guid? telephonyFlowId, string by, DateTimeOffset now)
+    {
+        if (NumbersLoadedAt is not null) throw new InvalidOperationException("The numbers are already loaded — change them on the Numbers page.");
+        if (!PortOrderStatus.IsOpen(Status)) throw new InvalidOperationException("This order is closed.");
+        if (campaignId is null && (flowId is not null || telephonyFlowId is not null))
+            throw new ArgumentException("Pick a campaign to set flow overrides.");
+        PreAssignCampaignId = campaignId; PreAssignFlowId = flowId; PreAssignTelephonyFlowId = telephonyFlowId;
+        Log(now, by, campaignId is null ? "When ported, the numbers go to the Reserve" : "When ported, the numbers go straight onto a campaign");
+    }
+
     /// <summary>Records the signature. The LOA and certificate are generated from this and attached with <see cref="AttachDocuments"/>.</summary>
     public void Sign(PortSignerDetails details, string? pinProtected, bool pinNotApplicable, string signatureName, string ip, string? userAgent, DateTimeOffset now)
     {
@@ -306,7 +321,23 @@ public class PortOrder
         Log(now, by, $"Port date confirmed: {date:yyyy-MM-dd}");
     }
 
-    public void MarkNumbersLoaded(DateTimeOffset now) => NumbersLoadedAt ??= now;
+    /// <summary>The numbers are now in the tenant's account (labelled with the port reference) — ready before the carrier switches.</summary>
+    public void MarkNumbersLoaded(int loaded, IReadOnlyCollection<string> skipped, string destination, DateTimeOffset now)
+    {
+        NumbersLoadedAt ??= now;
+        Log(now, "ContactConnection", $"{loaded} number(s) added to the account ({destination}), labelled \"{Label}\"" +
+            (skipped.Count == 0 ? "" : $"; not added (already present or in use): {string.Join(", ", skipped.Select(PortNumbers.Display))}"));
+    }
+
+    /// <summary>The label every loaded number carries, so the tenant can filter for them.</summary>
+    public string Label => $"Port {Reference}";
+
+    /// <summary>A cancelled port after its numbers were loaded: they never arrived, so they come back out.</summary>
+    public void MarkNumbersUnloaded(int removed, DateTimeOffset now)
+    {
+        NumbersLoadedAt = null;
+        Log(now, "ContactConnection", $"{removed} number(s) removed from the account — the port didn't happen");
+    }
 
     public void Complete(string by, DateTimeOffset now)
     {

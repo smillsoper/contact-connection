@@ -58,6 +58,7 @@ public static class HealthCatalog
         new("exports_failed", Work, "Failed export deliveries (24 h)", "", true, 1, 3, "Data export files that could not be delivered."),
         new("callbacks_late", Work, "Scheduled callbacks running late", "", true, 1, 5, "Callbacks more than 5 minutes past due and not yet dialed."),
         new("recordings_backlog", Work, "Recording merges waiting", "", true, 5, 25, "Recordings waiting over 30 minutes to be merged."),
+        new("porting", Work, "Port orders needing attention", "", true, null, null, "Signed ports waiting over a day to be submitted, or whose signature is about to pass SignalWire's 30-day limit."),
 
         new("client_apis", Integrations, "Client APIs (1 h)", "% failed", true, 10, 25, "The worst client / vendor API's failures (5xx, no answer) — judged per API once it has 5+ calls."),
         new("api_circuits", Integrations, "Client API circuit breakers", "", true, null, null, "An API that kept failing gets its calls refused for 30 s at a time."),

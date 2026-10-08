@@ -102,6 +102,8 @@ builder.Services.AddHostedService<OrphanedCallReconciliationService>();
 builder.Services.AddHostedService<ContactConnection.Api.Realtime.DashboardRelaySubscriber>();
 // S184: platform health — the API's heartbeat + facts, the Worker watchdog, live updates to the Portal's Health page.
 builder.Services.AddHostedService<ContactConnection.Api.Health.HealthReporterService>();
+// S184: porting housekeeping — PIN + bill copy deleted 30 days after a port closes.
+builder.Services.AddHostedService<ContactConnection.Api.Endpoints.PortingMaintenanceService>();
 
 // JWT Bearer authentication
 var signingKey = builder.Configuration["Jwt:SigningKey"]

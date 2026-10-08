@@ -96,6 +96,7 @@ public sealed class PlatformHealthService(IServiceScopeFactory scopes, IConnecti
 
         // ── Calls and queued work, across tenants ──
         results.AddRange(await MeasureTenantsAsync(now, ct));
+        results.Add(await MeasurePortingAsync(now, ct));
 
         // ── Integrations + things that expire (phase 2) ──
         results.AddRange(await MeasureIntegrationsAsync(ct));
@@ -276,6 +277,25 @@ public sealed class PlatformHealthService(IServiceScopeFactory scopes, IConnecti
                 ? new("payments", payTotal == 0 ? null : Math.Round(100.0 * payErrors / payTotal), $"{payErrors} error(s) in {payTotal} attempt(s) (judged at 5+)", HealthStatus.Unknown)
                 : new("payments", Math.Round(100.0 * payErrors / payTotal), payErrors == 0 ? $"{payTotal} attempts, no gateway errors" : $"{payErrors} of {payTotal}; last: {payLastError}"),
         ];
+    }
+
+    /// <summary>Signed ports nobody has submitted for a day (warning), or whose signature is within 2 days of SignalWire's
+    /// 30-day limit or past it (critical — the signer must sign again).</summary>
+    private async Task<HealthResult> MeasurePortingAsync(DateTimeOffset now, CancellationToken ct)
+    {
+        using var scope = scopes.CreateScope();
+        var master = scope.ServiceProvider.GetRequiredService<ContactConnectionDbContext>();
+        var signed = await master.PortOrders.AsNoTracking()
+            .Where(o => o.Status == PortOrderStatus.ReadyToSubmit || o.Status == PortOrderStatus.NeedsCorrection && o.SignedAt != null)
+            .Select(o => new { o.Number, o.Status, o.SignedAt, o.UpdatedAt }).ToListAsync(ct);
+        int Left(DateTimeOffset s) => (int)Math.Floor((s + PortOrder.SignatureValidFor - now).TotalDays);
+        var expiring = signed.Where(o => o.Status == PortOrderStatus.ReadyToSubmit && o.SignedAt is { } s && Left(s) <= 5).ToList();
+        var critical = expiring.Where(o => Left(o.SignedAt!.Value) <= 2).Select(o => $"P-{o.Number}").ToList();
+        var waiting = signed.Where(o => o.Status == PortOrderStatus.ReadyToSubmit && now - o.UpdatedAt > TimeSpan.FromDays(1)).Select(o => $"P-{o.Number}").ToList();
+        var count = expiring.Select(o => o.Number).Union(signed.Where(o => o.Status == PortOrderStatus.ReadyToSubmit && now - o.UpdatedAt > TimeSpan.FromDays(1)).Select(o => o.Number)).Count();
+        if (critical.Count > 0) return new("porting", count, $"Signature expiring or expired: {string.Join(", ", critical)} — submit now or send for a new signature", HealthStatus.Critical);
+        if (count > 0) return new("porting", count, waiting.Count > 0 ? $"Signed and waiting to be submitted: {string.Join(", ", waiting)}" : $"Signature expires within 5 days: {string.Join(", ", expiring.Select(o => $"P-{o.Number}"))}", HealthStatus.Warning);
+        return new("porting", 0, "Nothing waiting", HealthStatus.Ok);
     }
 
     /// <summary>Error rates from the integrations' own reports (RedisIntegrationHealth) over the last hour.</summary>

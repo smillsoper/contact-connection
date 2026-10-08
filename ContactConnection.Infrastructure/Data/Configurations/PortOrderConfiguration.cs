@@ -25,6 +25,8 @@ public class PortOrderConfiguration : IEntityTypeConfiguration<PortOrder>
         b.Property(o => o.EndUserName).HasColumnName("end_user_name").HasMaxLength(200).IsRequired();
         b.Property(o => o.CurrentProviderHint).HasColumnName("current_provider_hint").HasMaxLength(200);
         b.Property(o => o.PreAssignCampaignId).HasColumnName("pre_assign_campaign_id");
+        b.Property(o => o.PreAssignFlowId).HasColumnName("pre_assign_flow_id");
+        b.Property(o => o.PreAssignTelephonyFlowId).HasColumnName("pre_assign_telephony_flow_id");
         b.Property(o => o.RequestedById).HasColumnName("requested_by_id");
         b.Property(o => o.RequestedByName).HasColumnName("requested_by_name").HasMaxLength(200).IsRequired();
         b.Property(o => o.RequestedByEmail).HasColumnName("requested_by_email").HasMaxLength(320).IsRequired();
@@ -55,5 +57,6 @@ public class PortOrderConfiguration : IEntityTypeConfiguration<PortOrder>
         b.Property(o => o.CreatedAt).HasColumnName("created_at");
         b.Property(o => o.UpdatedAt).HasColumnName("updated_at");
         b.Ignore(o => o.Reference);
+        b.Ignore(o => o.Label);
     }
 }

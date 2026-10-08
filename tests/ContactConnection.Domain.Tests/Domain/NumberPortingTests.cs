@@ -83,3 +83,36 @@ public class NumberPortingTests
         Assert.True(o.Events.Count >= 7);
     }
 }
+
+/// <summary>S184 Phase B: where the numbers go, and the load / unload record.</summary>
+public class NumberPortingLoadTests
+{
+    private static readonly DateTimeOffset T0 = new(2026, 10, 8, 12, 0, 0, TimeSpan.Zero);
+
+    private static PortOrder Order() =>
+        PortOrder.Create(Guid.NewGuid(), PortOrderKind.Local, ["+15035551234"], "Business", "Acme", null, null,
+            Guid.NewGuid(), "Pat", "pat@x.com", "owner@x.com", T0);
+
+    [Fact]
+    public void Pre_assignment_needs_a_campaign_for_flows_and_locks_once_loaded()
+    {
+        var o = Order();
+        Assert.Throws<ArgumentException>(() => o.SetPreAssignment(null, Guid.NewGuid(), null, "Pat", T0));
+        var c = Guid.NewGuid();
+        o.SetPreAssignment(c, Guid.NewGuid(), null, "Pat", T0);
+        Assert.Equal(c, o.PreAssignCampaignId);
+        o.MarkNumbersLoaded(1, [], "campaign X", T0);
+        Assert.Throws<InvalidOperationException>(() => o.SetPreAssignment(null, null, null, "Pat", T0));
+        Assert.Equal($"Port {o.Reference}", o.Label);
+    }
+
+    [Fact]
+    public void Unloading_clears_the_loaded_mark_and_says_why()
+    {
+        var o = Order();
+        o.MarkNumbersLoaded(1, ["+15035550000"], "Reserve", T0);
+        Assert.Contains("(503) 555-0000", o.Events[^1].Text);
+        o.MarkNumbersUnloaded(1, T0);
+        Assert.Null(o.NumbersLoadedAt);
+    }
+}

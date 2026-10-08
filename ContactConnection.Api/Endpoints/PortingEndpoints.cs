@@ -26,6 +26,8 @@ public static class PortingEndpoints
         var t = app.MapGroup("/api/v1/porting").RequireAuthorization("NumbersPort");
         t.MapPost("scrub", Scrub);
         t.MapGet("campaigns", Campaigns);
+        t.MapGet("flows", Flows);
+        t.MapPut("orders/{id:guid}/pre-assign", PreAssign);
         t.MapPost("orders", Create);
         t.MapGet("orders", TenantList);
         t.MapGet("orders/{id:guid}", TenantGet);
@@ -67,7 +69,8 @@ public static class PortingEndpoints
     {
         o.Id, o.Reference, tenantName, kind = o.Kind, numberCount = o.Numbers.Count, o.Numbers, o.Status, o.SignerEmail,
         o.RequestedByName, o.CreatedAt, o.UpdatedAt, o.SignedAt, signatureDaysLeft = o.SignatureDaysLeft(DateTimeOffset.UtcNow),
-        o.SignalWireOrderNumber, o.FocDate, o.CompletedAt, o.EndUserName,
+        o.SignalWireOrderNumber, o.FocDate, o.CompletedAt, o.EndUserName, label = o.Label,
+        o.PreAssignCampaignId, o.PreAssignFlowId, o.PreAssignTelephonyFlowId, o.NumbersLoadedAt,
     };
 
     private static async Task SendAsync(IEmailService email, ILogger log, EmailMessage m, CancellationToken ct)
@@ -155,6 +158,30 @@ public static class PortingEndpoints
         await using var db = dbf.Create();
         return Results.Ok(await db.Campaigns.AsNoTracking().Where(c => c.Status == CampaignStatus.Active).OrderBy(c => c.Name)
             .Select(c => new { c.Id, c.Name }).ToListAsync(ct));
+    }
+
+    private static async Task<IResult> Flows(ScopedTenantDbContextFactory dbf, CancellationToken ct)
+    {
+        await using var db = dbf.Create();
+        return Results.Ok(await db.Flows.AsNoTracking().Where(f => f.IsActive && f.PublishedDefinition != null).OrderBy(f => f.Name)
+            .Select(f => new { f.Id, f.Name, type = f.FlowType, f.CampaignId }).ToListAsync(ct));
+    }
+
+    public record PreAssignRequest(Guid? CampaignId, Guid? FlowId, Guid? TelephonyFlowId);
+
+    /// <summary>Where the numbers go once the port date is confirmed — changeable until they're loaded.</summary>
+    private static async Task<IResult> PreAssign(Guid id, PreAssignRequest req, HttpContext http, TenantContext tc, ContactConnectionDbContext master,
+        ScopedTenantDbContextFactory dbf, CancellationToken ct)
+    {
+        if (tc.Current is not { } tenant) return Results.Unauthorized();
+        var o = await master.PortOrders.FirstOrDefaultAsync(x => x.Id == id && x.TenantId == tenant.Id, ct);
+        if (o is null) return Results.NotFound();
+        await using var db = dbf.Create();
+        if (req.CampaignId is { } c && !await db.Campaigns.AnyAsync(x => x.Id == c, ct)) return Results.BadRequest(new { error = "That campaign doesn't exist." });
+        try { o.SetPreAssignment(req.CampaignId, req.FlowId, req.TelephonyFlowId, Who(http), DateTimeOffset.UtcNow); }
+        catch (Exception e) when (e is ArgumentException or InvalidOperationException) { return Results.BadRequest(new { error = e.Message }); }
+        await master.SaveChangesAsync(ct);
+        return Results.Ok(Summary(o));
     }
 
     public record OrderGroup(string? Numbers, string? CurrentProvider, string? AccountType, string? EndUserName, string? SignerEmail, Guid? PreAssignCampaignId);
@@ -524,14 +551,27 @@ public static class PortingEndpoints
         });
 
     public record FocRequest(DateOnly? Date);
-    private static Task<IResult> Foc(Guid id, FocRequest req, HttpContext http, ContactConnectionDbContext master, IEmailService email, ILoggerFactory logs, CancellationToken ct) =>
-        ActAsync(id, master, email, logs, ct, o =>
-        {
-            if (req.Date is not { } d) throw new ArgumentException("Pick the confirmed port date.");
-            o.ConfirmFoc(d, Who(http), DateTimeOffset.UtcNow);
-            return ($"port date confirmed: {d:MMMM d, yyyy}",
-                $"The numbers move on <b>{d:dddd, MMMM d, yyyy}</b>. Keep service with your current phone company until then.");
-        });
+
+    /// <summary>The carrier confirmed the date: record it and load the numbers into the tenant's account now, so they work
+    /// the moment the carrier switches.</summary>
+    private static async Task<IResult> Foc(Guid id, FocRequest req, HttpContext http, ContactConnectionDbContext master, PortNumberLoader loader,
+        IEmailService email, ILoggerFactory logs, CancellationToken ct)
+    {
+        var o = await master.PortOrders.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (o is null) return Results.NotFound();
+        if (req.Date is not { } d) return Results.BadRequest(new { error = "Pick the confirmed port date." });
+        try { o.ConfirmFoc(d, Who(http), DateTimeOffset.UtcNow); }
+        catch (InvalidOperationException e) { return Results.BadRequest(new { error = e.Message }); }
+        await master.SaveChangesAsync(ct);
+        await loader.LoadAsync(o, ct);
+        var where = o.PreAssignCampaignId is null
+            ? $"They're already in your Reserve, labelled <b>{H(o.Label)}</b> — assign them to campaigns any time before then."
+            : $"They're already on the campaign you chose (labelled <b>{H(o.Label)}</b>), so they'll take calls as soon as the move happens.";
+        await NotifyRequesterAsync(o, $"port date confirmed: {d:MMMM d, yyyy}",
+            $"The numbers move on <b>{d:dddd, MMMM d, yyyy}</b>. {where} Keep service with your current phone company until then.",
+            email, logs.CreateLogger("Porting"), ct);
+        return Results.Ok(Summary(o));
+    }
 
     private static Task<IResult> Complete(Guid id, HttpContext http, ContactConnectionDbContext master, IEmailService email, ILoggerFactory logs, CancellationToken ct) =>
         ActAsync(id, master, email, logs, ct, o =>
@@ -557,12 +597,20 @@ public static class PortingEndpoints
         return Results.Ok(Summary(o));
     }
 
-    private static Task<IResult> PortalCancel(Guid id, CancelRequest req, HttpContext http, ContactConnectionDbContext master, IEmailService email, ILoggerFactory logs, CancellationToken ct) =>
-        ActAsync(id, master, email, logs, ct, o =>
+    private static async Task<IResult> PortalCancel(Guid id, CancelRequest req, HttpContext http, ContactConnectionDbContext master, PortNumberLoader loader,
+        IEmailService email, ILoggerFactory logs, CancellationToken ct)
+    {
+        var result = await ActAsync(id, master, email, logs, ct, o =>
         {
             o.Cancel(req.Reason ?? "", Who(http), DateTimeOffset.UtcNow);
-            return ("cancelled", $"The port was cancelled{(string.IsNullOrWhiteSpace(req.Reason) ? "" : ": " + H(req.Reason))}.");
+            return ("cancelled", $"The port was cancelled{(string.IsNullOrWhiteSpace(req.Reason) ? "" : ": " + H(req.Reason))}." +
+                (o.NumbersLoadedAt is null ? "" : " The numbers it had added to your account have been removed."));
         });
+        // The numbers never arrived — take out the ones this port loaded.
+        if (await master.PortOrders.FirstOrDefaultAsync(x => x.Id == id && x.Status == PortOrderStatus.Cancelled, ct) is { NumbersLoadedAt: not null } cancelled)
+            await loader.UnloadAsync(cancelled, ct);
+        return result;
+    }
 
     private static Task<IResult> Note(Guid id, MessageRequest req, HttpContext http, ContactConnectionDbContext master, IEmailService email, ILoggerFactory logs, CancellationToken ct) =>
         ActAsync(id, master, email, logs, ct, o => { o.Note(req.Message ?? "", Who(http), DateTimeOffset.UtcNow); return null; });
