@@ -90,8 +90,7 @@ export default function PortSignPage() {
     <div className="min-h-screen bg-gray-100 py-8 px-4">
       <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-6 sm:p-8 text-gray-900">
         <div className="flex items-center gap-2 mb-5">
-          <img src="/hubion-favicon.svg" alt="" className="w-7 h-7" />
-          <span className="font-semibold">ContactConnection</span>
+          <img src="/cc-navbar-light.svg" alt="ContactConnection" className="h-8 w-auto" />
           {view && <span className="ml-auto text-xs text-gray-500">{view.reference}</span>}
         </div>
 
