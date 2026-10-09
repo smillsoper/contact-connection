@@ -11975,6 +11975,9 @@ desk, platform support access with Entra roles, platform health (two phases + Up
    "you're live": align it with stopping the caller's hold audio and completing the bridge.
 3. **Porting Phase C:** configure ported numbers in the tenant's subproject via the API (confirm the parent token can
    manage subproject numbers).
+4. **Idle-number fee (design locked 2026-10-09):** $1.00/mo per idle local number, $1.50/mo per idle toll-free number, two
+   separate invoice lines listing the numbers; idle = Reserve or usage under the number's rental; 30-day grace; ports
+   awaiting their date not charged. Plus a $5.00/number port-out pass-through in the Terms. Open: Life Seasons from day one?
 4. ~~Help desk gaps~~ — closed by Stephen: the modal stays, and multi-campaign assignment replaces client-level scoping.
 5. Browser tests not yet done: Number Porting tenant page / Portal queue screens end to end.
 6. **Carried:** LLC reactivation ($500 — funds in hand 2026-10-09, waiting to clear) and its checklist; Clint's Cannella SFTP details; keypad retest after SignalWire
