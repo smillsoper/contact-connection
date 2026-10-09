@@ -11970,9 +11970,12 @@ desk, platform support access with Entra roles, platform health (two phases + Up
 1. **SignalWire subprojects:** create one per tenant (Compatibility API `POST /api/laml/2010-04-01/Accounts`,
    Management-scope token stored in Portal Credentials as `SignalWire:ProjectId` / `SignalWire:ApiToken`) on
    provisioning + a Manage Tenant button for existing tenants; fills Tenant.SignalWireProjectId.
-2. **Porting Phase C:** configure ported numbers in the tenant's subproject via the API (confirm the parent token can
+2. **Connect tone timing bug (reported 2026-10-09, demo-visible):** the agent hears the connect tone, but the caller keeps
+   hearing queue audio for a few seconds more — the agent talks before the caller can hear them. The tone must mean
+   "you're live": align it with stopping the caller's hold audio and completing the bridge.
+3. **Porting Phase C:** configure ported numbers in the tenant's subproject via the API (confirm the parent token can
    manage subproject numbers).
-3. ~~Help desk gaps~~ — closed by Stephen: the modal stays, and multi-campaign assignment replaces client-level scoping.
-4. Browser tests not yet done: Number Porting tenant page / Portal queue screens end to end.
-5. **Carried:** LLC reactivation ($500) and its checklist; Clint's Cannella SFTP details; keypad retest after SignalWire
+4. ~~Help desk gaps~~ — closed by Stephen: the modal stays, and multi-campaign assignment replaces client-level scoping.
+5. Browser tests not yet done: Number Porting tenant page / Portal queue screens end to end.
+6. **Carried:** LLC reactivation ($500 — funds in hand 2026-10-09, waiting to clear) and its checklist; Clint's Cannella SFTP details; keypad retest after SignalWire
    vetting; production fonts (QuestPDF uses bundled Lato now); screen-view registry to Redis if the API scales out.
