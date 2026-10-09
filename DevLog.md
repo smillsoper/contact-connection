@@ -11978,6 +11978,9 @@ desk, platform support access with Entra roles, platform health (two phases + Up
 4. **Idle-number fee (design locked 2026-10-09):** $1.00/mo per idle local number, $1.50/mo per idle toll-free number, two
    separate invoice lines listing the numbers; idle = Reserve or usage under the number's rental; 30-day grace; ports
    awaiting their date not charged. Plus a $5.00/number port-out pass-through in the Terms. Open: Life Seasons from day one?
+5. **Switch AI summaries to Haiku 5.5** (`claude-haiku-5-5`, ~10× cheaper than Haiku 4.5 — ~$0.0006 a summary) and
+   re-test quality. Pricing: bundle summaries; transcription (before go-live) is a separate per-minute opt-in line, with
+   PCI redaction designed up front.
 4. ~~Help desk gaps~~ — closed by Stephen: the modal stays, and multi-campaign assignment replaces client-level scoping.
 5. Browser tests not yet done: Number Porting tenant page / Portal queue screens end to end.
 6. **Carried:** LLC reactivation ($500 — funds in hand 2026-10-09, waiting to clear) and its checklist; Clint's Cannella SFTP details; keypad retest after SignalWire
