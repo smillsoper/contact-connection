@@ -391,6 +391,8 @@ public static class ServiceCollectionExtensions
 
         // HTTP client for AvalaraTaxProvider
         services.AddHttpClient("Avalara");
+        services.AddHttpClient("SignalWire");
+        services.AddScoped<ContactConnection.Infrastructure.Telephony.SignalWireProjects>();   // S185 subproject per tenant
 
         // AI (learning track, S171): Anthropic Messages API + the call summarizer.
         services.AddHttpClient("Anthropic");

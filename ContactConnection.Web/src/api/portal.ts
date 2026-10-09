@@ -147,6 +147,11 @@ export async function updateFeatureFlags(id: string, flags: TenantFeatureFlags):
   })
 }
 
+/** S185: the tenant's own SignalWire subproject. */
+export function createSignalWireProject(id: string): Promise<TenantRecord> {
+  return portalFetch<TenantRecord>(`/api/v1/portal/tenants/${id}/signalwire-project`, { method: 'POST' })
+}
+
 export async function activateTenant(id: string): Promise<TenantRecord> {
   return portalFetch<TenantRecord>(`/api/v1/portal/tenants/${id}/activate`, { method: 'POST' })
 }

@@ -12,6 +12,7 @@ import {
   updateFeatureFlags,
   activateTenant,
   deactivateTenant,
+  createSignalWireProject,
   resendTenantInvite,
   resetTenantOnboarding,
   inviteTenantAdmin,
@@ -392,13 +393,33 @@ export default function TenantDetailPage() {
             </div>}
             <div>
               <label className="block mb-1.5 text-sky-400 text-xs font-medium">SignalWire Project ID</label>
-              <input
-                type="text"
-                value={projectId}
-                onChange={(e) => setProjectId(e.target.value)}
-                placeholder="The tenant's SignalWire project — port-in orders need it"
-                className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm font-mono outline-none focus:ring-2 focus:ring-indigo-500"
-              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={projectId}
+                  onChange={(e) => setProjectId(e.target.value)}
+                  placeholder="The tenant's SignalWire project — port-in orders need it"
+                  className="flex-1 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm font-mono outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                {isOwner && !tenant.signalWireProjectId && (
+                  <button
+                    onClick={async () => {
+                      if (!id) return
+                      setSaving(true)
+                      try {
+                        const t = await createSignalWireProject(id)
+                        setTenant(t); setProjectId(t.signalWireProjectId ?? '')
+                        flash('SignalWire project created.')
+                      } catch (e) { flash(e instanceof Error ? e.message : 'Could not create the project.') }
+                      finally { setSaving(false) }
+                    }}
+                    disabled={saving}
+                    className="bg-sky-700 hover:bg-sky-600 disabled:opacity-50 text-white rounded-lg px-3 py-2 text-xs font-medium shrink-0"
+                  >
+                    Create SignalWire project
+                  </button>
+                )}
+              </div>
             </div>
             <div>
               <label className="block mb-1.5 text-sky-400 text-xs font-medium">Invite email</label>

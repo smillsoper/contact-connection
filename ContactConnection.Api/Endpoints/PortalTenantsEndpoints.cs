@@ -33,6 +33,7 @@ public static class PortalTenantsEndpoints
         group.MapGet("{id:guid}/agents", ListTenantAgents);
         group.MapGet("{id:guid}/usage", Usage).RequireAuthorization("PlatformOwner");
         group.MapPut("{id:guid}/billing-rates", UpdateBillingRates).RequireAuthorization("PlatformOwner");
+        group.MapPost("{id:guid}/signalwire-project", CreateSignalWireProject).RequireAuthorization("PlatformOwner");
         group.MapPost("{id:guid}/agents/{agentId:guid}/reset-password", ResetTenantAgentPassword);
 
         return app;
@@ -42,6 +43,23 @@ public static class PortalTenantsEndpoints
     internal static async Task<bool> IsOwnerAsync(HttpContext http) =>
         (await http.RequestServices.GetRequiredService<Microsoft.AspNetCore.Authorization.IAuthorizationService>()
             .AuthorizeAsync(http.User, "PlatformOwner")).Succeeded;
+
+    private static string SubprojectName(Tenant t) => $"{t.Name} ({t.Subdomain})";
+
+    /// <summary>Creates the tenant's SignalWire subproject (S185) — for tenants provisioned before this, or a retry.</summary>
+    private static async Task<IResult> CreateSignalWireProject(Guid id, ITenantRepository tenants,
+        ContactConnection.Infrastructure.Telephony.SignalWireProjects signalWire, CancellationToken ct)
+    {
+        var tenant = await tenants.GetByIdAsync(id, ct);
+        if (tenant is null) return Results.NotFound();
+        if (!string.IsNullOrWhiteSpace(tenant.SignalWireProjectId))
+            return Results.Conflict(new { error = "This tenant already has a SignalWire project." });
+        var result = await signalWire.CreateSubprojectAsync(SubprojectName(tenant), ct);
+        if (result.ProjectId is null) return Results.BadRequest(new { error = result.Error });
+        tenant.SetSignalWireProjectId(result.ProjectId);
+        await tenants.SaveChangesAsync(ct);
+        return Results.Ok(ToResponse(tenant));
+    }
 
     private static async Task<IResult> List(
         ITenantRepository tenants,
@@ -69,6 +87,8 @@ public static class PortalTenantsEndpoints
         IEmailService email,
         IConfiguration configuration,
         ILoggerFactory loggerFactory,
+        ContactConnection.Infrastructure.Telephony.SignalWireProjects signalWire,
+        ITenantRepository tenants,
         CancellationToken ct)
     {
         var logger = loggerFactory.CreateLogger("PortalProvisioning");
@@ -81,6 +101,17 @@ public static class PortalTenantsEndpoints
                 request.FeatureFlags,
                 request.InviteEmail,
                 ct);
+
+            // S185: the tenant's own SignalWire subproject. Never fails the provisioning — Manage Tenant can retry.
+            var sw = await signalWire.CreateSubprojectAsync(SubprojectName(tenant), ct);
+            if (sw.ProjectId is { } swId)
+            {
+                var tracked = await tenants.GetByIdAsync(tenant.Id, ct);
+                tracked?.SetSignalWireProjectId(swId);
+                await tenants.SaveChangesAsync(ct);
+                tenant = tracked ?? tenant;
+            }
+            else logger.LogWarning("No SignalWire subproject for {Tenant}: {Error}", tenant.Name, sw.Error);
 
             if (!string.IsNullOrWhiteSpace(tenant.InviteEmail) && inviteToken is not null)
             {
