@@ -181,8 +181,7 @@ public sealed class PlatformHealthService(IServiceScopeFactory scopes, IConnecti
                 new("freeswitch", Math.Round(ms), "Answering"),
                 gw.Contains("Invalid Gateway", StringComparison.OrdinalIgnoreCase)
                     ? new("trunk", null, $"No gateway named '{gateway}'", HealthStatus.Critical)
-                    : state == "REGED" ? new("trunk", null, "Registered", HealthStatus.Ok)
-                    : new("trunk", null, $"Not registered (state {state ?? "unknown"})", HealthStatus.Critical),
+                    : TrunkResult(state),
                 new("live_calls", count, count is null ? "Couldn't count" : $"{count} channel(s) up"),
             ];
         }
@@ -195,6 +194,20 @@ public sealed class PlatformHealthService(IServiceScopeFactory scopes, IConnecti
                 new("live_calls", null, "Unknown", HealthStatus.Unknown),
             ];
         }
+    }
+
+    /// <summary>Checks in a row the trunk wasn't registered. FreeSWITCH re-registers with SignalWire every few hours and a
+    /// check can land mid-way (one-minute blips that emailed twice each) — so it's only down after 3 misses in a row.</summary>
+    private int _trunkMisses;
+    private const int TrunkMissesBeforeDown = 3;
+
+    private HealthResult TrunkResult(string? state)
+    {
+        if (state == "REGED") { _trunkMisses = 0; return new("trunk", null, "Registered", HealthStatus.Ok); }
+        _trunkMisses++;
+        return _trunkMisses < TrunkMissesBeforeDown
+            ? new("trunk", null, $"Re-registering (state {state ?? "unknown"}) — checking again", HealthStatus.Ok)
+            : new("trunk", null, $"Not registered for {_trunkMisses} minutes (state {state ?? "unknown"})", HealthStatus.Critical);
     }
 
     /// <summary>A STUN binding request to the TURN server (coturn answers STUN on the same port).</summary>
