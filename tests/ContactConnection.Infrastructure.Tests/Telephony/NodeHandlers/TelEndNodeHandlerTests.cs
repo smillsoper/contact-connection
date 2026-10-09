@@ -70,10 +70,20 @@ public class TelEndNodeHandlerTests
     private static JsonObject Node() => new() { ["type"] = "tf_end" };
 
     [Fact]
-    public async Task WhisperPath_BreaksCaller_PlaysTone_ThenBridges_InOrder()
+    public async Task WhisperPath_ClearsHoldLoop_PlaysTone_ThenBreaksAndBridges_InOrder()
     {
+        // S185: the hold loop is forgotten BEFORE the caller's audio is stopped (or the stop restarts the next hold /
+        // ring-tone pass), and the break + bridge happen back to back after the agent's tone.
         var esl = NewEsl();
         var calls = new List<string>();
+        var sessionStore = new Mock<ITelephonyCallSessionStore>();
+        var session = new TelephonyCallSession { ChannelUuid = CallerUuid };
+        session.Vars["_play_media_arg"] = "ring.ogg"; session.Vars["_play_loop"] = "true"; session.Vars["_delay_until"] = "x";
+        session.Vars["_queued"] = "true";
+        sessionStore.Setup(s => s.GetAsync(CallerUuid, It.IsAny<CancellationToken>())).ReturnsAsync(session);
+        sessionStore.Setup(s => s.SaveAsync(It.IsAny<TelephonyCallSession>(), It.IsAny<CancellationToken>()))
+            .Callback<TelephonyCallSession, CancellationToken>((s, _) => calls.Add(s.Vars.Keys.Any(k => k.StartsWith("_play_") || k.StartsWith("_delay_")) ? "save-with-loop" : "save-cleared"))
+            .Returns(Task.CompletedTask);
         esl.Setup(e => e.BreakChannelAsync(CallerUuid, It.IsAny<CancellationToken>()))
            .Callback(() => calls.Add("break")).Returns(Task.CompletedTask);
         esl.Setup(e => e.BroadcastAsync(AgentUuid, It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -81,12 +91,14 @@ public class TelEndNodeHandlerTests
         esl.Setup(e => e.BridgeChannelsAsync(CallerUuid, AgentUuid, It.IsAny<CancellationToken>()))
            .Callback(() => calls.Add("bridge")).Returns(Task.CompletedTask);
 
-        var handler = NewHandler();
-        var ctx = Ctx(esl.Object, ("_agent_uuid", AgentUuid));
+        var handler = NewHandler(sessionStore: sessionStore);
+        var ctx = Ctx(esl.Object, ("_agent_uuid", AgentUuid), ("_play_media_arg", "ring.ogg"));
 
         var result = await handler.ExecuteAsync(Node(), ctx);
 
-        Assert.Equal(new[] { "break", "tone", "bridge" }, calls);
+        Assert.Equal(new[] { "save-cleared", "tone", "break", "bridge" }, calls);
+        Assert.True(session.Vars.ContainsKey("_queued"));                 // only hold-loop keys go
+        Assert.Contains("_play_media_arg", ctx.VarsToRemove);              // and the engine's sync won't write them back
         Assert.Equal("end", result.TransitionTaken);
         Assert.False(ctx.Vars.ContainsKey("_agent_uuid"));   // consumed
         esl.Verify(e => e.BroadcastAsync(AgentUuid, "tone_stream://%(200,0,800)", It.IsAny<CancellationToken>()), Times.Once);

@@ -37,6 +37,7 @@ public class RouteToQueueNodeHandler : ITelephonyNodeHandler
             // No ESL on this context (e.g. a trigger_telephony_event branch) — nothing to act on the channel with (S179).
             if (ctx.Esl is null)
                 return new TelephonyNodeResult(node["transitions"]?["default"]?.GetValue<string>(), "default");
+            await HoldLoopState.ClearAsync(_sessionStore, ctx.ChannelUuid, ctx, ct);   // S185 — see HoldLoopState
             await ctx.Esl.BridgeToAgentAsync(ctx.ChannelUuid, directExtension, ctx.TenantSubdomain, ctx.CallerNumber, ct);
             return new TelephonyNodeResult(null, "bridged");
         }

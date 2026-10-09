@@ -210,6 +210,8 @@ public class QueuedCallDeliveryService(
                 session.Vars["_assigned_agent_id"]      = agentId.ToString();
                 session.Vars["_pending_agent_id"]        = agentId.ToString();
                 session.Vars["_pending_interaction_id"]  = interaction.Id.ToString();
+                // S185: the bridge stops the caller's hold audio — don't let that restart the hold loop.
+                ContactConnection.Infrastructure.Telephony.HoldLoopState.Remove(session);
                 await sessionStore.SaveAsync(session, ct);
             }
 

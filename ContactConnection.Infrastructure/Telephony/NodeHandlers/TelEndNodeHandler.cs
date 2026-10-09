@@ -117,14 +117,18 @@ public class TelEndNodeHandler : ITelephonyNodeHandler
         {
             if (ctx.Esl is not null)
             {
-                // Stop any audio playing on the caller's channel (MOH loop, announcements, etc.)
-                // so they don't hear queue audio bleed into the live conversation.
-                await ctx.Esl.BreakChannelAsync(ctx.ChannelUuid, ct);
+                // S185: forget the hold loop FIRST — stopping its audio below fires PLAYBACK_STOP, which
+                // otherwise restarts the next hold / ring-tone pass and the caller keeps hearing queue
+                // audio after the agent's connect tone.
+                await HoldLoopState.ClearAsync(_sessionStore, ctx.ChannelUuid, ctx, ct);
                 // Agent connect tone — see EslClient.BridgeToAgentAsync's identical step for the
                 // simple-bridge / direct-extension paths. This is the whisper/agent_selected
                 // path's own bridge point (uuid_bridge called directly, not via BridgeToAgentAsync),
                 // so the tone has to be played here rather than shared with that method.
                 await PlayAgentConnectToneAsync(ctx.Esl, agentUuid, ct);
+                // Then stop the caller's hold audio and bridge back to back, so the caller hears hold
+                // audio right up to the moment the agent can hear them (the tone means "you're live").
+                await ctx.Esl.BreakChannelAsync(ctx.ChannelUuid, ct);
                 await ctx.Esl.BridgeChannelsAsync(ctx.ChannelUuid, agentUuid, ct);
             }
             ctx.Vars.Remove("_agent_uuid");
